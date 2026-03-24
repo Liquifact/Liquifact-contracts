@@ -283,7 +283,7 @@ fn test_fund_after_funded_panics() {
         &2000u64,
     );
     client.fund(&investor, &1_000i128); // reaches funded status
-    client.fund(&investor, &1i128);     // must panic
+    client.fund(&investor, &1i128); // must panic
 }
 
 /// Settling an escrow that is still open (not yet funded) must panic.

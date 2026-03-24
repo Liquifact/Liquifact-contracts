@@ -67,9 +67,7 @@ impl LiquifactEscrow {
 
         // Prevent re-initialization — escrow must not already exist.
         assert!(
-            !env.storage()
-                .instance()
-                .has(&symbol_short!("escrow")),
+            !env.storage().instance().has(&symbol_short!("escrow")),
             "Escrow already initialized"
         );
 
