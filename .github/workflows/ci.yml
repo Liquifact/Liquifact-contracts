@@ -15,7 +15,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt
+          components: rustfmt, llvm-tools-preview
 
       - name: Cache cargo registry and build
         uses: Swatinem/rust-cache@v2
@@ -28,3 +28,13 @@ jobs:
 
       - name: Run tests
         run: cargo test
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Check coverage (≥ 95%)
+        run: |
+          cargo llvm-cov \
+            --features testutils \
+            --fail-under-lines 95 \
+            --summary-only

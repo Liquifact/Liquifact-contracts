@@ -59,6 +59,11 @@ liquifact-contracts/
 │   └── src/
 │       ├── lib.rs       # LiquiFact escrow contract (init, fund, settle)
 │       └── test.rs      # Unit tests
+├── docs/
+│   ├── openapi.yaml     # OpenAPI 3.1 specification
+│   ├── package.json     # Test runner deps (AJV, js-yaml)
+│   └── tests/
+│       └── openapi.test.js  # Schema conformance tests (51 cases)
 └── .github/workflows/
     └── ci.yml           # CI: fmt, build, test
 ```
@@ -82,6 +87,63 @@ To ensure secure and verifiable fund release, the escrow contract follows a stri
 3. **Settlement Phase**: The final `settle` call can then be made to finalize the escrow. Status moves to `3` (Settled).
 
 Replay protection: `confirm_payment` and `settle` are idempotent-guarded by status checks, preventing double-confirmations or premature settlements.
+- **init** — Create an invoice escrow (admin, invoice id, SME address, amount, yield bps, maturity). Requires `admin` authorization.
+- **get_escrow** — Read current escrow state (no auth required).
+- **fund** — Record investor funding; status becomes “funded” when target is met. Requires `investor` authorization.
+- **settle** — Mark escrow as settled (buyer paid; investors receive principal + yield). Requires `sme_address` authorization.
+
+### Authorization model
+
+All sensitive state transitions are protected by Soroban's native [`require_auth`](https://developers.stellar.org/docs/smart-contracts/example-contracts/auth) mechanism.
+
+| Function | Required Signer  | Rationale                                                  |
+|----------|------------------|------------------------------------------------------------|
+| `init`   | `admin`          | Prevents unauthorized escrow creation or re-initialization |
+| `fund`   | `investor`       | Each investor authorizes their own contribution            |
+| `settle` | `sme_address`    | Only the SME beneficiary may trigger settlement            |
+
+`require_auth` integrates with Soroban's authorization framework: on-chain, the transaction must carry a valid signature (or sub-invocation auth) from the required address. In tests, `env.mock_all_auths()` satisfies all checks so happy-path logic can be verified independently of key management.
+
+#### Security assumptions
+
+- The `admin` address is trusted to create legitimate escrows. Rotate or use a multisig address in production.
+- Re-initialization is blocked at the contract level (`"Escrow already initialized"` panic) regardless of who calls `init`.
+- `settle` can only move status from `1 → 2`; calling it on an open or already-settled escrow panics.
+
+---
+
+## API documentation (OpenAPI)
+
+The REST API surface is documented in [`docs/openapi.yaml`](docs/openapi.yaml) (OpenAPI 3.1).
+
+### Endpoints
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/v1/health` | — | Liveness probe |
+| `GET` | `/v1/info` | — | API name, version, network |
+| `GET` | `/v1/invoices` | JWT | List invoice summaries (paginated) |
+| `GET` | `/v1/invoices/{invoiceId}` | JWT | Full escrow detail for one invoice |
+| `POST` | `/v1/escrow` | JWT | Initialise a new invoice escrow |
+| `POST` | `/v1/escrow/{invoiceId}/fund` | JWT | Record investor funding |
+| `POST` | `/v1/escrow/{invoiceId}/settle` | JWT | Settle a funded escrow |
+
+### Security
+
+- All mutating and data endpoints require a `Bearer` JWT in the `Authorization` header.
+- `/health` and `/info` are public (no auth required).
+- Stellar addresses are validated as 56-char base32 (`[A-Z2-7]`) strings.
+- Monetary amounts are always in stroops (smallest unit); `amount ≥ 1` is enforced.
+- `yield_bps` is capped at `10000` (100 %) to prevent overflow.
+
+### Running the schema conformance tests
+
+```bash
+cd docs
+npm install
+npm test
+# tests 51 | pass 51 | fail 0
+```
 
 ---
 
@@ -89,11 +151,29 @@ Replay protection: `confirm_payment` and `settle` are idempotent-guarded by stat
 
 GitHub Actions runs on every push and pull request to `main`:
 
-- **Format** — `cargo fmt --all -- --check`
-- **Build** — `cargo build`
-- **Tests** — `cargo test`
+| Step | Command | Fails if… |
+|------|---------|-----------|
+| Format | `cargo fmt --all -- --check` | any file is not formatted |
+| Build | `cargo build` | compilation error |
+| Tests | `cargo test` | any test fails |
+| Coverage | `cargo llvm-cov --features testutils --fail-under-lines 95` | line coverage < 95 % |
 
-Keep formatting and tests passing before opening a PR.
+### Coverage gate
+
+The pipeline uses [`cargo-llvm-cov`](https://github.com/taiki-e/cargo-llvm-cov) (installed via `taiki-e/install-action`) to measure line coverage and hard-fail the job when it drops below **95 %**.
+
+To run the coverage check locally:
+
+```bash
+# Install once
+cargo install cargo-llvm-cov
+
+# Run (requires llvm-tools-preview component)
+rustup component add llvm-tools-preview
+cargo llvm-cov --features testutils --fail-under-lines 95 --summary-only
+```
+
+Keep formatting, tests, and coverage passing before opening a PR.
 
 ---
 
