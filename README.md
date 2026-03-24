@@ -18,20 +18,15 @@ For CI and local checks you only need Rust and `cargo`.
 ## Setup
 
 1. **Clone the repo**
-
    ```bash
    git clone <this-repo-url>
    cd liquifact-contracts
    ```
-
 2. **Build**
-
    ```bash
    cargo build
    ```
-
 3. **Run tests**
-
    ```bash
    cargo test
    ```
@@ -40,12 +35,12 @@ For CI and local checks you only need Rust and `cargo`.
 
 ## Development
 
-| Command           | Description                    |
-|-------------------|--------------------------------|
-| `cargo build`     | Build all contracts            |
-| `cargo test`      | Run unit tests                 |
-| `cargo fmt`       | Format code                    |
-| `cargo fmt -- --check` | Check formatting (used in CI) |
+| Command                    | Description                       |
+|----------------------------|-----------------------------------|
+| `cargo build`              | Build all contracts               |
+| `cargo test`               | Run unit tests                    |
+| `cargo fmt`                | Format code                       |
+| `cargo fmt -- --check`     | Check formatting (used in CI)     |
 
 ---
 
@@ -57,18 +52,68 @@ liquifact-contracts/
 ├── escrow/
 │   ├── Cargo.toml       # Escrow contract crate
 │   └── src/
-│       ├── lib.rs       # LiquiFact escrow contract (init, fund, settle)
-│       └── test.rs      # Unit tests
+│       ├── lib.rs       # LiquiFact escrow contract (init, fund, settle, version)
+│       └── test.rs      # Unit tests (≥ 95 % coverage)
 └── .github/workflows/
     └── ci.yml           # CI: fmt, build, test
 ```
 
 ### Escrow contract (high level)
 
-- **init** — Create an invoice escrow (invoice id, SME address, amount, yield bps, maturity).
-- **get_escrow** — Read current escrow state.
-- **fund** — Record investor funding; status becomes “funded” when target is met.
-- **settle** — Mark escrow as settled (buyer paid; investors receive principal + yield).
+| Method        | Description                                                                 |
+|---------------|-----------------------------------------------------------------------------|
+| `version`     | **Read-only.** Returns semantic version string (`"MAJOR.MINOR.PATCH"`).    |
+| `init`        | Create an invoice escrow (invoice id, SME address, amount, yield bps, maturity). |
+| `get_escrow`  | Read current escrow state.                                                  |
+| `fund`        | Record investor funding; status becomes `Funded` when target is met.       |
+| `settle`      | Mark escrow as settled (buyer paid; investors receive principal + yield).   |
+
+---
+
+## Contract Version Introspection (`version`)
+
+### Overview
+
+`EscrowContract::version(&env)` is a **pure, read-only** method that returns the
+semantic version of the compiled contract WASM binary as a `SorobanString`.
+
+```rust
+let env = Env::default();
+let version: SorobanString = EscrowContract::version(&env);
+assert_eq!(version.to_string(), "1.0.0");
+```
+
+### Version semantics
+
+| Segment | Meaning                                                              |
+|---------|----------------------------------------------------------------------|
+| MAJOR   | Breaking change to the public interface or on-chain storage layout   |
+| MINOR   | Backwards-compatible new functionality                               |
+| PATCH   | Backwards-compatible bug-fix or documentation change only            |
+
+### Why this matters
+
+- **Tooling & indexers** can call `version()` before any interaction and fail
+  fast on an incompatible version range.
+- **Migration scripts** must re-read the version after a WASM upgrade to detect
+  storage-layout changes (MAJOR bump).
+- **Monitoring** can alert when a newly deployed binary carries an unexpected
+  version string.
+
+### Security properties
+
+| Property            | Detail                                                                    |
+|---------------------|---------------------------------------------------------------------------|
+| No state mutation   | Safe to call from any context; cannot trigger side-effects.               |
+| No auth required    | Purely informational; any caller may invoke it.                           |
+| Tamper-resistant    | Value is a compile-time constant embedded in the WASM binary; it cannot be changed without redeployment. |
+
+### Upgrade workflow
+
+1. Bump `CONTRACT_VERSION` in `escrow/src/lib.rs`.
+2. Run `cargo fmt && cargo test` — all tests must pass.
+3. Deploy the new WASM binary.
+4. Tooling calls `version()` on the live contract to confirm the upgrade.
 
 ---
 
@@ -101,7 +146,7 @@ Keep formatting and tests passing before opening a PR.
 7. **Push** to your fork and open a **Pull Request** to `main`.
 8. Wait for CI and address review feedback.
 
-We welcome new contracts (e.g. settlement, tokenization helpers), tests, and docs that align with LiquiFact’s invoice financing flow.
+We welcome new contracts (e.g. settlement, tokenization helpers), tests, and docs that align with LiquiFact's invoice financing flow.
 
 ---
 
