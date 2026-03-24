@@ -158,7 +158,7 @@ fn test_fund_after_funded_is_rejected() {
         &1000u64,
     );
     client.fund(&investor, &10_000_0000000i128); // status -> 1
-    client.fund(&investor, &1i128);              // must panic
+    client.fund(&investor, &1i128); // must panic
 }
 
 #[test]
@@ -185,7 +185,14 @@ fn test_fund_records_investor_auth() {
     let investor = Address::generate(&env);
     let client = deploy(&env);
 
-    client.init(&admin, &symbol_short!("INV005"), &sme, &1_000i128, &500i64, &2000u64);
+    client.init(
+        &admin,
+        &symbol_short!("INV005"),
+        &sme,
+        &1_000i128,
+        &500i64,
+        &2000u64,
+    );
     client.fund(&investor, &1_000i128);
 
     assert!(
@@ -203,7 +210,14 @@ fn test_settle_records_sme_auth() {
     let investor = Address::generate(&env);
     let client = deploy(&env);
 
-    client.init(&admin, &symbol_short!("INV006"), &sme, &1_000i128, &500i64, &2000u64);
+    client.init(
+        &admin,
+        &symbol_short!("INV006"),
+        &sme,
+        &1_000i128,
+        &500i64,
+        &2000u64,
+    );
     client.fund(&investor, &1_000i128);
     client.settle();
 
