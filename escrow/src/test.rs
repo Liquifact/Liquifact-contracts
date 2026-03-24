@@ -276,3 +276,169 @@ fn test_cost_baseline_settle() {
     cost.assert_instructions_below(180_000);
     cost.assert_mem_below(30_000);
 }
+
+// ---------------------------------------------------------------------------
+// Edge-case cost tests
+//
+// These tests validate that resource consumption stays within bounds for
+// boundary conditions and less-common execution paths.
+// ---------------------------------------------------------------------------
+
+/// Cost of `fund` when the cumulative amount exactly hits the target on the
+/// second call (two-step funding).  Validates that the status transition
+/// triggered by the second call does not add unexpected overhead.
+#[test]
+fn test_cost_baseline_fund_two_step_completion() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let sme = Address::generate(&env);
+    let investor = Address::generate(&env);
+    let contract_id = env.register(LiquifactEscrow, ());
+    let client = LiquifactEscrowClient::new(&env, &contract_id);
+
+    client.init(
+        &symbol_short!("INV200"),
+        &sme,
+        &10_000_0000000i128,
+        &800i64,
+        &1000u64,
+    );
+
+    // First partial fund — status stays open.
+    client.fund(&investor, &5_000_0000000i128);
+
+    // Second fund — exactly meets target, triggers status → funded.
+    client.fund(&investor, &5_000_0000000i128);
+    let cost = CostMeasurement::capture(&env, "fund (2nd call, hits target)");
+
+    assert!(cost.instructions > 0);
+    // The completing fund call should cost no more than a regular fund call.
+    cost.assert_instructions_below(180_000);
+    cost.assert_mem_below(30_000);
+}
+
+/// Cost of `fund` when the amount overshoots the target.  The contract
+/// accumulates the excess; status still flips to funded.
+#[test]
+fn test_cost_baseline_fund_overshoot() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let sme = Address::generate(&env);
+    let investor = Address::generate(&env);
+    let contract_id = env.register(LiquifactEscrow, ());
+    let client = LiquifactEscrowClient::new(&env, &contract_id);
+
+    client.init(
+        &symbol_short!("INV201"),
+        &sme,
+        &10_000_0000000i128,
+        &800i64,
+        &1000u64,
+    );
+
+    // Fund with 2× the target — overshoot scenario.
+    client.fund(&investor, &20_000_0000000i128);
+    let cost = CostMeasurement::capture(&env, "fund (overshoot 2×)");
+
+    assert!(cost.instructions > 0);
+    cost.assert_instructions_below(180_000);
+    cost.assert_mem_below(30_000);
+}
+
+/// Cost of `init` with a zero maturity timestamp.  Exercises the minimum-value
+/// boundary for the maturity field without changing the storage write pattern.
+#[test]
+fn test_cost_baseline_init_zero_maturity() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let sme = Address::generate(&env);
+    let contract_id = env.register(LiquifactEscrow, ());
+    let client = LiquifactEscrowClient::new(&env, &contract_id);
+
+    client.init(
+        &symbol_short!("INV202"),
+        &sme,
+        &10_000_0000000i128,
+        &800i64,
+        &0u64, // zero maturity — edge case
+    );
+    let cost = CostMeasurement::capture(&env, "init (zero maturity)");
+
+    assert!(cost.instructions > 0);
+    // Zero maturity is just a field value; cost profile should match normal init.
+    cost.assert_instructions_below(100_000);
+    cost.assert_mem_below(15_000);
+}
+
+/// Cost of `init` with maximum i128 amount.  Ensures large numeric values do
+/// not inflate serialisation cost.
+#[test]
+fn test_cost_baseline_init_max_amount() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let sme = Address::generate(&env);
+    let contract_id = env.register(LiquifactEscrow, ());
+    let client = LiquifactEscrowClient::new(&env, &contract_id);
+
+    client.init(
+        &symbol_short!("INV203"),
+        &sme,
+        &i128::MAX,
+        &800i64,
+        &1000u64,
+    );
+    let cost = CostMeasurement::capture(&env, "init (max i128 amount)");
+
+    assert!(cost.instructions > 0);
+    cost.assert_instructions_below(100_000);
+    cost.assert_mem_below(15_000);
+}
+
+/// Cost of `settle` immediately after a single-call full fund.  This is the
+/// happy-path end-to-end sequence and validates the combined cost profile.
+#[test]
+fn test_cost_baseline_full_lifecycle() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let sme = Address::generate(&env);
+    let investor = Address::generate(&env);
+    let contract_id = env.register(LiquifactEscrow, ());
+    let client = LiquifactEscrowClient::new(&env, &contract_id);
+
+    // --- init ---
+    client.init(
+        &symbol_short!("INV204"),
+        &sme,
+        &10_000_0000000i128,
+        &800i64,
+        &1000u64,
+    );
+    let cost_init = CostMeasurement::capture(&env, "lifecycle: init");
+
+    // --- fund ---
+    client.fund(&investor, &10_000_0000000i128);
+    let cost_fund = CostMeasurement::capture(&env, "lifecycle: fund");
+
+    // --- settle ---
+    client.settle();
+    let cost_settle = CostMeasurement::capture(&env, "lifecycle: settle");
+
+    // Validate each step individually.
+    cost_init.assert_instructions_below(100_000);
+    cost_fund.assert_instructions_below(180_000);
+    cost_settle.assert_instructions_below(180_000);
+
+    // Validate that settle is not significantly more expensive than fund
+    // (both are read-modify-write on the same storage entry).
+    let ratio = cost_settle.instructions as f64 / cost_fund.instructions as f64;
+    assert!(
+        ratio < 1.5,
+        "settle should not cost >1.5× fund; got ratio {:.2}",
+        ratio
+    );
+}
