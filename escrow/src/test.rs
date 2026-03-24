@@ -134,6 +134,22 @@ fn test_init_unauthorized_panics() {
 }
 
 // ---------------------------------------------------------------------------
+// fund – edge cases
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_fund_zero_amount_panics() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, sme) = setup(&env);
+    default_init(&client, &sme);
+
+    let investor = Address::generate(&env);
+    let result = client.try_fund(&investor, &0i128);
+    assert!(result.is_err());
+}
+
+// ---------------------------------------------------------------------------
 // fund – basic behaviour
 // ---------------------------------------------------------------------------
 
