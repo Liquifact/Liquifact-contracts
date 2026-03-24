@@ -15,7 +15,9 @@
 //! All auth checks are enforced via [`Address::require_auth`], which integrates
 //! with Soroban's native authorization framework and is verifiable on-chain.
 
-use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Address, Env, Symbol};
+use soroban_sdk::{
+    contract, contractimpl, contracttype, symbol_short, Address, BytesN, Env, Symbol,
+};
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -38,6 +40,19 @@ pub struct InvoiceEscrow {
     pub maturity: u64,
     /// Escrow status: 0 = open, 1 = funded, 2 = settled
     pub status: u32,
+    /// SHA-256 hash of the off-chain invoice metadata document (PDF, JSON, etc.).
+    ///
+    /// Anchored immutably at [`init`](LiquifactEscrow::init) time. Callers compute
+    /// this hash off-chain — recommended encoding: `SHA-256(canonical_utf8_json_bytes)`
+    /// or `SHA-256(raw_pdf_bytes)` — submit it on initialization, and later verify
+    /// document integrity by recomputing the hash and comparing it to this stored value.
+    ///
+    /// # Security
+    /// - Bytes are stored opaquely; the contract does not validate the pre-image.
+    ///   Callers are responsible for choosing a collision-resistant algorithm (SHA-256
+    ///   or stronger) and a canonical, deterministic serialization of the document.
+    /// - No setter exists: the hash cannot be altered after `init`.
+    pub metadata_hash: BytesN<32>,
 }
 
 #[contract]
@@ -46,6 +61,11 @@ pub struct LiquifactEscrow;
 #[contractimpl]
 impl LiquifactEscrow {
     /// Initialize a new invoice escrow.
+    ///
+    /// `metadata_hash` must be the SHA-256 digest of the canonical off-chain invoice
+    /// document (e.g. `SHA-256(invoice_json_utf8_bytes)`). It is stored immutably
+    /// and can later be used by any party to verify that the document has not been
+    /// tampered with since escrow creation.
     ///
     /// # Authorization
     /// Requires authorization from `admin`. This prevents any unauthorized
@@ -61,6 +81,7 @@ impl LiquifactEscrow {
         amount: i128,
         yield_bps: i64,
         maturity: u64,
+        metadata_hash: BytesN<32>,
     ) -> InvoiceEscrow {
         // Auth boundary: only the admin may initialize the escrow.
         admin.require_auth();
@@ -81,11 +102,24 @@ impl LiquifactEscrow {
             yield_bps,
             maturity,
             status: 0, // open
+            metadata_hash,
         };
         env.storage()
             .instance()
             .set(&symbol_short!("escrow"), &escrow);
         escrow
+    }
+
+    /// Return the immutable SHA-256 metadata hash anchored at initialization.
+    ///
+    /// Recompute `SHA-256(document_bytes)` off-chain and compare the result to
+    /// this value to confirm the invoice document has not been altered since the
+    /// escrow was created.
+    ///
+    /// # Panics
+    /// - If the escrow has not been initialized.
+    pub fn get_metadata_hash(env: Env) -> BytesN<32> {
+        Self::get_escrow(env).metadata_hash
     }
 
     /// Get current escrow state.

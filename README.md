@@ -40,11 +40,11 @@ For CI and local checks you only need Rust and `cargo`.
 
 ## Development
 
-| Command           | Description                    |
-|-------------------|--------------------------------|
-| `cargo build`     | Build all contracts            |
-| `cargo test`      | Run unit tests                 |
-| `cargo fmt`       | Format code                    |
+| Command                | Description                   |
+| ---------------------- | ----------------------------- |
+| `cargo build`          | Build all contracts           |
+| `cargo test`           | Run unit tests                |
+| `cargo fmt`            | Format code                   |
 | `cargo fmt -- --check` | Check formatting (used in CI) |
 
 ---
@@ -70,8 +70,9 @@ liquifact-contracts/
 
 ### Escrow contract (high level)
 
-- **init** — Create an invoice escrow (admin, invoice id, SME address, amount, yield bps, maturity). Requires `admin` authorization.
+- **init** — Create an invoice escrow (admin, invoice id, SME address, amount, yield bps, maturity, **metadata_hash**). Requires `admin` authorization.
 - **get_escrow** — Read current escrow state (no auth required).
+- **get_metadata_hash** — Return the immutable SHA-256 hash anchored at `init` (no auth required).
 - **fund** — Record investor funding; status becomes “funded” when target is met. Requires `investor` authorization.
 - **settle** — Mark escrow as settled (buyer paid; investors receive principal + yield). Requires `sme_address` authorization.
 
@@ -79,11 +80,13 @@ liquifact-contracts/
 
 All sensitive state transitions are protected by Soroban's native [`require_auth`](https://developers.stellar.org/docs/smart-contracts/example-contracts/auth) mechanism.
 
-| Function | Required Signer  | Rationale                                                  |
-|----------|------------------|------------------------------------------------------------|
-| `init`   | `admin`          | Prevents unauthorized escrow creation or re-initialization |
-| `fund`   | `investor`       | Each investor authorizes their own contribution            |
-| `settle` | `sme_address`    | Only the SME beneficiary may trigger settlement            |
+| Function            | Required Signer | Rationale                                                  |
+| ------------------- | --------------- | ---------------------------------------------------------- |
+| `init`              | `admin`         | Prevents unauthorized escrow creation or re-initialization |
+| `fund`              | `investor`      | Each investor authorizes their own contribution            |
+| `settle`            | `sme_address`   | Only the SME beneficiary may trigger settlement            |
+| `get_escrow`        | —               | Read-only; no state mutation                               |
+| `get_metadata_hash` | —               | Read-only; no state mutation                               |
 
 `require_auth` integrates with Soroban's authorization framework: on-chain, the transaction must carry a valid signature (or sub-invocation auth) from the required address. In tests, `env.mock_all_auths()` satisfies all checks so happy-path logic can be verified independently of key management.
 
@@ -95,21 +98,50 @@ All sensitive state transitions are protected by Soroban's native [`require_auth
 
 ---
 
+### Invoice metadata hash anchoring
+
+The `metadata_hash` field in `InvoiceEscrow` is a 32-byte immutable commitment to the off-chain invoice document (PDF, JSON, etc.) anchored on-chain at escrow creation.
+
+#### How it works
+
+1. **Off-chain**: compute `SHA-256(invoice_document_bytes)` — use the raw bytes of the canonical JSON body or PDF file.
+2. **On-chain**: pass the 32-byte digest to `init` as `metadata_hash`. The contract stores it and never overwrites it.
+3. **Verification**: at any point, any party can recompute the SHA-256 of the document they hold and compare it to the value returned by `get_metadata_hash()`. A mismatch proves tampering.
+
+#### Algorithm choice
+
+| Property              | Detail                                                         |
+| --------------------- | -------------------------------------------------------------- |
+| Digest size           | 32 bytes (`BytesN<32>`)                                        |
+| Recommended algorithm | SHA-256 (output is exactly 32 bytes)                           |
+| Collision resistance  | 2^128 birthday-bound — adequate for document integrity         |
+| Contract validation   | None — bytes are stored opaquely; callers choose the algorithm |
+
+SHA-256 is strongly recommended. Weaker algorithms (MD5, SHA-1) **must not** be used.
+
+#### Security notes
+
+- The contract cannot verify the pre-image; it is the caller's responsibility to use a collision-resistant hash and canonical document serialization.
+- No setter exists: `metadata_hash` cannot be changed after `init`, making the commitment immutable for the life of the escrow.
+- A malicious admin could submit a hash that does not correspond to the real invoice. Use off-chain governance (e.g. multi-party attestation) to validate the hash before trusting it.
+
+---
+
 ## API documentation (OpenAPI)
 
 The REST API surface is documented in [`docs/openapi.yaml`](docs/openapi.yaml) (OpenAPI 3.1).
 
 ### Endpoints
 
-| Method | Path | Auth | Description |
-|--------|------|------|-------------|
-| `GET` | `/v1/health` | — | Liveness probe |
-| `GET` | `/v1/info` | — | API name, version, network |
-| `GET` | `/v1/invoices` | JWT | List invoice summaries (paginated) |
-| `GET` | `/v1/invoices/{invoiceId}` | JWT | Full escrow detail for one invoice |
-| `POST` | `/v1/escrow` | JWT | Initialise a new invoice escrow |
-| `POST` | `/v1/escrow/{invoiceId}/fund` | JWT | Record investor funding |
-| `POST` | `/v1/escrow/{invoiceId}/settle` | JWT | Settle a funded escrow |
+| Method | Path                            | Auth | Description                        |
+| ------ | ------------------------------- | ---- | ---------------------------------- |
+| `GET`  | `/v1/health`                    | —    | Liveness probe                     |
+| `GET`  | `/v1/info`                      | —    | API name, version, network         |
+| `GET`  | `/v1/invoices`                  | JWT  | List invoice summaries (paginated) |
+| `GET`  | `/v1/invoices/{invoiceId}`      | JWT  | Full escrow detail for one invoice |
+| `POST` | `/v1/escrow`                    | JWT  | Initialise a new invoice escrow    |
+| `POST` | `/v1/escrow/{invoiceId}/fund`   | JWT  | Record investor funding            |
+| `POST` | `/v1/escrow/{invoiceId}/settle` | JWT  | Settle a funded escrow             |
 
 ### Security
 
@@ -134,12 +166,12 @@ npm test
 
 GitHub Actions runs on every push and pull request to `main`:
 
-| Step | Command | Fails if… |
-|------|---------|-----------|
-| Format | `cargo fmt --all -- --check` | any file is not formatted |
-| Build | `cargo build` | compilation error |
-| Tests | `cargo test` | any test fails |
-| Coverage | `cargo llvm-cov --features testutils --fail-under-lines 95` | line coverage < 95 % |
+| Step     | Command                                                     | Fails if…                 |
+| -------- | ----------------------------------------------------------- | ------------------------- |
+| Format   | `cargo fmt --all -- --check`                                | any file is not formatted |
+| Build    | `cargo build`                                               | compilation error         |
+| Tests    | `cargo test`                                                | any test fails            |
+| Coverage | `cargo llvm-cov --features testutils --fail-under-lines 95` | line coverage < 95 %      |
 
 ### Coverage gate
 
