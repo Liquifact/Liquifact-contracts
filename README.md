@@ -93,6 +93,19 @@ All sensitive state transitions are protected by Soroban's native [`require_auth
 - Re-initialization is blocked at the contract level (`"Escrow already initialized"` panic) regardless of who calls `init`.
 - `settle` can only move status from `1 → 2`; calling it on an open or already-settled escrow panics.
 
+### Edge-case test matrix (`escrow/src/test.rs`)
+
+Tests are tagged by risk category in inline comments:
+
+| Category  | Tag       | What is covered |
+|-----------|-----------|-----------------|
+| Happy path | `[HAPPY]` | Full lifecycle, field persistence, `get_escrow` consistency |
+| Auth       | `[AUTH]`  | `require_auth` recorded for admin / investor / SME; panics without auth |
+| State      | `[STATE]` | Double-init, fund-after-funded, fund-after-settled, settle-when-open, double-settle |
+| Uninitialized | `[UNINIT]` | `get_escrow`, `fund`, `settle` all panic before `init` |
+| Boundary   | `[BOUND]` | `amount=1`, `amount=i128::MAX`, `yield_bps=i64::MAX`, `maturity=0`, `maturity=u64::MAX`, overshoot funding, exact-boundary funding |
+| Repeated calls | `[REPEAT]` | Multiple investors accumulate correctly; `get_escrow` is idempotent |
+
 ---
 
 ## API documentation (OpenAPI)
