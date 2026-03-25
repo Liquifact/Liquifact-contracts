@@ -113,6 +113,19 @@ Records an investor contribution. Transitions to `status = 1` when
 - **settle** — Mark escrow as settled (buyer paid; investors receive principal + yield).
 - **migrate** — Upgrade storage from an older schema version to the current one (see below).
 
+### Edge-case test matrix (`escrow/src/test.rs`)
+
+Tests are tagged by risk category in inline comments:
+
+| Category  | Tag       | What is covered |
+|-----------|-----------|-----------------|
+| Happy path | `[HAPPY]` | Full lifecycle, field persistence, `get_escrow` consistency |
+| Auth       | `[AUTH]`  | `require_auth` recorded for admin / investor / SME; panics without auth |
+| State      | `[STATE]` | Double-init, fund-after-funded, fund-after-settled, settle-when-open, double-settle |
+| Uninitialized | `[UNINIT]` | `get_escrow`, `fund`, `settle` all panic before `init` |
+| Boundary   | `[BOUND]` | `amount=1`, `amount=i128::MAX`, `yield_bps=i64::MAX`, `maturity=0`, `maturity=u64::MAX`, overshoot funding, exact-boundary funding |
+| Repeated calls | `[REPEAT]` | Multiple investors accumulate correctly; `get_escrow` is idempotent |
+
 ---
 
 ## Contract migration strategy
