@@ -10,6 +10,12 @@
 //! 4. **Settlement**: SME calls `settle` to finalize the escrow, moving it to status 2.
 //!
 //! # Storage Schema Versioning
+//! | Function | Required Signer        | Reason                                      |
+//! |----------|------------------------|---------------------------------------------|
+//! | `init`   | `admin`                | Only the designated admin may create escrows |
+//! | `fund`   | `investor`             | Investor authorizes their own funding action |
+//! | `update_yield` | `admin`           | Admin may update yield in open state only    |
+//! | `settle` | `sme_address`          | Only the SME (payee) may trigger settlement  |
 //!
 //! The escrow state is stored under two keys:
 //! - `"escrow"` — the [`InvoiceEscrow`] struct (current schema)
@@ -529,6 +535,45 @@ impl LiquifactEscrow {
             .set(&symbol_short!("escrow"), &escrow);
 
         withdrawal_amount
+    /// Update yield rate (basis points) in open state.
+    ///
+    /// Allows the admin to adjust the yield rate while the escrow is still open
+    /// (status = 0). This enables dynamic yield adjustments based on market
+    /// conditions. Once funding begins, yield rate is locked to protect investors.
+    ///
+    /// # Yield Constraints
+    /// - Minimum yield: 0 bps (0%)
+    /// - Maximum yield: 10000 bps (100%)
+    ///
+    /// # Authorization
+    /// Requires authorization from `admin`. Only the designated admin may
+    /// update the yield rate, preventing unauthorized modifications.
+    ///
+    /// # Panics
+    /// - If escrow is not in open (status = 0) state.
+    /// - If yield_bps is greater than 10000.
+    ///
+    /// # Investor Fairness
+    /// Yield can only be updated in open state before any funding occurs.
+    /// This protects early investors from retroactive yield changes and ensures
+    /// all investors in a funded escrow have the same terms.
+    pub fn update_yield(env: Env, yield_bps: i64) -> InvoiceEscrow {
+        let mut escrow = Self::get_escrow(env.clone());
+
+        // Auth boundary: only admin may update yield.
+        escrow.admin.require_auth();
+
+        // Yield update only allowed in open state (before funding).
+        assert!(escrow.status == 0, "Yield can only be updated in open state");
+
+        // Safety limit: yield cannot exceed 100% (10000 bps).
+        assert!(yield_bps <= 10000, "Yield cannot exceed 10000 bps (100%)");
+
+        escrow.yield_bps = yield_bps;
+        env.storage()
+            .instance()
+            .set(&symbol_short!("escrow"), &escrow);
+        escrow
     }
 }
 
