@@ -1,0 +1,14 @@
+{
+  "name": "liquifact-openapi-tests",
+  "version": "1.0.0",
+  "description": "OpenAPI schema conformance tests for LiquiFact API",
+  "private": true,
+  "scripts": {
+    "test": "node --test tests/openapi.test.js"
+  },
+  "dependencies": {
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1",
+    "js-yaml": "^4.1.0"
+  }
+}
