@@ -69,16 +69,20 @@ components:
       required:
         - invoice_id
         - sme_address
+        - buyer_address
         - amount
         - funding_target
         - funded_amount
         - yield_bps
         - maturity
         - status
+        - is_paid
       properties:
         invoice_id:
           $ref: "#/components/schemas/InvoiceId"
         sme_address:
+          $ref: "#/components/schemas/StellarAddress"
+        buyer_address:
           $ref: "#/components/schemas/StellarAddress"
         amount:
           type: integer
@@ -113,6 +117,10 @@ components:
           example: 1000
         status:
           $ref: "#/components/schemas/EscrowStatus"
+        is_paid:
+          type: boolean
+          description: Whether the buyer has confirmed payment (repayment of invoice).
+          example: false
 
     InvoiceSummary:
       type: object
@@ -135,6 +143,7 @@ components:
       required:
         - invoice_id
         - sme_address
+        - buyer_address
         - amount
         - yield_bps
         - maturity
@@ -142,6 +151,8 @@ components:
         invoice_id:
           $ref: "#/components/schemas/InvoiceId"
         sme_address:
+          $ref: "#/components/schemas/StellarAddress"
+        buyer_address:
           $ref: "#/components/schemas/StellarAddress"
         amount:
           type: integer
@@ -412,6 +423,7 @@ paths:
             example:
               invoice_id: "INV-1023"
               sme_address: "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5"
+              buyer_address: "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5"
               amount: 100000000000
               yield_bps: 800
               maturity: 1000
@@ -475,14 +487,51 @@ paths:
         "500":
           $ref: "#/components/responses/InternalServerError"
 
+  /escrow/{invoiceId}/confirm:
+    post:
+      operationId: confirmPayment
+      summary: Confirm buyer payment
+      description: |
+        Records the buyer's explicit confirmation of payment via `LiquifactEscrow.confirm_payment`.
+        Required before the SME can settle the escrow.
+      tags: [Escrow]
+      parameters:
+        - name: invoiceId
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/InvoiceId"
+      responses:
+        "200":
+          description: Updated escrow state after confirmation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvoiceEscrow"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          description: Escrow is not in funded state or payment already confirmed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: INVALID_STATE
+                message: "Escrow must be funded before payment confirmation."
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
   /escrow/{invoiceId}/settle:
     post:
       operationId: settleEscrow
       summary: Settle an escrow
       description: |
         Marks the escrow as settled via `LiquifactEscrow.settle`.
-        Requires status `1` (funded). Transitions to status `2` (settled),
-        releasing principal + yield to investors.
+        Requires status `1` (funded) AND explicit buyer confirmation (`is_paid` = true).
+        Transitions to status `2` (settled), releasing principal + yield to investors.
       tags: [Escrow]
       parameters:
         - name: invoiceId
