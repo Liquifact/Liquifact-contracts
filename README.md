@@ -1,6 +1,7 @@
 # LiquiFact Contracts
 
-Soroban smart contracts for **LiquiFact** — the global invoice liquidity network on Stellar. This repo contains the **escrow** contract that holds investor funds for tokenized invoices until settlement.
+Soroban smart contracts for **LiquiFact** — the global invoice liquidity network on Stellar.
+This repo contains the **escrow** contract that holds investor funds for tokenized invoices until settlement.
 
 Part of the LiquiFact stack: **frontend** (Next.js) | **backend** (Express) | **contracts** (this repo).
 
@@ -11,30 +12,16 @@ Part of the LiquiFact stack: **frontend** (Next.js) | **backend** (Express) | **
 - **Rust** 1.70+ (stable)
 - **Soroban CLI** (optional, for deployment): [Stellar Soroban docs](https://developers.stellar.org/docs/smart-contracts/getting-started/soroban-cli)
 
-For CI and local checks you only need Rust and `cargo`.
-
 ---
 
 ## Setup
 
-1. **Clone the repo**
-
-   ```bash
-   git clone <this-repo-url>
-   cd liquifact-contracts
-   ```
-
-2. **Build**
-
-   ```bash
-   cargo build
-   ```
-
-3. **Run tests**
-
-   ```bash
-   cargo test
-   ```
+```bash
+git clone <this-repo-url>
+cd liquifact-contracts
+cargo build
+cargo test
+```
 
 ---
 
@@ -70,7 +57,30 @@ liquifact-contracts/
     └── ci.yml              # CI: fmt, build, test
 ```
 
-### Escrow contract (high level)
+Records an investor contribution. Transitions to `status = 1` when
+`funded_amount >= funding_target`.
+
+> **Production note:** Must be called atomically with a SEP-41 token `transfer`
+> from `investor` to the contract address. This version records accounting only.
+
+**Parameters**
+
+| Parameter   | Constraints                                  |
+|-------------|----------------------------------------------|
+| `_investor` | Investor's Stellar address (for audit trail) |
+| `amount`    | > 0 recommended; partial funding is allowed  |
+
+**Returns** — Updated `InvoiceEscrow`.
+
+**Failure conditions**
+
+| Condition                 | Behaviour                               |
+|---------------------------|-----------------------------------------|
+| `status != 0`             | Panics: `"Escrow not open for funding"` |
+| `init` not called         | Panics: `"Escrow not initialized"`      |
+| `funded_amount` overflows | Rust panics (debug) / wraps (release)   |
+
+**State transitions**
 
 - **init** — Create an invoice escrow (invoice id, SME address, admin address, amount, yield bps, maturity).
 - **get_escrow** — Read current escrow state.

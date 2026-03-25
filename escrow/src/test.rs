@@ -607,8 +607,174 @@ fn test_over_settlement_failure() {
         &admin,
         &10_000_0000000i128,
         &800i64,
+        &2000u64,
+    );
+
+    // Fund exactly the target in one shot
+    let after_fund = client.fund(&investor, &10_000_0000000i128);
+    assert_eq!(after_fund.funded_amount, 10_000_0000000i128);
+    assert_eq!(after_fund.status, 1, "should be funded");
+
+    // Settle
+    let after_settle = client.settle();
+    assert_eq!(after_settle.status, 2, "should be settled");
+}
+
+#[test]
+fn test_partial_funding_multiple_investors() {
+    let (env, client) = setup();
+    let sme = Address::generate(&env);
+    let inv_a = Address::generate(&env);
+    let inv_b = Address::generate(&env);
+    let inv_c = Address::generate(&env);
+
+    client.init(
+        &symbol_short!("INV003"),
+        &sme,
+        &9_000_0000000i128,
+        &500i64,
+        &3000u64,
+    );
+
+    // Three partial contributions
+    let s1 = client.fund(&inv_a, &3_000_0000000i128);
+    assert_eq!(s1.status, 0, "still open after first tranche");
+
+    let s2 = client.fund(&inv_b, &3_000_0000000i128);
+    assert_eq!(s2.status, 0, "still open after second tranche");
+
+    let s3 = client.fund(&inv_c, &3_000_0000000i128);
+    assert_eq!(s3.funded_amount, 9_000_0000000i128);
+    assert_eq!(s3.status, 1, "funded after third tranche completes target");
+}
+
+#[test]
+fn test_overfunding_still_funded() {
+    let (env, client) = setup();
+    let sme = Address::generate(&env);
+    let investor = Address::generate(&env);
+
+    client.init(
+        &symbol_short!("INV004"),
+        &sme,
+        &5_000_0000000i128,
+        &300i64,
+        &4000u64,
+    );
+
+    // Fund more than the target
+    let after = client.fund(&investor, &7_000_0000000i128);
+    assert_eq!(after.funded_amount, 7_000_0000000i128);
+    assert_eq!(after.status, 1, "over-funded escrow must still be status=1");
+}
+
+#[test]
+fn test_init_field_integrity() {
+    let (env, client) = setup();
+    let sme = Address::generate(&env);
+
+    let escrow = client.init(
+        &symbol_short!("INV005"),
+        &sme,
+        &1_500_0000000i128,
+        &1200i64,
+        &9999u64,
+    );
+
+    // funding_target must mirror amount
+    assert_eq!(escrow.funding_target, escrow.amount);
+    // sme_address must be preserved
+    assert_eq!(escrow.sme_address, sme);
+}
+
+#[test]
+fn test_yield_bps_stored() {
+    let (env, client) = setup();
+    let sme = Address::generate(&env);
+
+    client.init(
+        &symbol_short!("INV006"),
+        &sme,
+        &1_000_0000000i128,
+        &1500i64, // 15%
+        &5000u64,
+    );
+
+    assert_eq!(client.get_escrow().yield_bps, 1500);
+}
+
+#[test]
+fn test_maturity_stored() {
+    let (env, client) = setup();
+    let sme = Address::generate(&env);
+
+    client.init(
+        &symbol_short!("INV007"),
+        &sme,
+        &1_000_0000000i128,
+        &800i64,
+        &u64::MAX,
+    );
+
+    assert_eq!(client.get_escrow().maturity, u64::MAX);
+}
+
+#[test]
+fn test_minimum_amount_escrow() {
+    let (env, client) = setup();
+    let sme = Address::generate(&env);
+    let investor = Address::generate(&env);
+
+    client.init(&symbol_short!("INV008"), &sme, &1i128, &0i64, &1u64);
+
+    let after = client.fund(&investor, &1i128);
+    assert_eq!(after.status, 1);
+
+    let settled = client.settle();
+    assert_eq!(settled.status, 2);
+}
+
+#[test]
+fn test_zero_amount_fund_no_status_change() {
+    let (env, client) = setup();
+    let sme = Address::generate(&env);
+    let investor = Address::generate(&env);
+
+    client.init(
+        &symbol_short!("INV009"),
+        &sme,
+        &1_000_0000000i128,
+        &800i64,
         &1000u64,
     );
+
+    // A zero-amount fund call should not flip status
+    let after = client.fund(&investor, &0i128);
+    assert_eq!(after.status, 0, "zero-amount fund must not change status");
+    assert_eq!(after.funded_amount, 0);
+}
+
+// ---------------------------------------------------------------------------
+// Failure / panic tests
+// ---------------------------------------------------------------------------
+
+#[test]
+#[should_panic(expected = "Escrow not open for funding")]
+fn test_fund_after_funded_panics() {
+    let (env, client) = setup();
+    let sme = Address::generate(&env);
+    let investor = Address::generate(&env);
+
+    client.init(
+        &symbol_short!("INV010"),
+        &sme,
+        &1_000_0000000i128,
+        &800i64,
+        &1000u64,
+    );
+    client.fund(&investor, &1_000_0000000i128); // reaches status=1
+    client.fund(&investor, &1i128); // must panic
+}
 
     client.fund(&investor, &10_000_0000000i128);
 

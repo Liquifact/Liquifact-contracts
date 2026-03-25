@@ -206,6 +206,10 @@ pub struct LiquifactEscrow;
 
 #[contractimpl]
 impl LiquifactEscrow {
+    // -----------------------------------------------------------------------
+    // init
+    // -----------------------------------------------------------------------
+
     /// Initialize a new invoice escrow.
     ///
     /// # Authorization
