@@ -111,7 +111,9 @@ impl LiquifactEscrow {
     /// Requires authorization from `admin`.
     ///
     /// # Panics
-    /// - If an escrow has already been initialized.
+    /// - If `amount <= 0`
+    /// - If `yield_bps > 10_000`
+    /// - If the escrow has already been initialized
     pub fn init(
         env: Env,
         invoice_id: Symbol,
@@ -182,7 +184,7 @@ impl LiquifactEscrow {
         let stored: u32 = env.storage().instance().get(&DataKey::Version).unwrap_or(0);
 
         assert!(
-            stored == from_version,
+            stored_version == from_version,
             "from_version does not match stored version"
         );
         assert!(
@@ -229,7 +231,7 @@ impl LiquifactEscrow {
         env.storage().instance().set(&DataKey::Escrow, &escrow);
 
         EscrowFunded {
-            name: symbol_short!("escrow_fd"),
+            name: symbol_short!("funded"),
             invoice_id: escrow.invoice_id.clone(),
             investor,
             amount,
@@ -256,7 +258,6 @@ impl LiquifactEscrow {
         let mut escrow = Self::get_escrow(env.clone());
 
         escrow.sme_address.require_auth();
-
         assert!(
             escrow.status == 1,
             "Escrow must be funded before settlement"
@@ -300,8 +301,8 @@ impl LiquifactEscrow {
             "Maturity can only be updated in Open state"
         );
 
-        let old_maturity = escrow.maturity;
-        escrow.maturity = new_maturity;
+        let (yield_amount, total_payout) =
+            Self::compute_expected_payout(&escrow, record.contribution);
 
         env.storage().instance().set(&DataKey::Escrow, &escrow);
 
@@ -313,7 +314,18 @@ impl LiquifactEscrow {
         }
         .publish(&env);
 
-        escrow
+        // Audit event.
+        InvestorRedeemed {
+            name: symbol_short!("redeemed"),
+            invoice_id: escrow.invoice_id.clone(),
+            investor: investor.clone(),
+            principal: record.contribution,
+            yield_amount,
+            total_payout,
+        }
+        .publish(&env);
+
+        Self::build_position_view(&escrow, &investor, &record)
     }
 
     // ── withdraw ──────────────────────────────────────────────────────────────
@@ -335,8 +347,8 @@ impl LiquifactEscrow {
             "Escrow must be funded before withdrawal"
         );
         assert!(
-            escrow.funded_amount > 0,
-            "No funds available for withdrawal"
+            escrow.invoice_id == target_invoice_id,
+            "Target escrow invoice_id does not match"
         );
 
         let withdrawal_amount = escrow.funded_amount;

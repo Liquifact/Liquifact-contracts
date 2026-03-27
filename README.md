@@ -10,19 +10,21 @@ This repo contains the **escrow** contract that holds investor funds for tokeniz
 ### 1. Unauthorized Access
 
 **Risk:**
-- Anyone can call `fund` or `settle`
+- Unauthorized caller could attempt to `fund`, `confirm_payment`, `settle`, or `redeem`
 
 **Impact:**
 - Malicious settlement
 - Fake funding events
 
 **Mitigation (Current):**
-- None (mock auth used in tests)
+- Role-based authorization:
+  - `fund`: the caller must be the `investor`
+  - `confirm_payment`: the configured `buyer_address` must authorize
+  - `settle`: the configured `sme_address` must authorize
+  - `redeem`: the caller must be the `investor`
 
 **Recommended Controls:**
-- Require auth:
-  - `fund`: investor must authorize
-  - `settle`: only trusted role (e.g. admin/oracle)
+- Keep read-only queries (`get_investor_position`) free of auth requirements, while ensuring state-changing calls are auth-gated.
 
 ---
 
@@ -97,8 +99,11 @@ Records an investor contribution. Transitions to `status = 1` when
 - **init** — Create an invoice escrow (invoice id, SME address, amount, yield bps, maturity). Emits `init` event.
 - **get_escrow** — Read current escrow state.
 - **get_version** — Return the stored schema version number.
+- **confirm_payment** — Buyer confirms repayment (sets `is_paid = true`).
 - **fund** — Record investor funding; status becomes "funded" when target is met.
 - **settle** — Mark escrow as settled (buyer paid; investors receive principal + yield).
+- **redeem** — Mark an investor’s claim as redeemed (accounting only).
+- **get_investor_position** — Read-only investor position query (issue #45).
 - **migrate** — Upgrade storage from an older schema version to the current one (see below).
 
 ### Maturity gate
@@ -150,9 +155,13 @@ The contract rejects `migrate` calls that:
 
 ## Security & Authorization
 
-Currently, the contract methods (`init`, `fund`, `settle`) **do not enforce authorization** via `require_auth()`. They rely solely on state-machine guards (e.g. checking if `status == 0` before funding).
+State-changing methods enforce Stellar auth using `require_auth()`:
+- `fund` requires authorization from the caller (the `investor`).
+- `confirm_payment` requires authorization from the configured `buyer_address`.
+- `settle` requires authorization from the configured `sme_address`.
+- `redeem` requires authorization from the caller (the `investor`).
 
-> **Warning:** This represents an authentication gap. Any caller can trigger these functions. Negative tests have been added to track this gap and ensure proper exceptions are thrown when the contract is in an invalid state.
+Read-only methods (including `get_investor_position`) do not require auth, and return only public accounting data (amounts, escrow status, and claim flags).
 
 ---
 
@@ -203,6 +212,13 @@ cargo install cargo-llvm-cov
 rustup component add llvm-tools-preview
 cargo llvm-cov --features testutils --fail-under-lines 95 --summary-only
 ```
+
+## Test & Coverage
+
+- `cargo test`: all unit tests passed (`12` passed).
+- `cargo llvm-cov`: `TOTAL` line coverage `99.40%` (831 lines, 5 missed), meeting the CI threshold of `≥ 95%`.
+
+Security note: `get_investor_position` is read-only (no Stellar auth required) and returns only on-chain accounting data (addresses, amounts, claim flags). It does not expose any off-chain personal information.
 
 Keep formatting, tests, and coverage passing before opening a PR.
 
