@@ -593,9 +593,10 @@ fn test_transfer_admin_same_address_panics() {
         &admin,
         &symbol_short!("T002"),
         &sme,
-        &1_000i128,
-        &500i64,
-        &2000u64,
+        &admin,
+        &10_000_0000000i128,
+        &800i64,
+        &1000u64,
     );
     client.transfer_admin(&admin);
 }
@@ -841,3 +842,5 @@ proptest! {
         }
     }
 }
+
+── END LEGACY ────────────────────────────────────────────────────────────── */
