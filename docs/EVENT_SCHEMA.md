@@ -20,6 +20,11 @@ Each event has:
 - A **two-element topic tuple**: `(namespace: Symbol, action: Symbol)`
 - A **typed data payload** encoded as a Soroban XDR `ScVal`
 
+> **Source-truth note:** This document is secondary to the storage schema
+> documentation in `README.md`. The current branch contains event-model drift,
+> so any event statement that depends on unsettled storage or API shape should be
+> read as provisional until the contract source is normalized.
+
 ---
 
 ## Versioning Strategy
@@ -48,7 +53,7 @@ Emitted by `init()`. Marks the beginning of an invoice escrow lifecycle.
 | `Topic[1]` | `"initd"` *(≤ 8 chars — Soroban `symbol_short` limit)* |
 | Payload type | `InvoiceEscrow` |
 
-#### Payload: `InvoiceEscrow`
+#### Payload: `InvoiceEscrow` (intended view)
 
 | Field | Rust type | Description |
 |---|---|---|
@@ -60,6 +65,10 @@ Emitted by `init()`. Marks the beginning of an invoice escrow lifecycle.
 | `yield_bps` | `i64` | Annualized yield in basis points (e.g. `800` = 8 %) |
 | `maturity` | `u64` | Unix timestamp (seconds) for invoice maturity |
 | `status` | `u32` | Always `0` (open) at init |
+
+The live source currently contains additional schema drift around `admin`,
+`settled_amount`, and version bookkeeping. Reviewers should use the README
+storage section for the canonical persisted-layout discussion.
 
 #### Example (JSON representation after XDR decode)
 
@@ -91,7 +100,7 @@ the escrow became fully funded.
 | `Topic[1]` | `"funded"` |
 | Payload type | `FundedPayload` |
 
-#### Payload: `FundedPayload`
+#### Payload: `FundedPayload` (intended view)
 
 | Field | Rust type | Description |
 |---|---|---|
@@ -100,6 +109,9 @@ the escrow became fully funded.
 | `amount` | `i128` | Amount contributed in **this** call |
 | `funded_amount` | `i128` | Cumulative total **after** this call |
 | `status` | `u32` | `0` = still open · `1` = target just met |
+
+Current source drift also includes an `is_paid` field on the event struct that
+is not reflected consistently across the rest of the contract.
 
 > **Analytics tip**: Sum `amount` per `invoice_id` across all `funded` events
 > to reconstruct the full investor contribution table without reading state.
@@ -131,7 +143,7 @@ investor payouts without re-reading contract storage.
 | `Topic[1]` | `"settled"` |
 | Payload type | `SettledPayload` |
 
-#### Payload: `SettledPayload`
+#### Payload: `SettledPayload` (intended view)
 
 | Field | Rust type | Description |
 |---|---|---|
@@ -139,6 +151,10 @@ investor payouts without re-reading contract storage.
 | `funded_amount` | `i128` | Total principal held at settlement |
 | `yield_bps` | `i64` | Annualized yield rate for payout calculation |
 | `maturity` | `u64` | Original maturity timestamp (used to compute accrued interest) |
+
+The current branch's settlement implementation is internally inconsistent, so
+this event description should not be treated as a stronger source of truth than
+the contract file itself.
 
 > **Payout formula** (off-chain, backend responsibility):
 > ```
@@ -167,6 +183,7 @@ investor payouts without re-reading contract storage.
 | `0` | **open** | Escrow initialized; accepting investor funding |
 | `1` | **funded** | Target met; SME can be paid; awaiting buyer settlement |
 | `2` | **settled** | Buyer paid; investors can redeem principal + yield |
+| `3` | **withdrawn** | Explicitly written by `withdraw`, though not documented consistently elsewhere |
 
 ---
 
