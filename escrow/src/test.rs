@@ -2045,7 +2045,10 @@ fn test_fund_follow_on_does_not_reset_yield() {
     let inv = Address::generate(&env);
     let (tok, tre) = free_addresses(&env);
     let mut tiers = SorobanVec::new(&env);
-    tiers.push_back(YieldTier { min_lock_secs: 10, yield_bps: 950 });
+    tiers.push_back(YieldTier {
+        min_lock_secs: 10,
+        yield_bps: 950,
+    });
     client.init(
         &admin,
         &String::from_str(&env, "FOLO001"),
