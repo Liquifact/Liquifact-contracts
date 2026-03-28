@@ -6,8 +6,11 @@ Soroban smart contracts for **LiquiFact** on Stellar. This repository contains t
 
 | Method | Purpose |
 |--------|---------|
-| `init` | Create escrow (admin auth). Sets `funding_target = amount`. Binds **`funding_token`**, **`treasury`**, optional **`registry`**, optional **`yield_tiers`** ([`YieldTier`](escrow/src/lib.rs) Soroban [`Vec`]); validates **`invoice_id`** string (length ≤ 32, charset `[A-Za-z0-9_]`). |
+| `init` | Create escrow (admin auth). Sets `funding_target = amount`. Binds **`funding_token`**, **`treasury`**, optional **`registry`**, optional **`yield_tiers`**, optional **`min_contribution`** (per-call floor), optional **`max_unique_investors`** (cap on distinct funder addresses); validates **`invoice_id`** (length ≤ 32, charset `[A-Za-z0-9_]`). See [**`escrow/README.md`**](escrow/README.md) for formal invariant stubs and security checklist. |
 | `get_escrow` / `get_version` / `get_legal_hold` | Read state. |
+| `get_min_contribution_floor` / `get_max_unique_investors_cap` / `get_unique_funder_count` | Read optional per-call funding floor, optional unique-funder cap, and current distinct funder count. |
+| `bind_primary_attestation_hash` / `get_primary_attestation_hash` | Admin **single-set** 32-byte digest for off-chain bundle binding. |
+| `append_attestation_digest` / `get_attestation_append_log` | Admin **append-only** digest log (bounded length). |
 | `get_funding_token` / `get_treasury` / `get_registry_ref` | Immutable funding asset, treasury for dust recovery, optional registry hint (`None` if unset at init). |
 | `get_contribution` | Per-investor funded principal. |
 | `update_funding_target` | Admin, open state only; target ≥ `funded_amount`. |
@@ -65,7 +68,7 @@ When `DataKey::LegalHold` is true, the contract rejects new `fund`, `settle`, SM
 
 ### Storage keys (`DataKey`)
 
-Public enum in [`escrow/src/lib.rs`](escrow/src/lib.rs): `Escrow`, `Version`, `InvestorContribution(Address)`, `LegalHold`, `SmeCollateralPledge`, `InvestorClaimed(Address)`, `FundingToken`, `Treasury`, `RegistryRef` (present only when set at init), optional `YieldTierTable`, `FundingCloseSnapshot`, `InvestorEffectiveYield(Address)`, `InvestorClaimNotBefore(Address)`. New optional keys should keep **additive** names and avoid reusing or repurposing existing variants.
+Public enum in [`escrow/src/lib.rs`](escrow/src/lib.rs): `Escrow`, `Version`, `InvestorContribution(Address)`, `LegalHold`, `SmeCollateralPledge`, `InvestorClaimed(Address)`, `FundingToken`, `Treasury`, `RegistryRef` (present only when set at init), optional `YieldTierTable`, `FundingCloseSnapshot`, `InvestorEffectiveYield(Address)`, `InvestorClaimNotBefore(Address)`, `MinContributionFloor`, `MaxUniqueInvestorsCap` (when capped at init), `UniqueFunderCount`, `PrimaryAttestationHash`, `AttestationAppendLog`. New optional keys should keep **additive** names and avoid reusing or repurposing existing variants.
 
 ---
 

@@ -67,13 +67,16 @@
 
 use soroban_sdk::{
     contract, contractevent, contractimpl, contracttype, symbol_short, token::TokenClient, Address,
-    Env, String, Symbol, Vec,
+    BytesN, Env, String, Symbol, Vec,
 };
 
 pub(crate) mod external_calls;
 
 /// Current storage schema version (`DataKey::Version`).
-pub const SCHEMA_VERSION: u32 = 4;
+pub const SCHEMA_VERSION: u32 = 5;
+
+/// Upper bound on [`LiquifactEscrow::append_attestation_digest`] entries to keep storage bounded.
+pub const MAX_ATTESTATION_APPEND_ENTRIES: u32 = 32;
 
 /// Upper bound on [`LiquifactEscrow::sweep_terminal_dust`] per call (base units of the funding token).
 ///
@@ -119,6 +122,18 @@ pub enum DataKey {
     InvestorEffectiveYield(Address),
     /// Minimum [`Env::ledger`] timestamp before [`LiquifactEscrow::claim_investor_payout`] (0 = no extra gate).
     InvestorClaimNotBefore(Address),
+    /// Minimum [`LiquifactEscrow::fund`] / [`LiquifactEscrow::fund_with_commitment`] amount per call (0 = no floor).
+    MinContributionFloor,
+    /// When set at [`LiquifactEscrow::init`], caps distinct investor addresses that may contribute (`prev == 0`).
+    MaxUniqueInvestorsCap,
+    /// Count of distinct investor addresses that have a non-zero [`DataKey::InvestorContribution`].
+    UniqueFunderCount,
+    /// Admin-only **single-set** off-chain attestation digest (e.g. SHA-256 of a legal/KYC bundle).
+    /// See [`LiquifactEscrow::bind_primary_attestation_hash`].
+    PrimaryAttestationHash,
+    /// Append-only audit chain of digests (bounded by [`MAX_ATTESTATION_APPEND_ENTRIES`]).
+    /// See [`LiquifactEscrow::append_attestation_digest`].
+    AttestationAppendLog,
 }
 
 // --- Data types ---
@@ -290,6 +305,23 @@ pub struct TreasuryDustSwept {
     pub amount: i128,
 }
 
+#[contractevent]
+pub struct PrimaryAttestationBound {
+    #[topic]
+    pub name: Symbol,
+    pub invoice_id: Symbol,
+    pub digest: BytesN<32>,
+}
+
+#[contractevent]
+pub struct AttestationDigestAppended {
+    #[topic]
+    pub name: Symbol,
+    pub invoice_id: Symbol,
+    pub index: u32,
+    pub digest: BytesN<32>,
+}
+
 #[contract]
 pub struct LiquifactEscrow;
 
@@ -406,6 +438,8 @@ impl LiquifactEscrow {
         registry: Option<Address>,
         treasury: Address,
         yield_tiers: Option<Vec<YieldTier>>,
+        min_contribution: Option<i128>,
+        max_unique_investors: Option<u32>,
     ) -> InvoiceEscrow {
         admin.require_auth();
 
@@ -452,6 +486,35 @@ impl LiquifactEscrow {
                     .instance()
                     .set(&DataKey::YieldTierTable, tiers);
             }
+        }
+
+        let floor = min_contribution.unwrap_or(0);
+        if min_contribution.is_some() {
+            assert!(
+                floor > 0,
+                "min_contribution must be positive when configured"
+            );
+            assert!(
+                floor <= amount,
+                "min_contribution cannot exceed initial invoice amount / target hint"
+            );
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::MinContributionFloor, &floor);
+
+        env.storage()
+            .instance()
+            .set(&DataKey::UniqueFunderCount, &0u32);
+
+        if let Some(cap) = max_unique_investors {
+            assert!(
+                cap > 0,
+                "max_unique_investors must be positive when configured"
+            );
+            env.storage()
+                .instance()
+                .set(&DataKey::MaxUniqueInvestorsCap, &cap);
         }
 
         EscrowInitialized {
@@ -567,6 +630,105 @@ impl LiquifactEscrow {
     /// Whether a compliance/legal hold is active (defaults to `false` if unset).
     pub fn get_legal_hold(env: Env) -> bool {
         Self::legal_hold_active(&env)
+    }
+
+    /// Minimum principal per [`LiquifactEscrow::fund`] or [`LiquifactEscrow::fund_with_commitment`] call
+    /// in token base units; `0` means no extra floor beyond “amount must be positive”.
+    ///
+    /// **Ceilings:** [`InvoiceEscrow::funding_target`] and over-funding behavior are unchanged; the floor
+    /// applies to **each** call, so follow-on deposits from the same investor must also meet the floor.
+    pub fn get_min_contribution_floor(env: Env) -> i128 {
+        env.storage()
+            .instance()
+            .get(&DataKey::MinContributionFloor)
+            .unwrap_or(0)
+    }
+
+    /// Optional cap on **distinct** investor addresses (`prev == 0` at fund time); [`None`] if unlimited.
+    pub fn get_max_unique_investors_cap(env: Env) -> Option<u32> {
+        env.storage()
+            .instance()
+            .get(&DataKey::MaxUniqueInvestorsCap)
+    }
+
+    /// Distinct funders counted so far (each address counted once when it first receives principal).
+    ///
+    /// **Sybil:** this limits distinct **chain accounts**, not real-world persons; Sybil resistance is
+    /// not a goal of this counter.
+    pub fn get_unique_funder_count(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::UniqueFunderCount)
+            .unwrap_or(0)
+    }
+
+    /// Bind a **primary** 32-byte digest (e.g. SHA-256 of an IPFS CID or document bundle). **Single-set:**
+    /// the call succeeds only while no primary hash exists; use [`LiquifactEscrow::append_attestation_digest`]
+    /// for an append-only audit trail.
+    ///
+    /// **Authorization:** [`InvoiceEscrow::admin`]. **Frontrunning:** whichever binding transaction lands
+    /// first wins; observers must read on-chain state (or parse events) after finality—there is no replay lock.
+    pub fn bind_primary_attestation_hash(env: Env, digest: BytesN<32>) {
+        let escrow = Self::get_escrow(env.clone());
+        escrow.admin.require_auth();
+        assert!(
+            !env.storage()
+                .instance()
+                .has(&DataKey::PrimaryAttestationHash),
+            "primary attestation already bound"
+        );
+        env.storage()
+            .instance()
+            .set(&DataKey::PrimaryAttestationHash, &digest);
+        PrimaryAttestationBound {
+            name: symbol_short!("att_bind"),
+            invoice_id: escrow.invoice_id.clone(),
+            digest: digest.clone(),
+        }
+        .publish(&env);
+    }
+
+    pub fn get_primary_attestation_hash(env: Env) -> Option<BytesN<32>> {
+        env.storage()
+            .instance()
+            .get(&DataKey::PrimaryAttestationHash)
+    }
+
+    /// Append a digest to a bounded on-chain log (see [`MAX_ATTESTATION_APPEND_ENTRIES`]) for **versioned**
+    /// or incremental attestation updates. Does not replace [`LiquifactEscrow::bind_primary_attestation_hash`].
+    pub fn append_attestation_digest(env: Env, digest: BytesN<32>) {
+        let escrow = Self::get_escrow(env.clone());
+        escrow.admin.require_auth();
+
+        let mut log: Vec<BytesN<32>> = env
+            .storage()
+            .instance()
+            .get(&DataKey::AttestationAppendLog)
+            .unwrap_or_else(|| Vec::new(&env));
+        assert!(
+            log.len() < MAX_ATTESTATION_APPEND_ENTRIES,
+            "attestation append log capacity reached"
+        );
+        let idx = log.len();
+        log.push_back(digest.clone());
+        env.storage()
+            .instance()
+            .set(&DataKey::AttestationAppendLog, &log);
+
+        AttestationDigestAppended {
+            name: symbol_short!("att_app"),
+            invoice_id: escrow.invoice_id.clone(),
+            index: idx,
+            digest,
+        }
+        .publish(&env);
+    }
+
+    pub fn get_attestation_append_log(env: Env) -> Vec<BytesN<32>> {
+        env.storage()
+            .instance()
+            .get(&DataKey::AttestationAppendLog)
+            .unwrap_or_else(|| Vec::new(&env))
     }
 
     pub fn get_contribution(env: Env, investor: Address) -> i128 {
@@ -748,6 +910,18 @@ impl LiquifactEscrow {
 
         assert!(amount > 0, "Funding amount must be positive");
 
+        let floor: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::MinContributionFloor)
+            .unwrap_or(0);
+        if floor > 0 {
+            assert!(
+                amount >= floor,
+                "funding amount below min_contribution floor"
+            );
+        }
+
         let mut escrow = Self::get_escrow(env.clone());
         assert!(
             !Self::legal_hold_active(&env),
@@ -757,6 +931,21 @@ impl LiquifactEscrow {
 
         let contribution_key = DataKey::InvestorContribution(investor.clone());
         let prev: i128 = env.storage().instance().get(&contribution_key).unwrap_or(0);
+
+        if prev == 0 {
+            if let Some(cap) = env
+                .storage()
+                .instance()
+                .get::<DataKey, u32>(&DataKey::MaxUniqueInvestorsCap)
+            {
+                let cur: u32 = env
+                    .storage()
+                    .instance()
+                    .get(&DataKey::UniqueFunderCount)
+                    .unwrap_or(0);
+                assert!(cur < cap, "unique investor cap reached");
+            }
+        }
 
         if simple_fund {
             if prev == 0 {
@@ -814,6 +1003,17 @@ impl LiquifactEscrow {
         env.storage()
             .instance()
             .set(&contribution_key, &(prev + amount));
+
+        if prev == 0 {
+            let cur: u32 = env
+                .storage()
+                .instance()
+                .get(&DataKey::UniqueFunderCount)
+                .unwrap_or(0);
+            env.storage()
+                .instance()
+                .set(&DataKey::UniqueFunderCount, &(cur + 1));
+        }
 
         env.storage().instance().set(&DataKey::Escrow, &escrow);
 

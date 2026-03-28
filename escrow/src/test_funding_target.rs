@@ -26,6 +26,8 @@ fn init_escrow(
         &None,
         &treasury,
         &None,
+        &None,
+        &None,
     );
 }
 
