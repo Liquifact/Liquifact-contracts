@@ -10,16 +10,20 @@ This repo contains the **escrow** contract that holds investor funds for tokeniz
 ### 1. Unauthorized Access
 
 **Risk:**
+
 - Anyone can call `fund` or `settle`
 
 **Impact:**
+
 - Malicious settlement
 - Fake funding events
 
 **Mitigation (Current):**
+
 - None (mock auth used in tests)
 
 **Recommended Controls:**
+
 - Require auth:
   - `fund`: investor must authorize
   - `settle`: only trusted role (e.g. admin/oracle)
@@ -29,6 +33,7 @@ This repo contains the **escrow** contract that holds investor funds for tokeniz
 ### 2. Arithmetic Risks (Overflow / Underflow)
 
 **Risk:**
+
 - `funded_amount += amount` may overflow `i128`
 
 ---
@@ -47,12 +52,13 @@ cargo test
 ### 5. Invalid Input / Economic Attacks
 
 **Risks:**
+
 - Negative funding
 - Zero funding
 - Invalid maturity
 
 | Command                | Description                                                |
-|------------------------|------------------------------------------------------------|
+| ---------------------- | ---------------------------------------------------------- |
 | `cargo build`          | Build all contracts                                        |
 | `cargo test`           | Run unit tests and property-based tests (using `proptest`) |
 | `cargo fmt`            | Format code                                                |
@@ -90,7 +96,7 @@ Records an investor contribution. Transitions to `status = 1` when
 **Parameters**
 
 | Parameter   | Constraints                                  |
-|-------------|----------------------------------------------|
+| ----------- | -------------------------------------------- |
 | `_investor` | Investor's Stellar address (for audit trail) |
 | `amount`    | > 0 recommended; partial funding is allowed  |
 
@@ -99,7 +105,7 @@ Records an investor contribution. Transitions to `status = 1` when
 **Failure conditions**
 
 | Condition                 | Behaviour                               |
-|---------------------------|-----------------------------------------|
+| ------------------------- | --------------------------------------- |
 | `status != 0`             | Panics: `"Escrow not open for funding"` |
 | `init` not called         | Panics: `"Escrow not initialized"`      |
 | `funded_amount` overflows | Rust panics (debug) / wraps (release)   |
@@ -117,14 +123,14 @@ Records an investor contribution. Transitions to `status = 1` when
 
 Tests are tagged by risk category in inline comments:
 
-| Category  | Tag       | What is covered |
-|-----------|-----------|-----------------|
-| Happy path | `[HAPPY]` | Full lifecycle, field persistence, `get_escrow` consistency |
-| Auth       | `[AUTH]`  | `require_auth` recorded for admin / investor / SME; panics without auth |
-| State      | `[STATE]` | Double-init, fund-after-funded, fund-after-settled, settle-when-open, double-settle |
-| Uninitialized | `[UNINIT]` | `get_escrow`, `fund`, `settle` all panic before `init` |
-| Boundary   | `[BOUND]` | `amount=1`, `amount=i128::MAX`, `yield_bps=i64::MAX`, `maturity=0`, `maturity=u64::MAX`, overshoot funding, exact-boundary funding |
-| Repeated calls | `[REPEAT]` | Multiple investors accumulate correctly; `get_escrow` is idempotent |
+| Category       | Tag        | What is covered                                                                                                                    |
+| -------------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Happy path     | `[HAPPY]`  | Full lifecycle, field persistence, `get_escrow` consistency                                                                        |
+| Auth           | `[AUTH]`   | `require_auth` recorded for admin / investor / SME; panics without auth                                                            |
+| State          | `[STATE]`  | Double-init, fund-after-funded, fund-after-settled, settle-when-open, double-settle                                                |
+| Uninitialized  | `[UNINIT]` | `get_escrow`, `fund`, `settle` all panic before `init`                                                                             |
+| Boundary       | `[BOUND]`  | `amount=1`, `amount=i128::MAX`, `yield_bps=i64::MAX`, `maturity=0`, `maturity=u64::MAX`, overshoot funding, exact-boundary funding |
+| Repeated calls | `[REPEAT]` | Multiple investors accumulate correctly; `get_escrow` is idempotent                                                                |
 
 ---
 
@@ -138,8 +144,8 @@ Any change to the struct layout (adding, removing, or retyping a field) is a **b
 
 ### Version history
 
-| Version | Description |
-|---------|-------------|
+| Version | Description                                                                                                                             |
+| ------- | --------------------------------------------------------------------------------------------------------------------------------------- |
 | 1       | Initial schema — `invoice_id`, `sme_address`, `amount`, `funding_target`, `funded_amount`, `yield_bps`, `maturity`, `status`, `version` |
 
 ### How versioning works
@@ -181,6 +187,7 @@ Any change to the struct layout (adding, removing, or retyping a field) is a **b
 ```
 
 The contract rejects `migrate` calls that:
+
 - Pass a `from_version` that does not match the stored version (prevents accidental double-migration).
 - Pass a `from_version >= SCHEMA_VERSION` (already up to date).
 
@@ -201,9 +208,9 @@ Currently, the contract methods (`init`, `fund`, `settle`) **do not enforce auth
 
 ---
 
-
 ## Funding Constraints
-- **Minimum Funding:** All funding amounts must be strictly greater than zero ($> 0$). 
+
+- **Minimum Funding:** All funding amounts must be strictly greater than zero ($> 0$).
 - **Initialization:** Escrow creation will fail if the target amount is not positive.
 - **Integer Safety:** Uses `checked_add` to prevent overflow during funded amount accounting.
 
@@ -226,12 +233,12 @@ Currently, the contract methods (`init`, `fund`, `settle`) **do not enforce auth
 - `funded_amount <= funding_target` (soft enforced)
 - `status transitions`: 0 → 1 → 2
 - Cannot settle before funded
-| Step | Command | Fails if… |
-|------|---------|-----------|
-| Format | `cargo fmt --all -- --check` | any file is not formatted |
-| Build | `cargo build` | compilation error |
-| Tests | `cargo test` | any test fails |
-| Coverage | `cargo llvm-cov --features testutils --fail-under-lines 95` | line coverage < 95 % |
+  | Step | Command | Fails if… |
+  |------|---------|-----------|
+  | Format | `cargo fmt --all -- --check` | any file is not formatted |
+  | Build | `cargo build` | compilation error |
+  | Tests | `cargo test` | any test fails |
+  | Coverage | `cargo llvm-cov --features testutils --fail-under-lines 95` | line coverage < 95 % |
 
 ### Coverage gate
 
@@ -270,6 +277,75 @@ Keep formatting, tests, and coverage passing before opening a PR.
 8. Wait for CI and address review feedback.
 
 We welcome new contracts (e.g. settlement, tokenization helpers), tests, and docs that align with LiquiFact's invoice financing flow.
+
+---
+
+## Practical Integration Examples
+
+These examples demonstrate the core lifecycle of the LiquiFact Escrow contract. For a full executable setup, see [escrow/src/examples.rs](file:///Users/kanas/Desktop/opensource/Liquifact-contracts/escrow/src/examples.rs).
+
+### 1. Initialize Escrow (Admin)
+
+Platform admins create the escrow for a specific invoice and SME beneficiary.
+
+```rust
+let amount = 1_000_000i128; // Smallest unit
+let yield_bps = 1000i64;    // 10.00%
+let maturity = 1750000000;  // Unix timestamp
+
+client.init(
+    &admin,
+    &symbol_short!("INV001"),
+    &sme_address,
+    &amount,
+    &yield_bps,
+    &maturity
+);
+```
+
+### 2. Fund Escrow (Investor)
+
+Investors contribute funds. Status flips to `1` (Funded) once the target is met.
+
+```rust
+client.fund(&investor_address, &500_000i128);
+```
+
+### 3. Settle Invoice (SME/Admin)
+
+After the buyer pays (off-chain), the SME marks the escrow as settled to release funds.
+
+```rust
+// Total due includes the 10% yield
+client.settle(&1_100_000i128);
+```
+
+### 4. Claim Payout (Investor)
+
+Investors claim their principal and proportional yield.
+
+```rust
+let total_payout = client.claim(&investor_address);
+// Returns 1,100,000 for a 1M contribution at 10%
+```
+
+---
+
+## Technical Flow Diagram
+
+```mermaid
+sequence_flow
+    Admin->>Contract: init()
+    Investor->>Contract: fund()
+    Note over Investor, Contract: Status: Open -> Funded
+    SME->>Contract: withdraw()
+    Note over SME, Contract: Status: Funded -> Withdrawn
+    Buyer-->>SME: Payment (Off-chain)
+    SME->>Contract: settle()
+    Note over SME, Contract: Status: Withdrawn -> Settled
+    Investor->>Contract: claim()
+    Note over Investor, Contract: Payout: Principal + Yield
+```
 
 ---
 
