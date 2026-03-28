@@ -146,11 +146,16 @@ rustup component add llvm-tools-preview
 
 ---
 
+## Token integration security checklist
+
+See [`docs/ESCROW_TOKEN_INTEGRATION_CHECKLIST.md`](docs/ESCROW_TOKEN_INTEGRATION_CHECKLIST.md) for the supported token assumptions, explicit unsupported token warnings, and the integration-layer responsibilities required when this escrow contract interacts with external token contracts.
+
 ## Security notes
 
 - **Auth:** state-changing entrypoints use `require_auth()` for the appropriate role (admin, SME, investor, **treasury** for dust sweep).
 - **Legal hold:** is governance-controlled; misuse risk is mitigated by using a multisig `admin` and operational policy.
 - **Collateral record:** is not proof of encumbrance until a future version explicitly enforces token transfers.
+- **Token integration:** external token transfers and token safety validation must live in the integration layer; this contract stores only numeric amount state and collateral metadata.
 - **Overflow:** `fund` uses `checked_add` on `funded_amount`.
 - **Dust sweep:** gated on **terminal** escrow status, per-call **cap** ([`MAX_DUST_SWEEP_AMOUNT`]), actual **balance**, **legal hold**, and **treasury** auth; only the **configured** SEP-41 token is transferred. Wrong-asset or oversized balances still require operational discipline — the hook is not a general-purpose withdrawal for live liabilities.
 - **Registry ref:** stored for discoverability only; it must not be used as an authority without verifying behavior of the registry contract off-chain or in a dedicated integration.
