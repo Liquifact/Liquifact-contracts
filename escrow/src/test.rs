@@ -1,11 +1,12 @@
 use super::{
-    external_calls, LiquifactEscrow, LiquifactEscrowClient, YieldTier, MAX_DUST_SWEEP_AMOUNT,
-    SCHEMA_VERSION,
+    external_calls, EscrowSummary, LiquifactEscrow, LiquifactEscrowClient, YieldTier,
+    MAX_DUST_SWEEP_AMOUNT, SCHEMA_VERSION,
 };
 use soroban_sdk::{
     symbol_short,
     testutils::{Address as _, Ledger as _},
     token::StellarAssetClient,
+    xdr::{FromXdr, ToXdr},
     Address, Env, String, Vec as SorobanVec,
 };
 
@@ -151,6 +152,114 @@ fn test_get_escrow_uninitialized_panics() {
     let env = Env::default();
     let client = deploy(&env);
     client.get_escrow();
+}
+
+// --- summary read (#101) ---
+
+#[test]
+#[should_panic(expected = "Escrow not initialized")]
+fn test_get_escrow_summary_uninitialized_panics() {
+    let env = Env::default();
+    let client = deploy(&env);
+    client.get_escrow_summary();
+}
+
+#[test]
+fn test_get_escrow_summary_open_roundtrip_and_compact_xdr() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "SUM001"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &1000u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+    );
+
+    let summary = client.get_escrow_summary();
+    assert_eq!(
+        summary,
+        EscrowSummary {
+            status: 0,
+            amount: TARGET,
+            funding_target: TARGET,
+            funded_amount: 0,
+            maturity: 1000u64,
+            funding_close_timestamp: None,
+            funding_close_sequence: None,
+        }
+    );
+
+    let bytes = summary.clone().to_xdr(&env);
+    let rt = EscrowSummary::from_xdr(&env, &bytes).expect("xdr roundtrip");
+    assert_eq!(rt, summary);
+
+    let escrow_bytes = client.get_escrow().to_xdr(&env);
+    assert!(
+        bytes.len() < escrow_bytes.len(),
+        "expected summary to be more compact than full InvoiceEscrow"
+    );
+}
+
+#[test]
+fn test_get_escrow_summary_reflects_updated_funding_target() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "SUM002"),
+        &sme,
+        &5_000i128,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+    );
+    client.update_funding_target(&10_000i128);
+
+    let summary = client.get_escrow_summary();
+    assert_eq!(summary.amount, 5_000i128);
+    assert_eq!(summary.funding_target, 10_000i128);
+    assert_eq!(summary.status, 0);
+    assert_eq!(summary.funding_close_timestamp, None);
+    assert_eq!(summary.funding_close_sequence, None);
+}
+
+#[test]
+fn test_get_escrow_summary_includes_funding_close_metadata_when_funded() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "SUM003"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+    );
+
+    env.ledger().set_timestamp(4242);
+    env.ledger().set_sequence_number(77);
+
+    client.fund(&investor, &TARGET);
+
+    let summary = client.get_escrow_summary();
+    assert_eq!(summary.status, 1);
+    assert_eq!(summary.funded_amount, TARGET);
+    assert_eq!(summary.funding_close_timestamp, Some(4242));
+    assert_eq!(summary.funding_close_sequence, Some(77));
 }
 
 // --- fund ---

@@ -189,6 +189,36 @@ pub struct FundingCloseSnapshot {
     pub closed_at_ledger_sequence: u32,
 }
 
+/// Compact read view for indexers and cross-contract callers.
+///
+/// This struct intentionally contains only primitive, non-address fields so it can be fetched
+/// efficiently and decoded without pulling the full [`InvoiceEscrow`] (which includes `Address`
+/// and `Symbol` fields).
+///
+/// ## Stability across versions
+///
+/// The field order and types are part of the contract interface. Treat this struct as
+/// **append-only**: future versions may add new optional fields at the end, but existing fields
+/// will not be reordered or repurposed.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct EscrowSummary {
+    /// Current escrow status: `0 = open`, `1 = funded`, `2 = settled`, `3 = withdrawn`.
+    pub status: u32,
+    /// Invoice amount set at init (base units of the funding token).
+    pub amount: i128,
+    /// Funding target (may be updated by admin while status is `open`).
+    pub funding_target: i128,
+    /// Total funded principal credited so far (base units of the funding token).
+    pub funded_amount: i128,
+    /// Maturity ledger timestamp (seconds). `0` means no maturity gate.
+    pub maturity: u64,
+    /// Ledger timestamp when the escrow first became funded; [`None`] until then.
+    pub funding_close_timestamp: Option<u64>,
+    /// Ledger sequence when the escrow first became funded; [`None`] until then.
+    pub funding_close_sequence: Option<u32>,
+}
+
 // --- Events ---
 
 #[contractevent]
@@ -558,6 +588,36 @@ impl LiquifactEscrow {
             .instance()
             .get(&DataKey::Escrow)
             .unwrap_or_else(|| panic!("Escrow not initialized"))
+    }
+
+    /// Compact summary read for external indexers and cross-contract callers.
+    ///
+    /// Returns a small struct containing the most commonly-indexed numeric fields from
+    /// [`InvoiceEscrow`], plus the ledger time metadata from [`FundingCloseSnapshot`] (when present).
+    pub fn get_escrow_summary(env: Env) -> EscrowSummary {
+        let escrow = Self::get_escrow(env.clone());
+        let snap: Option<FundingCloseSnapshot> = env
+            .storage()
+            .instance()
+            .get::<DataKey, FundingCloseSnapshot>(&DataKey::FundingCloseSnapshot);
+
+        let (funding_close_timestamp, funding_close_sequence) = match snap {
+            Some(s) => (
+                Some(s.closed_at_ledger_timestamp),
+                Some(s.closed_at_ledger_sequence),
+            ),
+            None => (None, None),
+        };
+
+        EscrowSummary {
+            status: escrow.status,
+            amount: escrow.amount,
+            funding_target: escrow.funding_target,
+            funded_amount: escrow.funded_amount,
+            maturity: escrow.maturity,
+            funding_close_timestamp,
+            funding_close_sequence,
+        }
     }
 
     pub fn get_version(env: Env) -> u32 {

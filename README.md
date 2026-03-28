@@ -8,6 +8,7 @@ Soroban smart contracts for **LiquiFact** on Stellar. This repository contains t
 |--------|---------|
 | `init` | Create escrow (admin auth). Sets `funding_target = amount`. Binds **`funding_token`**, **`treasury`**, optional **`registry`**, optional **`yield_tiers`** ([`YieldTier`](escrow/src/lib.rs) Soroban [`Vec`]); validates **`invoice_id`** string (length ≤ 32, charset `[A-Za-z0-9_]`). |
 | `get_escrow` / `get_version` / `get_legal_hold` | Read state. |
+| `get_escrow_summary` | Compact read view for indexers/callers: status, amounts/targets, maturity, and funding-close ledger timestamp/sequence (when funded). |
 | `get_funding_token` / `get_treasury` / `get_registry_ref` | Immutable funding asset, treasury for dust recovery, optional registry hint (`None` if unset at init). |
 | `get_contribution` | Per-investor funded principal. |
 | `update_funding_target` | Admin, open state only; target ≥ `funded_amount`. |
