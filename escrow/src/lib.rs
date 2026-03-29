@@ -626,10 +626,7 @@ impl LiquifactEscrow {
         if !env.storage().instance().has(&DataKey::Initialized) {
             panic!("Escrow not initialized");
         }
-        env.storage()
-            .instance()
-            .get(&DataKey::Escrow)
-            .unwrap()
+        env.storage().instance().get(&DataKey::Escrow).unwrap()
     }
 
     pub fn get_version(env: Env) -> u32 {
