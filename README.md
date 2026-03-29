@@ -31,6 +31,24 @@ Soroban smart contracts for **LiquiFact** on Stellar. This repository contains t
 
 ### Per-instance funding asset and registry (issues #113, #116)
 
+**Risk:**
+
+- Anyone can call `fund` or `settle`
+
+**Impact:**
+
+- Malicious settlement
+- Fake funding events
+
+**Mitigation (Current):**
+
+- None (mock auth used in tests)
+
+**Recommended Controls:**
+
+- Require auth:
+  - `fund`: investor must authorize
+  - `settle`: only trusted role (e.g. admin/oracle)
 - **`funding_token`** and **`treasury`** are stored under `DataKey::FundingToken` / `DataKey::Treasury` and are **immutable** after `init` (no setter).
 - **`registry`** is optional: when provided, it is stored under `DataKey::RegistryRef`; if omitted, that key is absent and `get_registry_ref` returns `None`. The registry id is a **read-only hint for indexers** — it does **not** grant this escrow any privilege and must not be treated as an on-chain source of truth without calling the registry contract directly (avoid static “call loops” that assume mutual authority).
 
@@ -44,6 +62,9 @@ Off-chain invoice slugs should match the same rules enforced in `init`: non-empt
 
 ### Ledger time boundaries (issue #106)
 
+**Risk:**
+
+- `funded_amount += amount` may overflow `i128`
 There is no separate on-chain **funding deadline** or **grace-period** field beyond **maturity** on [`InvoiceEscrow`] and optional **per-investor claim locks** from `fund_with_commitment`. Tests exercise off-by-one behavior around maturity (`now >= maturity`) and exact **funded** transitions (`funded_amount >= funding_target`). Integrators should assume **ledger timestamp skew** across validators matches Stellar norms and test boundary predicates accordingly.
 
 ### Optional tiered yield (issue #110)
@@ -56,6 +77,18 @@ On the first transition to **funded**, the contract persists [`FundingCloseSnaps
 
 ### Treasury dust sweep (issue #107)
 
+**Risks:**
+
+- Negative funding
+- Zero funding
+- Invalid maturity
+
+| Command                | Description                                                |
+| ---------------------- | ---------------------------------------------------------- |
+| `cargo build`          | Build all contracts                                        |
+| `cargo test`           | Run unit tests and property-based tests (using `proptest`) |
+| `cargo fmt`            | Format code                                                |
+| `cargo fmt -- --check` | Check formatting (used in CI)                              |
 `sweep_terminal_dust(amount)` moves `min(amount, balance, MAX_DUST_SWEEP_AMOUNT)` of the **bound** funding token from the escrow contract to **`treasury`**, using the safety wrapper above. It is only callable in **status 2 (settled)** or **status 3 (withdrawn)** so **open** or **funded** escrows cannot be drained as “dust.” Legal hold blocks sweeps. **`fund` does not move tokens** in this version; if custodial flows are added later, token balances must stay reconciled with ledger fields so sweeps cannot pull user principal. Tokens sent to this contract in **other** assets are not touched by this hook.
 
 ### Optional SME collateral (record-only)
@@ -70,12 +103,21 @@ When `DataKey::LegalHold` is true, the contract rejects new `fund`, `settle`, SM
 
 Public enum in [`escrow/src/lib.rs`](escrow/src/lib.rs): `Escrow`, `Version`, `InvestorContribution(Address)`, `LegalHold`, `SmeCollateralPledge`, `InvestorClaimed(Address)`, `FundingToken`, `Treasury`, `RegistryRef` (present only when set at init), optional `YieldTierTable`, `FundingCloseSnapshot`, `InvestorEffectiveYield(Address)`, `InvestorClaimNotBefore(Address)`, `MinContributionFloor`, `MaxUniqueInvestorsCap` (when capped at init), `UniqueFunderCount`, `PrimaryAttestationHash`, `AttestationAppendLog`. New optional keys should keep **additive** names and avoid reusing or repurposing existing variants.
 
+| Parameter   | Constraints                                  |
+| ----------- | -------------------------------------------- |
+| `_investor` | Investor's Stellar address (for audit trail) |
+| `amount`    | > 0 recommended; partial funding is allowed  |
 ---
 
 ## Storage-only upgrade policy (additive fields)
 
 **Compatible without redeploy** when you only:
 
+| Condition                 | Behaviour                               |
+| ------------------------- | --------------------------------------- |
+| `status != 0`             | Panics: `"Escrow not open for funding"` |
+| `init` not called         | Panics: `"Escrow not initialized"`      |
+| `funded_amount` overflows | Rust panics (debug) / wraps (release)   |
 - Add **new** `DataKey` variants and/or new `#[contracttype]` structs stored under **new** keys.
 - Read new keys with `.get(...).unwrap_or(default)` so missing keys behave as “unset” on old deployments.
 
@@ -90,6 +132,14 @@ Public enum in [`escrow/src/lib.rs`](escrow/src/lib.rs): `Escrow`, `Version`, `I
 2. Deploy version _N+1_ with only new optional keys; repeat flows; assert old instances still readable.
 3. If `InvoiceEscrow` changes, add a migration test or document mandatory redeploy.
 
+| Category       | Tag        | What is covered                                                                                                                    |
+| -------------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Happy path     | `[HAPPY]`  | Full lifecycle, field persistence, `get_escrow` consistency                                                                        |
+| Auth           | `[AUTH]`   | `require_auth` recorded for admin / investor / SME; panics without auth                                                            |
+| State          | `[STATE]`  | Double-init, fund-after-funded, fund-after-settled, settle-when-open, double-settle                                                |
+| Uninitialized  | `[UNINIT]` | `get_escrow`, `fund`, `settle` all panic before `init`                                                                             |
+| Boundary       | `[BOUND]`  | `amount=1`, `amount=i128::MAX`, `yield_bps=i64::MAX`, `maturity=0`, `maturity=u64::MAX`, overshoot funding, exact-boundary funding |
+| Repeated calls | `[REPEAT]` | Multiple investors accumulate correctly; `get_escrow` is idempotent                                                                |
 `migrate` today validates `from_version` against stored `DataKey::Version` and errors if no path is implemented.
 
 ### `DataKey` naming convention
@@ -102,6 +152,9 @@ Use PascalCase variant names matching persisted role (`LegalHold`, `SmeCollatera
 
 **Who may deploy production:** only addresses and keys owned by LiquiFact governance (multisig / custody). Treat contract admin and deployer secrets as **highly sensitive**.
 
+| Version | Description                                                                                                                             |
+| ------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| 1       | Initial schema — `invoice_id`, `sme_address`, `amount`, `funding_target`, `funded_amount`, `yield_bps`, `maturity`, `status`, `version` |
 ### Environment variables (example)
 
 | Variable | Purpose |
@@ -132,6 +185,17 @@ stellar contract deploy \
   --rpc-url "$SOROBAN_RPC_URL"
 # Record emitted contract id as LIQUIFACT_ESCROW_CONTRACT_ID
 ```
+1. Deploy new WASM (bump SCHEMA_VERSION, add migration arm)
+2. Call get_version()  ->  confirm stored version == N
+3. Call migrate(N)     ->  storage upgraded to N+1
+4. Call get_version()  ->  confirm stored version == N+1
+5. Resume normal operations
+```
+
+The contract rejects `migrate` calls that:
+
+- Pass a `from_version` that does not match the stored version (prevents accidental double-migration).
+- Pass a `from_version >= SCHEMA_VERSION` (already up to date).
 
 Initialize on-chain with `init` via `stellar contract invoke` (pass `admin`, **`invoice_id` as string**, `sme_address`, amounts, `yield_bps`, `maturity`, **`funding_token`**, **`registry`** as optional address, **`treasury`**, **`yield_tiers`** as optional vector per your product).
 
@@ -150,6 +214,13 @@ Store the digest in release notes and inject the same WASM into verification too
 
 ---
 
+## Funding Constraints
+
+- **Minimum Funding:** All funding amounts must be strictly greater than zero ($> 0$).
+- **Initialization:** Escrow creation will fail if the target amount is not positive.
+- **Integer Safety:** Uses `checked_add` to prevent overflow during funded amount accounting.
+
+---
 ## Local development and CI
 
 | Step | Command |
@@ -172,6 +243,15 @@ rustup component add llvm-tools-preview
 
 See [`docs/ESCROW_TOKEN_INTEGRATION_CHECKLIST.md`](docs/ESCROW_TOKEN_INTEGRATION_CHECKLIST.md) for the supported token assumptions, explicit unsupported token warnings, and the integration-layer responsibilities required when this escrow contract interacts with external token contracts.
 
+- `funded_amount <= funding_target` (soft enforced)
+- `status transitions`: 0 → 1 → 2
+- Cannot settle before funded
+  | Step | Command | Fails if… |
+  |------|---------|-----------|
+  | Format | `cargo fmt --all -- --check` | any file is not formatted |
+  | Build | `cargo build` | compilation error |
+  | Tests | `cargo test` | any test fails |
+  | Coverage | `cargo llvm-cov --features testutils --fail-under-lines 95` | line coverage < 95 % |
 ## Security notes
 
 - **Auth:** state-changing entrypoints use `require_auth()` for the appropriate role (admin, SME, investor, **treasury** for dust sweep).
@@ -195,6 +275,101 @@ See [`docs/ESCROW_TOKEN_INTEGRATION_CHECKLIST.md`](docs/ESCROW_TOKEN_INTEGRATION
 
 ## Contributing
 
+1. **Fork** the repo and clone your fork.
+2. **Create a branch** from `main`: `git checkout -b feature/your-feature` or `fix/your-fix`.
+3. **Setup**: ensure Rust stable is installed; run `cargo build` and `cargo test`.
+4. **Make changes**:
+   - Follow existing patterns in `escrow/src/lib.rs`.
+   - Add or update tests in `escrow/src/test.rs`.
+   - Format with `cargo fmt`.
+5. **Verify locally**:
+   - `cargo fmt --all -- --check`
+   - `cargo build`
+   - `cargo test --features testutils`
+6. **Commit** with clear messages (e.g. `feat(escrow): X`, `test(escrow): Y`).
+7. **Push** to your fork and open a **Pull Request** to `main`.
+8. Wait for CI and address review feedback.
+
+We welcome new contracts (e.g. settlement, tokenization helpers), tests, and docs that align with LiquiFact's invoice financing flow.
+
+---
+
+## Practical Integration Examples
+
+These examples demonstrate the core lifecycle of the LiquiFact Escrow contract. For a full executable setup, see [escrow/src/examples.rs](file:///Users/kanas/Desktop/opensource/Liquifact-contracts/escrow/src/examples.rs).
+
+### 1. Initialize Escrow (Admin)
+
+Platform admins create the escrow for a specific invoice and SME beneficiary.
+
+```rust
+let amount = 1_000_000i128; // Smallest unit
+let yield_bps = 1000i64;    // 10.00%
+let maturity = 1750000000;  // Unix timestamp
+
+client.init(
+    &admin,
+    &symbol_short!("INV001"),
+    &sme_address,
+    &amount,
+    &yield_bps,
+    &maturity
+);
+```
+
+### 2. Fund Escrow (Investor)
+
+Investors contribute funds. Status flips to `1` (Funded) once the target is met.
+
+```rust
+client.fund(&investor_address, &500_000i128);
+```
+
+### 3. Settle Invoice (SME/Admin)
+
+After the buyer pays (off-chain), the SME marks the escrow as settled to release funds.
+
+```rust
+// Total due includes the 10% yield
+client.settle(&1_100_000i128);
+```
+
+### 4. Claim Payout (Investor)
+
+Investors claim their principal and proportional yield.
+
+```rust
+let total_payout = client.claim(&investor_address);
+// Returns 1,100,000 for a 1M contribution at 10%
+```
+
+---
+
+## Technical Flow Diagram
+
+```mermaid
+sequence_flow
+    Admin->>Contract: init()
+    Investor->>Contract: fund()
+    Note over Investor, Contract: Status: Open -> Funded
+    SME->>Contract: withdraw()
+    Note over SME, Contract: Status: Funded -> Withdrawn
+    Buyer-->>SME: Payment (Off-chain)
+    SME->>Contract: settle()
+    Note over SME, Contract: Status: Withdrawn -> Settled
+    Investor->>Contract: claim()
+    Note over Investor, Contract: Payout: Principal + Yield
+```
+
+---
+
+## Future Improvements
+
+- Multi-escrow support
+- Role-based access control
+- Token integration
+- Event emission
+- Formal verification
 1. Branch from `main`.
 2. Run `cargo fmt`, `cargo test`, and the coverage command above before pushing.
 3. Keep README and rustdoc aligned with `escrow/src/lib.rs` behavior.
