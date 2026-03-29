@@ -1,6 +1,6 @@
 use super::{
-    external_calls, LiquifactEscrow, LiquifactEscrowClient, YieldTier, MAX_DUST_SWEEP_AMOUNT,
-    SCHEMA_VERSION,
+    external_calls, Error, LiquifactEscrow, LiquifactEscrowClient, YieldTier,
+    MAX_DUST_SWEEP_AMOUNT, SCHEMA_VERSION,
 };
 use soroban_sdk::{
     symbol_short,
@@ -149,20 +149,33 @@ fn test_init_unauthorized_panics() {
 }
 
 #[test]
-#[should_panic(expected = "Escrow already initialized")]
-fn test_double_init_panics() {
+fn test_double_init_returns_error() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
     default_init(&client, &env, &admin, &sme);
-    default_init(&client, &env, &admin, &sme);
+    let result = client.try_init(
+        &admin,
+        &String::from_str(&env, "INV002"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &1000u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+    );
+    assert_eq!(result, Err(Error::EscrowAlreadyInitialized));
 }
 
 #[test]
-#[should_panic(expected = "Escrow not initialized")]
-fn test_get_escrow_uninitialized_panics() {
+fn test_get_escrow_uninitialized_returns_error() {
     let env = Env::default();
     let client = deploy(&env);
-    client.get_escrow();
+    let result = client.try_get_escrow();
+    assert_eq!(result, Err(Error::EscrowNotInitialized));
 }
 
 // --- fund ---
@@ -221,24 +234,24 @@ fn test_fund_partial_then_full() {
 }
 
 #[test]
-#[should_panic(expected = "Funding amount must be positive")]
-fn test_fund_zero_amount_panics() {
+fn test_fund_zero_amount_returns_error() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
     let investor = Address::generate(&env);
     default_init(&client, &env, &admin, &sme);
-    client.fund(&investor, &0i128);
+    let result = client.try_fund(&investor, &0i128);
+    assert_eq!(result, Err(Error::FundingAmountNotPositive));
 }
 
 #[test]
-#[should_panic(expected = "Escrow not open for funding")]
-fn test_fund_after_funded_panics() {
+fn test_fund_after_funded_returns_error() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
     let investor = Address::generate(&env);
     default_init(&client, &env, &admin, &sme);
     client.fund(&investor, &TARGET);
-    client.fund(&investor, &1i128);
+    let result = client.try_fund(&investor, &1i128);
+    assert_eq!(result, Err(Error::EscrowNotOpen));
 }
 
 #[test]
@@ -403,8 +416,7 @@ fn test_settle_after_full_funding() {
 }
 
 #[test]
-#[should_panic(expected = "Escrow must be funded before settlement")]
-fn test_settle_before_funded_panics() {
+fn test_settle_before_funded_returns_error() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
     client.init(
@@ -421,7 +433,8 @@ fn test_settle_before_funded_panics() {
         &None,
         &None,
     );
-    client.settle();
+    let result = client.try_settle();
+    assert_eq!(result, Err(Error::EscrowNotFunded));
 }
 
 #[test]
