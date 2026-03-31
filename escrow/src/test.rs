@@ -7,7 +7,6 @@ use soroban_sdk::{
     testutils::{Address as _, Ledger as _},
     token::StellarAssetClient,
     xdr::{FromXdr, ToXdr},
-    Address, Env, String, Vec as SorobanVec,
     Address, BytesN, Env, String, Vec as SorobanVec,
 };
 
@@ -192,6 +191,8 @@ fn test_get_escrow_summary_open_roundtrip_and_compact_xdr() {
         &None,
         &Address::generate(&env),
         &None,
+        &None,
+        &None,
     );
 
     let summary = client.get_escrow_summary();
@@ -234,6 +235,8 @@ fn test_get_escrow_summary_reflects_updated_funding_target() {
         &None,
         &Address::generate(&env),
         &None,
+        &None,
+        &None,
     );
     client.update_funding_target(&10_000i128);
 
@@ -260,6 +263,8 @@ fn test_get_escrow_summary_includes_funding_close_metadata_when_funded() {
         &Address::generate(&env),
         &None,
         &Address::generate(&env),
+        &None,
+        &None,
         &None,
     );
 
