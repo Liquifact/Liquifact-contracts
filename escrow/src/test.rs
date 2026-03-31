@@ -8,7 +8,10 @@ use soroban_sdk::{
     token::StellarAssetClient,
     xdr::{FromXdr, ToXdr},
     Address, Env, String, Vec as SorobanVec,
+    Address, BytesN, Env, String, Vec as SorobanVec,
 };
+
+// Integration tests for `LiquifactEscrow`. Formal invariant IDs and test mapping: see crate README.md (issues #102-#105).
 
 fn deploy(env: &Env) -> LiquifactEscrowClient<'_> {
     let id = env.register(LiquifactEscrow, ());
@@ -40,6 +43,8 @@ fn default_init(client: &LiquifactEscrowClient<'_>, env: &Env, admin: &Address, 
         &None,
         &treasury,
         &None,
+        &None,
+        &None,
     );
 }
 
@@ -59,6 +64,8 @@ fn test_init_stores_escrow() {
         &Address::generate(&env),
         &None,
         &Address::generate(&env),
+        &None,
+        &None,
         &None,
     );
     assert_eq!(escrow.invoice_id, symbol_short!("INV001"));
@@ -87,6 +94,8 @@ fn test_init_stores_keyed_invoice_and_lists_it() {
         &None,
         &Address::generate(&env),
         &None,
+        &None,
+        &None,
     );
     let got = client.get_escrow();
     assert_eq!(got, escrow);
@@ -106,6 +115,8 @@ fn test_init_requires_admin_auth() {
         &Address::generate(&env),
         &None,
         &Address::generate(&env),
+        &None,
+        &None,
         &None,
     );
     assert!(
@@ -131,6 +142,8 @@ fn test_init_unauthorized_panics() {
             &Address::generate(&env),
             &None,
             &Address::generate(&env),
+            &None,
+            &None,
             &None,
         );
     }));
@@ -280,6 +293,8 @@ fn test_fund_and_settle() {
         &None,
         &Address::generate(&env),
         &None,
+        &None,
+        &None,
     );
     let funded = client.fund(&investor, &TARGET);
     assert_eq!(funded.funded_amount, TARGET);
@@ -303,6 +318,8 @@ fn test_fund_partial_then_full() {
         &Address::generate(&env),
         &None,
         &Address::generate(&env),
+        &None,
+        &None,
         &None,
     );
     let partial = client.fund(&investor, &(TARGET / 2));
@@ -363,6 +380,8 @@ fn test_single_investor_contribution_tracked() {
         &None,
         &Address::generate(&env),
         &None,
+        &None,
+        &None,
     );
     client.fund(&investor, &(3_000_0000000i128));
     let contribution = client.get_contribution(&investor);
@@ -396,6 +415,8 @@ fn test_repeated_funding_accumulates_contribution() {
         &None,
         &Address::generate(&env),
         &None,
+        &None,
+        &None,
     );
     client.fund(&investor, &(2_000_0000000i128));
     client.fund(&investor, &(3_000_0000000i128));
@@ -419,6 +440,8 @@ fn test_multiple_investors_tracked_independently() {
         &Address::generate(&env),
         &None,
         &Address::generate(&env),
+        &None,
+        &None,
         &None,
     );
     client.fund(&inv_a, &(2_000_0000000i128));
@@ -451,6 +474,8 @@ fn test_contributions_sum_equals_funded_amount() {
         &None,
         &Address::generate(&env),
         &None,
+        &None,
+        &None,
     );
     client.fund(&inv_a, &(2_000_0000000i128));
     client.fund(&inv_b, &(5_000_0000000i128));
@@ -479,6 +504,8 @@ fn test_settle_after_full_funding() {
         &None,
         &Address::generate(&env),
         &None,
+        &None,
+        &None,
     );
     client.fund(&investor, &TARGET);
     let settled = client.settle();
@@ -501,6 +528,8 @@ fn test_settle_before_funded_panics() {
         &None,
         &Address::generate(&env),
         &None,
+        &None,
+        &None,
     );
     client.settle();
 }
@@ -520,6 +549,8 @@ fn test_settle_requires_sme_auth() {
         &Address::generate(&env),
         &None,
         &Address::generate(&env),
+        &None,
+        &None,
         &None,
     );
     client.fund(&investor, &1_000i128);
@@ -550,6 +581,8 @@ fn test_settle_unauthorized_panics() {
         &None,
         &Address::generate(&env),
         &None,
+        &None,
+        &None,
     );
     client.fund(&investor, &1_000i128);
     env.mock_auths(&[]);
@@ -573,6 +606,8 @@ fn test_settle_before_maturity_panics() {
         &None,
         &Address::generate(&env),
         &None,
+        &None,
+        &None,
     );
     client.fund(&investor, &1_000i128);
     client.settle();
@@ -593,6 +628,8 @@ fn test_settle_after_maturity_succeeds() {
         &Address::generate(&env),
         &None,
         &Address::generate(&env),
+        &None,
+        &None,
         &None,
     );
     client.fund(&investor, &1_000i128);
@@ -617,6 +654,8 @@ fn test_settle_at_exact_maturity_succeeds() {
         &None,
         &Address::generate(&env),
         &None,
+        &None,
+        &None,
     );
     client.fund(&investor, &1_000i128);
     env.ledger().set_timestamp(1000);
@@ -640,6 +679,8 @@ fn test_settle_with_zero_maturity_succeeds_immediately() {
         &None,
         &Address::generate(&env),
         &None,
+        &None,
+        &None,
     );
     client.fund(&investor, &1_000i128);
     let settled = client.settle();
@@ -661,6 +702,8 @@ fn test_settle_at_timestamp_zero_before_maturity_panics() {
         &Address::generate(&env),
         &None,
         &Address::generate(&env),
+        &None,
+        &None,
         &None,
     );
     client.fund(&investor, &1_000i128);
@@ -690,6 +733,8 @@ fn test_update_maturity_success() {
         &None,
         &Address::generate(&env),
         &None,
+        &None,
+        &None,
     );
     let updated = client.update_maturity(&2000u64);
     assert_eq!(updated.maturity, 2000u64);
@@ -712,6 +757,8 @@ fn test_update_maturity_wrong_state() {
         &Address::generate(&env),
         &None,
         &Address::generate(&env),
+        &None,
+        &None,
         &None,
     );
     client.fund(&investor, &1_000i128);
@@ -737,6 +784,8 @@ fn test_update_maturity_unauthorized() {
         &None,
         &Address::generate(&env),
         &None,
+        &None,
+        &None,
     );
     env.mock_auths(&[]);
     client.update_maturity(&2000u64);
@@ -760,6 +809,8 @@ fn test_transfer_admin_updates_admin() {
         &None,
         &Address::generate(&env),
         &None,
+        &None,
+        &None,
     );
     let updated = client.transfer_admin(&new_admin);
     assert_eq!(updated.admin, new_admin);
@@ -781,6 +832,8 @@ fn test_transfer_admin_same_address_panics() {
         &Address::generate(&env),
         &None,
         &Address::generate(&env),
+        &None,
+        &None,
         &None,
     );
     client.transfer_admin(&admin);
@@ -843,6 +896,8 @@ fn test_record_collateral_stored_and_does_not_block_settle() {
         &None,
         &Address::generate(&env),
         &None,
+        &None,
+        &None,
     );
     let c = client.record_sme_collateral_commitment(&symbol_short!("USDC"), &5000i128);
     assert_eq!(c.amount, 5000i128);
@@ -870,6 +925,8 @@ fn test_collateral_zero_panics() {
         &None,
         &Address::generate(&env),
         &None,
+        &None,
+        &None,
     );
     client.record_sme_collateral_commitment(&symbol_short!("XLM"), &0i128);
 }
@@ -889,6 +946,8 @@ fn test_collateral_requires_sme_auth() {
         &Address::generate(&env),
         &None,
         &Address::generate(&env),
+        &None,
+        &None,
         &None,
     );
     env.mock_auths(&[]);
@@ -912,6 +971,8 @@ fn test_legal_hold_blocks_settle_withdraw_claim_and_fund() {
         &Address::generate(&env),
         &None,
         &Address::generate(&env),
+        &None,
+        &None,
         &None,
     );
     client.fund(&investor, &TARGET);
@@ -961,6 +1022,8 @@ fn test_legal_hold_blocks_new_funds_when_open() {
         &None,
         &Address::generate(&env),
         &None,
+        &None,
+        &None,
     );
     client.set_legal_hold(&true);
     client.fund(&investor, &1i128);
@@ -981,6 +1044,8 @@ fn test_withdraw_funded_then_cannot_settle() {
         &Address::generate(&env),
         &None,
         &Address::generate(&env),
+        &None,
+        &None,
         &None,
     );
     client.fund(&investor, &TARGET);
@@ -1009,6 +1074,8 @@ fn test_claim_investor_twice_panics() {
         &None,
         &Address::generate(&env),
         &None,
+        &None,
+        &None,
     );
     client.fund(&investor, &1_000i128);
     client.settle();
@@ -1033,6 +1100,8 @@ fn test_claim_before_settle_panics() {
         &None,
         &Address::generate(&env),
         &None,
+        &None,
+        &None,
     );
     client.fund(&investor, &1_000i128);
     client.claim_investor_payout(&investor);
@@ -1055,6 +1124,8 @@ fn test_cost_baseline_init() {
         &None,
         &Address::generate(&env),
         &None,
+        &None,
+        &None,
     );
 }
 
@@ -1072,6 +1143,8 @@ fn test_cost_baseline_init_zero_maturity() {
         &Address::generate(&env),
         &None,
         &Address::generate(&env),
+        &None,
+        &None,
         &None,
     );
 }
@@ -1091,6 +1164,8 @@ fn test_cost_baseline_init_max_amount() {
         &None,
         &Address::generate(&env),
         &None,
+        &None,
+        &None,
     );
 }
 
@@ -1109,6 +1184,8 @@ fn test_cost_baseline_fund_partial() {
         &Address::generate(&env),
         &None,
         &Address::generate(&env),
+        &None,
+        &None,
         &None,
     );
     client.fund(&investor, &(1_000_0000000i128));
@@ -1130,6 +1207,8 @@ fn test_cost_baseline_fund_full() {
         &None,
         &Address::generate(&env),
         &None,
+        &None,
+        &None,
     );
     client.fund(&investor, &TARGET);
 }
@@ -1149,6 +1228,8 @@ fn test_cost_baseline_fund_overshoot() {
         &Address::generate(&env),
         &None,
         &Address::generate(&env),
+        &None,
+        &None,
         &None,
     );
     client.fund(&investor, &(15_000_0000000i128));
@@ -1170,6 +1251,8 @@ fn test_cost_baseline_fund_two_step_completion() {
         &Address::generate(&env),
         &None,
         &Address::generate(&env),
+        &None,
+        &None,
         &None,
     );
     client.fund(&investor, &(TARGET / 2));
@@ -1193,6 +1276,8 @@ fn test_cost_baseline_settle() {
         &None,
         &Address::generate(&env),
         &None,
+        &None,
+        &None,
     );
     client.fund(&investor, &TARGET);
     env.ledger().set_timestamp(1001);
@@ -1215,6 +1300,8 @@ fn test_cost_baseline_full_lifecycle() {
         &Address::generate(&env),
         &None,
         &Address::generate(&env),
+        &None,
+        &None,
         &None,
     );
     client.fund(&investor, &TARGET);
@@ -1245,6 +1332,8 @@ fn test_init_invoice_id_empty_string_panics() {
         &None,
         &tr,
         &None,
+        &None,
+        &None,
     );
 }
 
@@ -1267,6 +1356,8 @@ fn test_init_invoice_id_whitespace_panics() {
         &t,
         &None,
         &tr,
+        &None,
+        &None,
         &None,
     );
 }
@@ -1293,6 +1384,8 @@ fn test_init_invoice_id_too_long_panics() {
         &None,
         &tr,
         &None,
+        &None,
+        &None,
     );
 }
 
@@ -1315,6 +1408,8 @@ fn test_init_invoice_id_bad_charset_hyphen_panics() {
         &t,
         &None,
         &tr,
+        &None,
+        &None,
         &None,
     );
 }
@@ -1342,6 +1437,8 @@ fn test_init_stores_registry_some_and_getters() {
         &Some(reg.clone()),
         &treasury,
         &None,
+        &None,
+        &None,
     );
     assert_eq!(client.get_registry_ref(), Some(reg));
     assert_eq!(client.get_funding_token(), token);
@@ -1367,6 +1464,8 @@ fn test_init_registry_none_roundtrip() {
         &token,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
     );
     assert_eq!(client.get_registry_ref(), None);
@@ -1395,6 +1494,8 @@ fn test_sweep_terminal_dust_after_settle_transfers_to_treasury() {
         &token,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
     );
     let investor = Address::generate(&env);
@@ -1430,6 +1531,8 @@ fn test_sweep_terminal_dust_after_withdraw_and_ledger_tick() {
         &token,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
     );
     let investor = Address::generate(&env);
@@ -1468,6 +1571,8 @@ fn test_sweep_rejected_when_open() {
         &None,
         &treasury,
         &None,
+        &None,
+        &None,
     );
     let stellar = StellarAssetClient::new(&env, &token);
     stellar.mint(&escrow_id, &100i128);
@@ -1496,6 +1601,8 @@ fn test_sweep_blocked_under_legal_hold() {
         &token,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
     );
     let investor = Address::generate(&env);
@@ -1528,6 +1635,8 @@ fn test_sweep_rejects_amount_above_dust_cap() {
         &None,
         &treasury,
         &None,
+        &None,
+        &None,
     );
     let investor = Address::generate(&env);
     client.fund(&investor, &1_000i128);
@@ -1556,6 +1665,8 @@ fn test_sweep_caps_at_contract_balance() {
         &token,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
     );
     let investor = Address::generate(&env);
@@ -1589,6 +1700,8 @@ fn test_sweep_requires_treasury_auth() {
         &token,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
     );
     let investor = Address::generate(&env);
@@ -1626,6 +1739,8 @@ fn test_funding_close_snapshot_captures_overfunded_total_once() {
         &None,
         &tre,
         &None,
+        &None,
+        &None,
     );
     assert_eq!(client.get_funding_close_snapshot(), None);
     client.fund(&inv, &(TARGET + 5_000_0000000i128));
@@ -1657,6 +1772,8 @@ fn test_funding_snapshot_immutable_across_second_fund_after_funded() {
         &None,
         &tre,
         &None,
+        &None,
+        &None,
     );
     client.fund(&a, &(TARGET / 2));
     assert_eq!(client.get_funding_close_snapshot(), None);
@@ -1687,6 +1804,8 @@ fn test_pro_rata_weight_ratio_from_snapshot() {
         &tok,
         &None,
         &tre,
+        &None,
+        &None,
         &None,
     );
     client.fund(&a, &(2_000_0000000i128));
@@ -1727,6 +1846,8 @@ fn test_tiered_yield_and_follow_on_fund() {
         &None,
         &tre,
         &Some(tiers),
+        &None,
+        &None,
     );
     client.fund_with_commitment(&inv, &5_000i128, &200u64);
     assert_eq!(client.get_investor_yield_bps(&inv), 900);
@@ -1762,6 +1883,8 @@ fn test_tier_selection_edges_base_vs_high_bucket() {
         &None,
         &tre,
         &Some(tiers),
+        &None,
+        &None,
     );
     client.fund_with_commitment(&i_short, &10_000i128, &40u64);
     assert_eq!(client.get_investor_yield_bps(&i_short), 800);
@@ -1795,6 +1918,8 @@ fn test_fund_with_commitment_twice_panics() {
         &None,
         &tre,
         &Some(tiers),
+        &None,
+        &None,
     );
     client.fund_with_commitment(&inv, &5_000i128, &10u64);
     client.fund_with_commitment(&inv, &5_000i128, &10u64);
@@ -1821,6 +1946,8 @@ fn test_claim_blocked_until_commitment_ledger_time() {
         &None,
         &tre,
         &None,
+        &None,
+        &None,
     );
     client.fund_with_commitment(&inv, &1_000i128, &500u64);
     client.settle();
@@ -1846,6 +1973,8 @@ fn test_claim_succeeds_after_commitment_and_settle() {
         &tok,
         &None,
         &tre,
+        &None,
+        &None,
         &None,
     );
     client.fund_with_commitment(&inv, &1_000i128, &100u64);
@@ -1884,6 +2013,8 @@ fn test_init_bad_tier_order_panics() {
         &None,
         &tre,
         &Some(tiers),
+        &None,
+        &None,
     );
 }
 
@@ -1912,6 +2043,8 @@ fn test_init_tier_yield_below_base_panics() {
         &None,
         &tre,
         &Some(tiers),
+        &None,
+        &None,
     );
 }
 
@@ -1972,6 +2105,8 @@ fn test_differential_settle_maturity_minus_one_vs_exact() {
         &None,
         &tre,
         &None,
+        &None,
+        &None,
     );
     client.fund(&inv, &1_000i128);
     env.ledger().set_timestamp(M - 1);
@@ -2005,6 +2140,8 @@ fn test_differential_funding_target_eq_exact_cross() {
         &None,
         &tre,
         &None,
+        &None,
+        &None,
     );
     let escrow = client.fund(&inv, &t);
     assert_eq!(escrow.funded_amount, t);
@@ -2034,11 +2171,335 @@ fn test_ledger_sequence_recorded_in_snapshot_with_tick() {
         &None,
         &tre,
         &None,
+        &None,
+        &None,
     );
     let seq = env.ledger().sequence();
     client.fund(&inv, &1_000i128);
     let snap = client.get_funding_close_snapshot().unwrap();
     assert_eq!(snap.closed_at_ledger_sequence, seq);
+}
+
+// --- attestation hash (#103), min contribution (#104), max investors (#105) ---
+
+fn sample_digest(env: &Env, byte: u8) -> BytesN<32> {
+    BytesN::from_array(env, &[byte; 32])
+}
+
+#[test]
+fn test_bind_primary_attestation_single_set_and_get() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let (tok, tre) = free_addresses(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "ATT001"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+    );
+    assert_eq!(client.get_primary_attestation_hash(), None);
+    let d = sample_digest(&env, 3);
+    client.bind_primary_attestation_hash(&d);
+    assert_eq!(client.get_primary_attestation_hash(), Some(d));
+    let log = client.get_attestation_append_log();
+    assert_eq!(log.len(), 0);
+}
+
+#[test]
+#[should_panic(expected = "primary attestation already bound")]
+fn test_bind_primary_attestation_twice_panics() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let (tok, tre) = free_addresses(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "ATT002"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+    );
+    let d = sample_digest(&env, 9);
+    client.bind_primary_attestation_hash(&d);
+    client.bind_primary_attestation_hash(&sample_digest(&env, 8));
+}
+
+#[test]
+fn test_append_attestation_digest_log_and_primary_coexist() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let (tok, tre) = free_addresses(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "ATT003"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+    );
+    let p = sample_digest(&env, 1);
+    client.bind_primary_attestation_hash(&p);
+    let a = sample_digest(&env, 2);
+    client.append_attestation_digest(&a);
+    let log = client.get_attestation_append_log();
+    assert_eq!(log.len(), 1);
+    assert_eq!(log.get(0).unwrap(), a);
+}
+
+#[test]
+#[should_panic]
+fn test_bind_attestation_requires_admin_auth() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "ATT004"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+    );
+    env.mock_auths(&[]);
+    client.bind_primary_attestation_hash(&sample_digest(&env, 5));
+}
+
+#[test]
+fn test_min_contribution_floor_rejects_below_and_accepts_equal() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let inv = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    let floor = 500i128;
+    let target = 2_000i128;
+    client.init(
+        &admin,
+        &String::from_str(&env, "MIN001"),
+        &sme,
+        &target,
+        &100i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &Some(floor),
+        &None,
+    );
+    assert_eq!(client.get_min_contribution_floor(), floor);
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.fund(&inv, &400i128);
+    }))
+    .is_err());
+    client.fund(&inv, &floor);
+    client.fund(&inv, &(target - floor));
+    assert_eq!(client.get_escrow().status, 1);
+}
+
+#[test]
+#[should_panic(expected = "funding amount below min_contribution floor")]
+fn test_min_floor_applies_to_follow_on_fund() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let inv = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "MIN002"),
+        &sme,
+        &10_000i128,
+        &100i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &Some(1_000i128),
+        &None,
+    );
+    client.fund(&inv, &3_000i128);
+    client.fund(&inv, &500i128);
+}
+
+#[test]
+#[should_panic(expected = "min_contribution must be positive when configured")]
+fn test_init_min_contribution_zero_some_panics() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "MINBAD"),
+        &sme,
+        &1_000i128,
+        &100i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &Some(0i128),
+        &None,
+    );
+}
+
+#[test]
+#[should_panic(expected = "min_contribution cannot exceed initial invoice amount")]
+fn test_init_min_contribution_above_amount_panics() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "MINBAD2"),
+        &sme,
+        &1_000i128,
+        &100i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &Some(2_000i128),
+        &None,
+    );
+}
+
+#[test]
+fn test_max_unique_investors_cap_enforced() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let i1 = Address::generate(&env);
+    let i2 = Address::generate(&env);
+    let i3 = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "CAP001"),
+        &sme,
+        &10_000i128,
+        &100i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &Some(2u32),
+    );
+    assert_eq!(client.get_max_unique_investors_cap(), Some(2u32));
+    client.fund(&i1, &3_000i128);
+    assert_eq!(client.get_unique_funder_count(), 1u32);
+    client.fund(&i2, &3_000i128);
+    assert_eq!(client.get_unique_funder_count(), 2u32);
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.fund(&i3, &1i128);
+    }))
+    .is_err());
+    client.fund(&i1, &4_000i128);
+    assert_eq!(client.get_unique_funder_count(), 2u32);
+    assert_eq!(client.get_escrow().funded_amount, 10_000i128);
+}
+
+#[test]
+#[should_panic(expected = "max_unique_investors must be positive when configured")]
+fn test_init_max_unique_zero_panics() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "CAPBAD"),
+        &sme,
+        &1_000i128,
+        &100i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &Some(0u32),
+    );
+}
+
+#[test]
+fn test_append_attestation_respects_max_length() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let (tok, tre) = free_addresses(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "ATTMAX"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+    );
+    for i in 0..super::MAX_ATTESTATION_APPEND_ENTRIES {
+        client.append_attestation_digest(&sample_digest(&env, i as u8));
+    }
+    assert_eq!(
+        client.get_attestation_append_log().len(),
+        super::MAX_ATTESTATION_APPEND_ENTRIES
+    );
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.append_attestation_digest(&sample_digest(&env, 99));
+    }))
+    .is_err());
 }
 
 // --- property-based tests ---
@@ -2070,6 +2531,8 @@ proptest! {
             &Address::generate(&env),
             &None,
             &Address::generate(&env),
+            &None,
+            &None,
             &None,
         );
 
@@ -2107,6 +2570,8 @@ proptest! {
             &Address::generate(&env),
             &None,
             &Address::generate(&env),
+            &None,
+            &None,
             &None,
         );
         prop_assert_eq!(escrow.status, 0);
