@@ -3,6 +3,7 @@ target/
 
 # Test snapshots (generated)
 **/test_snapshots/
+node_modules/
 
 # IDE
 .idea/
