@@ -2479,3 +2479,306 @@ proptest! {
         }
     }
 }
+
+// --- coverage gap tests ---
+
+#[test]
+#[should_panic(expected = "Funding token not set")]
+fn test_get_funding_token_uninitialized_panics() {
+    let env = Env::default();
+    let client = deploy(&env);
+    client.get_funding_token();
+}
+
+#[test]
+#[should_panic(expected = "Treasury not set")]
+fn test_get_treasury_uninitialized_panics() {
+    let env = Env::default();
+    let client = deploy(&env);
+    client.get_treasury();
+}
+
+#[test]
+fn test_fund_follow_on_does_not_reset_yield() {
+    // Exercises the simple_fund=true branch where prev > 0 (yield already stored, skip re-set).
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let inv = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    let mut tiers = SorobanVec::new(&env);
+    tiers.push_back(YieldTier {
+        min_lock_secs: 10,
+        yield_bps: 950,
+    });
+    client.init(
+        &admin,
+        &String::from_str(&env, "FOLO001"),
+        &sme,
+        &20_000i128,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &Some(tiers),
+    );
+    // First deposit via fund_with_commitment — sets effective yield to 950.
+    client.fund_with_commitment(&inv, &5_000i128, &10u64);
+    assert_eq!(client.get_investor_yield_bps(&inv), 950);
+    // Follow-on via fund — prev > 0, so the if-prev==0 block is skipped.
+    client.fund(&inv, &5_000i128);
+    // Yield must remain 950, not reset to base 800.
+    assert_eq!(client.get_investor_yield_bps(&inv), 950);
+}
+
+#[test]
+fn test_effective_yield_empty_tier_table_returns_base() {
+    // Exercises the tiers.len() == 0 early-return in effective_yield_for_commitment.
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let inv = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    // Pass an empty Vec — validate_yield_tiers_table returns early, YieldTierTable not stored.
+    let empty: SorobanVec<YieldTier> = SorobanVec::new(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "EMPT001"),
+        &sme,
+        &1_000i128,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &Some(empty),
+    );
+    // fund_with_commitment with a lock — no table stored, so base yield is returned.
+    client.fund_with_commitment(&inv, &1_000i128, &100u64);
+    assert_eq!(client.get_investor_yield_bps(&inv), 800);
+}
+
+#[test]
+#[should_panic(expected = "no funding token balance to sweep")]
+fn test_sweep_panics_when_balance_zero() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let sac = env.register_stellar_asset_contract_v2(Address::generate(&env));
+    let token = sac.address();
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let treasury = Address::generate(&env);
+    let escrow_id = env.register(LiquifactEscrow, ());
+    let client = LiquifactEscrowClient::new(&env, &escrow_id);
+    client.init(
+        &admin,
+        &String::from_str(&env, "SWZ001"),
+        &sme,
+        &1_000i128,
+        &100i64,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+    );
+    let investor = Address::generate(&env);
+    client.fund(&investor, &1_000i128);
+    client.settle();
+    // No mint — balance is zero, should panic.
+    client.sweep_terminal_dust(&1i128);
+}
+
+#[test]
+#[should_panic(expected = "sweep amount must be positive")]
+fn test_sweep_zero_amount_panics() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let sac = env.register_stellar_asset_contract_v2(Address::generate(&env));
+    let token = sac.address();
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let treasury = Address::generate(&env);
+    let escrow_id = env.register(LiquifactEscrow, ());
+    let client = LiquifactEscrowClient::new(&env, &escrow_id);
+    client.init(
+        &admin,
+        &String::from_str(&env, "SWZ002"),
+        &sme,
+        &1_000i128,
+        &100i64,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+    );
+    let investor = Address::generate(&env);
+    client.fund(&investor, &1_000i128);
+    client.settle();
+    client.sweep_terminal_dust(&0i128);
+}
+
+#[test]
+fn test_get_version_returns_schema_version() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    assert_eq!(client.get_version(), SCHEMA_VERSION);
+}
+
+#[test]
+fn test_get_version_uninitialized_returns_zero() {
+    let env = Env::default();
+    let client = deploy(&env);
+    assert_eq!(client.get_version(), 0u32);
+}
+
+#[test]
+fn test_withdraw_requires_sme_auth() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "WDAUTH01"),
+        &sme,
+        &1_000i128,
+        &500i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+    );
+    client.fund(&investor, &1_000i128);
+    client.withdraw();
+    assert!(
+        env.auths().iter().any(|(addr, _)| *addr == sme),
+        "sme auth was not recorded for withdraw"
+    );
+}
+
+#[test]
+#[should_panic(expected = "Escrow must be funded before withdrawal")]
+fn test_withdraw_before_funded_panics() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "WDPANIC1"),
+        &sme,
+        &1_000i128,
+        &500i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+    );
+    client.withdraw();
+}
+
+#[test]
+#[should_panic(expected = "Legal hold blocks SME withdrawal")]
+fn test_withdraw_blocked_under_legal_hold() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "WDHOLD01"),
+        &sme,
+        &1_000i128,
+        &500i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+    );
+    client.fund(&investor, &1_000i128);
+    client.set_legal_hold(&true);
+    client.withdraw();
+}
+
+#[test]
+#[should_panic(expected = "Legal hold blocks settlement finalization")]
+fn test_settle_blocked_under_legal_hold() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "SDHOLD01"),
+        &sme,
+        &1_000i128,
+        &500i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+    );
+    client.fund(&investor, &1_000i128);
+    client.set_legal_hold(&true);
+    client.settle();
+}
+
+#[test]
+#[should_panic(expected = "Legal hold blocks investor claims")]
+fn test_claim_blocked_under_legal_hold_explicit() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "CLHOLD01"),
+        &sme,
+        &1_000i128,
+        &500i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+    );
+    client.fund(&investor, &1_000i128);
+    client.settle();
+    client.set_legal_hold(&true);
+    client.claim_investor_payout(&investor);
+}
+
+#[test]
+fn test_fund_with_commitment_zero_lock_sets_no_claim_gate() {
+    // committed_lock_secs == 0 → claim_nb = 0, no time gate.
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let inv = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "ZLOCK001"),
+        &sme,
+        &1_000i128,
+        &400i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+    );
+    client.fund_with_commitment(&inv, &1_000i128, &0u64);
+    assert_eq!(client.get_investor_claim_not_before(&inv), 0u64);
+    client.settle();
+    client.claim_investor_payout(&inv);
+    assert!(client.is_investor_claimed(&inv));
+}
