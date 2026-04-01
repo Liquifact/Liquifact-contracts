@@ -64,6 +64,23 @@
 //! (including over-funding past target), the target, and ledger timestamp/sequence. **Immutable** once
 //! written; off-chain pro-rata share for an investor is `get_contribution(addr) / snapshot.total_principal`
 //! in rational arithmetic (watch integer rounding off-chain).
+//!
+//! ## Optional investor allowlist
+//!
+//! When enabled via [`LiquifactEscrow::enable_allowlist`], only addresses explicitly added by the
+//! admin may call [`LiquifactEscrow::fund`] or [`LiquifactEscrow::fund_with_commitment`]. This
+//! supports regulated or closed funding rounds.
+//!
+//! - [`LiquifactEscrow::enable_allowlist`] / [`LiquifactEscrow::disable_allowlist`] — admin-only toggle.
+//! - [`LiquifactEscrow::add_to_allowlist`] / [`LiquifactEscrow::remove_from_allowlist`] — admin manages entries.
+//! - [`LiquifactEscrow::is_allowlisted`] — read whether an address is approved.
+//! - [`LiquifactEscrow::is_allowlist_enabled`] — read whether the gate is active.
+//!
+//! When the allowlist is **disabled** (default), all investors may fund as before — no migration needed.
+//! Per-address entries persist across enable/disable cycles; re-enabling restores the same set.
+//!
+//! **Gas note:** each allowlist check is a single instance-storage lookup (`O(1)`). There is no
+//! on-chain iteration over the list, so gas cost does not grow with list size.
 
 use soroban_sdk::{
     contract, contractevent, contractimpl, contracttype, symbol_short, token::TokenClient, Address,
@@ -823,6 +840,80 @@ impl LiquifactEscrow {
         .publish(&env);
 
         escrow
+    }
+
+    // --- Investor allowlist ---
+
+    /// Enable the investor allowlist gate. Only admin may call.
+    ///
+    /// When enabled, [`LiquifactEscrow::fund`] and [`LiquifactEscrow::fund_with_commitment`]
+    /// reject any caller not present in the allowlist. Existing contributions are unaffected.
+    pub fn enable_allowlist(env: Env) {
+        let escrow = Self::get_escrow(env.clone());
+        escrow.admin.require_auth();
+        env.storage()
+            .instance()
+            .set(&DataKey::AllowlistEnabled, &true);
+        AllowlistChanged {
+            name: symbol_short!("allowlst"),
+            invoice_id: escrow.invoice_id.clone(),
+            enabled: 1,
+        }
+        .publish(&env);
+    }
+
+    /// Disable the investor allowlist gate. Only admin may call.
+    ///
+    /// After this call all addresses may fund again (open round). Per-address entries are
+    /// preserved so re-enabling restores the same approved set without re-adding entries.
+    pub fn disable_allowlist(env: Env) {
+        let escrow = Self::get_escrow(env.clone());
+        escrow.admin.require_auth();
+        env.storage()
+            .instance()
+            .set(&DataKey::AllowlistEnabled, &false);
+        AllowlistChanged {
+            name: symbol_short!("allowlst"),
+            invoice_id: escrow.invoice_id.clone(),
+            enabled: 0,
+        }
+        .publish(&env);
+    }
+
+    /// Approve `investor` to fund when the allowlist is active. Only admin may call.
+    pub fn add_to_allowlist(env: Env, investor: Address) {
+        let escrow = Self::get_escrow(env.clone());
+        escrow.admin.require_auth();
+        env.storage()
+            .instance()
+            .set(&DataKey::InvestorAllowed(investor), &true);
+    }
+
+    /// Remove `investor` from the allowlist. Only admin may call.
+    ///
+    /// Has no effect if the address was not previously added.
+    pub fn remove_from_allowlist(env: Env, investor: Address) {
+        let escrow = Self::get_escrow(env.clone());
+        escrow.admin.require_auth();
+        env.storage()
+            .instance()
+            .set(&DataKey::InvestorAllowed(investor), &false);
+    }
+
+    /// Whether `investor` is in the allowlist (regardless of whether the gate is enabled).
+    pub fn is_allowlisted(env: Env, investor: Address) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::InvestorAllowed(investor))
+            .unwrap_or(false)
+    }
+
+    /// Whether the allowlist gate is currently active.
+    pub fn is_allowlist_enabled(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::AllowlistEnabled)
+            .unwrap_or(false)
     }
 }
 
