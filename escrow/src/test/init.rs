@@ -18,8 +18,8 @@ extern crate std;
 use soroban_sdk::{testutils::Address as _, vec, Address, Env};
 
 use crate::{
-    EscrowError, EscrowParams, LiquifactEscrow, LiquifactEscrowClient,
-    YieldTier, MAX_BPS, MAX_TIERS,
+    EscrowError, EscrowParams, LiquifactEscrow, LiquifactEscrowClient, YieldTier, MAX_BPS,
+    MAX_TIERS,
 };
 
 // ---------------------------------------------------------------------------
@@ -30,14 +30,14 @@ use crate::{
 /// Individual tests override specific fields to trigger errors.
 fn valid_params(env: &Env) -> EscrowParams {
     EscrowParams {
-        depositor:  Address::generate(env),
-        recipient:  Address::generate(env),
-        amount:     1_000_000,
-        yield_bps:  500,
-        floor_bps:  100,
+        depositor: Address::generate(env),
+        recipient: Address::generate(env),
+        amount: 1_000_000,
+        yield_bps: 500,
+        floor_bps: 100,
         target_bps: 500,
-        cap_bps:    1_000,
-        tiers:      vec![env],
+        cap_bps: 1_000,
+        tiers: vec![env],
     }
 }
 
@@ -95,7 +95,10 @@ fn test_init_yield_bps_zero_valid() {
     let env = Env::default();
     let (_, client) = new_client(&env);
     let mut p = valid_params(&env);
-    p.yield_bps = 0; p.floor_bps = 0; p.target_bps = 0; p.cap_bps = 0;
+    p.yield_bps = 0;
+    p.floor_bps = 0;
+    p.target_bps = 0;
+    p.cap_bps = 0;
     assert!(client.try_init(&p).is_ok());
 }
 
@@ -104,8 +107,10 @@ fn test_init_all_bps_at_max_valid() {
     let env = Env::default();
     let (_, client) = new_client(&env);
     let mut p = valid_params(&env);
-    p.yield_bps = MAX_BPS; p.floor_bps = MAX_BPS;
-    p.target_bps = MAX_BPS; p.cap_bps = MAX_BPS;
+    p.yield_bps = MAX_BPS;
+    p.floor_bps = MAX_BPS;
+    p.target_bps = MAX_BPS;
+    p.cap_bps = MAX_BPS;
     assert!(client.try_init(&p).is_ok());
 }
 
@@ -118,13 +123,13 @@ fn test_get_state_round_trips_params() {
     let rec = p.recipient.clone();
     client.init(&p);
     let s = client.get_state();
-    assert_eq!(s.depositor,  dep);
-    assert_eq!(s.recipient,  rec);
-    assert_eq!(s.amount,     1_000_000);
-    assert_eq!(s.yield_bps,  500);
-    assert_eq!(s.floor_bps,  100);
+    assert_eq!(s.depositor, dep);
+    assert_eq!(s.recipient, rec);
+    assert_eq!(s.amount, 1_000_000);
+    assert_eq!(s.yield_bps, 500);
+    assert_eq!(s.floor_bps, 100);
     assert_eq!(s.target_bps, 500);
-    assert_eq!(s.cap_bps,    1_000);
+    assert_eq!(s.cap_bps, 1_000);
 }
 
 // ---------------------------------------------------------------------------
@@ -135,7 +140,8 @@ fn test_get_state_round_trips_params() {
 fn test_inv1_amount_zero_rejected() {
     let env = Env::default();
     let (_, client) = new_client(&env);
-    let mut p = valid_params(&env); p.amount = 0;
+    let mut p = valid_params(&env);
+    p.amount = 0;
     assert_eq!(
         client.try_init(&p).unwrap_err().unwrap(),
         EscrowError::InvalidAmount.into()
@@ -146,7 +152,8 @@ fn test_inv1_amount_zero_rejected() {
 fn test_inv1_amount_negative_rejected() {
     let env = Env::default();
     let (_, client) = new_client(&env);
-    let mut p = valid_params(&env); p.amount = -1;
+    let mut p = valid_params(&env);
+    p.amount = -1;
     assert_eq!(
         client.try_init(&p).unwrap_err().unwrap(),
         EscrowError::InvalidAmount.into()
@@ -157,7 +164,8 @@ fn test_inv1_amount_negative_rejected() {
 fn test_inv1_amount_i128_min_rejected() {
     let env = Env::default();
     let (_, client) = new_client(&env);
-    let mut p = valid_params(&env); p.amount = i128::MIN;
+    let mut p = valid_params(&env);
+    p.amount = i128::MIN;
     assert_eq!(
         client.try_init(&p).unwrap_err().unwrap(),
         EscrowError::InvalidAmount.into()
@@ -168,7 +176,8 @@ fn test_inv1_amount_i128_min_rejected() {
 fn test_inv1_amount_one_accepted() {
     let env = Env::default();
     let (_, client) = new_client(&env);
-    let mut p = valid_params(&env); p.amount = 1;
+    let mut p = valid_params(&env);
+    p.amount = 1;
     assert!(client.try_init(&p).is_ok());
 }
 
@@ -176,7 +185,8 @@ fn test_inv1_amount_one_accepted() {
 fn test_inv1_amount_i128_max_accepted() {
     let env = Env::default();
     let (_, client) = new_client(&env);
-    let mut p = valid_params(&env); p.amount = i128::MAX;
+    let mut p = valid_params(&env);
+    p.amount = i128::MAX;
     assert!(client.try_init(&p).is_ok());
 }
 
@@ -190,7 +200,7 @@ fn test_inv2_yield_bps_above_max_rejected() {
     let (_, client) = new_client(&env);
     let mut p = valid_params(&env);
     p.yield_bps = MAX_BPS + 1;
-    p.cap_bps   = MAX_BPS + 1; // keep cap ≥ target to isolate this error
+    p.cap_bps = MAX_BPS + 1; // keep cap ≥ target to isolate this error
     assert_eq!(
         client.try_init(&p).unwrap_err().unwrap(),
         EscrowError::InvalidYieldBps.into()
@@ -202,8 +212,10 @@ fn test_inv2_yield_bps_at_max_accepted() {
     let env = Env::default();
     let (_, client) = new_client(&env);
     let mut p = valid_params(&env);
-    p.yield_bps = MAX_BPS; p.floor_bps = MAX_BPS;
-    p.target_bps = MAX_BPS; p.cap_bps = MAX_BPS;
+    p.yield_bps = MAX_BPS;
+    p.floor_bps = MAX_BPS;
+    p.target_bps = MAX_BPS;
+    p.cap_bps = MAX_BPS;
     assert!(client.try_init(&p).is_ok());
 }
 
@@ -215,7 +227,8 @@ fn test_inv2_yield_bps_at_max_accepted() {
 fn test_inv9_cap_above_max_rejected() {
     let env = Env::default();
     let (_, client) = new_client(&env);
-    let mut p = valid_params(&env); p.cap_bps = MAX_BPS + 1;
+    let mut p = valid_params(&env);
+    p.cap_bps = MAX_BPS + 1;
     assert_eq!(
         client.try_init(&p).unwrap_err().unwrap(),
         EscrowError::CapOutOfRange.into()
@@ -227,7 +240,9 @@ fn test_inv9_cap_at_max_accepted() {
     let env = Env::default();
     let (_, client) = new_client(&env);
     let mut p = valid_params(&env);
-    p.cap_bps = MAX_BPS; p.target_bps = MAX_BPS; p.floor_bps = MAX_BPS;
+    p.cap_bps = MAX_BPS;
+    p.target_bps = MAX_BPS;
+    p.floor_bps = MAX_BPS;
     assert!(client.try_init(&p).is_ok());
 }
 
@@ -240,7 +255,9 @@ fn test_inv7_floor_exceeds_target_rejected() {
     let env = Env::default();
     let (_, client) = new_client(&env);
     let mut p = valid_params(&env);
-    p.floor_bps = 600; p.target_bps = 500; p.cap_bps = 1_000;
+    p.floor_bps = 600;
+    p.target_bps = 500;
+    p.cap_bps = 1_000;
     assert_eq!(
         client.try_init(&p).unwrap_err().unwrap(),
         EscrowError::FloorExceedsTarget.into()
@@ -252,7 +269,9 @@ fn test_inv7_floor_equals_target_accepted() {
     let env = Env::default();
     let (_, client) = new_client(&env);
     let mut p = valid_params(&env);
-    p.floor_bps = 500; p.target_bps = 500; p.cap_bps = 500;
+    p.floor_bps = 500;
+    p.target_bps = 500;
+    p.cap_bps = 500;
     assert!(client.try_init(&p).is_ok());
 }
 
@@ -265,7 +284,9 @@ fn test_inv8_target_exceeds_cap_rejected() {
     let env = Env::default();
     let (_, client) = new_client(&env);
     let mut p = valid_params(&env);
-    p.floor_bps = 100; p.target_bps = 900; p.cap_bps = 800;
+    p.floor_bps = 100;
+    p.target_bps = 900;
+    p.cap_bps = 800;
     assert_eq!(
         client.try_init(&p).unwrap_err().unwrap(),
         EscrowError::TargetExceedsCap.into()
@@ -277,7 +298,9 @@ fn test_inv8_target_equals_cap_accepted() {
     let env = Env::default();
     let (_, client) = new_client(&env);
     let mut p = valid_params(&env);
-    p.floor_bps = 500; p.target_bps = 800; p.cap_bps = 800;
+    p.floor_bps = 500;
+    p.target_bps = 800;
+    p.cap_bps = 800;
     assert!(client.try_init(&p).is_ok());
 }
 
@@ -317,8 +340,14 @@ fn test_inv5_duplicate_min_amount_rejected() {
     let mut p = valid_params(&env);
     p.tiers = vec![
         &env,
-        YieldTier { min_amount: 1_000, bps: 100 },
-        YieldTier { min_amount: 1_000, bps: 200 },
+        YieldTier {
+            min_amount: 1_000,
+            bps: 100,
+        },
+        YieldTier {
+            min_amount: 1_000,
+            bps: 200,
+        },
     ];
     assert_eq!(
         client.try_init(&p).unwrap_err().unwrap(),
@@ -333,8 +362,14 @@ fn test_inv5_descending_min_amount_rejected() {
     let mut p = valid_params(&env);
     p.tiers = vec![
         &env,
-        YieldTier { min_amount: 5_000, bps: 200 },
-        YieldTier { min_amount: 1_000, bps: 100 },
+        YieldTier {
+            min_amount: 5_000,
+            bps: 200,
+        },
+        YieldTier {
+            min_amount: 1_000,
+            bps: 100,
+        },
     ];
     assert_eq!(
         client.try_init(&p).unwrap_err().unwrap(),
@@ -347,7 +382,13 @@ fn test_inv5_single_tier_accepted() {
     let env = Env::default();
     let (_, client) = new_client(&env);
     let mut p = valid_params(&env);
-    p.tiers = vec![&env, YieldTier { min_amount: 1_000, bps: 100 }];
+    p.tiers = vec![
+        &env,
+        YieldTier {
+            min_amount: 1_000,
+            bps: 100,
+        },
+    ];
     assert!(client.try_init(&p).is_ok());
 }
 
@@ -360,7 +401,13 @@ fn test_inv6_tier_bps_above_max_rejected() {
     let env = Env::default();
     let (_, client) = new_client(&env);
     let mut p = valid_params(&env);
-    p.tiers = vec![&env, YieldTier { min_amount: 1_000, bps: MAX_BPS + 1 }];
+    p.tiers = vec![
+        &env,
+        YieldTier {
+            min_amount: 1_000,
+            bps: MAX_BPS + 1,
+        },
+    ];
     assert_eq!(
         client.try_init(&p).unwrap_err().unwrap(),
         EscrowError::InvalidTierBps.into()
@@ -372,7 +419,13 @@ fn test_inv6_tier_bps_at_max_accepted() {
     let env = Env::default();
     let (_, client) = new_client(&env);
     let mut p = valid_params(&env);
-    p.tiers = vec![&env, YieldTier { min_amount: 1_000, bps: MAX_BPS }];
+    p.tiers = vec![
+        &env,
+        YieldTier {
+            min_amount: 1_000,
+            bps: MAX_BPS,
+        },
+    ];
     assert!(client.try_init(&p).is_ok());
 }
 
@@ -381,7 +434,13 @@ fn test_inv6_tier_bps_zero_accepted() {
     let env = Env::default();
     let (_, client) = new_client(&env);
     let mut p = valid_params(&env);
-    p.tiers = vec![&env, YieldTier { min_amount: 1_000, bps: 0 }];
+    p.tiers = vec![
+        &env,
+        YieldTier {
+            min_amount: 1_000,
+            bps: 0,
+        },
+    ];
     assert!(client.try_init(&p).is_ok());
 }
 
@@ -392,8 +451,14 @@ fn test_inv6_invalid_bps_in_second_tier() {
     let mut p = valid_params(&env);
     p.tiers = vec![
         &env,
-        YieldTier { min_amount: 1_000, bps: 100 },
-        YieldTier { min_amount: 2_000, bps: MAX_BPS + 5 },
+        YieldTier {
+            min_amount: 1_000,
+            bps: 100,
+        },
+        YieldTier {
+            min_amount: 2_000,
+            bps: MAX_BPS + 5,
+        },
     ];
     assert_eq!(
         client.try_init(&p).unwrap_err().unwrap(),
@@ -425,7 +490,8 @@ fn test_error_priority_amount_before_yield_bps() {
     let env = Env::default();
     let (_, client) = new_client(&env);
     let mut p = valid_params(&env);
-    p.amount = 0; p.yield_bps = MAX_BPS + 1;
+    p.amount = 0;
+    p.yield_bps = MAX_BPS + 1;
     assert_eq!(
         client.try_init(&p).unwrap_err().unwrap(),
         EscrowError::InvalidAmount.into()
@@ -437,7 +503,9 @@ fn test_error_priority_cap_before_floor_target() {
     let env = Env::default();
     let (_, client) = new_client(&env);
     let mut p = valid_params(&env);
-    p.cap_bps = MAX_BPS + 1; p.floor_bps = 9_000; p.target_bps = 100;
+    p.cap_bps = MAX_BPS + 1;
+    p.floor_bps = 9_000;
+    p.target_bps = 100;
     assert_eq!(
         client.try_init(&p).unwrap_err().unwrap(),
         EscrowError::CapOutOfRange.into()
@@ -449,6 +517,9 @@ fn test_edge_all_bps_zero_accepted() {
     let env = Env::default();
     let (_, client) = new_client(&env);
     let mut p = valid_params(&env);
-    p.yield_bps = 0; p.floor_bps = 0; p.target_bps = 0; p.cap_bps = 0;
+    p.yield_bps = 0;
+    p.floor_bps = 0;
+    p.target_bps = 0;
+    p.cap_bps = 0;
     assert!(client.try_init(&p).is_ok());
 }

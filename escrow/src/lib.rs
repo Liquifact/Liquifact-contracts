@@ -33,8 +33,7 @@
 #![no_std]
 
 use soroban_sdk::{
-    contract, contractimpl, contracttype, contracterror,
-    symbol_short, Address, Env, Vec,
+    contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env, Vec,
 };
 
 // ---------------------------------------------------------------------------
@@ -107,28 +106,28 @@ pub struct YieldTier {
 #[contracttype]
 #[derive(Clone, Debug)]
 pub struct EscrowParams {
-    pub depositor:  Address,
-    pub recipient:  Address,
-    pub amount:     i128,
-    pub yield_bps:  u32,
-    pub floor_bps:  u32,
+    pub depositor: Address,
+    pub recipient: Address,
+    pub amount: i128,
+    pub yield_bps: u32,
+    pub floor_bps: u32,
     pub target_bps: u32,
-    pub cap_bps:    u32,
-    pub tiers:      Vec<YieldTier>,
+    pub cap_bps: u32,
+    pub tiers: Vec<YieldTier>,
 }
 
 /// Persisted escrow state after successful `init`.
 #[contracttype]
 #[derive(Clone, Debug)]
 pub struct EscrowState {
-    pub depositor:   Address,
-    pub recipient:   Address,
-    pub amount:      i128,
-    pub yield_bps:   u32,
-    pub floor_bps:   u32,
-    pub target_bps:  u32,
-    pub cap_bps:     u32,
-    pub tiers:       Vec<YieldTier>,
+    pub depositor: Address,
+    pub recipient: Address,
+    pub amount: i128,
+    pub yield_bps: u32,
+    pub floor_bps: u32,
+    pub target_bps: u32,
+    pub cap_bps: u32,
+    pub tiers: Vec<YieldTier>,
     /// Ledger sequence number at initialisation; used for yield accrual.
     pub init_ledger: u32,
 }
@@ -157,19 +156,23 @@ impl LiquifactEscrow {
         Self::validate_params(&env, &params)?;
 
         let state = EscrowState {
-            depositor:   params.depositor.clone(),
-            recipient:   params.recipient.clone(),
-            amount:      params.amount,
-            yield_bps:   params.yield_bps,
-            floor_bps:   params.floor_bps,
-            target_bps:  params.target_bps,
-            cap_bps:     params.cap_bps,
-            tiers:       params.tiers,
+            depositor: params.depositor.clone(),
+            recipient: params.recipient.clone(),
+            amount: params.amount,
+            yield_bps: params.yield_bps,
+            floor_bps: params.floor_bps,
+            target_bps: params.target_bps,
+            cap_bps: params.cap_bps,
+            tiers: params.tiers,
             init_ledger: env.ledger().sequence(),
         };
 
-        env.storage().persistent().set(&symbol_short!("STAT"), &state);
-        env.storage().persistent().set(&symbol_short!("INIT"), &true);
+        env.storage()
+            .persistent()
+            .set(&symbol_short!("STAT"), &state);
+        env.storage()
+            .persistent()
+            .set(&symbol_short!("INIT"), &true);
 
         // Emit event: topics = (escrow, init), data = (depositor, recipient, amount)
         // Using the low-level publish API; #[contractevent] macro alternative is
@@ -196,11 +199,21 @@ impl LiquifactEscrow {
     /// Public so tests can call it directly without going through the full
     /// `init` flow (no auth or storage side-effects required).
     pub fn validate_params(_env: &Env, p: &EscrowParams) -> Result<(), EscrowError> {
-        if p.amount <= 0          { return Err(EscrowError::InvalidAmount); }
-        if p.yield_bps > MAX_BPS  { return Err(EscrowError::InvalidYieldBps); }
-        if p.cap_bps > MAX_BPS    { return Err(EscrowError::CapOutOfRange); }
-        if p.floor_bps > p.target_bps { return Err(EscrowError::FloorExceedsTarget); }
-        if p.target_bps > p.cap_bps   { return Err(EscrowError::TargetExceedsCap); }
+        if p.amount <= 0 {
+            return Err(EscrowError::InvalidAmount);
+        }
+        if p.yield_bps > MAX_BPS {
+            return Err(EscrowError::InvalidYieldBps);
+        }
+        if p.cap_bps > MAX_BPS {
+            return Err(EscrowError::CapOutOfRange);
+        }
+        if p.floor_bps > p.target_bps {
+            return Err(EscrowError::FloorExceedsTarget);
+        }
+        if p.target_bps > p.cap_bps {
+            return Err(EscrowError::TargetExceedsCap);
+        }
         Self::validate_yield_tiers_table(&p.tiers)
     }
 
@@ -210,14 +223,22 @@ impl LiquifactEscrow {
     /// Non-empty → ≤ MAX_TIERS entries, each bps in range, min_amount strictly ascending.
     pub fn validate_yield_tiers_table(tiers: &Vec<YieldTier>) -> Result<(), EscrowError> {
         let len = tiers.len();
-        if len == 0 { return Ok(()); }
-        if len > MAX_TIERS { return Err(EscrowError::TierTableTooLarge); }
+        if len == 0 {
+            return Ok(());
+        }
+        if len > MAX_TIERS {
+            return Err(EscrowError::TierTableTooLarge);
+        }
 
         let mut prev_min: i128 = i128::MIN;
         for i in 0..len {
             let tier = tiers.get(i).unwrap();
-            if tier.bps > MAX_BPS          { return Err(EscrowError::InvalidTierBps); }
-            if tier.min_amount <= prev_min { return Err(EscrowError::TierTableNotMonotonic); }
+            if tier.bps > MAX_BPS {
+                return Err(EscrowError::InvalidTierBps);
+            }
+            if tier.min_amount <= prev_min {
+                return Err(EscrowError::TierTableNotMonotonic);
+            }
             prev_min = tier.min_amount;
         }
         Ok(())
