@@ -723,5 +723,5 @@ fn test_escrow_settled_event_fields_match_storage() {
     assert_eq!(settled.status, 2);
     assert_eq!(settled.funded_amount, 5_000i128);
     assert_eq!(settled.yield_bps, YIELD_BPS);
-    assert_eq!(settled.maturity, MATURATION);
+    assert_eq!(settled.maturity, MATURITY);
 }
