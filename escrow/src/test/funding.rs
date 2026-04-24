@@ -108,9 +108,9 @@ fn test_single_investor_contribution_tracked() {
         &None,
         &None,
     );
-    client.fund(&investor, &(3_000_0000000i128));
+    client.fund(&investor, &(30_000_000_000i128));
     let contribution = client.get_contribution(&investor);
-    assert_eq!(contribution, 3_000_0000000i128);
+    assert_eq!(contribution, 30_000_000_000i128);
 }
 
 #[test]
@@ -143,9 +143,9 @@ fn test_repeated_funding_accumulates_contribution() {
         &None,
         &None,
     );
-    client.fund(&investor, &(2_000_0000000i128));
-    client.fund(&investor, &(3_000_0000000i128));
-    assert_eq!(client.get_contribution(&investor), 5_000_0000000i128);
+    client.fund(&investor, &(20_000_000_000i128));
+    client.fund(&investor, &(30_000_000_000i128));
+    assert_eq!(client.get_contribution(&investor), 50_000_000_000i128);
 }
 
 #[test]
@@ -169,12 +169,12 @@ fn test_multiple_investors_tracked_independently() {
         &None,
         &None,
     );
-    client.fund(&inv_a, &(2_000_0000000i128));
-    client.fund(&inv_b, &(5_000_0000000i128));
-    client.fund(&inv_c, &(3_000_0000000i128));
-    assert_eq!(client.get_contribution(&inv_a), 2_000_0000000i128);
-    assert_eq!(client.get_contribution(&inv_b), 5_000_0000000i128);
-    assert_eq!(client.get_contribution(&inv_c), 3_000_0000000i128);
+    client.fund(&inv_a, &(20_000_000_000i128));
+    client.fund(&inv_b, &(50_000_000_000i128));
+    client.fund(&inv_c, &(30_000_000_000i128));
+    assert_eq!(client.get_contribution(&inv_a), 20_000_000_000i128);
+    assert_eq!(client.get_contribution(&inv_b), 50_000_000_000i128);
+    assert_eq!(client.get_contribution(&inv_c), 30_000_000_000i128);
     let sum = client.get_contribution(&inv_a)
         + client.get_contribution(&inv_b)
         + client.get_contribution(&inv_c);
@@ -202,9 +202,9 @@ fn test_contributions_sum_equals_funded_amount() {
         &None,
         &None,
     );
-    client.fund(&inv_a, &(2_000_0000000i128));
-    client.fund(&inv_b, &(5_000_0000000i128));
-    client.fund(&inv_c, &(3_000_0000000i128));
+    client.fund(&inv_a, &(20_000_000_000i128));
+    client.fund(&inv_b, &(50_000_000_000i128));
+    client.fund(&inv_c, &(30_000_000_000i128));
     let sum = client.get_contribution(&inv_a)
         + client.get_contribution(&inv_b)
         + client.get_contribution(&inv_c);
@@ -230,7 +230,7 @@ fn test_cost_baseline_fund_partial() {
         &None,
         &None,
     );
-    client.fund(&investor, &(1_000_0000000i128));
+    client.fund(&investor, &(10_000_000_000i128));
 }
 
 #[test]
@@ -274,7 +274,7 @@ fn test_cost_baseline_fund_overshoot() {
         &None,
         &None,
     );
-    client.fund(&investor, &(15_000_0000000i128));
+    client.fund(&investor, &(150_000_000_000i128));
     assert_eq!(client.get_escrow().status, 1);
 }
 
@@ -326,9 +326,9 @@ fn test_funding_close_snapshot_captures_overfunded_total_once() {
         &None,
     );
     assert_eq!(client.get_funding_close_snapshot(), None);
-    client.fund(&inv, &(TARGET + 5_000_0000000i128));
+    client.fund(&inv, &(TARGET + 50_000_000_000i128));
     let snap = client.get_funding_close_snapshot().expect("snapshot");
-    assert_eq!(snap.total_principal, TARGET + 5_000_0000000i128);
+    assert_eq!(snap.total_principal, TARGET + 50_000_000_000i128);
     assert_eq!(snap.funding_target, TARGET);
     assert_eq!(snap.closed_at_ledger_timestamp, env.ledger().timestamp());
     assert_eq!(snap.closed_at_ledger_sequence, env.ledger().sequence());
@@ -391,8 +391,8 @@ fn test_pro_rata_weight_ratio_from_snapshot() {
         &None,
         &None,
     );
-    client.fund(&a, &(2_000_0000000i128));
-    client.fund(&b, &(8_000_0000000i128));
+    client.fund(&a, &(20_000_000_000i128));
+    client.fund(&b, &(80_000_000_000i128));
     let snap = client.get_funding_close_snapshot().unwrap();
     assert_eq!(snap.total_principal, TARGET);
     let ca = client.get_contribution(&a);

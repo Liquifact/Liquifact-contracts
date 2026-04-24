@@ -7,8 +7,8 @@ use proptest::prelude::*;
 proptest! {
     #[test]
     fn prop_funded_amount_non_decreasing(
-        amount1 in 1i128..5_000_0000000i128,
-        amount2 in 1i128..5_000_0000000i128,
+        amount1 in 1i128..50_000_000_000i128,
+        amount2 in 1i128..50_000_000_000i128,
     ) {
         let env = Env::default();
         env.mock_all_auths();
@@ -18,7 +18,7 @@ proptest! {
         let investor2 = Address::generate(&env);
         let client = deploy(&env);
 
-        let target = 20_000_0000000i128;
+        let target = 200_000_000_000i128;
         client.init(
             &admin,
             &String::from_str(&env, "INVTST"),
@@ -48,8 +48,8 @@ proptest! {
 
     #[test]
     fn prop_status_only_increases(
-        amount in 1i128..10_000_0000000i128,
-        target in 1i128..10_000_0000000i128,
+        amount in 1i128..100_000_000_000i128,
+        target in 1i128..100_000_000_000i128,
     ) {
         let env = Env::default();
         env.mock_all_auths();

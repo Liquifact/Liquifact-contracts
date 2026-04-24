@@ -46,7 +46,7 @@ pub(super) fn default_init(
         admin,
         &String::from_str(env, "INV001"),
         sme,
-        &10_000_0000000i128,
+        &100_000_000_000i128,
         &800i64,
         &1000u64,
         &token,
@@ -58,4 +58,4 @@ pub(super) fn default_init(
     );
 }
 
-pub(super) const TARGET: i128 = 10_000_0000000i128;
+pub(super) const TARGET: i128 = 100_000_000_000i128;

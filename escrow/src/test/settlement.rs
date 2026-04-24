@@ -259,8 +259,7 @@ fn test_withdraw_funded_then_cannot_settle() {
 }
 
 #[test]
-#[should_panic(expected = "Investor already claimed")]
-fn test_claim_investor_twice_panics() {
+fn test_claim_investor_twice_is_idempotent() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
     let investor = Address::generate(&env);
@@ -280,8 +279,75 @@ fn test_claim_investor_twice_panics() {
     );
     client.fund(&investor, &1_000i128);
     client.settle();
+
+    // First claim - should succeed and set the claimed marker
     client.claim_investor_payout(&investor);
+
+    assert!(client.is_investor_claimed(&investor));
+
+    // Second claim - should be idempotent (no-op, does not panic)
     client.claim_investor_payout(&investor);
+    assert!(client.is_investor_claimed(&investor));
+}
+
+#[test]
+#[should_panic(expected = "Address has no contribution to claim")]
+fn test_claim_by_non_investor_panics() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let stranger = Address::generate(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "STR001"),
+        &sme,
+        &1_000i128,
+        &400i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+    );
+    // Escrow settled but stranger never funded
+    let investor = Address::generate(&env);
+    client.fund(&investor, &1_000i128);
+    client.settle();
+
+    client.claim_investor_payout(&stranger);
+}
+
+#[test]
+fn test_clashing_investors_have_independent_claims() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let inv_a = Address::generate(&env);
+    let inv_b = Address::generate(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "CLASH01"),
+        &sme,
+        &2_000i128,
+        &400i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+    );
+    client.fund(&inv_a, &1_000i128);
+    client.fund(&inv_b, &1_000i128);
+    client.settle();
+
+    client.claim_investor_payout(&inv_a);
+    assert!(client.is_investor_claimed(&inv_a));
+    assert!(!client.is_investor_claimed(&inv_b));
+
+    client.claim_investor_payout(&inv_b);
+    assert!(client.is_investor_claimed(&inv_b));
 }
 
 #[test]
