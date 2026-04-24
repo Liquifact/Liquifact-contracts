@@ -150,8 +150,6 @@ proptest! {
             &None,
         );
 
-        if target <= 0 { return; }
-
         client.fund(&investor, &target);
         let status_after_fund = client.get_escrow().status;
         prop_assert!(status_after_fund >= escrow.status);
