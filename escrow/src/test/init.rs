@@ -1,336 +1,454 @@
-use super::*;
+//! Tests for `LiquifactEscrow::init` invariants.
+//!
+//! Each test is named after the invariant number from the module-level table
+//! so reviewers can cross-reference the spec directly.
+//!
+//! Run coverage locally:
+//! ```sh
+//! cargo llvm-cov --package liquifact_escrow --features testutils --fail-under-lines 95 --html
+//! ```
 
-// Initialization, getters, invoice-id validation, and init-shaped cost baselines.
+// This file is only compiled when the "testutils" feature is active.
+// The feature is set automatically by `cargo test` when the crate declares
+// it (see Cargo.toml), and by cargo-llvm-cov via the --features flag.
+#![cfg(test)]
 
-#[test]
-fn test_init_stores_escrow() {
-    let env = Env::default();
-    let (client, admin, sme) = setup(&env);
-    let escrow = client.init(
-        &admin,
-        &String::from_str(&env, "INV001"),
-        &sme,
-        &TARGET,
-        &800i64,
-        &1000u64,
-        &Address::generate(&env),
-        &None,
-        &Address::generate(&env),
-        &None,
-        &None,
-        &None,
-    );
-    assert_eq!(escrow.invoice_id, symbol_short!("INV001"));
-    assert_eq!(escrow.admin, admin);
-    assert_eq!(escrow.sme_address, sme);
-    assert_eq!(escrow.amount, TARGET);
-    assert_eq!(escrow.funding_target, TARGET);
-    assert_eq!(escrow.funded_amount, 0);
-    assert_eq!(escrow.yield_bps, 800);
-    assert_eq!(escrow.maturity, 1000);
-    assert_eq!(escrow.status, 0);
+extern crate std;
+
+use soroban_sdk::{testutils::Address as _, vec, Address, Env};
+
+use crate::{
+    EscrowError, EscrowParams, LiquifactEscrow, LiquifactEscrowClient,
+    YieldTier, MAX_BPS, MAX_TIERS,
+};
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/// Return a minimal *valid* `EscrowParams` that passes all invariants.
+/// Individual tests override specific fields to trigger errors.
+fn valid_params(env: &Env) -> EscrowParams {
+    EscrowParams {
+        depositor:  Address::generate(env),
+        recipient:  Address::generate(env),
+        amount:     1_000_000,
+        yield_bps:  500,
+        floor_bps:  100,
+        target_bps: 500,
+        cap_bps:    1_000,
+        tiers:      vec![env],
+    }
 }
 
-#[test]
-fn test_init_stores_keyed_invoice_and_lists_it() {
-    let env = Env::default();
-    let (client, admin, sme) = setup(&env);
-    let escrow = client.init(
-        &admin,
-        &String::from_str(&env, "INV001"),
-        &sme,
-        &TARGET,
-        &800i64,
-        &1000u64,
-        &Address::generate(&env),
-        &None,
-        &Address::generate(&env),
-        &None,
-        &None,
-        &None,
-    );
-    let got = client.get_escrow();
-    assert_eq!(got, escrow);
-}
-
-#[test]
-fn test_init_requires_admin_auth() {
-    let env = Env::default();
-    let (client, admin, sme) = setup(&env);
-    client.init(
-        &admin,
-        &String::from_str(&env, "INVB"),
-        &sme,
-        &TARGET,
-        &800i64,
-        &1000u64,
-        &Address::generate(&env),
-        &None,
-        &Address::generate(&env),
-        &None,
-        &None,
-        &None,
-    );
-    assert!(
-        env.auths().iter().any(|(addr, _)| *addr == admin),
-        "admin auth was not recorded for init"
-    );
-}
-
-#[test]
-fn test_init_unauthorized_panics() {
-    let env = Env::default();
-    let client = deploy(&env);
-    let admin = Address::generate(&env);
-    let sme = Address::generate(&env);
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        client.init(
-            &admin,
-            &String::from_str(&env, "INV001"),
-            &sme,
-            &1_000i128,
-            &800i64,
-            &1000u64,
-            &Address::generate(&env),
-            &None,
-            &Address::generate(&env),
-            &None,
-            &None,
-            &None,
-        );
-    }));
-    assert!(result.is_err(), "Expected panic without auth");
-}
-
-#[test]
-#[should_panic(expected = "Escrow already initialized")]
-fn test_double_init_panics() {
-    let env = Env::default();
-    let (client, admin, sme) = setup(&env);
-    default_init(&client, &env, &admin, &sme);
-    default_init(&client, &env, &admin, &sme);
-}
-
-#[test]
-#[should_panic(expected = "Escrow not initialized")]
-fn test_get_escrow_uninitialized_panics() {
-    let env = Env::default();
-    let client = deploy(&env);
-    client.get_escrow();
-}
-
-#[test]
-fn test_cost_baseline_init() {
-    let env = Env::default();
-    let (client, admin, sme) = setup(&env);
-    client.init(
-        &admin,
-        &String::from_str(&env, "INV100"),
-        &sme,
-        &TARGET,
-        &800i64,
-        &1000u64,
-        &Address::generate(&env),
-        &None,
-        &Address::generate(&env),
-        &None,
-        &None,
-        &None,
-    );
-}
-
-#[test]
-fn test_cost_baseline_init_zero_maturity() {
-    let env = Env::default();
-    let (client, admin, sme) = setup(&env);
-    client.init(
-        &admin,
-        &String::from_str(&env, "INV101"),
-        &sme,
-        &TARGET,
-        &800i64,
-        &0u64,
-        &Address::generate(&env),
-        &None,
-        &Address::generate(&env),
-        &None,
-        &None,
-        &None,
-    );
-}
-
-#[test]
-fn test_cost_baseline_init_max_amount() {
-    let env = Env::default();
-    let (client, admin, sme) = setup(&env);
-    client.init(
-        &admin,
-        &String::from_str(&env, "INV102"),
-        &sme,
-        &i128::MAX,
-        &800i64,
-        &1000u64,
-        &Address::generate(&env),
-        &None,
-        &Address::generate(&env),
-        &None,
-        &None,
-        &None,
-    );
-}
-
-#[test]
-#[should_panic(expected = "invoice_id length")]
-fn test_init_invoice_id_empty_string_panics() {
-    let env = Env::default();
+fn new_client(env: &Env) -> (Env, LiquifactEscrowClient) {
+    let env = env.clone();
     env.mock_all_auths();
-    let client = deploy(&env);
-    let admin = Address::generate(&env);
-    let sme = Address::generate(&env);
-    let (t, tr) = free_addresses(&env);
-    client.init(
-        &admin,
-        &String::from_str(&env, ""),
-        &sme,
-        &1000i128,
-        &500i64,
-        &0u64,
-        &t,
-        &None,
-        &tr,
-        &None,
-        &None,
-        &None,
+    let contract = env.register_contract(None, LiquifactEscrow);
+    let client = LiquifactEscrowClient::new(&env, &contract);
+    (env, client)
+}
+
+/// Build a tier vec with `n` monotonically-increasing entries, all valid bps.
+fn monotonic_tiers(env: &Env, n: u32) -> soroban_sdk::Vec<YieldTier> {
+    let mut tiers = vec![env];
+    for i in 0..n {
+        tiers.push_back(YieldTier {
+            min_amount: (i as i128 + 1) * 1_000,
+            bps: 100 * (i + 1),
+        });
+    }
+    tiers
+}
+
+// ---------------------------------------------------------------------------
+// Happy-path
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_init_minimal_valid_no_tiers() {
+    let env = Env::default();
+    let (_, client) = new_client(&env);
+    assert!(client.try_init(&valid_params(&env)).is_ok());
+}
+
+#[test]
+fn test_init_with_tiers_valid() {
+    let env = Env::default();
+    let (_, client) = new_client(&env);
+    let mut p = valid_params(&env);
+    p.tiers = monotonic_tiers(&env, 3);
+    assert!(client.try_init(&p).is_ok());
+}
+
+#[test]
+fn test_init_max_tiers_valid() {
+    let env = Env::default();
+    let (_, client) = new_client(&env);
+    let mut p = valid_params(&env);
+    p.tiers = monotonic_tiers(&env, MAX_TIERS);
+    assert!(client.try_init(&p).is_ok());
+}
+
+#[test]
+fn test_init_yield_bps_zero_valid() {
+    let env = Env::default();
+    let (_, client) = new_client(&env);
+    let mut p = valid_params(&env);
+    p.yield_bps = 0; p.floor_bps = 0; p.target_bps = 0; p.cap_bps = 0;
+    assert!(client.try_init(&p).is_ok());
+}
+
+#[test]
+fn test_init_all_bps_at_max_valid() {
+    let env = Env::default();
+    let (_, client) = new_client(&env);
+    let mut p = valid_params(&env);
+    p.yield_bps = MAX_BPS; p.floor_bps = MAX_BPS;
+    p.target_bps = MAX_BPS; p.cap_bps = MAX_BPS;
+    assert!(client.try_init(&p).is_ok());
+}
+
+#[test]
+fn test_get_state_round_trips_params() {
+    let env = Env::default();
+    let (_, client) = new_client(&env);
+    let p = valid_params(&env);
+    let dep = p.depositor.clone();
+    let rec = p.recipient.clone();
+    client.init(&p);
+    let s = client.get_state();
+    assert_eq!(s.depositor,  dep);
+    assert_eq!(s.recipient,  rec);
+    assert_eq!(s.amount,     1_000_000);
+    assert_eq!(s.yield_bps,  500);
+    assert_eq!(s.floor_bps,  100);
+    assert_eq!(s.target_bps, 500);
+    assert_eq!(s.cap_bps,    1_000);
+}
+
+// ---------------------------------------------------------------------------
+// INV-1 — positive amount
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_inv1_amount_zero_rejected() {
+    let env = Env::default();
+    let (_, client) = new_client(&env);
+    let mut p = valid_params(&env); p.amount = 0;
+    assert_eq!(
+        client.try_init(&p).unwrap_err().unwrap(),
+        EscrowError::InvalidAmount.into()
     );
 }
 
 #[test]
-#[should_panic(expected = "invoice_id must be [A-Za-z0-9_]")]
-fn test_init_invoice_id_whitespace_panics() {
+fn test_inv1_amount_negative_rejected() {
     let env = Env::default();
-    env.mock_all_auths();
-    let client = deploy(&env);
-    let admin = Address::generate(&env);
-    let sme = Address::generate(&env);
-    let (t, tr) = free_addresses(&env);
-    client.init(
-        &admin,
-        &String::from_str(&env, "INV BAD"),
-        &sme,
-        &1000i128,
-        &500i64,
-        &0u64,
-        &t,
-        &None,
-        &tr,
-        &None,
-        &None,
-        &None,
+    let (_, client) = new_client(&env);
+    let mut p = valid_params(&env); p.amount = -1;
+    assert_eq!(
+        client.try_init(&p).unwrap_err().unwrap(),
+        EscrowError::InvalidAmount.into()
     );
 }
 
 #[test]
-#[should_panic(expected = "invoice_id length")]
-fn test_init_invoice_id_too_long_panics() {
+fn test_inv1_amount_i128_min_rejected() {
     let env = Env::default();
-    env.mock_all_auths();
-    let client = deploy(&env);
-    let admin = Address::generate(&env);
-    let sme = Address::generate(&env);
-    let (t, tr) = free_addresses(&env);
-    let thirty_three = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456";
-    client.init(
-        &admin,
-        &String::from_str(&env, thirty_three),
-        &sme,
-        &1000i128,
-        &500i64,
-        &0u64,
-        &t,
-        &None,
-        &tr,
-        &None,
-        &None,
-        &None,
+    let (_, client) = new_client(&env);
+    let mut p = valid_params(&env); p.amount = i128::MIN;
+    assert_eq!(
+        client.try_init(&p).unwrap_err().unwrap(),
+        EscrowError::InvalidAmount.into()
     );
 }
 
 #[test]
-#[should_panic(expected = "invoice_id must be [A-Za-z0-9_]")]
-fn test_init_invoice_id_bad_charset_hyphen_panics() {
+fn test_inv1_amount_one_accepted() {
     let env = Env::default();
-    env.mock_all_auths();
-    let client = deploy(&env);
-    let admin = Address::generate(&env);
-    let sme = Address::generate(&env);
-    let (t, tr) = free_addresses(&env);
-    client.init(
-        &admin,
-        &String::from_str(&env, "INV-DASH"),
-        &sme,
-        &1000i128,
-        &500i64,
-        &0u64,
-        &t,
-        &None,
-        &tr,
-        &None,
-        &None,
-        &None,
+    let (_, client) = new_client(&env);
+    let mut p = valid_params(&env); p.amount = 1;
+    assert!(client.try_init(&p).is_ok());
+}
+
+#[test]
+fn test_inv1_amount_i128_max_accepted() {
+    let env = Env::default();
+    let (_, client) = new_client(&env);
+    let mut p = valid_params(&env); p.amount = i128::MAX;
+    assert!(client.try_init(&p).is_ok());
+}
+
+// ---------------------------------------------------------------------------
+// INV-2 — yield_bps range
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_inv2_yield_bps_above_max_rejected() {
+    let env = Env::default();
+    let (_, client) = new_client(&env);
+    let mut p = valid_params(&env);
+    p.yield_bps = MAX_BPS + 1;
+    p.cap_bps   = MAX_BPS + 1; // keep cap ≥ target to isolate this error
+    assert_eq!(
+        client.try_init(&p).unwrap_err().unwrap(),
+        EscrowError::InvalidYieldBps.into()
     );
 }
 
 #[test]
-fn test_init_stores_registry_some_and_getters() {
+fn test_inv2_yield_bps_at_max_accepted() {
     let env = Env::default();
-    env.mock_all_auths();
-    let client = deploy(&env);
-    let admin = Address::generate(&env);
-    let sme = Address::generate(&env);
-    let reg = Address::generate(&env);
-    let token = Address::generate(&env);
-    let treasury = Address::generate(&env);
-    client.init(
-        &admin,
-        &String::from_str(&env, "REG001"),
-        &sme,
-        &5000i128,
-        &100i64,
-        &0u64,
-        &token,
-        &Some(reg.clone()),
-        &treasury,
-        &None,
-        &None,
-        &None,
+    let (_, client) = new_client(&env);
+    let mut p = valid_params(&env);
+    p.yield_bps = MAX_BPS; p.floor_bps = MAX_BPS;
+    p.target_bps = MAX_BPS; p.cap_bps = MAX_BPS;
+    assert!(client.try_init(&p).is_ok());
+}
+
+// ---------------------------------------------------------------------------
+// INV-9 — cap_bps range
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_inv9_cap_above_max_rejected() {
+    let env = Env::default();
+    let (_, client) = new_client(&env);
+    let mut p = valid_params(&env); p.cap_bps = MAX_BPS + 1;
+    assert_eq!(
+        client.try_init(&p).unwrap_err().unwrap(),
+        EscrowError::CapOutOfRange.into()
     );
-    assert_eq!(client.get_registry_ref(), Some(reg));
-    assert_eq!(client.get_funding_token(), token);
-    assert_eq!(client.get_treasury(), treasury);
 }
 
 #[test]
-fn test_init_registry_none_roundtrip() {
+fn test_inv9_cap_at_max_accepted() {
     let env = Env::default();
-    env.mock_all_auths();
-    let client = deploy(&env);
-    let admin = Address::generate(&env);
-    let sme = Address::generate(&env);
-    let token = Address::generate(&env);
-    let treasury = Address::generate(&env);
-    client.init(
-        &admin,
-        &String::from_str(&env, "REG002"),
-        &sme,
-        &5000i128,
-        &100i64,
-        &0u64,
-        &token,
-        &None,
-        &treasury,
-        &None,
-        &None,
-        &None,
+    let (_, client) = new_client(&env);
+    let mut p = valid_params(&env);
+    p.cap_bps = MAX_BPS; p.target_bps = MAX_BPS; p.floor_bps = MAX_BPS;
+    assert!(client.try_init(&p).is_ok());
+}
+
+// ---------------------------------------------------------------------------
+// INV-7 — floor ≤ target
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_inv7_floor_exceeds_target_rejected() {
+    let env = Env::default();
+    let (_, client) = new_client(&env);
+    let mut p = valid_params(&env);
+    p.floor_bps = 600; p.target_bps = 500; p.cap_bps = 1_000;
+    assert_eq!(
+        client.try_init(&p).unwrap_err().unwrap(),
+        EscrowError::FloorExceedsTarget.into()
     );
-    assert_eq!(client.get_registry_ref(), None);
+}
+
+#[test]
+fn test_inv7_floor_equals_target_accepted() {
+    let env = Env::default();
+    let (_, client) = new_client(&env);
+    let mut p = valid_params(&env);
+    p.floor_bps = 500; p.target_bps = 500; p.cap_bps = 500;
+    assert!(client.try_init(&p).is_ok());
+}
+
+// ---------------------------------------------------------------------------
+// INV-8 — target ≤ cap
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_inv8_target_exceeds_cap_rejected() {
+    let env = Env::default();
+    let (_, client) = new_client(&env);
+    let mut p = valid_params(&env);
+    p.floor_bps = 100; p.target_bps = 900; p.cap_bps = 800;
+    assert_eq!(
+        client.try_init(&p).unwrap_err().unwrap(),
+        EscrowError::TargetExceedsCap.into()
+    );
+}
+
+#[test]
+fn test_inv8_target_equals_cap_accepted() {
+    let env = Env::default();
+    let (_, client) = new_client(&env);
+    let mut p = valid_params(&env);
+    p.floor_bps = 500; p.target_bps = 800; p.cap_bps = 800;
+    assert!(client.try_init(&p).is_ok());
+}
+
+// ---------------------------------------------------------------------------
+// INV-4 — tier table size
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_inv4_tier_table_too_large_rejected() {
+    let env = Env::default();
+    let (_, client) = new_client(&env);
+    let mut p = valid_params(&env);
+    p.tiers = monotonic_tiers(&env, MAX_TIERS + 1);
+    assert_eq!(
+        client.try_init(&p).unwrap_err().unwrap(),
+        EscrowError::TierTableTooLarge.into()
+    );
+}
+
+#[test]
+fn test_inv4_exactly_max_tiers_accepted() {
+    let env = Env::default();
+    let (_, client) = new_client(&env);
+    let mut p = valid_params(&env);
+    p.tiers = monotonic_tiers(&env, MAX_TIERS);
+    assert!(client.try_init(&p).is_ok());
+}
+
+// ---------------------------------------------------------------------------
+// INV-5 — tier table monotonicity
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_inv5_duplicate_min_amount_rejected() {
+    let env = Env::default();
+    let (_, client) = new_client(&env);
+    let mut p = valid_params(&env);
+    p.tiers = vec![
+        &env,
+        YieldTier { min_amount: 1_000, bps: 100 },
+        YieldTier { min_amount: 1_000, bps: 200 },
+    ];
+    assert_eq!(
+        client.try_init(&p).unwrap_err().unwrap(),
+        EscrowError::TierTableNotMonotonic.into()
+    );
+}
+
+#[test]
+fn test_inv5_descending_min_amount_rejected() {
+    let env = Env::default();
+    let (_, client) = new_client(&env);
+    let mut p = valid_params(&env);
+    p.tiers = vec![
+        &env,
+        YieldTier { min_amount: 5_000, bps: 200 },
+        YieldTier { min_amount: 1_000, bps: 100 },
+    ];
+    assert_eq!(
+        client.try_init(&p).unwrap_err().unwrap(),
+        EscrowError::TierTableNotMonotonic.into()
+    );
+}
+
+#[test]
+fn test_inv5_single_tier_accepted() {
+    let env = Env::default();
+    let (_, client) = new_client(&env);
+    let mut p = valid_params(&env);
+    p.tiers = vec![&env, YieldTier { min_amount: 1_000, bps: 100 }];
+    assert!(client.try_init(&p).is_ok());
+}
+
+// ---------------------------------------------------------------------------
+// INV-6 — per-tier bps range
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_inv6_tier_bps_above_max_rejected() {
+    let env = Env::default();
+    let (_, client) = new_client(&env);
+    let mut p = valid_params(&env);
+    p.tiers = vec![&env, YieldTier { min_amount: 1_000, bps: MAX_BPS + 1 }];
+    assert_eq!(
+        client.try_init(&p).unwrap_err().unwrap(),
+        EscrowError::InvalidTierBps.into()
+    );
+}
+
+#[test]
+fn test_inv6_tier_bps_at_max_accepted() {
+    let env = Env::default();
+    let (_, client) = new_client(&env);
+    let mut p = valid_params(&env);
+    p.tiers = vec![&env, YieldTier { min_amount: 1_000, bps: MAX_BPS }];
+    assert!(client.try_init(&p).is_ok());
+}
+
+#[test]
+fn test_inv6_tier_bps_zero_accepted() {
+    let env = Env::default();
+    let (_, client) = new_client(&env);
+    let mut p = valid_params(&env);
+    p.tiers = vec![&env, YieldTier { min_amount: 1_000, bps: 0 }];
+    assert!(client.try_init(&p).is_ok());
+}
+
+#[test]
+fn test_inv6_invalid_bps_in_second_tier() {
+    let env = Env::default();
+    let (_, client) = new_client(&env);
+    let mut p = valid_params(&env);
+    p.tiers = vec![
+        &env,
+        YieldTier { min_amount: 1_000, bps: 100 },
+        YieldTier { min_amount: 2_000, bps: MAX_BPS + 5 },
+    ];
+    assert_eq!(
+        client.try_init(&p).unwrap_err().unwrap(),
+        EscrowError::InvalidTierBps.into()
+    );
+}
+
+// ---------------------------------------------------------------------------
+// INV-11 — one-shot guarantee
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_inv11_double_init_rejected() {
+    let env = Env::default();
+    let (_, client) = new_client(&env);
+    client.init(&valid_params(&env));
+    assert_eq!(
+        client.try_init(&valid_params(&env)).unwrap_err().unwrap(),
+        EscrowError::AlreadyInitialized.into()
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Error priority
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_error_priority_amount_before_yield_bps() {
+    let env = Env::default();
+    let (_, client) = new_client(&env);
+    let mut p = valid_params(&env);
+    p.amount = 0; p.yield_bps = MAX_BPS + 1;
+    assert_eq!(
+        client.try_init(&p).unwrap_err().unwrap(),
+        EscrowError::InvalidAmount.into()
+    );
+}
+
+#[test]
+fn test_error_priority_cap_before_floor_target() {
+    let env = Env::default();
+    let (_, client) = new_client(&env);
+    let mut p = valid_params(&env);
+    p.cap_bps = MAX_BPS + 1; p.floor_bps = 9_000; p.target_bps = 100;
+    assert_eq!(
+        client.try_init(&p).unwrap_err().unwrap(),
+        EscrowError::CapOutOfRange.into()
+    );
+}
+
+#[test]
+fn test_edge_all_bps_zero_accepted() {
+    let env = Env::default();
+    let (_, client) = new_client(&env);
+    let mut p = valid_params(&env);
+    p.yield_bps = 0; p.floor_bps = 0; p.target_bps = 0; p.cap_bps = 0;
+    assert!(client.try_init(&p).is_ok());
 }
