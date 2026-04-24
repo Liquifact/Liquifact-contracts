@@ -695,3 +695,33 @@ fn test_differential_settle_maturity_minus_one_vs_exact() {
     let settled = client.settle();
     assert_eq!(settled.status, 2);
 }
+
+#[test]
+fn test_escrow_settled_event_fields_match_storage() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    const MATURITY: u64 = 0;
+    const YIELD_BPS: i64 = 750;
+    client.init(
+        &admin,
+        &String::from_str(&env, "EVFLD"),
+        &sme,
+        &5_000i128,
+        &YIELD_BPS,
+        &MATURITY,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+    );
+    client.fund(&investor, &5_000i128);
+    let settled = client.settle();
+
+    assert_eq!(settled.status, 2);
+    assert_eq!(settled.funded_amount, 5_000i128);
+    assert_eq!(settled.yield_bps, YIELD_BPS);
+    assert_eq!(settled.maturity, MATURATION);
+}

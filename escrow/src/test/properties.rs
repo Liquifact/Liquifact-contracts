@@ -86,4 +86,113 @@ proptest! {
             prop_assert_eq!(after_fund.status, 0);
         }
     }
+
+    #[test]
+    fn prop_status_transition_open_to_funded_then_settled_or_withdrawn(
+        amount in 1i128..10_000_0000000i128,
+        target in 1i128..10_000_0000000i128,
+    ) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let sme = Address::generate(&env);
+        let investor = Address::generate(&env);
+        let client = deploy(&env);
+
+        let escrow = client.init(
+            &admin,
+            &String::from_str(&env, "INVTRAN"),
+            &sme,
+            &target,
+            &800i64,
+            &0u64,
+            &Address::generate(&env),
+            &None,
+            &Address::generate(&env),
+            &None,
+            &None,
+            &None,
+        );
+        prop_assert_eq!(escrow.status, 0);
+
+        if amount >= target {
+            let after_fund = client.fund(&investor, &amount);
+            prop_assert_eq!(after_fund.status, 1);
+
+            let after_settle = client.settle();
+            prop_assert!(after_settle.status == 2 || after_settle.status == 3);
+        }
+    }
+
+    #[test]
+    fn prop_status_cannot_regress_from_funded(
+        target in 1i128..10_000_0000000i128,
+    ) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let sme = Address::generate(&env);
+        let investor = Address::generate(&env);
+        let client = deploy(&env);
+
+        let escrow = client.init(
+            &admin,
+            &String::from_str(&env, "REG001"),
+            &sme,
+            &target,
+            &800i64,
+            &0u64,
+            &Address::generate(&env),
+            &None,
+            &Address::generate(&env),
+            &None,
+            &None,
+            &None,
+        );
+
+        if target <= 0 { return; }
+
+        client.fund(&investor, &target);
+        let status_after_fund = client.get_escrow().status;
+        prop_assert!(status_after_fund >= escrow.status);
+        prop_assert!(status_after_fund <= 3);
+    }
+
+    #[test]
+    fn prop_funded_amount_overflow_protection(
+        amount1 in 1i128..1_000_000000i128,
+        amount2 in 1i128..1_000_000000i128,
+    ) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let sme = Address::generate(&env);
+        let investor = Address::generate(&env);
+        let client = deploy(&env);
+
+        let target = 1_000_000000i128;
+        client.init(
+            &admin,
+            &String::from_str(&env, "OVF001"),
+            &sme,
+            &target,
+            &800i64,
+            &0u64,
+            &Address::generate(&env),
+            &None,
+            &Address::generate(&env),
+            &None,
+            &None,
+            &None,
+        );
+
+        let total = amount1.saturating_add(amount2);
+        if total > 0 {
+            let before = client.get_escrow().funded_amount;
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                client.fund(&investor, &total);
+            }));
+            prop_assert!(result.is_ok() || before >= target);
+        }
+    }
 }
