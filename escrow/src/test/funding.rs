@@ -632,3 +632,115 @@ fn test_ledger_sequence_recorded_in_snapshot_with_tick() {
     let snap = client.get_funding_close_snapshot().unwrap();
     assert_eq!(snap.closed_at_ledger_sequence, seq);
 }
+
+#[test]
+fn test_get_funding_close_snapshot_absent_before_any_funding() {
+    // Snapshot must be None immediately after init, before any fund() call.
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "SNAP010"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+    );
+    assert_eq!(
+        client.get_funding_close_snapshot(),
+        None,
+        "snapshot must be absent before any funding"
+    );
+}
+
+#[test]
+fn test_get_funding_close_snapshot_present_after_funding_completes() {
+    // Snapshot must be Some with correct fields once funded_amount reaches funding_target.
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let inv = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "SNAP011"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+    );
+    // Partial fund — snapshot still absent.
+    client.fund(&inv, &(TARGET / 2));
+    assert_eq!(
+        client.get_funding_close_snapshot(),
+        None,
+        "snapshot must remain absent while escrow is still open"
+    );
+    // Final fund that crosses the target — snapshot must now be present.
+    client.fund(&inv, &(TARGET / 2));
+    let snap = client
+        .get_funding_close_snapshot()
+        .expect("snapshot must be present after funding completes");
+    assert_eq!(snap.total_principal, TARGET);
+    assert_eq!(snap.funding_target, TARGET);
+    assert_eq!(client.get_escrow().status, 1);
+}
+
+#[test]
+fn test_get_funding_close_snapshot_immutable_after_set() {
+    // Once the snapshot is written it must not change, even if additional reads occur
+    // after the escrow has transitioned to a terminal state (settled).
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let inv = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "SNAP012"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+    );
+    // Fund exactly to target — snapshot is written here.
+    client.fund(&inv, &TARGET);
+    let snap_at_close = client
+        .get_funding_close_snapshot()
+        .expect("snapshot must be present after funding");
+    // Advance through settlement — snapshot must remain identical.
+    client.settle();
+    let snap_after_settle = client
+        .get_funding_close_snapshot()
+        .expect("snapshot must still be present after settlement");
+    assert_eq!(
+        snap_at_close, snap_after_settle,
+        "snapshot must be immutable after being set"
+    );
+}
