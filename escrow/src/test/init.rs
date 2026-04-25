@@ -310,6 +310,29 @@ fn test_init_stores_registry_some_and_getters() {
 }
 
 #[test]
+#[should_panic(expected = "Funding token not set")]
+fn test_get_funding_token_before_init_panics() {
+    let env = Env::default();
+    let client = deploy(&env);
+    client.get_funding_token();
+}
+
+#[test]
+#[should_panic(expected = "Treasury not set")]
+fn test_get_treasury_before_init_panics() {
+    let env = Env::default();
+    let client = deploy(&env);
+    client.get_treasury();
+}
+
+#[test]
+fn test_get_registry_ref_before_init_returns_none() {
+    let env = Env::default();
+    let client = deploy(&env);
+    assert_eq!(client.get_registry_ref(), None);
+}
+
+#[test]
 fn test_init_registry_none_roundtrip() {
     let env = Env::default();
     env.mock_all_auths();

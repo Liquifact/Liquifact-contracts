@@ -151,11 +151,23 @@ fn test_migrate_wrong_from_version_panics() {
 }
 
 #[test]
-#[should_panic(expected = "No migration path from version 0")]
+#[should_panic(expected = "No migration path from version 4 — extend migrate or redeploy")]
+fn test_migrate_no_path_branch() {
+    let env = Env::default();
+    let (client, _, _) = setup(&env);
+    // Simulate an older version 4 already in storage.
+    env.storage().instance().set(&DataKey::Version, &4u32);
+    // migrate(4) should hit the "No migration path" branch.
+    client.migrate(&4u32);
+}
+
+#[test]
+#[should_panic(expected = "No migration path from version 0 — extend migrate or redeploy")]
 fn test_migrate_from_zero_uninitialized_panics() {
     let env = Env::default();
     env.mock_all_auths();
     let client = deploy(&env);
+    // Uninitialized storage returns version 0; migrate(0) hits the no-path branch.
     client.migrate(&0u32);
 }
 

@@ -6,6 +6,15 @@
 //!   these are **ledger records only**; they do **not** move tokens or trigger liquidation.
 //! - [`LiquifactEscrow::settle`] finalizes the escrow after maturity (when configured).
 //!
+//! ## Schema version ([`SCHEMA_VERSION`] / [`DataKey::Version`])
+//!
+//! The constant [`SCHEMA_VERSION`] is written to [`DataKey::Version`] by [`LiquifactEscrow::init`]
+//! and is the canonical source of truth for upgrade decisions. **Current value: 5.**
+//!
+//! [`LiquifactEscrow::migrate`] **panics in all current execution paths** — no silent migration
+//! work is promised or performed. Operators must extend `migrate` before calling it, or redeploy
+//! when stored struct layout changes. See `docs/OPERATOR_RUNBOOK.md` for the full decision tree.
+//!
 //! ## Compliance hold (legal hold)
 //!
 //! An admin may set [`DataKey::LegalHold`] to block risk-bearing transitions until cleared:
@@ -38,9 +47,10 @@
 //! escrow has reached a **terminal** [`InvoiceEscrow::status`] (settled or withdrawn). It cannot run
 //! during a legal hold. Transfers go through [`crate::external_calls`] so **pre/post token balances**
 //! must match the requested amount (standard SEP-41 behavior); fee-on-transfer or malicious tokens
-//! are out of scope and should fail safe assertions. This is meant for rounding residue / stray
-//! transfers, not for settling live liabilities — integrations that custody principal on-chain must
-//! keep token balances reconciled with `funded_amount` so treasury sweeps cannot pull user funds.
+//! are **explicitly out of scope** and will cause safe-failure panics at the balance-check boundary.
+//! This is meant for rounding residue / stray transfers, not for settling live liabilities —
+//! integrations that custody principal on-chain must keep token balances reconciled with
+//! `funded_amount` so treasury sweeps cannot pull user funds.
 //!
 //! ## Ledger time trust model
 //!
@@ -74,7 +84,19 @@ use soroban_sdk::{
 
 pub(crate) mod external_calls;
 
-/// Current storage schema version (`DataKey::Version`).
+/// Current storage schema version written to [`DataKey::Version`] by [`LiquifactEscrow::init`].
+///
+/// # Schema version changelog
+///
+/// | Version | Summary | Upgrade path |
+/// |---------|---------|-------------|
+/// | 1 | Initial schema (`InvoiceEscrow` v1, basic fund / settle) | N/A |
+/// | 2 | Added `InvestorEffectiveYield`, `InvestorClaimNotBefore` | Additive keys — no `migrate` call required |
+/// | 3 | Added `FundingCloseSnapshot`, `MinContributionFloor`, `MaxUniqueInvestorsCap`, `UniqueFunderCount` | Additive keys — old instances return defaults |
+/// | 4 | Added `PrimaryAttestationHash`, `AttestationAppendLog` | Additive keys — no `migrate` call required |
+/// | 5 | Added `YieldTierTable`, `RegistryRef`, `Treasury`; `fund_with_commitment` | **Redeploy required** if `InvoiceEscrow` XDR changed |
+///
+/// See `docs/OPERATOR_RUNBOOK.md` for the full redeploy-vs-upgrade decision tree.
 pub const SCHEMA_VERSION: u32 = 5;
 
 /// Upper bound on [`LiquifactEscrow::append_attestation_digest`] entries to keep storage bounded.
@@ -111,8 +133,9 @@ pub const MAX_INVOICE_ID_STRING_LEN: u32 = 32;
 pub enum DataKey {
     /// Full escrow snapshot ([`InvoiceEscrow`]); rewritten atomically on every state transition.
     Escrow,
-    /// Stored schema version (`u32`); written as [`SCHEMA_VERSION`] at `init`.
-    /// Incremented only when a `migrate` path is added; additive-only releases leave it unchanged.
+    /// Stored schema version; written once by [`LiquifactEscrow::init`] to [`SCHEMA_VERSION`]
+    /// and updated by [`LiquifactEscrow::migrate`] when a migration path is implemented.
+    /// Read with [`LiquifactEscrow::get_version`]. Never delete or rename this variant.
     Version,
     /// Per-investor contributed principal recorded during [`LiquifactEscrow::fund`].
     /// Absent ⇒ `0`. One entry per investor address.
@@ -321,8 +344,9 @@ pub struct SmeWithdrew {
 pub struct InvestorPayoutClaimed {
     #[topic]
     pub name: Symbol,
-    pub invoice_id: Symbol,
+    #[topic]
     pub investor: Address,
+    pub invoice_id: Symbol,
 }
 
 #[contractevent]
@@ -554,7 +578,9 @@ impl LiquifactEscrow {
         escrow
     }
 
-    /// Bound funding token (immutable after [`LiquifactEscrow::init`]).
+    /// Returns the SEP-41 funding token bound at [`LiquifactEscrow::init`] ([`DataKey::FundingToken`]).
+    ///
+    /// **Immutable:** set once at init; cannot change after deploy. Panics if called before init.
     pub fn get_funding_token(env: Env) -> Address {
         env.storage()
             .instance()
@@ -562,7 +588,10 @@ impl LiquifactEscrow {
             .unwrap_or_else(|| panic!("Funding token not set"))
     }
 
-    /// Treasury that may receive terminal dust sweeps (immutable after init).
+    /// Returns the protocol treasury address bound at [`LiquifactEscrow::init`] ([`DataKey::Treasury`]).
+    ///
+    /// **Immutable:** set once at init; cannot change after deploy. The treasury is the only
+    /// recipient of [`LiquifactEscrow::sweep_terminal_dust`]. Panics if called before init.
     pub fn get_treasury(env: Env) -> Address {
         env.storage()
             .instance()
@@ -570,7 +599,12 @@ impl LiquifactEscrow {
             .unwrap_or_else(|| panic!("Treasury not set"))
     }
 
-    /// Optional registry contract id (**hint only** — not authority for this escrow).
+    /// Returns the optional off-chain registry hint stored at [`DataKey::RegistryRef`], or [`None`]
+    /// when no registry was supplied at [`LiquifactEscrow::init`].
+    ///
+    /// **Non-authority:** this address is a read-only discoverability hint for off-chain indexers.
+    /// No on-chain logic in this contract consults it. Callers must **not** treat its presence as
+    /// proof of registry membership — query the registry contract directly to verify on-chain state.
     pub fn get_registry_ref(env: Env) -> Option<Address> {
         env.storage().instance().get(&DataKey::RegistryRef)
     }
@@ -884,11 +918,37 @@ impl LiquifactEscrow {
         escrow
     }
 
-    /// Migrate stored schema version.
+    /// Validate the stored schema version and apply a migration if one is implemented.
     ///
-    /// New optional keys (`LegalHold`, `SmeCollateralPledge`, etc.) are **additive**: older
-    /// bytecode can ignore unknown instance keys. Changing stored `InvoiceEscrow` layout still
-    /// requires a coordinated migration or redeploy — see repository README.
+    /// # Behavior — **panics on all current paths**
+    ///
+    /// This entrypoint currently contains **no implemented migration logic**. Every call
+    /// terminates with a `panic!` (aborts the Soroban transaction). This is intentional:
+    /// it makes the "no migration" guarantee explicit rather than silently returning success.
+    ///
+    /// Do **not** call `migrate` expecting it to perform bookkeeping work in the current
+    /// release. To add a real migration path (e.g. rewriting a stored struct after a field
+    /// addition), implement the transformation above the final `panic!` branch, update
+    /// [`DataKey::Version`], and bump [`SCHEMA_VERSION`].
+    ///
+    /// # When to call
+    ///
+    /// - **Only** when you have extended `migrate` with a concrete transformation for the
+    ///   `from_version → SCHEMA_VERSION` path you need.
+    /// - Additive new [`DataKey`] variants read with `.get(...).unwrap_or(default)` do **not**
+    ///   require a `migrate` call; old instances simply return the default.
+    /// - If `InvoiceEscrow` struct layout changed, `migrate` cannot help — redeploy instead.
+    ///
+    /// # Panics
+    ///
+    /// | Condition | Message |
+    /// |-----------|--------|
+    /// | `stored_version != from_version` | `"from_version does not match stored version"` |
+    /// | `from_version >= SCHEMA_VERSION` | `"Already at current schema version"` |
+    /// | Any `from_version < SCHEMA_VERSION` (all paths) | `"No migration path from version {N} — extend migrate or redeploy"` |
+    ///
+    /// See `docs/OPERATOR_RUNBOOK.md` §2 for step-by-step instructions on implementing
+    /// a concrete migration path.
     pub fn migrate(env: Env, from_version: u32) -> u32 {
         let stored: u32 = env.storage().instance().get(&DataKey::Version).unwrap_or(0);
 
@@ -901,6 +961,10 @@ impl LiquifactEscrow {
             panic!("Already at current schema version");
         }
 
+        // No migration path is implemented for any version below SCHEMA_VERSION.
+        // To add one: implement the transformation here, call
+        //   env.storage().instance().set(&DataKey::Version, &NEW_VERSION);
+        // and return NEW_VERSION before reaching this panic.
         panic!(
             "No migration path from version {} — extend migrate or redeploy",
             from_version
@@ -984,6 +1048,7 @@ impl LiquifactEscrow {
                     .instance()
                     .set(&DataKey::InvestorClaimNotBefore(investor.clone()), &0u64);
             }
+            // If prev > 0, preserve existing effective yield and claim lock
         } else {
             assert!(
                 prev == 0,
@@ -1141,6 +1206,14 @@ impl LiquifactEscrow {
 
         investor.require_auth();
 
+        // Ensure the caller is actually an investor with a recorded contribution.
+        let contribution: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::InvestorContribution(investor.clone()))
+            .unwrap_or(0);
+        assert!(contribution > 0, "Address has no contribution to claim");
+
         let escrow = Self::get_escrow(env.clone());
         assert!(
             escrow.status == 2,
@@ -1159,17 +1232,16 @@ impl LiquifactEscrow {
         );
 
         let key = DataKey::InvestorClaimed(investor.clone());
-        assert!(
-            !env.storage().instance().get(&key).unwrap_or(false),
-            "Investor already claimed"
-        );
+        if env.storage().instance().get(&key).unwrap_or(false) {
+            return;
+        }
 
         env.storage().instance().set(&key, &true);
 
         InvestorPayoutClaimed {
             name: symbol_short!("inv_claim"),
-            invoice_id: escrow.invoice_id.clone(),
             investor,
+            invoice_id: escrow.invoice_id.clone(),
         }
         .publish(&env);
     }
