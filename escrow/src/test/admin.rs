@@ -318,6 +318,17 @@ fn test_legal_hold_blocks_new_funds_when_open() {
     client.fund(&investor, &1i128);
 }
 
+/// Soroban instance storage returns `None` for a key that has never been written.
+/// `legal_hold_active` maps that `None` to `false` via `unwrap_or(false)`, so a
+/// fresh deploy must read `false` without any explicit `set_legal_hold` call.
+#[test]
+fn test_get_legal_hold_defaults_false_on_fresh_deploy() {
+    let env = Env::default();
+    // No init, no set_legal_hold – DataKey::LegalHold is absent from storage.
+    let client = deploy(&env);
+    assert!(!client.get_legal_hold());
+}
+
 #[test]
 fn test_update_funding_target_by_admin_succeeds() {
     let env = Env::default();

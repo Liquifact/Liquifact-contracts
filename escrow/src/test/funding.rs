@@ -509,6 +509,126 @@ fn test_fund_with_commitment_twice_panics() {
 }
 
 #[test]
+#[should_panic(expected = "Additional principal after a tiered first deposit")]
+fn test_fund_then_fund_with_commitment_panics() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let inv = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "SEQ001"),
+        &sme,
+        &10_000i128,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+    );
+    client.fund(&inv, &5_000i128);
+    client.fund_with_commitment(&inv, &5_000i128, &10u64);
+}
+
+#[test]
+fn test_tier_selection_ladder() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
+    let mut tiers = SorobanVec::new(&env);
+    tiers.push_back(YieldTier {
+        min_lock_secs: 100,
+        yield_bps: 900,
+    });
+    tiers.push_back(YieldTier {
+        min_lock_secs: 200,
+        yield_bps: 1000,
+    });
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "LADDER01"),
+        &sme,
+        &100_000i128,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &Some(tiers),
+        &None,
+        &None,
+    );
+
+    let inv_base = Address::generate(&env);
+    let inv_tier1 = Address::generate(&env);
+    let inv_tier2 = Address::generate(&env);
+    let inv_mid = Address::generate(&env);
+
+    // Below first tier -> base
+    client.fund_with_commitment(&inv_base, &1_000i128, &50u64);
+    assert_eq!(client.get_investor_yield_bps(&inv_base), 800);
+
+    // Exactly first tier
+    client.fund_with_commitment(&inv_tier1, &1_000i128, &100u64);
+    assert_eq!(client.get_investor_yield_bps(&inv_tier1), 900);
+
+    // Between tiers -> still first tier
+    client.fund_with_commitment(&inv_mid, &1_000i128, &150u64);
+    assert_eq!(client.get_investor_yield_bps(&inv_mid), 900);
+
+    // Exactly second tier
+    client.fund_with_commitment(&inv_tier2, &1_000i128, &200u64);
+    assert_eq!(client.get_investor_yield_bps(&inv_tier2), 1000);
+}
+
+#[test]
+fn test_fund_with_commitment_zero_lock_behaves_as_fund() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let inv = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
+    let mut tiers = SorobanVec::new(&env);
+    tiers.push_back(YieldTier {
+        min_lock_secs: 100,
+        yield_bps: 900,
+    });
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "ZERO001"),
+        &sme,
+        &10_000i128,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &Some(tiers),
+        &None,
+        &None,
+    );
+
+    client.fund_with_commitment(&inv, &5_000i128, &0u64);
+    assert_eq!(client.get_investor_yield_bps(&inv), 800);
+    assert_eq!(client.get_investor_claim_not_before(&inv), 0);
+}
+
+#[test]
 #[should_panic(expected = "strictly increasing min_lock_secs")]
 fn test_init_bad_tier_order_panics() {
     let env = Env::default();

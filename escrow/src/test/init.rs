@@ -309,6 +309,138 @@ fn test_init_stores_registry_some_and_getters() {
     assert_eq!(client.get_treasury(), treasury);
 }
 
+// --- min_contribution_floor init wiring ---
+
+/// Floor stored and readable when a positive value is supplied at init.
+#[test]
+fn test_init_min_contribution_floor_stored() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "FLOOR01"),
+        &sme,
+        &10_000i128,
+        &500i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &Some(1_000i128),
+        &None,
+    );
+    assert_eq!(client.get_min_contribution_floor(), 1_000i128);
+}
+
+/// Floor defaults to 0 when `min_contribution` is `None`.
+#[test]
+fn test_init_min_contribution_floor_defaults_to_zero() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "FLOOR02"),
+        &sme,
+        &10_000i128,
+        &500i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+    );
+    assert_eq!(client.get_min_contribution_floor(), 0i128);
+}
+
+/// `min_contribution = Some(0)` is rejected — the value must be positive when supplied.
+#[test]
+#[should_panic(expected = "min_contribution must be positive when configured")]
+fn test_init_min_contribution_zero_panics() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "FLOOR03"),
+        &sme,
+        &10_000i128,
+        &500i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &Some(0i128),
+        &None,
+    );
+}
+
+/// `min_contribution` exceeding the invoice amount is rejected.
+#[test]
+#[should_panic(expected = "min_contribution cannot exceed initial invoice amount")]
+fn test_init_min_contribution_exceeds_amount_panics() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "FLOOR04"),
+        &sme,
+        &1_000i128,
+        &500i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &Some(1_001i128),
+        &None,
+    );
+}
+
+/// Floor equal to the invoice amount is the boundary — must be accepted.
+#[test]
+fn test_init_min_contribution_equal_to_amount_accepted() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "FLOOR05"),
+        &sme,
+        &5_000i128,
+        &500i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &Some(5_000i128),
+        &None,
+    );
+    assert_eq!(client.get_min_contribution_floor(), 5_000i128);
+}
+
 #[test]
 #[should_panic(expected = "Funding token not set")]
 fn test_get_funding_token_before_init_panics() {

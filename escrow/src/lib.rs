@@ -114,53 +114,82 @@ pub const MAX_INVOICE_ID_STRING_LEN: u32 = 32;
 
 #[contracttype]
 #[derive(Clone)]
-/// Storage discriminator for all persisted values.
+/// Storage discriminator for all persisted values in Soroban instance storage.
+///
+/// Every variant maps to a distinct XDR-encoded key in the contract’s instance storage map.
+/// Optional and per-address keys are always read with `.get(...).unwrap_or(default)` so that
+/// deployments predating a key behave as “unset / default” without panicking.
+///
+/// ## Additive-key policy (see ADR-007)
+///
+/// Adding a new variant is **backward-compatible** when the new key is read with
+/// `.unwrap_or(default)` and its absence does not change existing entrypoint semantics.
+/// Renaming a variant, changing its XDR discriminant, or altering the stored type of an
+/// existing key is **breaking** and requires a `migrate` path or a full redeploy.
 ///
 /// Derive rationale:
 /// - `Clone`: required because keys are passed by reference into storage APIs and reused
 ///   across lookups/sets in the same execution path.
 pub enum DataKey {
+    /// Full escrow snapshot ([`InvoiceEscrow`]); rewritten atomically on every state transition.
     Escrow,
     /// Stored schema version; written once by [`LiquifactEscrow::init`] to [`SCHEMA_VERSION`]
     /// and updated by [`LiquifactEscrow::migrate`] when a migration path is implemented.
     /// Read with [`LiquifactEscrow::get_version`]. Never delete or rename this variant.
     Version,
     /// Per-investor contributed principal recorded during [`LiquifactEscrow::fund`].
+    /// Absent ⇒ `0`. One entry per investor address.
     InvestorContribution(Address),
     /// When true, compliance/legal hold blocks payouts and settlement finalization.
+    /// Absent ⇒ `false` (no hold). Toggled by admin via [`LiquifactEscrow::set_legal_hold`].
     LegalHold,
     /// Optional SME collateral pledge metadata (record-only — not an on-chain asset lock).
+    /// Absent when no pledge has been recorded. Replaceable by the SME.
     SmeCollateralPledge,
-    /// Set when an investor has exercised a claim after settlement.
+    /// Set to `true` when an investor has exercised a claim after settlement.
+    /// Absent ⇒ `false`. Written once; a second claim panics.
     InvestorClaimed(Address),
     /// SEP-41 funding asset for this invoice instance; set once in [`LiquifactEscrow::init`].
+    /// Immutable after init.
     FundingToken,
     /// Protocol treasury that may receive [`LiquifactEscrow::sweep_terminal_dust`]; set once in init.
+    /// Immutable after init.
     Treasury,
     /// Optional registry contract id for indexers; **hint only**, not authority (see module rustdoc).
-    /// Omitted from storage when unset at init.
+    /// Omitted from storage when unset at init. Absent ⇒ `None`.
     RegistryRef,
     /// Immutable tier table when configured at [`LiquifactEscrow::init`]; omitted when tiering is off.
+    /// Absent ⇒ no tiering (base `yield_bps` applies to all investors).
     /// **Trust:** values are protocol-supplied at deploy; the contract never mutates this key after init.
     YieldTierTable,
     /// Set once when status first becomes **funded** (1); immutable thereafter (pro-rata denominator).
+    /// Absent until the escrow reaches `status == 1`. See [`FundingCloseSnapshot`].
     FundingCloseSnapshot,
     /// Effective annualized yield in bps chosen at this investor’s **first** deposit (see tiered yield).
+    /// Absent ⇒ falls back to [`InvoiceEscrow::yield_bps`]. One entry per investor address.
     InvestorEffectiveYield(Address),
     /// Minimum [`Env::ledger`] timestamp before [`LiquifactEscrow::claim_investor_payout`] (0 = no extra gate).
+    /// Absent ⇒ `0`. One entry per investor address; set on first deposit.
     InvestorClaimNotBefore(Address),
     /// Minimum [`LiquifactEscrow::fund`] / [`LiquifactEscrow::fund_with_commitment`] amount per call (0 = no floor).
+    /// Written as `0` even when unconfigured so reads always succeed.
     MinContributionFloor,
-    /// When set at [`LiquifactEscrow::init`], caps distinct investor addresses that may contribute (`prev == 0`).
+    /// When set at [`LiquifactEscrow::init`], caps distinct investor addresses that may contribute.
+    /// Absent ⇒ unlimited. Checked against [`DataKey::UniqueFunderCount`] on each new investor.
     MaxUniqueInvestorsCap,
     /// Count of distinct investor addresses that have a non-zero [`DataKey::InvestorContribution`].
+    /// Written as `0` at init; incremented once per new investor in `fund_impl`.
     UniqueFunderCount,
     /// Admin-only **single-set** off-chain attestation digest (e.g. SHA-256 of a legal/KYC bundle).
-    /// See [`LiquifactEscrow::bind_primary_attestation_hash`].
+    /// Absent until [`LiquifactEscrow::bind_primary_attestation_hash`] is called; single-set thereafter.
     PrimaryAttestationHash,
     /// Append-only audit chain of digests (bounded by [`MAX_ATTESTATION_APPEND_ENTRIES`]).
-    /// See [`LiquifactEscrow::append_attestation_digest`].
+    /// Absent ⇒ empty log. See [`LiquifactEscrow::append_attestation_digest`].
     AttestationAppendLog,
+    /// When true, only allowlisted addresses may call [`LiquifactEscrow::fund`] or [`LiquifactEscrow::fund_with_commitment`].
+    AllowlistActive,
+    /// Whether a specific address is permitted to fund when [`DataKey::AllowlistActive`] is true.
+    InvestorAllowlisted(Address),
 }
 
 // --- Data types ---
@@ -348,6 +377,25 @@ pub struct AttestationDigestAppended {
     pub invoice_id: Symbol,
     pub index: u32,
     pub digest: BytesN<32>,
+}
+
+#[contractevent]
+pub struct AllowlistEnabledChanged {
+    #[topic]
+    pub name: Symbol,
+    pub invoice_id: Symbol,
+    /// `1` = enabled, `0` = disabled.
+    pub active: u32,
+}
+
+#[contractevent]
+pub struct InvestorAllowlistChanged {
+    #[topic]
+    pub name: Symbol,
+    pub invoice_id: Symbol,
+    pub investor: Address,
+    /// `1` = allowed, `0` = blocked.
+    pub allowed: u32,
 }
 
 #[contract]
@@ -858,6 +906,53 @@ impl LiquifactEscrow {
         .publish(&env);
     }
 
+    /// Enable or disable the investor allowlist. When enabled, only addresses with
+    /// [`DataKey::InvestorAllowlisted`] set to true may fund the escrow.
+    pub fn set_allowlist_active(env: Env, active: bool) {
+        let escrow = Self::get_escrow(env.clone());
+        escrow.admin.require_auth();
+        env.storage()
+            .instance()
+            .set(&DataKey::AllowlistActive, &active);
+        AllowlistEnabledChanged {
+            name: symbol_short!("al_ena"),
+            invoice_id: escrow.invoice_id.clone(),
+            active: if active { 1 } else { 0 },
+        }
+        .publish(&env);
+    }
+
+    pub fn is_allowlist_active(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::AllowlistActive)
+            .unwrap_or(false)
+    }
+
+    /// Add or remove an investor from the allowlist.
+    pub fn set_investor_allowlisted(env: Env, investor: Address, allowed: bool) {
+        let escrow = Self::get_escrow(env.clone());
+        escrow.admin.require_auth();
+        env.storage()
+            .persistent()
+            .set(&DataKey::InvestorAllowlisted(investor.clone()), &allowed);
+
+        InvestorAllowlistChanged {
+            name: symbol_short!("al_set"),
+            invoice_id: escrow.invoice_id.clone(),
+            investor,
+            allowed: if allowed { 1 } else { 0 },
+        }
+        .publish(&env);
+    }
+
+    pub fn is_investor_allowlisted(env: Env, investor: Address) -> bool {
+        env.storage()
+            .persistent()
+            .get(&DataKey::InvestorAllowlisted(investor))
+            .unwrap_or(false)
+    }
+
     /// Convenience alias for [`LiquifactEscrow::set_legal_hold`] with `active = false`.
     pub fn clear_legal_hold(env: Env) {
         Self::set_legal_hold(env, false);
@@ -994,6 +1089,13 @@ impl LiquifactEscrow {
             "Legal hold blocks new funding while active"
         );
         assert!(escrow.status == 0, "Escrow not open for funding");
+
+        if Self::is_allowlist_active(env.clone()) {
+            assert!(
+                Self::is_investor_allowlisted(env.clone(), investor.clone()),
+                "Investor not on allowlist"
+            );
+        }
 
         let contribution_key = DataKey::InvestorContribution(investor.clone());
         let prev: i128 = env.storage().instance().get(&contribution_key).unwrap_or(0);
@@ -1206,6 +1308,10 @@ impl LiquifactEscrow {
             "Investor commitment lock not expired (ledger timestamp)"
         );
 
+        // Investor must have participated (non-zero contribution) to claim.
+        let contribution: i128 = Self::get_contribution(env.clone(), investor.clone());
+        assert!(contribution > 0, "Investor did not participate");
+
         let key = DataKey::InvestorClaimed(investor.clone());
         if env.storage().instance().get(&key).unwrap_or(false) {
             return;
@@ -1273,3 +1379,5 @@ impl LiquifactEscrow {
 
 #[cfg(test)]
 mod test;
+#[cfg(test)]
+mod test_allowlist;

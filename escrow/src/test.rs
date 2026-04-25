@@ -1,6 +1,6 @@
 use super::{
-    external_calls, DataKey, LiquifactEscrow, LiquifactEscrowClient, YieldTier,
-    MAX_DUST_SWEEP_AMOUNT, SCHEMA_VERSION,
+    DataKey, LiquifactEscrow, LiquifactEscrowClient, YieldTier, MAX_DUST_SWEEP_AMOUNT,
+    SCHEMA_VERSION,
 };
 use soroban_sdk::{
     symbol_short,
@@ -12,10 +12,11 @@ use soroban_sdk::{
 // Focused test tree for escrow behavior. Shared helpers live here so feature
 // modules stay assertion-focused and each test still owns a fresh Env.
 mod admin;
-mod attestations;
+mod external_calls;
 mod funding;
 mod init;
 mod integration;
+mod legal_hold;
 mod properties;
 mod settlement;
 
@@ -87,7 +88,7 @@ pub(super) fn default_init(
         sme,
         &100_000_000_000i128,
         &800i64,
-        &1000u64,
+        &0u64,
         &token,
         &None,
         &treasury,
