@@ -13,6 +13,7 @@ use soroban_sdk::{
 // modules stay assertion-focused and each test still owns a fresh Env.
 mod admin;
 mod external_calls;
+mod external_calls_mocked;
 mod funding;
 mod init;
 mod integration;
