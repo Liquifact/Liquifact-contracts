@@ -708,6 +708,153 @@ fn test_sweep_requires_treasury_auth() {
     assert!(err.is_err(), "sweep without treasury auth must fail");
 }
 
+// ── is_investor_claimed: idempotent read behavior & cross-investor isolation ──
+
+#[test]
+fn test_is_investor_claimed_false_before_any_claim() {
+    // Getter must return false for a funded investor who has not yet claimed;
+    // repeated reads must not mutate state.
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "GIC001"),
+        &sme,
+        &1_000i128,
+        &400i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+    );
+    client.fund(&investor, &1_000i128);
+    client.settle();
+    assert!(!client.is_investor_claimed(&investor));
+    assert!(!client.is_investor_claimed(&investor)); // idempotent — no state change
+}
+
+#[test]
+fn test_is_investor_claimed_returns_false_for_unfunded_address() {
+    // An address that never participated must return false, not panic.
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    let stranger = Address::generate(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "GIC002"),
+        &sme,
+        &1_000i128,
+        &400i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+    );
+    client.fund(&investor, &1_000i128);
+    client.settle();
+    assert!(!client.is_investor_claimed(&stranger));
+}
+
+#[test]
+fn test_claim_marker_persists_after_claim() {
+    // After a successful claim the flag must remain true across repeated reads.
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "GIC003"),
+        &sme,
+        &1_000i128,
+        &400i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+    );
+    client.fund(&investor, &1_000i128);
+    client.settle();
+    client.claim_investor_payout(&investor);
+    assert!(client.is_investor_claimed(&investor));
+    assert!(client.is_investor_claimed(&investor)); // second read: still persisted
+}
+
+#[test]
+fn test_claim_marker_isolated_per_investor() {
+    // Claiming for investor_a must not set the flag for investor_b (no key crosstalk).
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor_a = Address::generate(&env);
+    let investor_b = Address::generate(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "GIC004"),
+        &sme,
+        &2_000i128,
+        &400i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+    );
+    client.fund(&investor_a, &1_000i128);
+    client.fund(&investor_b, &1_000i128);
+    client.settle();
+    client.claim_investor_payout(&investor_a);
+    assert!(client.is_investor_claimed(&investor_a));
+    assert!(!client.is_investor_claimed(&investor_b)); // b unaffected by a's claim
+}
+
+#[test]
+fn test_claim_marker_all_investors_independent() {
+    // Three investors with independent claim keys; partial claiming must not
+    // corrupt unclaimed investors' flags.
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let inv_a = Address::generate(&env);
+    let inv_b = Address::generate(&env);
+    let inv_c = Address::generate(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "GIC005"),
+        &sme,
+        &3_000i128,
+        &400i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+    );
+    client.fund(&inv_a, &1_000i128);
+    client.fund(&inv_b, &1_000i128);
+    client.fund(&inv_c, &1_000i128);
+    client.settle();
+    client.claim_investor_payout(&inv_a);
+    client.claim_investor_payout(&inv_c);
+    assert!(client.is_investor_claimed(&inv_a));
+    assert!(!client.is_investor_claimed(&inv_b)); // b still unclaimed
+    assert!(client.is_investor_claimed(&inv_c));
+    client.claim_investor_payout(&inv_b);
+    assert!(client.is_investor_claimed(&inv_b));
+}
+
 #[test]
 fn test_differential_settle_maturity_minus_one_vs_exact() {
     let env = Env::default();
