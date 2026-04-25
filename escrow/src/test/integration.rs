@@ -1,4 +1,5 @@
 use super::*;
+use super::super::external_calls::transfer_funding_token_with_balance_checks;
 use soroban_sdk::{contract, contractimpl};
 
 // External-call and token-integration assumptions that should stay separate
@@ -72,7 +73,7 @@ fn test_external_transfer_wrapper_balance_deltas() {
     let holder = deploy_id(&env);
     let treasury = Address::generate(&env);
     token.stellar.mint(&holder, &777i128);
-    external_calls::transfer_funding_token_with_balance_checks(
+    transfer_funding_token_with_balance_checks(
         &env, &token.id, &holder, &treasury, 777i128,
     );
     assert_eq!(token.token.balance(&holder), 0);
@@ -88,7 +89,7 @@ fn test_external_wrapper_panics_when_undercollateralized() {
     let holder = deploy_id(&env);
     let treasury = Address::generate(&env);
     token.stellar.mint(&holder, &1i128);
-    external_calls::transfer_funding_token_with_balance_checks(
+    transfer_funding_token_with_balance_checks(
         &env, &token.id, &holder, &treasury, 10i128,
     );
 }
