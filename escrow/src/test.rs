@@ -15,6 +15,7 @@ mod admin;
 mod funding;
 mod init;
 mod integration;
+mod legal_hold;
 mod properties;
 mod settlement;
 
