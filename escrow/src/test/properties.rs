@@ -18,7 +18,7 @@ proptest! {
         let target = 200_000_000_000i128;
         client.init(
             &admin,
-            &String::from_strsoroban_sdk::String::from_str(&env, "INVTST"),
+            &soroban_sdk::String::from_str(&env, "INVTST"),
             &sme,
             &target,
             &800i64,
@@ -57,7 +57,7 @@ proptest! {
 
         let escrow = client.init(
             &admin,
-            &String::from_strsoroban_sdk::String::from_str(&env, "INVSTA"),
+            &soroban_sdk::String::from_str(&env, "INVSTA"),
             &sme,
             &target,
             &800i64,
@@ -101,7 +101,7 @@ fn prop_status_transitions_open_to_funded_only() {
     let target: i128 = 100_000_000_000i128;
     client.init(
         &admin,
-        &String::from_strsoroban_sdk::String::from_str(&env, "ST0"),
+        &soroban_sdk::String::from_str(&env, "ST0"),
         &sme,
         &target,
         &800i64,
@@ -137,7 +137,7 @@ fn prop_status_settle_transition() {
     let target: i128 = 100_000_000_000i128;
     client.init(
         &admin,
-        &String::from_strsoroban_sdk::String::from_str(&env, "ST1"),
+        &soroban_sdk::String::from_str(&env, "ST1"),
         &sme,
         &target,
         &800i64,
@@ -171,7 +171,7 @@ fn prop_status_withdraw_transition() {
     let target: i128 = 100_000_000_000i128;
     client.init(
         &admin,
-        &String::from_strsoroban_sdk::String::from_str(&env, "STW1"),
+        &soroban_sdk::String::from_str(&env, "STW1"),
         &sme,
         &target,
         &800i64,
@@ -209,7 +209,7 @@ fn prop_no_regression_from_funded_status() {
     let target: i128 = 100_000_000_000i128;
     client.init(
         &admin,
-        &String::from_strsoroban_sdk::String::from_str(&env, "NREG1"),
+        &soroban_sdk::String::from_str(&env, "NREG1"),
         &sme,
         &target,
         &800i64,
@@ -245,7 +245,7 @@ fn prop_no_regression_after_withdraw() {
     let target: i128 = 100_000_000_000i128;
     client.init(
         &admin,
-        &String::from_strsoroban_sdk::String::from_str(&env, "NREG2"),
+        &soroban_sdk::String::from_str(&env, "NREG2"),
         &sme,
         &target,
         &800i64,
@@ -279,7 +279,7 @@ fn prop_settled_is_terminal_for_settle() {
     let target: i128 = 100_000_000_000i128;
     client.init(
         &admin,
-        &String::from_strsoroban_sdk::String::from_str(&env, "TERM1"),
+        &soroban_sdk::String::from_str(&env, "TERM1"),
         &sme,
         &target,
         &800i64,
@@ -311,7 +311,7 @@ fn prop_withdrawn_is_terminal_for_withdraw() {
     let target: i128 = 100_000_000_000i128;
     client.init(
         &admin,
-        &String::from_strsoroban_sdk::String::from_str(&env, "TERM2"),
+        &soroban_sdk::String::from_str(&env, "TERM2"),
         &sme,
         &target,
         &800i64,
@@ -343,7 +343,7 @@ fn prop_status_invariant_all_states_valid_range() {
     let target: i128 = 200_000_000_000i128;
     client.init(
         &admin,
-        &String::from_strsoroban_sdk::String::from_str(&env, "INV1"),
+        &soroban_sdk::String::from_str(&env, "INV1"),
         &sme,
         &target,
         &800i64,
@@ -381,7 +381,7 @@ fn prop_funded_amount_sum_of_contributions() {
     let target: i128 = 300_000_000_000i128;
     client.init(
         &admin,
-        &String::from_strsoroban_sdk::String::from_str(&env, "MONO1"),
+        &soroban_sdk::String::from_str(&env, "MONO1"),
         &sme,
         &target,
         &800i64,
@@ -429,7 +429,7 @@ fn prop_funded_amount_respects_funding_target() {
     let excess: i128 = 50_000_000_000i128;
     client.init(
         &admin,
-        &String::from_strsoroban_sdk::String::from_str(&env, "MONO2"),
+        &soroban_sdk::String::from_str(&env, "MONO2"),
         &sme,
         &target,
         &800i64,
@@ -465,7 +465,7 @@ fn prop_funded_amount_non_decreasing_across_multiple_funders() {
     let target: i128 = 300_000_000_000i128;
     client.init(
         &admin,
-        &String::from_strsoroban_sdk::String::from_str(&env, "MONO3"),
+        &soroban_sdk::String::from_str(&env, "MONO3"),
         &sme,
         &target,
         &800i64,
@@ -515,7 +515,7 @@ fn prop_funded_amount_equals_contribution_sum_for_funded_escrow() {
     let target: i128 = 300_000_000_000i128;
     client.init(
         &admin,
-        &String::from_strsoroban_sdk::String::from_str(&env, "MONO4"),
+        &soroban_sdk::String::from_str(&env, "MONO4"),
         &sme,
         &target,
         &800i64,
@@ -631,7 +631,7 @@ fn fuzz_multi_investor_fund_ordering_snapshot_once_only() {
         let (token, treasury) = free_addresses(&env);
         client.init(
             &admin,
-            &String::from_strsoroban_sdk::String::from_str(&env, "FUZZSNAP"),
+            &soroban_sdk::String::from_str(&env, "FUZZSNAP"),
             &sme,
             &TARGET,
             &800i64,

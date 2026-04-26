@@ -235,7 +235,7 @@ fn test_claim_investor_twice_is_idempotent() {
     let investor = Address::generate(&env);
     client.init(
         &admin,
-        &String::from_strsoroban_sdk::String::from_str(&env, "CL001"),
+        &soroban_sdk::String::from_str(&env, "CL001"),
         &sme,
         &1_000i128,
         &400i64,
@@ -268,7 +268,7 @@ fn test_claim_by_non_investor_panics() {
     let stranger = Address::generate(&env);
     client.init(
         &admin,
-        &String::from_strsoroban_sdk::String::from_str(&env, "STR001"),
+        &soroban_sdk::String::from_str(&env, "STR001"),
         &sme,
         &1_000i128,
         &400i64,
@@ -296,7 +296,7 @@ fn test_clashing_investors_have_independent_claims() {
     let inv_b = Address::generate(&env);
     client.init(
         &admin,
-        &String::from_strsoroban_sdk::String::from_str(&env, "CLASH01"),
+        &soroban_sdk::String::from_str(&env, "CLASH01"),
         &sme,
         &2_000i128,
         &400i64,
@@ -378,7 +378,7 @@ fn test_claim_gating_exact_timestamp() {
 
     client.init(
         &admin,
-        &String::from_strsoroban_sdk::String::from_str(&env, "LOCK003"),
+        &soroban_sdk::String::from_str(&env, "LOCK003"),
         &sme,
         &1_000i128,
         &400i64,
@@ -425,7 +425,7 @@ fn test_claim_gating_with_multiple_investors() {
 
     client.init(
         &admin,
-        &String::from_strsoroban_sdk::String::from_str(&env, "LOCK004"),
+        &soroban_sdk::String::from_str(&env, "LOCK004"),
         &sme,
         &2_000i128,
         &400i64,
@@ -495,7 +495,7 @@ fn settle_with_maturity_zero_succeeds_immediately() {
 
     client.init(
         &admin,
-        &String::from_strsoroban_sdk::String::from_str(&env, "MAT001"),
+        &soroban_sdk::String::from_str(&env, "MAT001"),
         &sme,
         &TARGET,
         &800i64,
@@ -532,7 +532,7 @@ fn settle_maturity_zero_event_maturity_field_is_zero() {
 
     client.init(
         &admin,
-        &String::from_strsoroban_sdk::String::from_str(&env, "MAT002"),
+        &soroban_sdk::String::from_str(&env, "MAT002"),
         &sme,
         &TARGET,
         &800i64,
@@ -567,7 +567,7 @@ fn settle_before_maturity_panics() {
     let maturity_ts: u64 = 1_700_000_000;
     client.init(
         &admin,
-        &String::from_strsoroban_sdk::String::from_str(&env, "MAT003"),
+        &soroban_sdk::String::from_str(&env, "MAT003"),
         &sme,
         &TARGET,
         &800i64,
@@ -599,7 +599,7 @@ fn settle_at_maturity_succeeds() {
     let maturity_ts: u64 = 1_800_000_000;
     client.init(
         &admin,
-        &String::from_strsoroban_sdk::String::from_str(&env, "MAT004"),
+        &soroban_sdk::String::from_str(&env, "MAT004"),
         &sme,
         &TARGET,
         &800i64,
@@ -634,7 +634,7 @@ fn settle_after_maturity_succeeds() {
     let maturity_ts: u64 = 1_700_000_000;
     client.init(
         &admin,
-        &String::from_strsoroban_sdk::String::from_str(&env, "MAT005"),
+        &soroban_sdk::String::from_str(&env, "MAT005"),
         &sme,
         &TARGET,
         &800i64,
@@ -673,7 +673,7 @@ fn settle_emits_escrow_settled_event() {
     let maturity_ts: u64 = 0u64;
     client.init(
         &admin,
-        &String::from_strsoroban_sdk::String::from_str(&env, "EVT001"),
+        &soroban_sdk::String::from_str(&env, "EVT001"),
         &sme,
         &TARGET,
         &yield_bps,
@@ -762,7 +762,7 @@ fn settle_blocked_by_legal_hold_when_maturity_not_reached() {
     let maturity_ts: u64 = 2_000_000_000;
     client.init(
         &admin,
-        &String::from_strsoroban_sdk::String::from_str(&env, "LHMAT01"),
+        &soroban_sdk::String::from_str(&env, "LHMAT01"),
         &sme,
         &TARGET,
         &800i64,
@@ -847,7 +847,7 @@ fn claim_investor_payout_succeeds_after_settle() {
     let (escrow_id, client) = deploy_with_id(&env);
     client.init(
         &admin,
-        &String::from_strsoroban_sdk::String::from_str(&env, "SW003"),
+        &soroban_sdk::String::from_str(&env, "SW003"),
         &sme,
         &1_000i128,
         &100i64,
@@ -876,7 +876,7 @@ fn claim_investor_payout_twice_panics() {
     let (_escrow_id, client) = deploy_with_id(&env);
     client.init(
         &admin,
-        &String::from_strsoroban_sdk::String::from_str(&env, "SW004"),
+        &soroban_sdk::String::from_str(&env, "SW004"),
         &sme,
         &1_000i128,
         &100i64,
@@ -908,7 +908,7 @@ fn claim_investor_payout_before_settle_panics() {
     let (_escrow_id, client) = deploy_with_id(&env);
     client.init(
         &admin,
-        &String::from_strsoroban_sdk::String::from_str(&env, "SW005"),
+        &soroban_sdk::String::from_str(&env, "SW005"),
         &sme,
         &1_000i128,
         &100i64,
@@ -939,7 +939,7 @@ fn claim_investor_payout_non_participant_panics() {
     let (escrow_id, client) = deploy_with_id(&env);
     client.init(
         &admin,
-        &String::from_strsoroban_sdk::String::from_str(&env, "SW006"),
+        &soroban_sdk::String::from_str(&env, "SW006"),
         &sme,
         &1_000i128,
         &100i64,
@@ -981,7 +981,7 @@ fn funding_snapshot_survives_withdraw() {
     let (escrow_id, client) = deploy_with_id(&env);
     client.init(
         &admin,
-        &String::from_strsoroban_sdk::String::from_str(&env, "SW007"),
+        &soroban_sdk::String::from_str(&env, "SW007"),
         &sme,
         &TARGET,
         &100i64,
@@ -1036,7 +1036,7 @@ fn test_is_investor_claimed_false_before_any_claim() {
     let investor = Address::generate(&env);
     client.init(
         &admin,
-        &String::from_strsoroban_sdk::String::from_str(&env, "GIC001"),
+        &soroban_sdk::String::from_str(&env, "GIC001"),
         &sme,
         &1_000i128,
         &400i64,
@@ -1063,7 +1063,7 @@ fn test_is_investor_claimed_returns_false_for_unfunded_address() {
     let stranger = Address::generate(&env);
     client.init(
         &admin,
-        &String::from_strsoroban_sdk::String::from_str(&env, "GIC002"),
+        &soroban_sdk::String::from_str(&env, "GIC002"),
         &sme,
         &1_000i128,
         &400i64,
@@ -1088,7 +1088,7 @@ fn test_claim_marker_persists_after_claim() {
     let investor = Address::generate(&env);
     client.init(
         &admin,
-        &String::from_strsoroban_sdk::String::from_str(&env, "GIC003"),
+        &soroban_sdk::String::from_str(&env, "GIC003"),
         &sme,
         &1_000i128,
         &400i64,
@@ -1116,7 +1116,7 @@ fn test_claim_marker_isolated_per_investor() {
     let investor_b = Address::generate(&env);
     client.init(
         &admin,
-        &String::from_strsoroban_sdk::String::from_str(&env, "GIC004"),
+        &soroban_sdk::String::from_str(&env, "GIC004"),
         &sme,
         &2_000i128,
         &400i64,
@@ -1147,7 +1147,7 @@ fn test_claim_marker_all_investors_independent() {
     let inv_c = Address::generate(&env);
     client.init(
         &admin,
-        &String::from_strsoroban_sdk::String::from_str(&env, "GIC005"),
+        &soroban_sdk::String::from_str(&env, "GIC005"),
         &sme,
         &3_000i128,
         &400i64,

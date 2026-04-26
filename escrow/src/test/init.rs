@@ -8,7 +8,7 @@ fn test_init_stores_escrow() {
     let (client, admin, sme) = setup(&env);
     let escrow = client.init(
         &admin,
-        &String::from_strsoroban_sdk::String::from_str(&env, "INV001"),
+        &soroban_sdk::String::from_str(&env, "INV001"),
         &sme,
         &TARGET,
         &800i64,
@@ -37,7 +37,7 @@ fn test_init_stores_keyed_invoice_and_lists_it() {
     let (client, admin, sme) = setup(&env);
     let escrow = client.init(
         &admin,
-        &String::from_strsoroban_sdk::String::from_str(&env, "INV001"),
+        &soroban_sdk::String::from_str(&env, "INV001"),
         &sme,
         &TARGET,
         &800i64,
@@ -59,7 +59,7 @@ fn test_init_requires_admin_auth() {
     let (client, admin, sme) = setup(&env);
     client.init(
         &admin,
-        &String::from_strsoroban_sdk::String::from_str(&env, "INVB"),
+        &soroban_sdk::String::from_str(&env, "INVB"),
         &sme,
         &TARGET,
         &800i64,
@@ -86,7 +86,7 @@ fn test_init_unauthorized_panics() {
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         client.init(
             &admin,
-            &String::from_strsoroban_sdk::String::from_str(&env, "INV001"),
+            &soroban_sdk::String::from_str(&env, "INV001"),
             &sme,
             &1_000i128,
             &800i64,
@@ -125,7 +125,7 @@ fn test_cost_baseline_init() {
     let (client, admin, sme) = setup(&env);
     client.init(
         &admin,
-        &String::from_strsoroban_sdk::String::from_str(&env, "INV100"),
+        &soroban_sdk::String::from_str(&env, "INV100"),
         &sme,
         &TARGET,
         &800i64,
@@ -145,7 +145,7 @@ fn test_cost_baseline_init_zero_maturity() {
     let (client, admin, sme) = setup(&env);
     client.init(
         &admin,
-        &String::from_strsoroban_sdk::String::from_str(&env, "INV101"),
+        &soroban_sdk::String::from_str(&env, "INV101"),
         &sme,
         &TARGET,
         &800i64,
@@ -165,7 +165,7 @@ fn test_cost_baseline_init_max_amount() {
     let (client, admin, sme) = setup(&env);
     client.init(
         &admin,
-        &String::from_strsoroban_sdk::String::from_str(&env, "INV102"),
+        &soroban_sdk::String::from_str(&env, "INV102"),
         &sme,
         &i128::MAX,
         &800i64,
@@ -190,7 +190,7 @@ fn test_init_invoice_id_empty_string_panics() {
     let (t, tr) = free_addresses(&env);
     client.init(
         &admin,
-        &String::from_strsoroban_sdk::String::from_str(&env, ""),
+        &soroban_sdk::String::from_str(&env, ""),
         &sme,
         &1000i128,
         &500i64,
@@ -215,7 +215,7 @@ fn test_init_invoice_id_whitespace_panics() {
     let (t, tr) = free_addresses(&env);
     client.init(
         &admin,
-        &String::from_strsoroban_sdk::String::from_str(&env, "INV BAD"),
+        &soroban_sdk::String::from_str(&env, "INV BAD"),
         &sme,
         &1000i128,
         &500i64,
@@ -241,7 +241,7 @@ fn test_init_invoice_id_too_long_panics() {
     let thirty_three = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456";
     client.init(
         &admin,
-        &String::from_strsoroban_sdk::String::from_str(&env, thirty_three),
+        &soroban_sdk::String::from_str(&env, thirty_three),
         &sme,
         &1000i128,
         &500i64,
@@ -266,7 +266,7 @@ fn test_init_invoice_id_bad_charset_hyphen_panics() {
     let (t, tr) = free_addresses(&env);
     client.init(
         &admin,
-        &String::from_strsoroban_sdk::String::from_str(&env, "INV-DASH"),
+        &soroban_sdk::String::from_str(&env, "INV-DASH"),
         &sme,
         &1000i128,
         &500i64,
@@ -292,7 +292,7 @@ fn test_init_stores_registry_some_and_getters() {
     let treasury = Address::generate(&env);
     client.init(
         &admin,
-        &String::from_strsoroban_sdk::String::from_str(&env, "REG001"),
+        &soroban_sdk::String::from_str(&env, "REG001"),
         &sme,
         &5000i128,
         &100i64,
@@ -322,7 +322,7 @@ fn test_init_min_contribution_floor_stored() {
     let (tok, tre) = free_addresses(&env);
     client.init(
         &admin,
-        &String::from_strsoroban_sdk::String::from_str(&env, "FLOOR01"),
+        &soroban_sdk::String::from_str(&env, "FLOOR01"),
         &sme,
         &10_000i128,
         &500i64,
@@ -348,7 +348,7 @@ fn test_init_min_contribution_floor_defaults_to_zero() {
     let (tok, tre) = free_addresses(&env);
     client.init(
         &admin,
-        &String::from_strsoroban_sdk::String::from_str(&env, "FLOOR02"),
+        &soroban_sdk::String::from_str(&env, "FLOOR02"),
         &sme,
         &10_000i128,
         &500i64,
@@ -375,7 +375,7 @@ fn test_init_min_contribution_zero_panics() {
     let (tok, tre) = free_addresses(&env);
     client.init(
         &admin,
-        &String::from_strsoroban_sdk::String::from_str(&env, "FLOOR03"),
+        &soroban_sdk::String::from_str(&env, "FLOOR03"),
         &sme,
         &10_000i128,
         &500i64,
@@ -401,7 +401,7 @@ fn test_init_min_contribution_exceeds_amount_panics() {
     let (tok, tre) = free_addresses(&env);
     client.init(
         &admin,
-        &String::from_strsoroban_sdk::String::from_str(&env, "FLOOR04"),
+        &soroban_sdk::String::from_str(&env, "FLOOR04"),
         &sme,
         &1_000i128,
         &500i64,
@@ -426,7 +426,7 @@ fn test_init_min_contribution_equal_to_amount_accepted() {
     let (tok, tre) = free_addresses(&env);
     client.init(
         &admin,
-        &String::from_strsoroban_sdk::String::from_str(&env, "FLOOR05"),
+        &soroban_sdk::String::from_str(&env, "FLOOR05"),
         &sme,
         &5_000i128,
         &500i64,
@@ -475,7 +475,7 @@ fn test_init_registry_none_roundtrip() {
     let treasury = Address::generate(&env);
     client.init(
         &admin,
-        &String::from_strsoroban_sdk::String::from_str(&env, "REG002"),
+        &soroban_sdk::String::from_str(&env, "REG002"),
         &sme,
         &5000i128,
         &100i64,
