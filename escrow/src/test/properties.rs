@@ -85,8 +85,8 @@ proptest! {
     }
 
     // Issue #145: Status state machine property tests
-    // Valid transitions: 0→1 (fund reaches target), 1→2 (settle), 1→3 (withdraw)
-    // Forbidden: 1→0, 2→0, 3→0, 2→1, 3→1, 2→2, 3→3, 2→3, 3→2
+    // Valid transitions: 0->1 (fund reaches target), 1->2 (settle), 1->3 (withdraw)
+    // Forbidden: 1->0, 2->0, 3->0, 2->1, 3->1, 2->2, 3->3, 2->3, 3->2
 
     #[test]
     fn prop_status_transitions_open_to_funded_only(
