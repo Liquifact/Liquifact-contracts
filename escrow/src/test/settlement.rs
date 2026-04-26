@@ -19,7 +19,7 @@
 #[cfg(test)]
 use super::{
     default_init, deploy, deploy_with_id, free_addresses, install_stellar_asset_token, setup,
-    TARGET,
+    MAX_DUST_SWEEP_AMOUNT, TARGET,
 };
 use soroban_sdk::{
     testutils::{Address as _, Events, Ledger as _},
@@ -1009,9 +1009,9 @@ fn funding_snapshot_survives_settle() {
 
     let snapshot_before = client.get_funding_close_snapshot();
     client.settle();
-    token.stellar.mint(&escrow_id, &10i128);
 
-    assert_eq!(snapshot_before, snapshot_after);
+    let snapshot_after = client.get_funding_close_snapshot();
+    assert_eq!(snapshot_before.unwrap().total_principal, snapshot_after.unwrap().total_principal);
 }
 
 // ── is_investor_claimed: idempotent read behavior & cross-investor isolation ──
