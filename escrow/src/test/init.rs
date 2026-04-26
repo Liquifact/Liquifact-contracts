@@ -1,4 +1,5 @@
 use super::*;
+use std::str::FromStr;
 
 // Initialization, getters, invoice-id validation, and init-shaped cost baselines.
 

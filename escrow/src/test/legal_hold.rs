@@ -15,6 +15,7 @@
 
 use super::*;
 use soroban_sdk::token::StellarAssetClient;
+use std::str::FromStr;
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 

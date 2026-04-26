@@ -23,7 +23,7 @@ use super::{
 };
 use soroban_sdk::{
     testutils::{Address as _, Events, Ledger as _},
-    Address, Env,
+    Address, Env, FromStr,
 };
 
 // ──────────────────────────────────────────────────────────────────────────────

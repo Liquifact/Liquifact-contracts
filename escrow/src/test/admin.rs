@@ -1,5 +1,6 @@
 use super::*;
 use crate::FundingTargetUpdated;
+use std::str::FromStr;
 
 // Admin/governance operations: target changes, maturity changes, admin transfer,
 // legal hold, migration guards, and collateral metadata.
