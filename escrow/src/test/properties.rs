@@ -1,6 +1,5 @@
 use super::*;
 use proptest::prelude::*;
-use std::str::FromStr;
 
 proptest! {
     #[test]
