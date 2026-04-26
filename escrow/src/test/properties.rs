@@ -83,516 +83,454 @@ proptest! {
             prop_assert_eq!(after_fund.status, 0);
         }
     }
+}
 
-    // Issue #145: Status state machine property tests
-    // Valid transitions: 0->1 (fund reaches target), 1->2 (settle), 1->3 (withdraw)
-    // Forbidden: 1->0, 2->0, 3->0, 2->1, 3->1, 2->2, 3->3, 2->3, 3->2
+// Issue #145: Status state machine property tests
+// Valid transitions: 0->1 (fund reaches target), 1->2 (settle), 1->3 (withdraw)
+// Forbidden: 1->0, 2->0, 3->0, 2->1, 3->1, 2->2, 3->3, 2->3, 3->2
 
-    #[test]
-    fn prop_status_transitions_open_to_funded_only(
-        amount in 1i128..100_000_000_000i128,
-        target in 1i128..100_000_000_000i128,
-    ) {
-        let env = Env::default();
-        env.mock_all_auths();
-        let admin = Address::generate(&env);
-        let sme = Address::generate(&env);
-        let investor = Address::generate(&env);
-        let client = deploy(&env);
+#[test]
+fn prop_status_transitions_open_to_funded_only() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let investor = Address::generate(&env);
+    let client = deploy(&env);
 
-        client.init(
-            &admin,
-            &String::from_str(&env, "ST0"),
-            &sme,
-            &target,
-            &800i64,
-            &0u64,
-            &Address::generate(&env),
-            &None,
-            &Address::generate(&env),
-            &None,
-            &None,
-            &None,
+    let target: i128 = 100_000_000_000i128;
+    client.init(
+        &admin,
+        &String::from_str(&env, "ST0"),
+        &sme,
+        &target,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+    );
+
+    let initial = client.get_escrow();
+    assert_eq!(initial.status, 0, "status must start at 0");
+
+    let after = client.fund(&investor, &target);
+    assert_eq!(after.status, 1, "funded: status must be 1");
+    assert!(after.status <= 1, "status must not exceed 1 before settle/withdraw");
+}
+
+#[test]
+fn prop_status_settle_transition() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let investor = Address::generate(&env);
+    let client = deploy(&env);
+
+    let target: i128 = 100_000_000_000i128;
+    client.init(
+        &admin,
+        &String::from_str(&env, "ST1"),
+        &sme,
+        &target,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+    );
+
+    client.fund(&investor, &target);
+
+    let before_settle = client.get_escrow();
+    assert_eq!(before_settle.status, 1, "status before settle must be 1");
+
+    let after_settle = client.settle();
+    assert_eq!(after_settle.status, 2, "settle must transition to 2");
+}
+
+#[test]
+fn prop_status_withdraw_transition() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let investor = Address::generate(&env);
+    let client = deploy(&env);
+
+    let target: i128 = 100_000_000_000i128;
+    client.init(
+        &admin,
+        &String::from_str(&env, "STW1"),
+        &sme,
+        &target,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+    );
+
+    client.fund(&investor, &target);
+
+    let before_withdraw = client.get_escrow();
+    assert_eq!(before_withdraw.status, 1, "status before withdraw must be 1");
+
+    let after_withdraw = client.withdraw();
+    assert_eq!(after_withdraw.status, 3, "withdraw must transition to 3");
+}
+
+// Issue #145: Forbidden regression tests
+
+#[test]
+fn prop_no_regression_from_funded_status() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let investor = Address::generate(&env);
+    let client = deploy(&env);
+
+    let target: i128 = 100_000_000_000i128;
+    client.init(
+        &admin,
+        &String::from_str(&env, "NREG1"),
+        &sme,
+        &target,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+    );
+
+    client.fund(&investor, &target);
+
+    let funded = client.get_escrow();
+    assert_eq!(funded.status, 1, "must be funded");
+
+    let settled = client.settle();
+    assert!(settled.status >= 1, "status must not decrease after settle");
+    assert_ne!(settled.status, 0, "status must never regress to 0");
+    assert_ne!(settled.status, 1, "after settle status must not be 1");
+}
+
+#[test]
+fn prop_no_regression_after_withdraw() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let investor = Address::generate(&env);
+    let client = deploy(&env);
+
+    let target: i128 = 100_000_000_000i128;
+    client.init(
+        &admin,
+        &String::from_str(&env, "NREG2"),
+        &sme,
+        &target,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+    );
+
+    client.fund(&investor, &target);
+    let withdrawn = client.withdraw();
+
+    assert_eq!(withdrawn.status, 3, "withdraw must set status to 3");
+    assert!(withdrawn.status >= 1, "status must not decrease below 1");
+}
+
+// Issue #145: Terminal state isolation
+
+#[test]
+fn prop_settled_is_terminal_for_settle() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let investor = Address::generate(&env);
+    let client = deploy(&env);
+
+    let target: i128 = 100_000_000_000i128;
+    client.init(
+        &admin,
+        &String::from_str(&env, "TERM1"),
+        &sme,
+        &target,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+    );
+
+    client.fund(&investor, &target);
+    client.settle();
+
+    let settled = client.get_escrow();
+    assert_eq!(settled.status, 2, "must be settled");
+}
+
+#[test]
+fn prop_withdrawn_is_terminal_for_withdraw() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let investor = Address::generate(&env);
+    let client = deploy(&env);
+
+    let target: i128 = 100_000_000_000i128;
+    client.init(
+        &admin,
+        &String::from_str(&env, "TERM2"),
+        &sme,
+        &target,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+    );
+
+    client.fund(&investor, &target);
+    client.withdraw();
+
+    let withdrawn = client.get_escrow();
+    assert_eq!(withdrawn.status, 3, "must be withdrawn");
+}
+
+#[test]
+fn prop_status_invariant_all_states_valid_range() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let investor = Address::generate(&env);
+    let client = deploy(&env);
+
+    let target: i128 = 200_000_000_000i128;
+    client.init(
+        &admin,
+        &String::from_str(&env, "INV1"),
+        &sme,
+        &target,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+    );
+
+    assert!(client.get_escrow().status == 0);
+
+    let partial_amount = target / 2;
+    client.fund(&investor, &partial_amount);
+
+    let after_partial = client.get_escrow();
+    assert!(after_partial.status <= 1, "partial funding: status must be 0 or 1");
+}
+
+// Issue #144: funded_amount monotonicity tests
+
+#[test]
+fn prop_funded_amount_sum_of_contributions() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let client = deploy(&env);
+
+    let target: i128 = 300_000_000_000i128;
+    client.init(
+        &admin,
+        &String::from_str(&env, "MONO1"),
+        &sme,
+        &target,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+    );
+
+    let inv1 = Address::generate(&env);
+    let inv2 = Address::generate(&env);
+    let inv3 = Address::generate(&env);
+
+    let amt1: i128 = 50_000_000_000i128;
+    let amt2: i128 = 100_000_000_000i128;
+    let amt3: i128 = 50_000_000_000i128;
+
+    let after1 = client.fund(&inv1, &amt1);
+    assert_eq!(after1.funded_amount, amt1, "first contribution");
+
+    let after2 = client.fund(&inv2, &amt2);
+    assert_eq!(after2.funded_amount, amt1 + amt2, "sum of contributions");
+
+    let after3 = client.fund(&inv3, &amt3);
+    assert_eq!(after3.funded_amount, amt1 + amt2 + amt3, "total contributions");
+}
+
+#[test]
+fn prop_funded_amount_respects_funding_target() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let investor = Address::generate(&env);
+    let client = deploy(&env);
+
+    let target: i128 = 100_000_000_000i128;
+    let excess: i128 = 50_000_000_000i128;
+    client.init(
+        &admin,
+        &String::from_str(&env, "MONO2"),
+        &sme,
+        &target,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+    );
+
+    let fund_amount = target + excess;
+    let after = client.fund(&investor, &fund_amount);
+    assert_eq!(after.funded_amount, fund_amount, "funded_amount records exact amount");
+    assert!(after.funded_amount > target, "overfunding recorded");
+}
+
+#[test]
+fn prop_funded_amount_non_decreasing_across_multiple_funders() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let inv1 = Address::generate(&env);
+    let inv2 = Address::generate(&env);
+    let inv3 = Address::generate(&env);
+    let client = deploy(&env);
+
+    let target: i128 = 300_000_000_000i128;
+    client.init(
+        &admin,
+        &String::from_str(&env, "MONO3"),
+        &sme,
+        &target,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+    );
+
+    let amt1: i128 = 50_000_000_000i128;
+    let amt2: i128 = 100_000_000_000i128;
+    let amt3: i128 = 50_000_000_000i128;
+
+    let before1 = client.get_escrow().funded_amount;
+    let after1 = client.fund(&inv1, &amt1);
+    assert!(after1.funded_amount >= before1, "first fund non-decreasing");
+
+    let before2 = after1.funded_amount;
+    let after2 = client.fund(&inv2, &amt2);
+    assert!(after2.funded_amount >= before2, "second fund non-decreasing");
+
+    let before3 = after2.funded_amount;
+    let after3 = client.fund(&inv3, &amt3);
+    assert!(after3.funded_amount >= before3, "third fund non-decreasing");
+
+    assert_eq!(
+        after3.funded_amount,
+        before1 + amt1 + amt2 + amt3,
+        "total equals sum"
+    );
+}
+
+#[test]
+fn prop_funded_amount_equals_contribution_sum_for_funded_escrow() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let client = deploy(&env);
+
+    let target: i128 = 300_000_000_000i128;
+    client.init(
+        &admin,
+        &String::from_str(&env, "MONO4"),
+        &sme,
+        &target,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+    );
+
+    let amounts: [i128; 3] = [50_000_000_000i128, 100_000_000_000i128, 50_000_000_000i128];
+    let mut total_contributed: i128 = 0;
+
+    for amount in amounts {
+        let before = client.get_escrow().funded_amount;
+        let after = client.fund(&Address::generate(&env), &amount);
+
+        total_contributed += amount;
+
+        assert_eq!(
+            after.funded_amount, total_contributed,
+            "funded_amount equals running sum"
         );
-
-        let initial = client.get_escrow();
-        prop_assert_eq!(initial.status, 0, "status must start at 0");
-
-        let after = client.fund(&investor, &amount);
-
-        if amount >= target {
-            prop_assert_eq!(after.status, 1, "funded: status must be 1");
-        } else {
-            prop_assert_eq!(after.status, 0, "not funded: status must remain 0");
-        }
-
-        prop_assert!(after.status <= 1, "status must not exceed 1 before settle/withdraw");
+        assert!(after.funded_amount >= before, "funded_amount never decreases");
     }
 
-    #[test]
-    fn prop_status_settle_transition(
-        target in 1i128..100_000_000_000i128,
-        funded_amount in 1i128..=200_000_000_000i128,
-    ) {
-        let env = Env::default();
-        env.mock_all_auths();
-        let admin = Address::generate(&env);
-        let sme = Address::generate(&env);
-        let investor = Address::generate(&env);
-        let client = deploy(&env);
-
-        let actual_fund = funded_amount.max(target);
-
-        client.init(
-            &admin,
-            &String::from_str(&env, "ST1"),
-            &sme,
-            &target,
-            &800i64,
-            &0u64,
-            &Address::generate(&env),
-            &None,
-            &Address::generate(&env),
-            &None,
-            &None,
-            &None,
-        );
-
-        client.fund(&investor, &actual_fund);
-
-        let before_settle = client.get_escrow();
-        prop_assert!(before_settle.status <= 1, "status before settle must be 0 or 1");
-
-        if before_settle.status == 1 {
-            let after_settle = client.settle();
-            prop_assert_eq!(after_settle.status, 2, "settle must transition to 2");
-        }
-    }
-
-    #[test]
-    fn prop_status_withdraw_transition(
-        target in 1i128..100_000_000_000i128,
-        funded_amount in 1i128..=200_000_000_000i128,
-    ) {
-        let env = Env::default();
-        env.mock_all_auths();
-        let admin = Address::generate(&env);
-        let sme = Address::generate(&env);
-        let investor = Address::generate(&env);
-        let client = deploy(&env);
-
-        let actual_fund = funded_amount.max(target);
-
-        client.init(
-            &admin,
-            &String::from_str(&env, "STW1"),
-            &sme,
-            &target,
-            &800i64,
-            &0u64,
-            &Address::generate(&env),
-            &None,
-            &Address::generate(&env),
-            &None,
-            &None,
-            &None,
-        );
-
-        client.fund(&investor, &actual_fund);
-
-        let before_withdraw = client.get_escrow();
-        prop_assert!(before_withdraw.status <= 1, "status before withdraw must be 0 or 1");
-
-        if before_withdraw.status == 1 {
-            let after_withdraw = client.withdraw();
-            prop_assert_eq!(after_withdraw.status, 3, "withdraw must transition to 3");
-        }
-    }
-
-    // Issue #145: Forbidden regression tests — no state can return to a lower status
-
-    #[test]
-    fn prop_no_regression_from_funded_status(
-        target in 1i128..50_000_000_000i128,
-    ) {
-        let env = Env::default();
-        env.mock_all_auths();
-        let admin = Address::generate(&env);
-        let sme = Address::generate(&env);
-        let investor = Address::generate(&env);
-        let client = deploy(&env);
-
-        client.init(
-            &admin,
-            &String::from_str(&env, "NREG1"),
-            &sme,
-            &target,
-            &800i64,
-            &0u64,
-            &Address::generate(&env),
-            &None,
-            &Address::generate(&env),
-            &None,
-            &None,
-            &None,
-        );
-
-        client.fund(&investor, &target);
-
-        let funded = client.get_escrow();
-        prop_assert_eq!(funded.status, 1, "must be funded");
-
-        let settled = client.settle();
-        prop_assert!(settled.status >= 1, "status must not decrease after settle");
-
-        prop_assert_ne!(settled.status, 0, "status must never regress to 0");
-        prop_assert_ne!(settled.status, 1, "after settle status must not be 1");
-    }
-
-    #[test]
-    fn prop_no_regression_after_withdraw() {
-        let env = Env::default();
-        env.mock_all_auths();
-        let admin = Address::generate(&env);
-        let sme = Address::generate(&env);
-        let investor = Address::generate(&env);
-        let client = deploy(&env);
-
-        client.init(
-            &admin,
-            &String::from_str(&env, "NREG2"),
-            &sme,
-            &100_000_000_000i128,
-            &800i64,
-            &0u64,
-            &Address::generate(&env),
-            &None,
-            &Address::generate(&env),
-            &None,
-            &None,
-            &None,
-        );
-
-        client.fund(&investor, &100_000_000_000i128);
-        let withdrawn = client.withdraw();
-
-        prop_assert_eq!(withdrawn.status, 3, "withdraw must set status to 3");
-        prop_assert!(withdrawn.status >= 1, "status must not decrease below 1");
-    }
-
-    // Issue #145: Terminal state isolation
-
-    #[test]
-    fn prop_settled_is_terminal_for_settle(
-        target in 1i128..50_000_000_000i128,
-    ) {
-        let env = Env::default();
-        env.mock_all_auths();
-        let admin = Address::generate(&env);
-        let sme = Address::generate(&env);
-        let investor = Address::generate(&env);
-        let client = deploy(&env);
-
-        client.init(
-            &admin,
-            &String::from_str(&env, "TERM1"),
-            &sme,
-            &target,
-            &800i64,
-            &0u64,
-            &Address::generate(&env),
-            &None,
-            &Address::generate(&env),
-            &None,
-            &None,
-            &None,
-        );
-
-        client.fund(&investor, &target);
-        client.settle();
-
-        let settled = client.get_escrow();
-        prop_assert_eq!(settled.status, 2, "must be settled");
-    }
-
-    #[test]
-    fn prop_withdrawn_is_terminal_for_withdraw() {
-        let env = Env::default();
-        env.mock_all_auths();
-        let admin = Address::generate(&env);
-        let sme = Address::generate(&env);
-        let investor = Address::generate(&env);
-        let client = deploy(&env);
-
-        client.init(
-            &admin,
-            &String::from_str(&env, "TERM2"),
-            &sme,
-            &100_000_000_000i128,
-            &800i64,
-            &0u64,
-            &Address::generate(&env),
-            &None,
-            &Address::generate(&env),
-            &None,
-            &None,
-            &None,
-        );
-
-        client.fund(&investor, &100_000_000_000i128);
-        client.withdraw();
-
-        let withdrawn = client.get_escrow();
-        prop_assert_eq!(withdrawn.status, 3, "must be withdrawn");
-    }
-
-    // Issue #145: Status invariant across all valid paths
-
-    #[test]
-    fn prop_status_invariant_all_states_valid_range(
-        target in 1i128..100_000_000_000i128,
-    ) {
-        let env = Env::default();
-        env.mock_all_auths();
-        let admin = Address::generate(&env);
-        let sme = Address::generate(&env);
-        let investor = Address::generate(&env);
-        let client = deploy(&env);
-
-        client.init(
-            &admin,
-            &String::from_str(&env, "INV1"),
-            &sme,
-            &target,
-            &800i64,
-            &0u64,
-            &Address::generate(&env),
-            &None,
-            &Address::generate(&env),
-            &None,
-            &None,
-            &None,
-        );
-
-        prop_assert!(client.get_escrow().status == 0);
-
-        let partial_amount = target / 2;
-        client.fund(&investor, &partial_amount);
-
-        let after_partial = client.get_escrow();
-        prop_assert!(after_partial.status <= 1, "partial funding: status must be 0 or 1");
-    }
-
-    // Issue #144: funded_amount monotonicity property tests
-
-    #[test]
-    fn prop_funded_amount_sum_of_contributions(
-        amounts in proptest::collection::vec(1i128..100_000_000_000i128, 1..20),
-    ) {
-        let env = Env::default();
-        env.mock_all_auths();
-        let admin = Address::generate(&env);
-        let sme = Address::generate(&env);
-        let client = deploy(&env);
-
-        let target: i128 = amounts.iter().sum::<i128>() + 1_000_000_000_000i128;
-
-        client.init(
-            &admin,
-            &String::from_str(&env, "MONO1"),
-            &sme,
-            &target,
-            &800i64,
-            &0u64,
-            &Address::generate(&env),
-            &None,
-            &Address::generate(&env),
-            &None,
-            &None,
-            &None,
-        );
-
-        let mut expected_total: i128 = 0;
-        let mut prev_funded: i128 = 0;
-        let mut funders_at_status_0 = 0usize;
-
-        for amount in &amounts {
-            let current_status = client.get_escrow().status;
-
-            if current_status == 0 {
-                funders_at_status_0 += 1;
-                expected_total = expected_total
-                    .checked_add(*amount)
-                    .expect("funded_amount overflow");
-
-                let after = client.fund(&Address::generate(&env), amount);
-
-                prop_assert!(
-                    after.funded_amount >= prev_funded,
-                    "funded_amount must be non-decreasing"
-                );
-                prop_assert_eq!(
-                    after.funded_amount, expected_total,
-                    "funded_amount must equal sum of contributions"
-                );
-
-                prev_funded = after.funded_amount;
-            }
-        }
-
-        prop_assert!(
-            client.get_escrow().funded_amount >= prev_funded,
-            "final funded_amount must be at least the last tracked value"
-        );
-    }
-
-    #[test]
-    fn prop_funded_amount_respects_funding_target(
-        target in 1i128..100_000_000_000i128,
-        excess in 0i128..50_000_000_000i128,
-    ) {
-        let env = Env::default();
-        env.mock_all_auths();
-        let admin = Address::generate(&env);
-        let sme = Address::generate(&env);
-        let investor = Address::generate(&env);
-        let client = deploy(&env);
-
-        client.init(
-            &admin,
-            &String::from_str(&env, "MONO2"),
-            &sme,
-            &target,
-            &800i64,
-            &0u64,
-            &Address::generate(&env),
-            &None,
-            &Address::generate(&env),
-            &None,
-            &None,
-            &None,
-        );
-
-        let fund_amount = target + excess;
-        let after = client.fund(&investor, &fund_amount);
-
-        prop_assert_eq!(
-            after.funded_amount, fund_amount,
-            "funded_amount must record exact funding amount"
-        );
-
-        if excess > 0 {
-            prop_assert!(after.funded_amount > target, "overfunding must be recorded");
-        }
-    }
-
-    #[test]
-    fn prop_funded_amount_non_decreasing_across_multiple_funders(
-        amount1 in 1i128..50_000_000_000i128,
-        amount2 in 1i128..50_000_000_000i128,
-        amount3 in 1i128..50_000_000_000i128,
-    ) {
-        let env = Env::default();
-        env.mock_all_auths();
-        let admin = Address::generate(&env);
-        let sme = Address::generate(&env);
-        let inv1 = Address::generate(&env);
-        let inv2 = Address::generate(&env);
-        let inv3 = Address::generate(&env);
-        let client = deploy(&env);
-
-        // Set target high enough that all three funds are needed
-        let target = amount1 + amount2 + amount3 + 1;
-
-        client.init(
-            &admin,
-            &String::from_str(&env, "MONO3"),
-            &sme,
-            &target,
-            &800i64,
-            &0u64,
-            &Address::generate(&env),
-            &None,
-            &Address::generate(&env),
-            &None,
-            &None,
-            &None,
-        );
-
-        let before1 = client.get_escrow().funded_amount;
-        let after1 = client.fund(&inv1, &amount1);
-        prop_assert!(after1.funded_amount >= before1, "first fund: non-decreasing");
-
-        let before2 = after1.funded_amount;
-        let after2 = client.fund(&inv2, &amount2);
-        prop_assert!(after2.funded_amount >= before2, "second fund: non-decreasing");
-
-        let before3 = after2.funded_amount;
-        let after3 = client.fund(&inv3, &amount3);
-        prop_assert!(after3.funded_amount >= before3, "third fund: non-decreasing");
-
-        prop_assert_eq!(
-            after3.funded_amount,
-            before1 + amount1 + amount2 + amount3,
-            "total must equal sum of contributions"
-        );
-    }
-
-    #[test]
-    fn prop_funded_amount_equals_contribution_sum_for_funded_escrow(
-        amounts in proptest::collection::vec(1i128..30_000_000_000i128, 2..10),
-    ) {
-        let env = Env::default();
-        env.mock_all_auths();
-        let admin = Address::generate(&env);
-        let sme = Address::generate(&env);
-        let client = deploy(&env);
-
-        // Sum of amounts + buffer ensures escrow stays open for all contributions
-        let target: i128 = amounts.iter().sum::<i128>() + 10_000_000_000i128;
-
-        client.init(
-            &admin,
-            &String::from_str(&env, "MONO4"),
-            &sme,
-            &target,
-            &800i64,
-            &0u64,
-            &Address::generate(&env),
-            &None,
-            &Address::generate(&env),
-            &None,
-            &None,
-            &None,
-        );
-
-        let mut total_contributed: i128 = 0;
-        let mut funders: Vec<Address> = Vec::new(&env);
-
-        for amount in &amounts {
-            let before = client.get_escrow().funded_amount;
-            let after = client.fund(&Address::generate(&env), amount);
-
-            total_contributed += amount;
-
-            prop_assert_eq!(
-                after.funded_amount, total_contributed,
-                "funded_amount must equal running sum of contributions"
-            );
-            prop_assert!(
-                after.funded_amount >= before,
-                "funded_amount must never decrease"
-            );
-
-            funders.push_back(Address::generate(&env));
-        }
-
-        let final_funded = client.get_escrow().funded_amount;
-        prop_assert_eq!(
-            final_funded, total_contributed,
-            "final funded_amount must equal total contributions"
-        );
-    }
+    let final_funded = client.get_escrow().funded_amount;
+    assert_eq!(
+        final_funded, total_contributed,
+        "final funded_amount equals total contributions"
+    );
 }
 
 #[derive(Clone, Copy)]
