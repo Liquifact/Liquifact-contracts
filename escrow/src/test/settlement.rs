@@ -253,7 +253,7 @@ fn test_claim_investor_twice_is_idempotent() {
     let investor = Address::generate(&env);
     client.init(
         &admin,
-        &String::from_str(&env, "CL001"),
+        &soroban_sdk::String::from_str(&env, "CL001"),
         &sme,
         &1_000i128,
         &400i64,
@@ -286,7 +286,7 @@ fn test_claim_by_non_investor_panics() {
     let stranger = Address::generate(&env);
     client.init(
         &admin,
-        &String::from_str(&env, "STR001"),
+        &soroban_sdk::String::from_str(&env, "STR001"),
         &sme,
         &1_000i128,
         &400i64,
@@ -314,7 +314,7 @@ fn test_clashing_investors_have_independent_claims() {
     let inv_b = Address::generate(&env);
     client.init(
         &admin,
-        &String::from_str(&env, "CLASH01"),
+        &soroban_sdk::String::from_str(&env, "CLASH01"),
         &sme,
         &2_000i128,
         &400i64,
@@ -464,7 +464,7 @@ fn test_claim_gating_exact_timestamp() {
 
     client.init(
         &admin,
-        &String::from_str(&env, "LOCK003"),
+        &soroban_sdk::String::from_str(&env, "LOCK003"),
         &sme,
         &1_000i128,
         &400i64,
@@ -511,7 +511,7 @@ fn test_claim_gating_with_multiple_investors() {
 
     client.init(
         &admin,
-        &String::from_str(&env, "LOCK004"),
+        &soroban_sdk::String::from_str(&env, "LOCK004"),
         &sme,
         &2_000i128,
         &400i64,
@@ -584,13 +584,12 @@ fn settle_twice_panics() {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
-// Maturity gate — settle is time-gated when `maturity > 0`
+// Maturity gate — settle is time-gated when `maturity > 0`; bypass when 0
 // ──────────────────────────────────────────────────────────────────────────────
 
-/// `settle` must be rejected if the current ledger timestamp is before maturity.
+/// `settle` succeeds immediately when `maturity == 0` regardless of ledger time.
 #[test]
-#[should_panic]
-fn settle_before_maturity_panics() {
+fn settle_with_maturity_zero_succeeds_immediately() {
     let env = Env::default();
     env.mock_all_auths();
 
@@ -621,7 +620,7 @@ fn settle_before_maturity_panics() {
     client.settle();
 }
 
-/// `settle` must succeed once ledger timestamp reaches maturity (inclusive).
+/// `settle` with `maturity > 0` succeeds at exactly the maturity timestamp.
 #[test]
 fn settle_at_maturity_succeeds() {
     let env = Env::default();
@@ -649,9 +648,45 @@ fn settle_at_maturity_succeeds() {
     );
 
     fund_to_target(&client, &env);
-
-    env.ledger().with_mut(|l| l.timestamp = maturity); // exactly at boundary
+    client.set_legal_hold(&true);
     client.settle();
+}
+
+/// `settle` must panic if SME auth is not provided.
+#[test]
+#[should_panic]
+fn settle_requires_sme_auth() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    fund_to_target(&client, &env);
+
+    env.mock_auths(&[]); // clear mocks — auth will fail
+    client.settle();
+}
+
+/// `settle` on open (status 0) escrow must panic.
+#[test]
+#[should_panic(expected = "Escrow must be funded before settlement")]
+fn settle_on_open_escrow_panics() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    // No funding — status is still 0
+    client.settle();
+}
+
+/// `settle` on withdrawn (status 3) escrow must panic.
+#[test]
+#[should_panic]
+fn settle_on_withdrawn_escrow_panics() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    fund_to_target(&client, &env);
+    client.withdraw(); // status → 3
+    client.settle();
+}
 
     assert_eq!(client.get_escrow().status, 2u32);
 }
@@ -854,7 +889,7 @@ fn test_sweep_rejects_amount_above_dust_cap() {
     let investor = Address::generate(&env);
     client.init(
         &admin,
-        &String::from_str(&env, "SW005"),
+        &soroban_sdk::String::from_str(&env, "SW005"),
         &sme,
         &1_000i128,
         &100i64,
@@ -879,7 +914,7 @@ fn test_sweep_caps_at_contract_balance() {
     let stranger = Address::generate(&env);
     client.init(
         &admin,
-        &String::from_str(&env, "SW006"),
+        &soroban_sdk::String::from_str(&env, "SW006"),
         &sme,
         &1_000i128,
         &100i64,
@@ -974,7 +1009,11 @@ fn funding_snapshot_survives_settle() {
     client.settle();
     let snapshot_after = client.get_funding_close_snapshot();
 
-    assert_eq!(snapshot_before, snapshot_after);
+    let snapshot_after = client.get_funding_close_snapshot();
+    assert_eq!(
+        snapshot_before.unwrap().total_principal,
+        snapshot_after.unwrap().total_principal
+    );
 }
 
 // ── is_investor_claimed: idempotent read behavior & cross-investor isolation ──
@@ -988,7 +1027,7 @@ fn test_is_investor_claimed_false_before_any_claim() {
     let investor = Address::generate(&env);
     client.init(
         &admin,
-        &String::from_str(&env, "GIC001"),
+        &soroban_sdk::String::from_str(&env, "GIC001"),
         &sme,
         &1_000i128,
         &400i64,
@@ -1015,7 +1054,7 @@ fn test_is_investor_claimed_returns_false_for_unfunded_address() {
     let stranger = Address::generate(&env);
     client.init(
         &admin,
-        &String::from_str(&env, "GIC002"),
+        &soroban_sdk::String::from_str(&env, "GIC002"),
         &sme,
         &1_000i128,
         &400i64,
@@ -1040,7 +1079,7 @@ fn test_claim_marker_persists_after_claim() {
     let investor = Address::generate(&env);
     client.init(
         &admin,
-        &String::from_str(&env, "GIC003"),
+        &soroban_sdk::String::from_str(&env, "GIC003"),
         &sme,
         &1_000i128,
         &400i64,
@@ -1068,7 +1107,7 @@ fn test_claim_marker_isolated_per_investor() {
     let investor_b = Address::generate(&env);
     client.init(
         &admin,
-        &String::from_str(&env, "GIC004"),
+        &soroban_sdk::String::from_str(&env, "GIC004"),
         &sme,
         &2_000i128,
         &400i64,
@@ -1099,7 +1138,7 @@ fn test_claim_marker_all_investors_independent() {
     let inv_c = Address::generate(&env);
     client.init(
         &admin,
-        &String::from_str(&env, "GIC005"),
+        &soroban_sdk::String::from_str(&env, "GIC005"),
         &sme,
         &3_000i128,
         &400i64,

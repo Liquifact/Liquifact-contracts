@@ -30,7 +30,7 @@ fn init_open(
     let treasury = Address::generate(env);
     client.init(
         admin,
-        &String::from_str(env, id),
+        &soroban_sdk::String::from_str(env, id),
         sme,
         &TARGET,
         &800i64,
@@ -74,7 +74,7 @@ fn init_settled<'a>(
     let client = LiquifactEscrowClient::new(env, &escrow_id);
     client.init(
         admin,
-        &String::from_str(env, id),
+        &soroban_sdk::String::from_str(env, id),
         sme,
         &TARGET,
         &800i64,
