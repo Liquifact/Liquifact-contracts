@@ -1,6 +1,6 @@
 use super::super::external_calls::transfer_funding_token_with_balance_checks;
 use super::*;
-use crate::{DataKey, InvoiceEscrow};
+use crate::{DataKey, InvoiceEscrow, LegalHoldChanged};
 use soroban_sdk::{
     contract, contractimpl, testutils::Events as _, vec, IntoVal, Map, MuxedAddress, Symbol, Val,
 };
@@ -75,7 +75,10 @@ fn test_legal_hold_midflow_blocks_and_resumes_with_ordered_events() {
     // Hold off: funding resumes and reaches funded state.
     client.clear_legal_hold();
     let escrow = client.fund(&investor_b, &(TARGET - first_leg));
-    assert_eq!(escrow.status, 1, "escrow should reach funded after hold clears");
+    assert_eq!(
+        escrow.status, 1,
+        "escrow should reach funded after hold clears"
+    );
 
     // Hold on again: release/settlement action is blocked.
     client.set_legal_hold(&true);
@@ -149,16 +152,17 @@ fn test_legal_hold_midflow_blocks_and_resumes_with_ordered_events() {
     ];
 
     // Ordering assertion for legal-hold toggles, allowing unrelated lifecycle events between them.
-    let all_events = env.events().all().events();
+    let all_events: std::vec::Vec<_> = env.events().all().events().into_iter().collect();
+    let expected_std: std::vec::Vec<_> = expected.into_iter().collect();
     let mut cursor = 0usize;
-    for event in all_events {
-        if cursor < expected.len() && *event == expected[cursor] {
+    let expected_len = expected_std.len();
+    for event in &all_events {
+        if cursor < expected_len && *event == expected_std[cursor] {
             cursor += 1;
         }
     }
     assert_eq!(
-        cursor,
-        expected.len(),
+        cursor, expected_len,
         "LegalHoldChanged events should appear in expected toggle order"
     );
 }
@@ -540,6 +544,7 @@ fn test_escrow_tiered_yield_with_commitment_locks() {
     let tier3_expected = calculate_expected_payout(tier3_amount, 1500);
     let base_expected = calculate_expected_payout(base_amount, BASE_YIELD_BPS);
     let tier3_yield_amount = tier3_expected - tier3_amount;
+    let base_yield_amount = base_expected - base_amount;
     assert!(
         tier3_yield_amount > base_yield_amount,
         "Higher tier should yield more absolute return"
@@ -737,7 +742,10 @@ fn test_legal_hold_midflow_blocks_then_resumes_with_ordered_events() {
     let fund_blocked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         client.fund(&investor, &1_000i128);
     }));
-    assert!(fund_blocked.is_err(), "fund must be blocked while hold is active");
+    assert!(
+        fund_blocked.is_err(),
+        "fund must be blocked while hold is active"
+    );
 
     let settle_blocked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         client.settle();
@@ -755,13 +763,16 @@ fn test_legal_hold_midflow_blocks_then_resumes_with_ordered_events() {
     assert_eq!(funded_state.status, 1, "escrow should become funded");
 
     let settled_state = client.settle();
-    assert_eq!(settled_state.status, 2, "escrow should settle after hold is cleared");
+    assert_eq!(
+        settled_state.status, 2,
+        "escrow should settle after hold is cleared"
+    );
 
     // Assert legal-hold event ordering.
     let all_events = env.events().all();
     let hold_on_xdr = super::super::LegalHoldChanged {
         name: symbol_short!("legalhld"),
-        invoice_id,
+        invoice_id: invoice_id.clone(),
         active: 1,
     }
     .to_xdr(&env, &contract_id);
@@ -773,10 +784,12 @@ fn test_legal_hold_midflow_blocks_then_resumes_with_ordered_events() {
     .to_xdr(&env, &contract_id);
 
     let hold_on_pos = all_events
+        .events()
         .iter()
         .position(|evt| *evt == hold_on_xdr)
         .expect("expected legal hold enable event");
     let hold_off_pos = all_events
+        .events()
         .iter()
         .position(|evt| *evt == hold_off_xdr)
         .expect("expected legal hold clear event");

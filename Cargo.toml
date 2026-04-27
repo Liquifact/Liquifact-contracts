@@ -1,3 +1,11 @@
 [workspace]
 members = ["escrow"]
 resolver = "2"
+
+[workspace.metadata.cargo-llvm-cov]
+# Exclude test files from coverage calculation to focus on production code
+exclude = [
+    "escrow/src/test/*",
+    "**/*_test.rs",
+    "tests/*"
+]

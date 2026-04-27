@@ -1095,13 +1095,13 @@ fn test_unique_funder_count_increments_for_distinct_investors() {
         &None,
     );
     assert_eq!(client.get_unique_funder_count(), 0);
-    
+
     client.fund(&inv_a, &(TARGET / 3));
     assert_eq!(client.get_unique_funder_count(), 1);
-    
+
     client.fund(&inv_b, &(TARGET / 3));
     assert_eq!(client.get_unique_funder_count(), 2);
-    
+
     client.fund(&inv_c, &(TARGET / 3));
     assert_eq!(client.get_unique_funder_count(), 3);
 }
@@ -1116,13 +1116,13 @@ fn test_unique_funder_count_with_fund_with_commitment() {
     let inv_a = Address::generate(&env);
     let inv_b = Address::generate(&env);
     let (tok, tre) = free_addresses(&env);
-    
+
     let mut tiers = SorobanVec::new(&env);
     tiers.push_back(YieldTier {
         min_lock_secs: 100,
         yield_bps: 900,
     });
-    
+
     client.init(
         &admin,
         &String::from_str(&env, "CAP004"),
@@ -1137,13 +1137,13 @@ fn test_unique_funder_count_with_fund_with_commitment() {
         &None,
         &None,
     );
-    
+
     assert_eq!(client.get_unique_funder_count(), 0);
-    
+
     // First investor uses fund_with_commitment
     client.fund_with_commitment(&inv_a, &(TARGET / 2), &200u64);
     assert_eq!(client.get_unique_funder_count(), 1);
-    
+
     // Second investor uses regular fund
     client.fund(&inv_b, &(TARGET / 2));
     assert_eq!(client.get_unique_funder_count(), 2);
@@ -1167,7 +1167,7 @@ fn test_max_unique_investors_cap_none_allows_unlimited() {
         &None,
         &None, // No cap set
     );
-    
+
     // Should be able to add many investors when no cap is set
     for i in 0..10 {
         let investor = Address::generate(&env);
@@ -1194,23 +1194,23 @@ fn test_max_unique_investors_cap_enforced_at_limit() {
         &None,
         &Some(3u32), // Cap of 3 investors
     );
-    
+
     assert_eq!(client.get_max_unique_investors_cap(), Some(3u32));
-    
+
     // Add 3 investors - should succeed
     let inv1 = Address::generate(&env);
     let inv2 = Address::generate(&env);
     let inv3 = Address::generate(&env);
-    
+
     client.fund(&inv1, &(TARGET / 6));
     assert_eq!(client.get_unique_funder_count(), 1);
-    
+
     client.fund(&inv2, &(TARGET / 6));
     assert_eq!(client.get_unique_funder_count(), 2);
-    
+
     client.fund(&inv3, &(TARGET / 6));
     assert_eq!(client.get_unique_funder_count(), 3);
-    
+
     // 4th investor should panic
     let inv4 = Address::generate(&env);
     client.fund(&inv4, &(TARGET / 6));
@@ -1235,13 +1235,13 @@ fn test_max_unique_investors_cap_blocks_excess_investors() {
         &None,
         &Some(2u32), // Cap of 2 investors
     );
-    
+
     // Add 2 investors
     let inv1 = Address::generate(&env);
     let inv2 = Address::generate(&env);
     client.fund(&inv1, &(TARGET / 4));
     client.fund(&inv2, &(TARGET / 4));
-    
+
     // 3rd investor should panic
     let inv3 = Address::generate(&env);
     client.fund(&inv3, &(TARGET / 4));
@@ -1256,13 +1256,13 @@ fn test_max_unique_investors_cap_blocks_fund_with_commitment() {
     let admin = Address::generate(&env);
     let sme = Address::generate(&env);
     let (tok, tre) = free_addresses(&env);
-    
+
     let mut tiers = SorobanVec::new(&env);
     tiers.push_back(YieldTier {
         min_lock_secs: 100,
         yield_bps: 900,
     });
-    
+
     client.init(
         &admin,
         &String::from_str(&env, "CAP008"),
@@ -1277,11 +1277,11 @@ fn test_max_unique_investors_cap_blocks_fund_with_commitment() {
         &None,
         &Some(1u32), // Cap of 1 investor
     );
-    
+
     // First investor succeeds
     let inv1 = Address::generate(&env);
     client.fund_with_commitment(&inv1, &(TARGET / 2), &200u64);
-    
+
     // Second investor using fund_with_commitment should panic
     let inv2 = Address::generate(&env);
     client.fund_with_commitment(&inv2, &(TARGET / 2), &200u64);
@@ -1306,15 +1306,15 @@ fn test_re_funding_same_address_doesnt_count_against_cap() {
         &None,
         &Some(1u32), // Cap of 1 investor
     );
-    
+
     // First fund should succeed
     client.fund(&investor, &(TARGET / 3));
     assert_eq!(client.get_unique_funder_count(), 1);
-    
+
     // Re-funding same address should also succeed (doesn't count against cap)
     client.fund(&investor, &(TARGET / 3));
     assert_eq!(client.get_unique_funder_count(), 1);
-    
+
     // Final fund from same address should succeed
     client.fund(&investor, &(TARGET / 3));
     assert_eq!(client.get_unique_funder_count(), 1);
@@ -1340,10 +1340,10 @@ fn test_zero_contribution_then_non_zero_contribution_counts_as_unique_investor()
         &None,
         &Some(2u32), // Cap of 2 investors
     );
-    
+
     assert_eq!(client.get_unique_funder_count(), 0);
     assert_eq!(client.get_contribution(&investor), 0);
-    
+
     // First non-zero contribution should increment count
     client.fund(&investor, &(TARGET / 2));
     assert_eq!(client.get_unique_funder_count(), 1);
@@ -1354,7 +1354,7 @@ fn test_zero_contribution_then_non_zero_contribution_counts_as_unique_investor()
 fn test_cap_validation_at_init_positive_value_required() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
-    
+
     // Should panic for zero cap
     client.init(
         &admin,
@@ -1411,17 +1411,17 @@ fn test_cap_edge_case_exact_limit_reached() {
         &None,
         &Some(5u32), // Cap of 5 investors
     );
-    
+
     // Add exactly 5 investors - should all succeed
     for i in 0..5 {
         let investor = Address::generate(&env);
         client.fund(&investor, &(TARGET / 10));
         assert_eq!(client.get_unique_funder_count(), i + 1);
     }
-    
+
     // Should have exactly 5 unique funders
     assert_eq!(client.get_unique_funder_count(), 5);
-    
+
     // 6th investor should panic
     let inv6 = Address::generate(&env);
     client.fund(&inv6, &(TARGET / 10));
@@ -1446,13 +1446,13 @@ fn test_cap_edge_case_exactly_one_over_limit_panics() {
         &None,
         &Some(5u32), // Cap of 5 investors
     );
-    
+
     // Add exactly 5 investors
     for _i in 0..5 {
         let investor = Address::generate(&env);
         client.fund(&investor, &(TARGET / 10));
     }
-    
+
     // 6th investor should panic
     let inv6 = Address::generate(&env);
     client.fund(&inv6, &(TARGET / 10));
@@ -1474,23 +1474,23 @@ fn test_cap_with_min_contribution_floor_interaction() {
         &Address::generate(&env),
         &None,
         &Some(1_000i128), // Min contribution floor
-        &Some(3u32), // Cap of 3 investors
+        &Some(3u32),      // Cap of 3 investors
     );
-    
+
     // Should respect both cap and floor
     let inv1 = Address::generate(&env);
     let inv2 = Address::generate(&env);
     let inv3 = Address::generate(&env);
-    
+
     client.fund(&inv1, &2_000i128);
     assert_eq!(client.get_unique_funder_count(), 1);
-    
+
     client.fund(&inv2, &1_500i128);
     assert_eq!(client.get_unique_funder_count(), 2);
-    
+
     client.fund(&inv3, &1_000i128);
     assert_eq!(client.get_unique_funder_count(), 3);
-    
+
     // 4th investor should be blocked by cap, not floor
     let inv4 = Address::generate(&env);
     client.fund(&inv4, &2_000i128);
@@ -1515,11 +1515,11 @@ fn test_cap_blocks_even_with_large_contribution() {
         &None,
         &Some(1u32), // Cap of 1 investor
     );
-    
+
     // First investor can fund large amount
     let inv1 = Address::generate(&env);
     client.fund(&inv1, &(TARGET * 5));
-    
+
     // Second investor blocked even if they could fully fund remaining amount
     let inv2 = Address::generate(&env);
     client.fund(&inv2, &(TARGET * 5));
@@ -1533,7 +1533,7 @@ fn test_cap_panic_message_quality() {
     let admin = Address::generate(&env);
     let sme = Address::generate(&env);
     let (tok, tre) = free_addresses(&env);
-    
+
     client.init(
         &admin,
         &String::from_str(&env, "CAP017"),
@@ -1548,11 +1548,11 @@ fn test_cap_panic_message_quality() {
         &None,
         &Some(1u32),
     );
-    
+
     // Add first investor
     let inv1 = Address::generate(&env);
     client.fund(&inv1, &(TARGET / 2));
-    
+
     // Try to add second investor - should panic with clear message
     let inv2 = Address::generate(&env);
     client.fund(&inv2, &(TARGET / 2));

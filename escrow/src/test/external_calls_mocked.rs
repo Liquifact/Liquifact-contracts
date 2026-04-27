@@ -5,7 +5,7 @@
 
 use super::super::external_calls::transfer_funding_token_with_balance_checks;
 use super::*;
-use soroban_sdk::{Address, Env, MuxedAddress, contracterror, contracttype, symbol_short};
+use soroban_sdk::{contracterror, contracttype, symbol_short, Address, Env, MuxedAddress};
 
 /// Mock token that simulates fee-on-transfer behavior.
 /// This token takes a 1% fee on transfers, causing balance delta divergence.
@@ -32,13 +32,21 @@ pub struct FeeTokenClient<'a> {
 
 impl<'a> FeeTokenClient<'a> {
     pub fn new(env: &'a Env, contract_id: &Address) -> Self {
-        Self { env, contract_id: contract_id.clone() }
+        Self {
+            env,
+            contract_id: contract_id.clone(),
+        }
     }
 
     /// Mock balance function - in real implementation this would read from storage
     pub fn balance(&self, addr: &Address) -> i128 {
         let key = symbol_short!("BAL");
-        let balances: soroban_sdk::Map<Address, i128> = self.env.storage().persistent().get(&key).unwrap_or_else(|| soroban_sdk::Map::new(&self.env));
+        let balances: soroban_sdk::Map<Address, i128> = self
+            .env
+            .storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or_else(|| soroban_sdk::Map::new(&self.env));
         balances.get(addr.clone()).unwrap_or(0)
     }
 
@@ -59,22 +67,32 @@ impl<'a> FeeTokenClient<'a> {
 
         // Update balances (mock implementation)
         let key = symbol_short!("BAL");
-        let mut balances: soroban_sdk::Map<Address, i128> = self.env.storage().persistent().get(&key).unwrap_or_else(|| soroban_sdk::Map::new(&self.env));
-        
+        let mut balances: soroban_sdk::Map<Address, i128> = self
+            .env
+            .storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or_else(|| soroban_sdk::Map::new(&self.env));
+
         // Subtract full amount from sender
         balances.set(from.clone(), from_balance - *amount);
-        
+
         // Add amount after fee to recipient
         let to_balance = balances.get(to.address().clone()).unwrap_or(0);
         balances.set(to.address().clone(), to_balance + amount_after_fee);
-        
+
         self.env.storage().persistent().set(&key, &balances);
     }
 
     /// Mock mint function for testing
     pub fn mint(&self, to: &Address, amount: &i128) {
         let key = symbol_short!("BAL");
-        let mut balances: soroban_sdk::Map<Address, i128> = self.env.storage().persistent().get(&key).unwrap_or_else(|| soroban_sdk::Map::new(&self.env));
+        let mut balances: soroban_sdk::Map<Address, i128> = self
+            .env
+            .storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or_else(|| soroban_sdk::Map::new(&self.env));
         let current_balance = balances.get(to.clone()).unwrap_or(0);
         balances.set(to.clone(), current_balance + *amount);
         self.env.storage().persistent().set(&key, &balances);
@@ -90,12 +108,20 @@ pub struct RebasingTokenClient<'a> {
 
 impl<'a> RebasingTokenClient<'a> {
     pub fn new(env: &'a Env, contract_id: &Address) -> Self {
-        Self { env, contract_id: contract_id.clone() }
+        Self {
+            env,
+            contract_id: contract_id.clone(),
+        }
     }
 
     pub fn balance(&self, addr: &Address) -> i128 {
         let key = symbol_short!("REBAL");
-        let balances: soroban_sdk::Map<Address, i128> = self.env.storage().persistent().get(&key).unwrap_or_else(|| soroban_sdk::Map::new(&self.env));
+        let balances: soroban_sdk::Map<Address, i128> = self
+            .env
+            .storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or_else(|| soroban_sdk::Map::new(&self.env));
         balances.get(addr.clone()).unwrap_or(0)
     }
 
@@ -116,21 +142,31 @@ impl<'a> RebasingTokenClient<'a> {
 
         // Update balances
         let key = symbol_short!("REBAL");
-        let mut balances: soroban_sdk::Map<Address, i128> = self.env.storage().persistent().get(&key).unwrap_or_else(|| soroban_sdk::Map::new(&self.env));
-        
+        let mut balances: soroban_sdk::Map<Address, i128> = self
+            .env
+            .storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or_else(|| soroban_sdk::Map::new(&self.env));
+
         // Subtract exact amount from sender
         balances.set(from.clone(), from_balance - *amount);
-        
+
         // Add amount with bonus to recipient
         let to_balance = balances.get(to.address().clone()).unwrap_or(0);
         balances.set(to.address().clone(), to_balance + amount_with_bonus);
-        
+
         self.env.storage().persistent().set(&key, &balances);
     }
 
     pub fn mint(&self, to: &Address, amount: &i128) {
         let key = symbol_short!("REBAL");
-        let mut balances: soroban_sdk::Map<Address, i128> = self.env.storage().persistent().get(&key).unwrap_or_else(|| soroban_sdk::Map::new(&self.env));
+        let mut balances: soroban_sdk::Map<Address, i128> = self
+            .env
+            .storage()
+            .persistent()
+            .get(&key)
+            .unwrap_or_else(|| soroban_sdk::Map::new(&self.env));
         let current_balance = balances.get(to.clone()).unwrap_or(0);
         balances.set(to.clone(), current_balance + *amount);
         self.env.storage().persistent().set(&key, &balances);
@@ -146,7 +182,7 @@ fn test_balance_delta_divergence_with_fee_token() {
     // Set up fee token (1% fee)
     let fee_token_id = Address::generate(&env);
     let fee_token = FeeTokenClient::new(&env, &fee_token_id);
-    
+
     let holder = Address::generate(&env);
     let treasury = Address::generate(&env);
 
@@ -182,12 +218,12 @@ fn test_balance_delta_conservation_with_standard_token() {
     // Verify mathematical conservation: total value is preserved
     let total_before = holder_before + treasury_before;
     let total_after = holder_after + treasury_after;
-    
+
     assert_eq!(
         total_before, total_after,
         "Total token supply must be conserved during transfer"
     );
-    
+
     // Verify exact deltas
     assert_eq!(holder_before - holder_after, amount);
     assert_eq!(treasury_after - treasury_before, amount);
@@ -261,29 +297,44 @@ fn test_balance_delta_invariants_with_multiple_recipients() {
     // Transfer to first treasury
     let holder_before1 = token.token.balance(&holder);
     let treasury1_before = token.token.balance(&treasury1);
-    
-    transfer_funding_token_with_balance_checks(&env, &token.id, &holder, &treasury1, transfer_amount);
-    
+
+    transfer_funding_token_with_balance_checks(
+        &env,
+        &token.id,
+        &holder,
+        &treasury1,
+        transfer_amount,
+    );
+
     let holder_after1 = token.token.balance(&holder);
     let treasury1_after = token.token.balance(&treasury1);
-    
+
     assert_eq!(holder_before1 - holder_after1, transfer_amount);
     assert_eq!(treasury1_after - treasury1_before, transfer_amount);
 
     // Transfer to second treasury
     let holder_before2 = token.token.balance(&holder);
     let treasury2_before = token.token.balance(&treasury2);
-    
-    transfer_funding_token_with_balance_checks(&env, &token.id, &holder, &treasury2, transfer_amount);
-    
+
+    transfer_funding_token_with_balance_checks(
+        &env,
+        &token.id,
+        &holder,
+        &treasury2,
+        transfer_amount,
+    );
+
     let holder_after2 = token.token.balance(&holder);
     let treasury2_after = token.token.balance(&treasury2);
-    
+
     assert_eq!(holder_before2 - holder_after2, transfer_amount);
     assert_eq!(treasury2_after - treasury2_before, transfer_amount);
 
     // Verify final state
-    assert_eq!(token.token.balance(&holder), initial_amount - 2 * transfer_amount);
+    assert_eq!(
+        token.token.balance(&holder),
+        initial_amount - 2 * transfer_amount
+    );
     assert_eq!(token.token.balance(&treasury1), transfer_amount);
     assert_eq!(token.token.balance(&treasury2), transfer_amount);
 }
@@ -311,7 +362,7 @@ fn test_balance_delta_invariants_with_zero_final_balance() {
     // Verify sender ends with zero balance
     assert_eq!(holder_after, 0i128);
     assert_eq!(treasury_after, amount);
-    
+
     // Verify deltas
     assert_eq!(holder_before - holder_after, amount);
     assert_eq!(treasury_after - treasury_before, amount);

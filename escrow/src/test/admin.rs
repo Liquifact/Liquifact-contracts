@@ -1,5 +1,5 @@
 use super::*;
-use crate::FundingTargetUpdated;
+use crate::{AdminTransferredEvent, FundingTargetUpdated};
 use soroban_sdk::Event;
 
 // Admin/governance operations: target changes, maturity changes, admin transfer,
@@ -132,6 +132,339 @@ fn test_transfer_admin_uninitialized_panics() {
     let client = deploy(&env);
     let new_admin = Address::generate(&env);
     client.transfer_admin(&new_admin);
+}
+
+// --- AdminTransferredEvent validation tests ---
+
+/// Verify that `transfer_admin` emits an `AdminTransferredEvent` with correct
+/// `old_admin` and `new_admin` fields for indexer consumption.
+#[test]
+fn test_transfer_admin_event_emitted_with_correct_payload() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let contract_id = client.address.clone();
+    let new_admin = Address::generate(&env);
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "EVT_ADMIN_001"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &1000u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+    );
+
+    client.transfer_admin(&new_admin);
+
+    let all_events = env.events().all();
+    let events = all_events.events();
+    assert_eq!(events.len(), 1, "Expected exactly one event");
+
+    let expected_event = AdminTransferredEvent {
+        name: symbol_short!("admin"),
+        invoice_id: client.get_escrow().invoice_id,
+        old_admin: admin,
+        new_admin: new_admin.clone(),
+    };
+
+    let actual_event_xdr = events.get(0).unwrap();
+    let expected_event_xdr = expected_event.to_xdr(&env, &contract_id);
+
+    assert_eq!(
+        *actual_event_xdr, expected_event_xdr,
+        "Event payload must match expected old_admin and new_admin"
+    );
+}
+
+/// Verify no event is emitted when transfer fails due to unauthorized caller.
+#[test]
+fn test_transfer_admin_unauthorized_no_event_emitted() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let _unauthorized = Address::generate(&env);
+    let new_admin = Address::generate(&env);
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "EVT_ADMIN_002"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &1000u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+    );
+
+    // Capture event count before failed transfer
+    let events_before = env.events().all().events().len();
+
+    // Attempt unauthorized transfer (should panic)
+    env.mock_auths(&[]);
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.transfer_admin(&new_admin);
+    }));
+
+    assert!(result.is_err(), "Unauthorized transfer should panic");
+
+    // Verify no new events were emitted
+    let events_after = env.events().all().events().len();
+    assert_eq!(
+        events_before, events_after,
+        "No event should be emitted on unauthorized transfer"
+    );
+}
+
+/// Verify no event is emitted when transfer fails due to no-op (same admin).
+#[test]
+fn test_transfer_admin_no_op_no_event_emitted() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "EVT_ADMIN_003"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &1000u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+    );
+
+    // Capture event count before no-op transfer
+    let events_before = env.events().all().events().len();
+
+    // Attempt no-op transfer (should panic)
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.transfer_admin(&admin);
+    }));
+
+    assert!(result.is_err(), "No-op transfer should panic");
+
+    // Verify no new events were emitted
+    let events_after = env.events().all().events().len();
+    assert_eq!(
+        events_before, events_after,
+        "No event should be emitted on no-op transfer"
+    );
+}
+
+// --- Sequential transfer tests ---
+
+/// Verify multiple sequential transfers work correctly with consistent events.
+#[test]
+fn test_transfer_admin_sequential_transfers() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let contract_id = client.address.clone();
+
+    let admin_2 = Address::generate(&env);
+    let admin_3 = Address::generate(&env);
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "SEQ_ADMIN_001"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &1000u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+    );
+
+    // First transfer: admin -> admin_2
+    client.transfer_admin(&admin_2);
+    assert_eq!(client.get_escrow().admin, admin_2);
+
+    // Second transfer: admin_2 -> admin_3
+    client.transfer_admin(&admin_3);
+    assert_eq!(client.get_escrow().admin, admin_3);
+
+    // Verify events were emitted for both transfers
+    let all_events = env.events().all();
+    let events = all_events.events();
+    assert_eq!(
+        events.len(),
+        2,
+        "Expected exactly 2 AdminTransferredEvent events"
+    );
+
+    // Verify first event payload
+    let event_1 = AdminTransferredEvent {
+        name: symbol_short!("admin"),
+        invoice_id: client.get_escrow().invoice_id,
+        old_admin: admin.clone(),
+        new_admin: admin_2.clone(),
+    };
+    assert_eq!(
+        *events.get(0).unwrap(),
+        event_1.to_xdr(&env, &contract_id),
+        "First event must have admin -> admin_2"
+    );
+
+    // Verify second event payload
+    let event_2 = AdminTransferredEvent {
+        name: symbol_short!("admin"),
+        invoice_id: client.get_escrow().invoice_id,
+        old_admin: admin_2,
+        new_admin: admin_3.clone(),
+    };
+    assert_eq!(
+        *events.get(1).unwrap(),
+        event_2.to_xdr(&env, &contract_id),
+        "Second event must have admin_2 -> admin_3"
+    );
+}
+
+/// Verify latest admin is always enforced after multiple transfers.
+#[test]
+fn test_transfer_admin_latest_admin_enforced() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+
+    let admin_2 = Address::generate(&env);
+    let admin_3 = Address::generate(&env);
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "SEQ_ADMIN_002"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &1000u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+    );
+
+    // Transfer to admin_2
+    client.transfer_admin(&admin_2);
+    assert_eq!(client.get_escrow().admin, admin_2);
+
+    // Transfer to admin_3
+    client.transfer_admin(&admin_3);
+    assert_eq!(client.get_escrow().admin, admin_3);
+
+    // Verify old admin (admin_2) cannot transfer anymore
+    env.mock_auths(&[]);
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.transfer_admin(&admin);
+    }));
+    assert!(
+        result.is_err(),
+        "Previous admin should not be able to transfer after rotation"
+    );
+
+    // Verify only current admin (admin_3) can transfer
+    let admin_4 = Address::generate(&env);
+    client.transfer_admin(&admin_4);
+    assert_eq!(client.get_escrow().admin, admin_4);
+}
+
+// --- Authorization enforcement tests ---
+
+/// Verify only current admin can transfer (unauthorized caller fails).
+#[test]
+#[should_panic]
+fn test_transfer_admin_unauthorized_caller_panics() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let unauthorized = Address::generate(&env);
+    let new_admin = Address::generate(&env);
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "AUTH_ADMIN_001"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &1000u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+    );
+
+    // Attempt transfer with unauthorized caller
+    env.mock_auths(&[]);
+    client.transfer_admin(&new_admin);
+}
+
+/// Verify state remains unchanged after failed transfer.
+#[test]
+fn test_transfer_admin_state_unchanged_on_failure() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let _unauthorized = Address::generate(&env);
+    let new_admin = Address::generate(&env);
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "STATE_ADMIN_001"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &1000u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+    );
+
+    // Capture initial state
+    let initial_escrow = client.get_escrow();
+    assert_eq!(initial_escrow.admin, admin);
+
+    // Attempt unauthorized transfer (should panic)
+    env.mock_auths(&[]);
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.transfer_admin(&new_admin);
+    }));
+    assert!(result.is_err(), "Unauthorized transfer should panic");
+
+    // Verify state is unchanged
+    let final_escrow = client.get_escrow();
+    assert_eq!(
+        final_escrow.admin, admin,
+        "Admin should remain unchanged after failed transfer"
+    );
+    assert_eq!(
+        final_escrow.invoice_id, initial_escrow.invoice_id,
+        "Other state fields should remain unchanged"
+    );
 }
 
 #[test]
