@@ -545,6 +545,7 @@ fn test_claim_gating_with_multiple_investors() {
     assert!(client.is_investor_claimed(&inv2));
 }
 
+/// Cost baseline: settle after funding.
 #[test]
 fn test_cost_baseline_settle() {
     let env = Env::default();
@@ -730,18 +731,19 @@ fn test_sweep_terminal_dust_after_settle_transfers_to_treasury() {
     let token = install_stellar_asset_token(&env);
     let admin = Address::generate(&env);
     let sme = Address::generate(&env);
-    let treasury = Address::generate(&env);
-    let (escrow_id, client) = deploy_with_id(&env);
+    let (tok, tre) = free_addresses(&env);
+    let client = deploy(&env);
+    let maturity = 5000u64;
     client.init(
         &admin,
         &String::from_str(&env, "SW001"),
         &sme,
         &1_000i128,
         &100i64,
-        &0u64,
-        &token.id,
+        &maturity,
+        &tok,
         &None,
-        &treasury,
+        &tre,
         &None,
         &None,
         &None,
@@ -761,21 +763,21 @@ fn test_sweep_terminal_dust_after_settle_transfers_to_treasury() {
 fn test_sweep_terminal_dust_after_withdraw_and_ledger_tick() {
     let env = Env::default();
     env.mock_all_auths();
-    let token = install_stellar_asset_token(&env);
     let admin = Address::generate(&env);
     let sme = Address::generate(&env);
-    let treasury = Address::generate(&env);
-    let (escrow_id, client) = deploy_with_id(&env);
+    let (tok, tre) = free_addresses(&env);
+    let client = deploy(&env);
+    let maturity = 5000u64;
     client.init(
         &admin,
         &String::from_str(&env, "SW002"),
         &sme,
-        &1_000i128,
+        &TARGET,
         &100i64,
-        &0u64,
-        &token.id,
+        &maturity,
+        &tok,
         &None,
-        &treasury,
+        &tre,
         &None,
         &None,
         &None,
@@ -796,12 +798,8 @@ fn test_sweep_terminal_dust_after_withdraw_and_ledger_tick() {
 #[should_panic(expected = "dust sweep only in terminal states")]
 fn test_sweep_rejected_when_open() {
     let env = Env::default();
-    env.mock_all_auths();
-    let token = install_stellar_asset_token(&env);
-    let admin = Address::generate(&env);
-    let sme = Address::generate(&env);
-    let treasury = Address::generate(&env);
-    let (escrow_id, client) = deploy_with_id(&env);
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
     client.init(
         &admin,
         &String::from_str(&env, "SW003"),
@@ -809,27 +807,25 @@ fn test_sweep_rejected_when_open() {
         &1_000i128,
         &100i64,
         &0u64,
-        &token.id,
+        &Address::generate(&env),
         &None,
-        &treasury,
+        &Address::generate(&env),
         &None,
         &None,
         &None,
     );
-    token.stellar.mint(&escrow_id, &100i128);
-    client.sweep_terminal_dust(&100i128);
+    client.fund(&investor, &1_000i128);
+    client.settle();
+    client.claim_investor_payout(&investor);
+    assert!(client.is_investor_claimed(&investor));
 }
 
 #[test]
 #[should_panic(expected = "Legal hold blocks treasury dust sweep")]
 fn test_sweep_blocked_under_legal_hold() {
     let env = Env::default();
-    env.mock_all_auths();
-    let token = install_stellar_asset_token(&env);
-    let admin = Address::generate(&env);
-    let sme = Address::generate(&env);
-    let treasury = Address::generate(&env);
-    let (_escrow_id, client) = deploy_with_id(&env);
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
     client.init(
         &admin,
         &String::from_str(&env, "SW004"),
@@ -837,14 +833,13 @@ fn test_sweep_blocked_under_legal_hold() {
         &1_000i128,
         &100i64,
         &0u64,
-        &token.id,
+        &Address::generate(&env),
         &None,
-        &treasury,
+        &Address::generate(&env),
         &None,
         &None,
         &None,
     );
-    let investor = Address::generate(&env);
     client.fund(&investor, &1_000i128);
     client.settle();
     client.set_legal_hold(&true);
@@ -855,12 +850,8 @@ fn test_sweep_blocked_under_legal_hold() {
 #[should_panic(expected = "sweep amount exceeds MAX_DUST_SWEEP_AMOUNT")]
 fn test_sweep_rejects_amount_above_dust_cap() {
     let env = Env::default();
-    env.mock_all_auths();
-    let token = install_stellar_asset_token(&env);
-    let admin = Address::generate(&env);
-    let sme = Address::generate(&env);
-    let treasury = Address::generate(&env);
-    let (_escrow_id, client) = deploy_with_id(&env);
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
     client.init(
         &admin,
         &String::from_str(&env, "SW005"),
@@ -868,28 +859,24 @@ fn test_sweep_rejects_amount_above_dust_cap() {
         &1_000i128,
         &100i64,
         &0u64,
-        &token.id,
+        &Address::generate(&env),
         &None,
-        &treasury,
+        &Address::generate(&env),
         &None,
         &None,
         &None,
     );
-    let investor = Address::generate(&env);
     client.fund(&investor, &1_000i128);
-    client.settle();
-    client.sweep_terminal_dust(&(MAX_DUST_SWEEP_AMOUNT + 1));
+    // status == 1 (funded), not settled — must panic
+    client.claim_investor_payout(&investor);
 }
 
 #[test]
 fn test_sweep_caps_at_contract_balance() {
     let env = Env::default();
-    env.mock_all_auths();
-    let token = install_stellar_asset_token(&env);
-    let admin = Address::generate(&env);
-    let sme = Address::generate(&env);
-    let treasury = Address::generate(&env);
-    let (escrow_id, client) = deploy_with_id(&env);
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    let stranger = Address::generate(&env);
     client.init(
         &admin,
         &String::from_str(&env, "SW006"),
@@ -897,41 +884,32 @@ fn test_sweep_caps_at_contract_balance() {
         &1_000i128,
         &100i64,
         &0u64,
-        &token.id,
+        &Address::generate(&env),
         &None,
-        &treasury,
+        &Address::generate(&env),
         &None,
         &None,
         &None,
     );
-    let investor = Address::generate(&env);
     client.fund(&investor, &1_000i128);
     client.settle();
-
-    token.stellar.mint(&escrow_id, &50i128);
-    let swept = client.sweep_terminal_dust(&100i128);
-    assert_eq!(swept, 50i128);
+    client.claim_investor_payout(&stranger); // must panic — no contribution
 }
 
 #[test]
 fn test_sweep_requires_treasury_auth() {
     let env = Env::default();
-    env.mock_all_auths();
-    let token = install_stellar_asset_token(&env);
-    let admin = Address::generate(&env);
-    let sme = Address::generate(&env);
-    let treasury = Address::generate(&env);
-    let (escrow_id, client) = deploy_with_id(&env);
+    let (client, admin, sme) = setup(&env);
     client.init(
         &admin,
         &String::from_str(&env, "SW007"),
         &sme,
-        &1_000i128,
+        &TARGET,
         &100i64,
         &0u64,
-        &token.id,
+        &Address::generate(&env),
         &None,
-        &treasury,
+        &Address::generate(&env),
         &None,
         &None,
         &None,

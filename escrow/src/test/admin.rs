@@ -1,4 +1,6 @@
 use super::*;
+use crate::FundingTargetUpdated;
+use soroban_sdk::Event;
 
 // Admin/governance operations: target changes, maturity changes, admin transfer,
 // legal hold, migration guards, and collateral metadata.

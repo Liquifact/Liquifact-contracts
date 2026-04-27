@@ -298,7 +298,7 @@ fn test_escrow_gold_standard_happy_path_open_overfund_snapshot_settle_claim() {
 
     // Fast-forward time to maturity
     env.ledger().with_mut(|li| {
-        li.timestamp = MATURITY_SECS + 1; // Just past maturity
+        li.timestamp = MATURITY_SECS + 1;
     });
 
     let settled_escrow = client.settle();
