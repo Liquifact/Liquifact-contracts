@@ -111,6 +111,10 @@ invariants:
 - **`append_attestation_digest(digest)`**: admin; **append-only** log, capacity `MAX_ATTESTATION_APPEND_ENTRIES` (see `lib.rs`).
 - **Frontrunning**: first finalized binding transaction wins for the primary slot; integrators should read on-chain state or events after finality.
 
+## SME collateral commitment metadata
+
+`record_sme_collateral_commitment` is SME-authenticated metadata only. It writes `SmeCollateralCommitment`, emits `CollateralRecordedEvt`, and does not move tokens, verify custody, reserve balances, or create an enforceable on-chain claim. Off-chain risk teams should follow [`docs/escrow-sme-collateral.md`](../docs/escrow-sme-collateral.md) before using the record in underwriting, monitoring, or reporting.
+
 ## Security review sign-off checklist (pre-deploy)
 
 Use as a human gate; not a substitute for professional audit.
@@ -118,6 +122,7 @@ Use as a human gate; not a substitute for professional audit.
 - [ ] `admin` is a multisig or governed contract (legal hold and attestation are admin-gated).
 - [ ] Escrow has a **single-initialization guard** to prevent re-initialization after deployment.
 - [ ] Funding token is standard SEP-41; fee-on-transfer tokens are out of scope (see module docs and `docs/ESCROW_TOKEN_INTEGRATION_CHECKLIST.md`).
+- [ ] SME collateral records are labeled as reported metadata only and reviewed against [`docs/escrow-sme-collateral.md`](../docs/escrow-sme-collateral.md).
 - [ ] `min_contribution` and `max_unique_investors` match the legal offering (floor vs. target; cap is per-address, not KYC’d entity).
 - [ ] Attestation digests match the intended off-chain bundle (hash algorithm and canonical encoding documented off-chain).
 - [ ] Maturity and claim-lock semantics use ledger time only (see `lib.rs` rustdoc).

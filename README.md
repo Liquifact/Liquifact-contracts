@@ -221,6 +221,10 @@ external token contracts.
 
 ---
 
+## SME collateral metadata
+
+See [`docs/escrow-sme-collateral.md`](docs/escrow-sme-collateral.md) for the risk-team handling rules for `record_sme_collateral_commitment` and `CollateralRecordedEvt`. The record is SME-reported metadata only; it is not proof of custody, token movement, or an enforceable on-chain claim.
+
 ## Security notes
 
 - **Auth:** state-changing entrypoints use `require_auth()` for the
@@ -228,8 +232,8 @@ external token contracts.
 - **Legal hold:** governance-controlled; misuse risk is mitigated by using a
   multisig `admin` and operational policy (see
   [`docs/OPERATOR_RUNBOOK.md`](docs/OPERATOR_RUNBOOK.md)).
-- **Collateral record:** not proof of encumbrance until a future version
-  explicitly enforces token transfers.
+- **Collateral record:** SME-reported metadata only; not proof of custody,
+  token movement, reserved balance, or an enforceable on-chain claim.
 - **Token integration:** fee-on-transfer, rebasing, and hook tokens are
   **explicitly out of scope**. Post-transfer balance-equality checks in
   [`external_calls`](escrow/src/external_calls.rs) will `panic!` (safe
@@ -272,6 +276,15 @@ cargo build
 cargo test
 cargo llvm-cov --features testutils --fail-under-lines 95 --summary-only -p liquifact_escrow
 ```
+
+### Cargo.lock process notes
+
+- Keep `Cargo.lock` committed and reviewed for every dependency change.
+- For routine updates, use a dedicated dependency branch and include lockfile diff context in PR.
+- For emergency advisory bumps, prioritize minimal version movement and full regression checks.
+- After any lockfile update, re-run the full CI command set above before merge.
+- Dependency policy, cadence, and emergency workflow are documented in
+  [`docs/escrow-dependency-policy.md`](docs/escrow-dependency-policy.md).
 
 ---
 

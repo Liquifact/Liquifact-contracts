@@ -8,7 +8,7 @@ This checklist describes the supported assumptions and explicit unsupported toke
   - Integration layers must convert external human-readable amounts into smallest units before calling `fund`.
   - Do not rely on asset decimals inside the escrow contract; the contract stores integer amounts only.
 - The escrow contract does not itself perform token transfers or custody assets.
-  - `record_sme_collateral_commitment` stores metadata only and does not lock assets.
+  - `record_sme_collateral_commitment` stores SME-reported metadata only and does not lock assets, verify custody, or create an enforceable on-chain claim.
   - Token movement must be handled separately by the integration layer.
 - The contract uses strong signer authorization for state changes (`require_auth(...)` for admin, SME, and investor roles).
 - Token asset identity should be established by token contract ID or audited registry, not by symbol alone.
@@ -49,4 +49,4 @@ Because the contract only records numeric state and collateral metadata (aside f
 
 - The escrow contract is safe for algebraic accounting of on-chain amounts.
 - The integration layer must reject unsupported token patterns before calling escrow entrypoints.
-- The collateral pledge record is not an on-chain asset lock and should not be treated as proof of custody.
+- The collateral commitment record is not an on-chain asset lock and should not be treated as proof of custody; see [`escrow-sme-collateral.md`](escrow-sme-collateral.md).

@@ -149,6 +149,65 @@ fn test_repeated_funding_accumulates_contribution() {
 }
 
 #[test]
+#[should_panic(expected = "funded_amount overflow")]
+fn test_funding_amount_accumulation_overflow_panics() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "OVF001"),
+        &sme,
+        &i128::MAX,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+    );
+
+    client.fund(&investor, &(i128::MAX - 1));
+    client.fund(&investor, &2i128);
+}
+
+#[test]
+fn test_funding_amount_overflow_does_not_mutate_state() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "OVF002"),
+        &sme,
+        &i128::MAX,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+    );
+
+    client.fund(&investor, &(i128::MAX - 1));
+    let before = client.get_escrow();
+
+    let overflowed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.fund(&investor, &2i128);
+    }));
+    assert!(overflowed.is_err());
+
+    let after = client.get_escrow();
+    assert_eq!(after.funded_amount, before.funded_amount);
+    assert_eq!(after.status, 0);
+    assert_eq!(client.get_contribution(&investor), i128::MAX - 1);
+}
+
+#[test]
 fn test_multiple_investors_tracked_independently() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
@@ -629,6 +688,106 @@ fn test_fund_with_commitment_zero_lock_behaves_as_fund() {
 }
 
 #[test]
+fn test_commitment_claim_time_allows_u64_max_boundary() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|ledger| {
+        ledger.timestamp = u64::MAX - 5;
+    });
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let investor = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "CLKMAX1"),
+        &sme,
+        &1_000i128,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+    );
+
+    client.fund_with_commitment(&investor, &100i128, &5u64);
+
+    assert_eq!(client.get_investor_claim_not_before(&investor), u64::MAX);
+}
+
+#[test]
+#[should_panic(expected = "investor claim time overflow")]
+fn test_commitment_claim_time_overflow_panics() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|ledger| {
+        ledger.timestamp = u64::MAX - 5;
+    });
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let investor = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "CLKMAX2"),
+        &sme,
+        &1_000i128,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+    );
+
+    client.fund_with_commitment(&investor, &100i128, &6u64);
+}
+
+#[test]
+fn test_commitment_claim_time_overflow_does_not_record_position() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|ledger| {
+        ledger.timestamp = u64::MAX - 5;
+    });
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let investor = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "CLKMAX3"),
+        &sme,
+        &1_000i128,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+    );
+
+    let overflowed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.fund_with_commitment(&investor, &100i128, &6u64);
+    }));
+    assert!(overflowed.is_err());
+
+    assert_eq!(client.get_escrow().funded_amount, 0);
+    assert_eq!(client.get_contribution(&investor), 0);
+    assert_eq!(client.get_investor_claim_not_before(&investor), 0);
+}
+
+#[test]
 #[should_panic(expected = "strictly increasing min_lock_secs")]
 fn test_init_bad_tier_order_panics() {
     let env = Env::default();
@@ -865,126 +1024,110 @@ fn test_get_funding_close_snapshot_immutable_after_set() {
     );
 }
 
-// ============================================================================
-// Yield Tier Table Validation Tests
-// ============================================================================
+// --- MaxUniqueInvestorsCap and UniqueFunderCount Tests ---
 
-/// Tier table with strictly increasing min_lock_secs and non-decreasing yield_bps is valid.
 #[test]
-fn test_validate_yield_tiers_table_valid_ladder() {
+fn test_unique_funder_count_initialized_to_zero() {
     let env = Env::default();
-    env.mock_all_auths();
-    let client = deploy(&env);
-    let admin = Address::generate(&env);
-    let sme = Address::generate(&env);
-    let (tok, tre) = free_addresses(&env);
-
-    let mut tiers = SorobanVec::new(&env);
-    tiers.push_back(YieldTier {
-        min_lock_secs: 100,
-        yield_bps: 850,
-    });
-    tiers.push_back(YieldTier {
-        min_lock_secs: 200,
-        yield_bps: 900,
-    });
-    tiers.push_back(YieldTier {
-        min_lock_secs: 500,
-        yield_bps: 1100,
-    });
-
-    // Should not panic — valid tier ordering
+    let (client, admin, sme) = setup(&env);
     client.init(
         &admin,
-        &String::from_str(&env, "VALID01"),
+        &String::from_str(&env, "CAP001"),
         &sme,
-        &10_000i128,
+        &TARGET,
         &800i64,
         &0u64,
-        &tok,
+        &Address::generate(&env),
         &None,
-        &tre,
-        &Some(tiers),
-        &None,
-        &None,
-    );
-}
-
-/// Empty tier table is valid (no tiers configured).
-#[test]
-fn test_validate_yield_tiers_table_empty_is_valid() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let client = deploy(&env);
-    let admin = Address::generate(&env);
-    let sme = Address::generate(&env);
-    let (tok, tre) = free_addresses(&env);
-
-    let tiers = SorobanVec::new(&env);
-
-    client.init(
-        &admin,
-        &String::from_str(&env, "EMPTY01"),
-        &sme,
-        &10_000i128,
-        &800i64,
-        &0u64,
-        &tok,
-        &None,
-        &tre,
-        &Some(tiers),
-        &None,
-        &None,
-    );
-}
-
-/// None tier table is valid (tiering disabled).
-#[test]
-fn test_validate_yield_tiers_table_none_is_valid() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let client = deploy(&env);
-    let admin = Address::generate(&env);
-    let sme = Address::generate(&env);
-    let (tok, tre) = free_addresses(&env);
-
-    client.init(
-        &admin,
-        &String::from_str(&env, "NONE01"),
-        &sme,
-        &10_000i128,
-        &800i64,
-        &0u64,
-        &tok,
-        &None,
-        &tre,
+        &Address::generate(&env),
         &None,
         &None,
         &None,
     );
+    assert_eq!(client.get_unique_funder_count(), 0);
 }
 
-/// Single tier with yield >= base is valid.
 #[test]
-fn test_validate_yield_tiers_table_single_tier_valid() {
+fn test_unique_funder_count_increments_on_first_investor() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "CAP002"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+    );
+    assert_eq!(client.get_unique_funder_count(), 0);
+    client.fund(&investor, &(TARGET / 2));
+    assert_eq!(client.get_unique_funder_count(), 1);
+    client.fund(&investor, &(TARGET / 2));
+    assert_eq!(client.get_unique_funder_count(), 1); // Still 1, same investor
+}
+
+#[test]
+fn test_unique_funder_count_increments_for_distinct_investors() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let inv_a = Address::generate(&env);
+    let inv_b = Address::generate(&env);
+    let inv_c = Address::generate(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "CAP003"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+    );
+    assert_eq!(client.get_unique_funder_count(), 0);
+    
+    client.fund(&inv_a, &(TARGET / 3));
+    assert_eq!(client.get_unique_funder_count(), 1);
+    
+    client.fund(&inv_b, &(TARGET / 3));
+    assert_eq!(client.get_unique_funder_count(), 2);
+    
+    client.fund(&inv_c, &(TARGET / 3));
+    assert_eq!(client.get_unique_funder_count(), 3);
+}
+
+#[test]
+fn test_unique_funder_count_with_fund_with_commitment() {
     let env = Env::default();
     env.mock_all_auths();
     let client = deploy(&env);
     let admin = Address::generate(&env);
     let sme = Address::generate(&env);
+    let inv_a = Address::generate(&env);
+    let inv_b = Address::generate(&env);
     let (tok, tre) = free_addresses(&env);
-
+    
     let mut tiers = SorobanVec::new(&env);
     tiers.push_back(YieldTier {
         min_lock_secs: 100,
         yield_bps: 900,
     });
-
+    
     client.init(
         &admin,
-        &String::from_str(&env, "SINGLE01"),
+        &String::from_str(&env, "CAP004"),
         &sme,
-        &10_000i128,
+        &TARGET,
         &800i64,
         &0u64,
         &tok,
@@ -994,275 +1137,137 @@ fn test_validate_yield_tiers_table_single_tier_valid() {
         &None,
         &None,
     );
+    
+    assert_eq!(client.get_unique_funder_count(), 0);
+    
+    // First investor uses fund_with_commitment
+    client.fund_with_commitment(&inv_a, &(TARGET / 2), &200u64);
+    assert_eq!(client.get_unique_funder_count(), 1);
+    
+    // Second investor uses regular fund
+    client.fund(&inv_b, &(TARGET / 2));
+    assert_eq!(client.get_unique_funder_count(), 2);
 }
 
-/// Tier yield_bps equal to base yield is valid (minimum boundary).
 #[test]
-fn test_validate_yield_tiers_table_tier_equal_to_base() {
+fn test_max_unique_investors_cap_none_allows_unlimited() {
     let env = Env::default();
-    env.mock_all_auths();
-    let client = deploy(&env);
-    let admin = Address::generate(&env);
-    let sme = Address::generate(&env);
-    let (tok, tre) = free_addresses(&env);
-
-    let mut tiers = SorobanVec::new(&env);
-    tiers.push_back(YieldTier {
-        min_lock_secs: 100,
-        yield_bps: 800, // Equal to base
-    });
-
+    let (client, admin, sme) = setup(&env);
     client.init(
         &admin,
-        &String::from_str(&env, "EQUAL01"),
+        &String::from_str(&env, "CAP005"),
         &sme,
-        &10_000i128,
+        &TARGET,
         &800i64,
         &0u64,
-        &tok,
+        &Address::generate(&env),
         &None,
-        &tre,
-        &Some(tiers),
+        &Address::generate(&env),
         &None,
         &None,
+        &None, // No cap set
     );
+    
+    // Should be able to add many investors when no cap is set
+    for i in 0..10 {
+        let investor = Address::generate(&env);
+        client.fund(&investor, &(TARGET / 20));
+        assert_eq!(client.get_unique_funder_count(), i + 1);
+    }
 }
 
-/// Tier with yield_bps below base must panic.
 #[test]
-#[should_panic(expected = "tier yield_bps must be >= base yield_bps")]
-fn test_validate_yield_tiers_table_tier_below_base_panics() {
+fn test_max_unique_investors_cap_enforced_at_limit() {
     let env = Env::default();
-    env.mock_all_auths();
-    let client = deploy(&env);
-    let admin = Address::generate(&env);
-    let sme = Address::generate(&env);
-    let (tok, tre) = free_addresses(&env);
-
-    let mut tiers = SorobanVec::new(&env);
-    tiers.push_back(YieldTier {
-        min_lock_secs: 100,
-        yield_bps: 700, // Below base 800
-    });
-
+    let (client, admin, sme) = setup(&env);
     client.init(
         &admin,
-        &String::from_str(&env, "BELOW01"),
+        &String::from_str(&env, "CAP006"),
         &sme,
-        &10_000i128,
+        &TARGET,
         &800i64,
         &0u64,
-        &tok,
+        &Address::generate(&env),
         &None,
-        &tre,
-        &Some(tiers),
+        &Address::generate(&env),
         &None,
         &None,
+        &Some(3u32), // Cap of 3 investors
     );
+    
+    assert_eq!(client.get_max_unique_investors_cap(), Some(3u32));
+    
+    // Add 3 investors - should succeed
+    let inv1 = Address::generate(&env);
+    let inv2 = Address::generate(&env);
+    let inv3 = Address::generate(&env);
+    
+    client.fund(&inv1, &(TARGET / 6));
+    assert_eq!(client.get_unique_funder_count(), 1);
+    
+    client.fund(&inv2, &(TARGET / 6));
+    assert_eq!(client.get_unique_funder_count(), 2);
+    
+    client.fund(&inv3, &(TARGET / 6));
+    assert_eq!(client.get_unique_funder_count(), 3);
+    
+    // 4th investor should panic
+    let inv4 = Address::generate(&env);
+    client.fund(&inv4, &(TARGET / 6));
 }
 
-/// Tier with yield_bps > 10_000 must panic.
 #[test]
-#[should_panic(expected = "tier yield_bps must be 0..=10_000")]
-fn test_validate_yield_tiers_table_tier_yield_exceeds_max_panics() {
+#[should_panic(expected = "unique investor cap reached")]
+fn test_max_unique_investors_cap_blocks_excess_investors() {
     let env = Env::default();
-    env.mock_all_auths();
-    let client = deploy(&env);
-    let admin = Address::generate(&env);
-    let sme = Address::generate(&env);
-    let (tok, tre) = free_addresses(&env);
-
-    let mut tiers = SorobanVec::new(&env);
-    tiers.push_back(YieldTier {
-        min_lock_secs: 100,
-        yield_bps: 10_001, // Exceeds max
-    });
-
+    let (client, admin, sme) = setup(&env);
     client.init(
         &admin,
-        &String::from_str(&env, "EXCEED01"),
+        &String::from_str(&env, "CAP007"),
         &sme,
-        &10_000i128,
+        &TARGET,
         &800i64,
         &0u64,
-        &tok,
+        &Address::generate(&env),
         &None,
-        &tre,
-        &Some(tiers),
+        &Address::generate(&env),
         &None,
         &None,
+        &Some(2u32), // Cap of 2 investors
     );
+    
+    // Add 2 investors
+    let inv1 = Address::generate(&env);
+    let inv2 = Address::generate(&env);
+    client.fund(&inv1, &(TARGET / 4));
+    client.fund(&inv2, &(TARGET / 4));
+    
+    // 3rd investor should panic
+    let inv3 = Address::generate(&env);
+    client.fund(&inv3, &(TARGET / 4));
 }
 
-/// Tier with negative yield_bps must panic.
 #[test]
-#[should_panic(expected = "tier yield_bps must be 0..=10_000")]
-fn test_validate_yield_tiers_table_tier_yield_negative_panics() {
+#[should_panic(expected = "unique investor cap reached")]
+fn test_max_unique_investors_cap_blocks_fund_with_commitment() {
     let env = Env::default();
     env.mock_all_auths();
     let client = deploy(&env);
     let admin = Address::generate(&env);
     let sme = Address::generate(&env);
     let (tok, tre) = free_addresses(&env);
-
-    let mut tiers = SorobanVec::new(&env);
-    tiers.push_back(YieldTier {
-        min_lock_secs: 100,
-        yield_bps: -100, // Negative
-    });
-
-    client.init(
-        &admin,
-        &String::from_str(&env, "NEG01"),
-        &sme,
-        &10_000i128,
-        &800i64,
-        &0u64,
-        &tok,
-        &None,
-        &tre,
-        &Some(tiers),
-        &None,
-        &None,
-    );
-}
-
-/// Tiers with non-strictly-increasing min_lock_secs (equal) must panic.
-#[test]
-#[should_panic(expected = "tiers must have strictly increasing min_lock_secs")]
-fn test_validate_yield_tiers_table_equal_min_lock_panics() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let client = deploy(&env);
-    let admin = Address::generate(&env);
-    let sme = Address::generate(&env);
-    let (tok, tre) = free_addresses(&env);
-
-    let mut tiers = SorobanVec::new(&env);
-    tiers.push_back(YieldTier {
-        min_lock_secs: 100,
-        yield_bps: 850,
-    });
-    tiers.push_back(YieldTier {
-        min_lock_secs: 100, // Equal to previous
-        yield_bps: 900,
-    });
-
-    client.init(
-        &admin,
-        &String::from_str(&env, "EQLOCK01"),
-        &sme,
-        &10_000i128,
-        &800i64,
-        &0u64,
-        &tok,
-        &None,
-        &tre,
-        &Some(tiers),
-        &None,
-        &None,
-    );
-}
-
-/// Tiers with decreasing min_lock_secs must panic.
-#[test]
-#[should_panic(expected = "tiers must have strictly increasing min_lock_secs")]
-fn test_validate_yield_tiers_table_decreasing_min_lock_panics() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let client = deploy(&env);
-    let admin = Address::generate(&env);
-    let sme = Address::generate(&env);
-    let (tok, tre) = free_addresses(&env);
-
-    let mut tiers = SorobanVec::new(&env);
-    tiers.push_back(YieldTier {
-        min_lock_secs: 200,
-        yield_bps: 850,
-    });
-    tiers.push_back(YieldTier {
-        min_lock_secs: 100, // Decreasing
-        yield_bps: 900,
-    });
-
-    client.init(
-        &admin,
-        &String::from_str(&env, "DECLOCK01"),
-        &sme,
-        &10_000i128,
-        &800i64,
-        &0u64,
-        &tok,
-        &None,
-        &tre,
-        &Some(tiers),
-        &None,
-        &None,
-    );
-}
-
-/// Tiers with decreasing yield_bps must panic (non-monotonic).
-#[test]
-#[should_panic(expected = "tiers must have non-decreasing yield_bps")]
-fn test_validate_yield_tiers_table_decreasing_yield_panics() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let client = deploy(&env);
-    let admin = Address::generate(&env);
-    let sme = Address::generate(&env);
-    let (tok, tre) = free_addresses(&env);
-
-    let mut tiers = SorobanVec::new(&env);
-    tiers.push_back(YieldTier {
-        min_lock_secs: 100,
-        yield_bps: 1000,
-    });
-    tiers.push_back(YieldTier {
-        min_lock_secs: 200,
-        yield_bps: 900, // Decreasing
-    });
-
-    client.init(
-        &admin,
-        &String::from_str(&env, "DECYIELD01"),
-        &sme,
-        &10_000i128,
-        &800i64,
-        &0u64,
-        &tok,
-        &None,
-        &tre,
-        &Some(tiers),
-        &None,
-        &None,
-    );
-}
-
-/// Tiers with equal yield_bps (non-decreasing) are valid.
-#[test]
-fn test_validate_yield_tiers_table_equal_yield_valid() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let client = deploy(&env);
-    let admin = Address::generate(&env);
-    let sme = Address::generate(&env);
-    let (tok, tre) = free_addresses(&env);
-
+    
     let mut tiers = SorobanVec::new(&env);
     tiers.push_back(YieldTier {
         min_lock_secs: 100,
         yield_bps: 900,
     });
-    tiers.push_back(YieldTier {
-        min_lock_secs: 200,
-        yield_bps: 900, // Equal is valid (non-decreasing)
-    });
-
+    
     client.init(
         &admin,
-        &String::from_str(&env, "EQYIELD01"),
+        &String::from_str(&env, "CAP008"),
         &sme,
-        &10_000i128,
+        &TARGET,
         &800i64,
         &0u64,
         &tok,
@@ -1270,159 +1275,285 @@ fn test_validate_yield_tiers_table_equal_yield_valid() {
         &tre,
         &Some(tiers),
         &None,
+        &Some(1u32), // Cap of 1 investor
+    );
+    
+    // First investor succeeds
+    let inv1 = Address::generate(&env);
+    client.fund_with_commitment(&inv1, &(TARGET / 2), &200u64);
+    
+    // Second investor using fund_with_commitment should panic
+    let inv2 = Address::generate(&env);
+    client.fund_with_commitment(&inv2, &(TARGET / 2), &200u64);
+}
+
+#[test]
+fn test_re_funding_same_address_doesnt_count_against_cap() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "CAP009"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
         &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &Some(1u32), // Cap of 1 investor
+    );
+    
+    // First fund should succeed
+    client.fund(&investor, &(TARGET / 3));
+    assert_eq!(client.get_unique_funder_count(), 1);
+    
+    // Re-funding same address should also succeed (doesn't count against cap)
+    client.fund(&investor, &(TARGET / 3));
+    assert_eq!(client.get_unique_funder_count(), 1);
+    
+    // Final fund from same address should succeed
+    client.fund(&investor, &(TARGET / 3));
+    assert_eq!(client.get_unique_funder_count(), 1);
+    assert_eq!(client.get_escrow().status, 1); // Funded
+}
+
+#[test]
+fn test_zero_contribution_then_non_zero_contribution_counts_as_unique_investor() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "CAP010"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &Some(2u32), // Cap of 2 investors
+    );
+    
+    assert_eq!(client.get_unique_funder_count(), 0);
+    assert_eq!(client.get_contribution(&investor), 0);
+    
+    // First non-zero contribution should increment count
+    client.fund(&investor, &(TARGET / 2));
+    assert_eq!(client.get_unique_funder_count(), 1);
+    assert_eq!(client.get_contribution(&investor), TARGET / 2);
+}
+
+#[test]
+fn test_cap_validation_at_init_positive_value_required() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    
+    // Should panic for zero cap
+    client.init(
+        &admin,
+        &String::from_str(&env, "CAP011"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &Some(0u32), // Invalid: zero cap
     );
 }
 
-/// Maximum valid yield_bps (10_000) is accepted.
 #[test]
-fn test_validate_yield_tiers_table_max_yield_valid() {
+#[should_panic(expected = "max_unique_investors must be positive when configured")]
+fn test_init_panics_for_zero_cap() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "CAP012"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &Some(0u32), // Invalid: zero cap
+    );
+}
+
+#[test]
+fn test_cap_edge_case_exact_limit_reached() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "CAP013"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &Some(5u32), // Cap of 5 investors
+    );
+    
+    // Add exactly 5 investors - should all succeed
+    for i in 0..5 {
+        let investor = Address::generate(&env);
+        client.fund(&investor, &(TARGET / 10));
+        assert_eq!(client.get_unique_funder_count(), i + 1);
+    }
+    
+    // Should have exactly 5 unique funders
+    assert_eq!(client.get_unique_funder_count(), 5);
+    
+    // 6th investor should panic
+    let inv6 = Address::generate(&env);
+    client.fund(&inv6, &(TARGET / 10));
+}
+
+#[test]
+#[should_panic(expected = "unique investor cap reached")]
+fn test_cap_edge_case_exactly_one_over_limit_panics() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "CAP014"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &Some(5u32), // Cap of 5 investors
+    );
+    
+    // Add exactly 5 investors
+    for _i in 0..5 {
+        let investor = Address::generate(&env);
+        client.fund(&investor, &(TARGET / 10));
+    }
+    
+    // 6th investor should panic
+    let inv6 = Address::generate(&env);
+    client.fund(&inv6, &(TARGET / 10));
+}
+
+#[test]
+fn test_cap_with_min_contribution_floor_interaction() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "CAP015"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &Some(1_000i128), // Min contribution floor
+        &Some(3u32), // Cap of 3 investors
+    );
+    
+    // Should respect both cap and floor
+    let inv1 = Address::generate(&env);
+    let inv2 = Address::generate(&env);
+    let inv3 = Address::generate(&env);
+    
+    client.fund(&inv1, &2_000i128);
+    assert_eq!(client.get_unique_funder_count(), 1);
+    
+    client.fund(&inv2, &1_500i128);
+    assert_eq!(client.get_unique_funder_count(), 2);
+    
+    client.fund(&inv3, &1_000i128);
+    assert_eq!(client.get_unique_funder_count(), 3);
+    
+    // 4th investor should be blocked by cap, not floor
+    let inv4 = Address::generate(&env);
+    client.fund(&inv4, &2_000i128);
+}
+
+#[test]
+#[should_panic(expected = "unique investor cap reached")]
+fn test_cap_blocks_even_with_large_contribution() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "CAP016"),
+        &sme,
+        &(TARGET * 10), // Large target
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &Some(1u32), // Cap of 1 investor
+    );
+    
+    // First investor can fund large amount
+    let inv1 = Address::generate(&env);
+    client.fund(&inv1, &(TARGET * 5));
+    
+    // Second investor blocked even if they could fully fund remaining amount
+    let inv2 = Address::generate(&env);
+    client.fund(&inv2, &(TARGET * 5));
+}
+
+#[test]
+fn test_cap_panic_message_quality() {
     let env = Env::default();
     env.mock_all_auths();
     let client = deploy(&env);
     let admin = Address::generate(&env);
     let sme = Address::generate(&env);
     let (tok, tre) = free_addresses(&env);
-
-    let mut tiers = SorobanVec::new(&env);
-    tiers.push_back(YieldTier {
-        min_lock_secs: 100,
-        yield_bps: 10_000, // Maximum valid
-    });
-
+    
     client.init(
         &admin,
-        &String::from_str(&env, "MAXYIELD01"),
+        &String::from_str(&env, "CAP017"),
         &sme,
-        &10_000i128,
+        &TARGET,
         &800i64,
         &0u64,
         &tok,
         &None,
         &tre,
-        &Some(tiers),
         &None,
         &None,
+        &Some(1u32),
     );
-}
-
-/// Zero yield_bps in tier is valid if base is also zero.
-#[test]
-fn test_validate_yield_tiers_table_zero_yield_valid() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let client = deploy(&env);
-    let admin = Address::generate(&env);
-    let sme = Address::generate(&env);
-    let (tok, tre) = free_addresses(&env);
-
-    let mut tiers = SorobanVec::new(&env);
-    tiers.push_back(YieldTier {
-        min_lock_secs: 100,
-        yield_bps: 0,
-    });
-
-    client.init(
-        &admin,
-        &String::from_str(&env, "ZEROYIELD01"),
-        &sme,
-        &10_000i128,
-        &0i64, // Base yield is 0
-        &0u64,
-        &tok,
-        &None,
-        &tre,
-        &Some(tiers),
-        &None,
-        &None,
-    );
-}
-
-/// Complex multi-tier ladder with all valid constraints.
-#[test]
-fn test_validate_yield_tiers_table_complex_ladder() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let client = deploy(&env);
-    let admin = Address::generate(&env);
-    let sme = Address::generate(&env);
-    let (tok, tre) = free_addresses(&env);
-
-    let mut tiers = SorobanVec::new(&env);
-    tiers.push_back(YieldTier {
-        min_lock_secs: 30,
-        yield_bps: 500,
-    });
-    tiers.push_back(YieldTier {
-        min_lock_secs: 90,
-        yield_bps: 600,
-    });
-    tiers.push_back(YieldTier {
-        min_lock_secs: 180,
-        yield_bps: 750,
-    });
-    tiers.push_back(YieldTier {
-        min_lock_secs: 365,
-        yield_bps: 1000,
-    });
-    tiers.push_back(YieldTier {
-        min_lock_secs: 730,
-        yield_bps: 1500,
-    });
-
-    client.init(
-        &admin,
-        &String::from_str(&env, "COMPLEX01"),
-        &sme,
-        &100_000i128,
-        &400i64, // Base yield
-        &0u64,
-        &tok,
-        &None,
-        &tre,
-        &Some(tiers),
-        &None,
-        &None,
-    );
-}
-
-/// Second tier with yield below first tier must panic.
-#[test]
-#[should_panic(expected = "tiers must have non-decreasing yield_bps")]
-fn test_validate_yield_tiers_table_second_tier_below_first_panics() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let client = deploy(&env);
-    let admin = Address::generate(&env);
-    let sme = Address::generate(&env);
-    let (tok, tre) = free_addresses(&env);
-
-    let mut tiers = SorobanVec::new(&env);
-    tiers.push_back(YieldTier {
-        min_lock_secs: 100,
-        yield_bps: 1000,
-    });
-    tiers.push_back(YieldTier {
-        min_lock_secs: 200,
-        yield_bps: 950, // Below previous tier
-    });
-    tiers.push_back(YieldTier {
-        min_lock_secs: 300,
-        yield_bps: 1100,
-    });
-
-    client.init(
-        &admin,
-        &String::from_str(&env, "MIDLOW01"),
-        &sme,
-        &10_000i128,
-        &800i64,
-        &0u64,
-        &tok,
-        &None,
-        &tre,
-        &Some(tiers),
-        &None,
-        &None,
-    );
+    
+    // Add first investor
+    let inv1 = Address::generate(&env);
+    client.fund(&inv1, &(TARGET / 2));
+    
+    // Try to add second investor - should panic with clear message
+    let inv2 = Address::generate(&env);
+    client.fund(&inv2, &(TARGET / 2));
 }

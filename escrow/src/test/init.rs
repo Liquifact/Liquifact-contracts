@@ -1,4 +1,5 @@
 use super::*;
+use proptest::prelude::*;
 
 // Initialization, getters, invoice-id validation, and init-shaped cost baselines.
 
@@ -488,4 +489,223 @@ fn test_init_registry_none_roundtrip() {
         &None,
     );
     assert_eq!(client.get_registry_ref(), None);
+}
+
+// ---------------------------------------------------------------------------
+// invoice_id boundary and charset fuzz/parameterized tests
+// ---------------------------------------------------------------------------
+
+/// Helper: attempt init with the given invoice_id string; returns Err on panic.
+fn try_init_with_id(env: &Env, id: &str) -> Result<(), ()> {
+    env.mock_all_auths();
+    let client = deploy(env);
+    let admin = Address::generate(env);
+    let sme = Address::generate(env);
+    let (t, tr) = free_addresses(env);
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.init(
+            &admin,
+            &String::from_str(env, id),
+            &sme,
+            &1_000i128,
+            &500i64,
+            &0u64,
+            &t,
+            &None,
+            &tr,
+            &None,
+            &None,
+            &None,
+        );
+    }));
+    result.map(|_| ()).map_err(|_| ())
+}
+
+// --- length boundary ---
+
+/// Length 1 is the minimum valid length.
+#[test]
+fn test_invoice_id_length_1_accepted() {
+    let env = Env::default();
+    assert!(try_init_with_id(&env, "A").is_ok());
+}
+
+/// Length 32 is the maximum valid length (MAX_INVOICE_ID_STRING_LEN).
+#[test]
+fn test_invoice_id_length_32_accepted() {
+    let env = Env::default();
+    // 32 chars, all valid
+    assert!(try_init_with_id(&env, "ABCDEFGHIJKLMNOPQRSTUVWXYZ012345").is_ok());
+}
+
+/// Length 33 is one over the limit and must be rejected.
+#[test]
+#[should_panic(expected = "invoice_id length")]
+fn test_invoice_id_length_33_panics() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (t, tr) = free_addresses(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456"), // 33 chars
+        &sme,
+        &1_000i128,
+        &500i64,
+        &0u64,
+        &t,
+        &None,
+        &tr,
+        &None,
+        &None,
+        &None,
+    );
+}
+
+// --- charset: valid characters ---
+
+/// All three character classes (upper, lower, digit, underscore) are accepted.
+#[test]
+fn test_invoice_id_all_valid_char_classes_accepted() {
+    let env = Env::default();
+    assert!(try_init_with_id(&env, "Az0_").is_ok());
+}
+
+/// Underscore-only string is valid.
+#[test]
+fn test_invoice_id_underscore_only_accepted() {
+    let env = Env::default();
+    assert!(try_init_with_id(&env, "_").is_ok());
+}
+
+/// Digits-only string is valid.
+#[test]
+fn test_invoice_id_digits_only_accepted() {
+    let env = Env::default();
+    assert!(try_init_with_id(&env, "0123456789").is_ok());
+}
+
+// --- charset: illegal characters (parameterized) ---
+
+/// Every character outside [A-Za-z0-9_] must be rejected with the charset panic message.
+/// This covers common punctuation, operators, whitespace, and non-ASCII bytes.
+#[test]
+fn test_invoice_id_illegal_chars_all_rejected() {
+    // Characters that are NOT in [A-Za-z0-9_] — representative set covering
+    // punctuation, operators, whitespace, and boundary ASCII values.
+    let illegal: &[&str] = &[
+        "INV-DASH",  // hyphen
+        "INV.DOT",   // period
+        "INV@AT",    // @
+        "INV!BANG",  // !
+        "INV#HASH",  // #
+        "INV$DOLL",  // $
+        "INV%PCT",   // %
+        "INV^CARET", // ^
+        "INV&AMP",   // &
+        "INV*STAR",  // *
+        "INV(PAR",   // (
+        "INV)PAR",   // )
+        "INV+PLUS",  // +
+        "INV=EQ",    // =
+        "INV[BRK",   // [
+        "INV]BRK",   // ]
+        "INV{BRC",   // {
+        "INV}BRC",   // }
+        "INV|PIPE",  // |
+        "INV;SEMI",  // ;
+        "INV:COL",   // :
+        "INV'QUOT",  // '
+        "INV,COM",   // ,
+        "INV<LT",    // <
+        "INV>GT",    // >
+        "INV?QM",    // ?
+        "INV/SL",    // /
+        "INV BAD",   // space
+        "INV\tTAB",  // tab
+    ];
+
+    for &id in illegal {
+        let env = Env::default();
+        let result = try_init_with_id(&env, id);
+        assert!(
+            result.is_err(),
+            "expected panic for illegal invoice_id {:?} but init succeeded",
+            id
+        );
+    }
+}
+
+/// A single illegal character at the start of an otherwise valid string is caught.
+#[test]
+fn test_invoice_id_illegal_char_at_start_rejected() {
+    let env = Env::default();
+    assert!(try_init_with_id(&env, "-LEADING").is_err());
+}
+
+/// A single illegal character at the end of an otherwise valid string is caught.
+#[test]
+fn test_invoice_id_illegal_char_at_end_rejected() {
+    let env = Env::default();
+    assert!(try_init_with_id(&env, "TRAILING-").is_err());
+}
+
+/// A single illegal character in the middle of an otherwise valid string is caught.
+#[test]
+fn test_invoice_id_illegal_char_in_middle_rejected() {
+    let env = Env::default();
+    assert!(try_init_with_id(&env, "MID.DLE").is_err());
+}
+
+// --- proptest: random valid strings always succeed ---
+
+proptest! {
+    /// Any string composed entirely of [A-Za-z0-9_] with length 1..=32 must be accepted.
+    #[test]
+    fn prop_valid_invoice_id_always_accepted(
+        s in "[A-Za-z0-9_]{1,32}"
+    ) {
+        let env = Env::default();
+        prop_assert!(
+            try_init_with_id(&env, &s).is_ok(),
+            "valid invoice_id {:?} was rejected",
+            s
+        );
+    }
+
+    /// Any string with at least one character outside [A-Za-z0-9_] (length 1..=32) must panic.
+    #[test]
+    fn prop_invalid_charset_invoice_id_always_rejected(
+        // valid prefix + one illegal char + optional valid suffix, total ≤ 32
+        prefix in "[A-Za-z0-9_]{0,15}",
+        bad_char in "[^A-Za-z0-9_]",
+        suffix in "[A-Za-z0-9_]{0,15}",
+    ) {
+        let combined = format!("{}{}{}", prefix, bad_char, suffix);
+        // Only test if the combined string fits within the length limit so we isolate
+        // the charset rejection rather than the length rejection.
+        prop_assume!(combined.len() >= 1 && combined.len() <= 32);
+        let env = Env::default();
+        prop_assert!(
+            try_init_with_id(&env, &combined).is_err(),
+            "expected rejection for invoice_id with illegal char: {:?}",
+            combined
+        );
+    }
+
+    /// Strings longer than MAX_INVOICE_ID_STRING_LEN (32) must always be rejected.
+    #[test]
+    fn prop_too_long_invoice_id_always_rejected(
+        s in "[A-Za-z0-9_]{33,64}"
+    ) {
+        let env = Env::default();
+        prop_assert!(
+            try_init_with_id(&env, &s).is_err(),
+            "expected rejection for too-long invoice_id (len={}): {:?}",
+            s.len(),
+            s
+        );
+    }
 }

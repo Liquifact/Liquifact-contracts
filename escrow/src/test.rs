@@ -1,18 +1,20 @@
 use super::{
-    DataKey, LiquifactEscrow, LiquifactEscrowClient, YieldTier, MAX_DUST_SWEEP_AMOUNT,
-    SCHEMA_VERSION,
+    DataKey, FundingTargetUpdated, LiquifactEscrow, LiquifactEscrowClient, YieldTier,
+    MAX_DUST_SWEEP_AMOUNT, SCHEMA_VERSION,
 };
 use soroban_sdk::{
     symbol_short,
     testutils::{Address as _, Ledger as _},
     token::{StellarAssetClient, TokenClient},
-    Address, Env, String, Vec as SorobanVec,
+    Address, Env, Event, String, Vec as SorobanVec,
 };
 
 // Focused test tree for escrow behavior. Shared helpers live here so feature
 // modules stay assertion-focused and each test still owns a fresh Env.
 mod admin;
+mod cap_validation;
 mod external_calls;
+mod external_calls_mocked;
 mod funding;
 mod init;
 mod integration;

@@ -1,5 +1,6 @@
 use super::*;
 use proptest::prelude::*;
+use std::vec::Vec;
 
 // Property tests stay isolated so deterministic unit-test grouping remains easy
 // to review while fuzzier invariants keep their own namespace.

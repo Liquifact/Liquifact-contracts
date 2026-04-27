@@ -19,7 +19,7 @@ fn test_balance_delta_invariants_with_standard_token() {
     if holder_balance > 0 {
         token.token.transfer(
             &holder,
-            &MuxedAddress::from(treasury.clone()),
+            MuxedAddress::from(treasury.clone()),
             &holder_balance,
         );
     }
