@@ -691,16 +691,10 @@ fn settle_on_withdrawn_escrow_panics() {
     assert_eq!(client.get_escrow().status, 2u32);
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Investor claim path (post-settle)
-// ──────────────────────────────────────────────────────────────────────────────
-
-/// `claim_investor_payout` succeeds for an investor after `settle`.
-///
-/// This is a state-marker call — no token transfer occurs inside the contract.
-/// The test verifies the call completes without panic and emits an event.
+/// `sweep_terminal_dust` must reject open/funded escrows before terminal state.
 #[test]
-fn claim_investor_payout_succeeds_after_settle() {
+#[should_panic(expected = "dust sweep only in terminal states (settled or withdrawn)")]
+fn sweep_terminal_dust_before_terminal_state_panics() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
     default_init(&client, &env, &admin, &sme);
@@ -773,7 +767,7 @@ fn test_sweep_terminal_dust_after_settle_transfers_to_treasury() {
         &admin,
         &String::from_str(&env, "SW001"),
         &sme,
-        &1_000i128,
+        &TARGET,
         &100i64,
         &maturity,
         &tok,
@@ -839,7 +833,7 @@ fn test_sweep_rejected_when_open() {
         &admin,
         &String::from_str(&env, "SW003"),
         &sme,
-        &1_000i128,
+        &TARGET,
         &100i64,
         &0u64,
         &Address::generate(&env),
@@ -891,7 +885,7 @@ fn test_sweep_rejects_amount_above_dust_cap() {
         &admin,
         &soroban_sdk::String::from_str(&env, "SW005"),
         &sme,
-        &1_000i128,
+        &TARGET,
         &100i64,
         &0u64,
         &Address::generate(&env),
@@ -949,8 +943,23 @@ fn test_sweep_requires_treasury_auth() {
         &None,
         &None,
     );
+    fund_to_target(&client, &env);
+    client.settle();
+    token.stellar.mint(&escrow_id, &(MAX_DUST_SWEEP_AMOUNT + 1));
+
+    client.sweep_terminal_dust(&(MAX_DUST_SWEEP_AMOUNT + 1));
+}
+
+/// `claim_investor_payout` succeeds for an investor after `settle`.
+#[test]
+fn claim_investor_payout_succeeds_after_settle() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
     let investor = Address::generate(&env);
-    client.fund(&investor, &1_000i128);
+
+    default_init(&client, &env, &admin, &sme);
+    client.fund(&investor, &TARGET);
     client.settle();
     token.stellar.mint(&escrow_id, &10i128);
 
@@ -1003,6 +1012,7 @@ fn funding_snapshot_survives_settle() {
     let env = Env::default();
     env.mock_all_auths();
     let (client, admin, sme) = setup(&env);
+
     default_init(&client, &env, &admin, &sme);
     fund_to_target(&client, &env);
 
