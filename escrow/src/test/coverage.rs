@@ -1,5 +1,11 @@
-use crate::{test::{free_addresses, setup}, DataKey, YieldTier};
-use soroban_sdk::{testutils::{Address as _, Ledger}, Address, Env, Vec as SorobanVec};
+use crate::{
+    test::{free_addresses, setup},
+    DataKey, YieldTier,
+};
+use soroban_sdk::{
+    testutils::{Address as _, Ledger},
+    Address, Env, Vec as SorobanVec,
+};
 
 #[test]
 #[should_panic(expected = "from_version does not match stored version")]
@@ -57,7 +63,7 @@ fn test_migrate_no_path() {
         &None,
         &None,
     );
-    
+
     env.as_contract(&client.address, || {
         env.storage().instance().set(&DataKey::Version, &0u32);
     });
@@ -257,10 +263,10 @@ fn test_claim_lock_not_expired() {
 
     let investor = Address::generate(&env);
     client.fund_with_commitment(&investor, &100, &3600);
-    
+
     env.ledger().with_mut(|li| li.timestamp = 101);
     client.settle();
-    
+
     client.claim_investor_payout(&investor);
 }
 
@@ -306,7 +312,20 @@ fn test_attestations_happy_path() {
     let (client, admin, sme) = setup(&env);
     let (funding_token, treasury) = free_addresses(&env);
 
-    client.init(&admin, &soroban_sdk::String::from_str(&env, "T"), &sme, &100, &10, &10, &funding_token, &None, &treasury, &None, &None, &None);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "T"),
+        &sme,
+        &100,
+        &10,
+        &10,
+        &funding_token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+    );
 
     let hash1 = soroban_sdk::BytesN::from_array(&env, &[1u8; 32]);
     let hash2 = soroban_sdk::BytesN::from_array(&env, &[2u8; 32]);
@@ -327,7 +346,20 @@ fn test_bind_primary_attestation_twice() {
     env.mock_all_auths();
     let (client, admin, sme) = setup(&env);
     let (funding_token, treasury) = free_addresses(&env);
-    client.init(&admin, &soroban_sdk::String::from_str(&env, "T"), &sme, &100, &10, &10, &funding_token, &None, &treasury, &None, &None, &None);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "T"),
+        &sme,
+        &100,
+        &10,
+        &10,
+        &funding_token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+    );
 
     let hash = soroban_sdk::BytesN::from_array(&env, &[1u8; 32]);
     client.bind_primary_attestation_hash(&hash);
@@ -396,14 +428,27 @@ fn test_sweep_terminal_dust_happy_path() {
     let token = crate::test::install_stellar_asset_token(&env);
     let treasury = Address::generate(&env);
 
-    client.init(&admin, &soroban_sdk::String::from_str(&env, "T"), &sme, &100, &10, &10, &token.id, &None, &treasury, &None, &None, &None);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "T"),
+        &sme,
+        &100,
+        &10,
+        &10,
+        &token.id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+    );
 
     client.fund(&Address::generate(&env), &100);
     env.ledger().with_mut(|li| li.timestamp = 200);
     client.settle();
 
     token.stellar.mint(&client.address, &50);
-    
+
     let swept = client.sweep_terminal_dust(&50);
     assert_eq!(swept, 50);
     assert_eq!(token.token.balance(&treasury), 50);
@@ -416,7 +461,20 @@ fn test_sweep_not_terminal() {
     env.mock_all_auths();
     let (client, admin, sme) = setup(&env);
     let (funding_token, treasury) = free_addresses(&env);
-    client.init(&admin, &soroban_sdk::String::from_str(&env, "T"), &sme, &100, &10, &10, &funding_token, &None, &treasury, &None, &None, &None);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "T"),
+        &sme,
+        &100,
+        &10,
+        &10,
+        &funding_token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+    );
 
     client.sweep_terminal_dust(&10);
 }
@@ -429,7 +487,20 @@ fn test_sweep_no_balance() {
     let (client, admin, sme) = setup(&env);
     let token = crate::test::install_stellar_asset_token(&env);
     let treasury = Address::generate(&env);
-    client.init(&admin, &soroban_sdk::String::from_str(&env, "T"), &sme, &100, &10, &10, &token.id, &None, &treasury, &None, &None, &None);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "T"),
+        &sme,
+        &100,
+        &10,
+        &10,
+        &token.id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+    );
 
     client.fund(&Address::generate(&env), &100);
     env.ledger().with_mut(|li| li.timestamp = 200);
@@ -444,7 +515,20 @@ fn test_withdraw_happy_path() {
     env.mock_all_auths();
     let (client, admin, sme) = setup(&env);
     let (token, treasury) = free_addresses(&env);
-    client.init(&admin, &soroban_sdk::String::from_str(&env, "W"), &sme, &100, &10, &10, &token, &None, &treasury, &None, &None, &None);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "W"),
+        &sme,
+        &100,
+        &10,
+        &10,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+    );
 
     client.fund(&Address::generate(&env), &100);
     assert_eq!(client.get_escrow().status, 1);
@@ -460,7 +544,20 @@ fn test_settle_too_early() {
     env.mock_all_auths();
     let (client, admin, sme) = setup(&env);
     let (token, treasury) = free_addresses(&env);
-    client.init(&admin, &soroban_sdk::String::from_str(&env, "T"), &sme, &100, &10, &20000, &token, &None, &treasury, &None, &None, &None);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "T"),
+        &sme,
+        &100,
+        &10,
+        &20000,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+    );
 
     client.fund(&Address::generate(&env), &100);
     client.settle();
@@ -472,7 +569,20 @@ fn test_update_funding_target_happy_path() {
     env.mock_all_auths();
     let (client, admin, sme) = setup(&env);
     let (token, treasury) = free_addresses(&env);
-    client.init(&admin, &soroban_sdk::String::from_str(&env, "T"), &sme, &100, &10, &10, &token, &None, &treasury, &None, &None, &None);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "T"),
+        &sme,
+        &100,
+        &10,
+        &10,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+    );
 
     let updated = client.update_funding_target(&200);
     assert_eq!(updated.funding_target, 200);
@@ -485,7 +595,20 @@ fn test_update_funding_target_too_low() {
     env.mock_all_auths();
     let (client, admin, sme) = setup(&env);
     let (token, treasury) = free_addresses(&env);
-    client.init(&admin, &soroban_sdk::String::from_str(&env, "T"), &sme, &100, &10, &10, &token, &None, &treasury, &None, &None, &None);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "T"),
+        &sme,
+        &100,
+        &10,
+        &10,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+    );
 
     client.fund(&Address::generate(&env), &50);
     client.update_funding_target(&40);
@@ -497,13 +620,26 @@ fn test_sme_collateral_commitment() {
     env.mock_all_auths();
     let (client, admin, sme) = setup(&env);
     let (token, treasury) = free_addresses(&env);
-    client.init(&admin, &soroban_sdk::String::from_str(&env, "T"), &sme, &100, &10, &10, &token, &None, &treasury, &None, &None, &None);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "T"),
+        &sme,
+        &100,
+        &10,
+        &10,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+    );
 
     let asset = soroban_sdk::Symbol::new(&env, "GOLD");
     let commitment = client.record_sme_collateral_commitment(&asset, &5000);
     assert_eq!(commitment.amount, 5000);
     assert_eq!(commitment.asset, asset);
-    
+
     let stored = client.get_sme_collateral_commitment().unwrap();
     assert_eq!(stored.amount, 5000);
 }
@@ -514,7 +650,20 @@ fn test_clear_legal_hold_convenience() {
     env.mock_all_auths();
     let (client, admin, sme) = setup(&env);
     let (token, treasury) = free_addresses(&env);
-    client.init(&admin, &soroban_sdk::String::from_str(&env, "T"), &sme, &100, &10, &10, &token, &None, &treasury, &None, &None, &None);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "T"),
+        &sme,
+        &100,
+        &10,
+        &10,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+    );
 
     client.set_legal_hold(&true);
     assert_eq!(client.get_legal_hold(), true);
@@ -528,7 +677,20 @@ fn test_claim_not_before_getter() {
     env.mock_all_auths();
     let (client, admin, sme) = setup(&env);
     let (token, treasury) = free_addresses(&env);
-    client.init(&admin, &soroban_sdk::String::from_str(&env, "T"), &sme, &100, &10, &10, &token, &None, &treasury, &None, &None, &None);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "T"),
+        &sme,
+        &100,
+        &10,
+        &10,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+    );
 
     let investor = Address::generate(&env);
     client.fund_with_commitment(&investor, &50, &1000);
@@ -542,12 +704,31 @@ fn test_init_with_tiers() {
     env.mock_all_auths();
     let (client, admin, sme) = setup(&env);
     let (token, treasury) = free_addresses(&env);
-    
-    let mut tiers = SorobanVec::new(&env);
-    tiers.push_back(YieldTier { min_lock_secs: 100, yield_bps: 500 });
-    tiers.push_back(YieldTier { min_lock_secs: 200, yield_bps: 600 });
 
-    client.init(&admin, &soroban_sdk::String::from_str(&env, "T"), &sme, &1000, &100, &10, &token, &None, &treasury, &Some(tiers), &None, &None);
+    let mut tiers = SorobanVec::new(&env);
+    tiers.push_back(YieldTier {
+        min_lock_secs: 100,
+        yield_bps: 500,
+    });
+    tiers.push_back(YieldTier {
+        min_lock_secs: 200,
+        yield_bps: 600,
+    });
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "T"),
+        &sme,
+        &1000,
+        &100,
+        &10,
+        &token,
+        &None,
+        &treasury,
+        &Some(tiers),
+        &None,
+        &None,
+    );
     assert_eq!(client.get_escrow().yield_bps, 100); // Default yield
 }
 
@@ -558,7 +739,20 @@ fn test_sweep_too_much() {
     env.mock_all_auths();
     let (client, admin, sme) = setup(&env);
     let (token, treasury) = free_addresses(&env);
-    client.init(&admin, &soroban_sdk::String::from_str(&env, "T"), &sme, &100, &10, &10, &token, &None, &treasury, &None, &None, &None);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "T"),
+        &sme,
+        &100,
+        &10,
+        &10,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+    );
 
     client.fund(&Address::generate(&env), &100);
     env.ledger().with_mut(|li| li.timestamp = 200);
@@ -574,7 +768,20 @@ fn test_withdraw_not_funded() {
     env.mock_all_auths();
     let (client, admin, sme) = setup(&env);
     let (token, treasury) = free_addresses(&env);
-    client.init(&admin, &soroban_sdk::String::from_str(&env, "T"), &sme, &100, &10, &10, &token, &None, &treasury, &None, &None, &None);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "T"),
+        &sme,
+        &100,
+        &10,
+        &10,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+    );
 
     client.withdraw();
 }
@@ -586,7 +793,20 @@ fn test_settle_not_funded() {
     env.mock_all_auths();
     let (client, admin, sme) = setup(&env);
     let (token, treasury) = free_addresses(&env);
-    client.init(&admin, &soroban_sdk::String::from_str(&env, "T"), &sme, &100, &10, &10, &token, &None, &treasury, &None, &None, &None);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "T"),
+        &sme,
+        &100,
+        &10,
+        &10,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+    );
 
     client.settle();
 }
@@ -597,7 +817,20 @@ fn test_fund_with_zero_commitment() {
     env.mock_all_auths();
     let (client, admin, sme) = setup(&env);
     let (token, treasury) = free_addresses(&env);
-    client.init(&admin, &soroban_sdk::String::from_str(&env, "T"), &sme, &100, &10, &10, &token, &None, &treasury, &None, &None, &None);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "T"),
+        &sme,
+        &100,
+        &10,
+        &10,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+    );
 
     let investor = Address::generate(&env);
     client.fund_with_commitment(&investor, &50, &0);
@@ -611,7 +844,20 @@ fn test_update_target_invalid() {
     env.mock_all_auths();
     let (client, admin, sme) = setup(&env);
     let (token, treasury) = free_addresses(&env);
-    client.init(&admin, &soroban_sdk::String::from_str(&env, "T"), &sme, &100, &10, &10, &token, &None, &treasury, &None, &None, &None);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "T"),
+        &sme,
+        &100,
+        &10,
+        &10,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+    );
 
     client.update_funding_target(&0);
 }
@@ -623,7 +869,20 @@ fn test_init_yield_out_of_range() {
     env.mock_all_auths();
     let (client, admin, sme) = setup(&env);
     let (token, treasury) = free_addresses(&env);
-    client.init(&admin, &soroban_sdk::String::from_str(&env, "T"), &sme, &100, &10001, &10, &token, &None, &treasury, &None, &None, &None);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "T"),
+        &sme,
+        &100,
+        &10001,
+        &10,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+    );
 }
 
 #[test]
@@ -633,7 +892,20 @@ fn test_init_min_contribution_zero() {
     env.mock_all_auths();
     let (client, admin, sme) = setup(&env);
     let (token, treasury) = free_addresses(&env);
-    client.init(&admin, &soroban_sdk::String::from_str(&env, "T"), &sme, &100, &100, &10, &token, &None, &treasury, &None, &Some(0), &None);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "T"),
+        &sme,
+        &100,
+        &100,
+        &10,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &Some(0),
+        &None,
+    );
 }
 
 #[test]
@@ -644,9 +916,28 @@ fn test_init_tiers_unsorted() {
     let (client, admin, sme) = setup(&env);
     let (token, treasury) = free_addresses(&env);
     let mut tiers = SorobanVec::new(&env);
-    tiers.push_back(YieldTier { min_lock_secs: 200, yield_bps: 500 });
-    tiers.push_back(YieldTier { min_lock_secs: 100, yield_bps: 600 });
-    client.init(&admin, &soroban_sdk::String::from_str(&env, "T"), &sme, &100, &100, &10, &token, &None, &treasury, &Some(tiers), &None, &None);
+    tiers.push_back(YieldTier {
+        min_lock_secs: 200,
+        yield_bps: 500,
+    });
+    tiers.push_back(YieldTier {
+        min_lock_secs: 100,
+        yield_bps: 600,
+    });
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "T"),
+        &sme,
+        &100,
+        &100,
+        &10,
+        &token,
+        &None,
+        &treasury,
+        &Some(tiers),
+        &None,
+        &None,
+    );
 }
 
 #[test]
@@ -657,9 +948,28 @@ fn test_init_tiers_not_increasing_yield() {
     let (client, admin, sme) = setup(&env);
     let (token, treasury) = free_addresses(&env);
     let mut tiers = SorobanVec::new(&env);
-    tiers.push_back(YieldTier { min_lock_secs: 100, yield_bps: 600 });
-    tiers.push_back(YieldTier { min_lock_secs: 200, yield_bps: 500 });
-    client.init(&admin, &soroban_sdk::String::from_str(&env, "T"), &sme, &100, &100, &10, &token, &None, &treasury, &Some(tiers), &None, &None);
+    tiers.push_back(YieldTier {
+        min_lock_secs: 100,
+        yield_bps: 600,
+    });
+    tiers.push_back(YieldTier {
+        min_lock_secs: 200,
+        yield_bps: 500,
+    });
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "T"),
+        &sme,
+        &100,
+        &100,
+        &10,
+        &token,
+        &None,
+        &treasury,
+        &Some(tiers),
+        &None,
+        &None,
+    );
 }
 
 #[test]
@@ -670,8 +980,24 @@ fn test_init_tiers_lower_than_base() {
     let (client, admin, sme) = setup(&env);
     let (token, treasury) = free_addresses(&env);
     let mut tiers = SorobanVec::new(&env);
-    tiers.push_back(YieldTier { min_lock_secs: 100, yield_bps: 50 });
-    client.init(&admin, &soroban_sdk::String::from_str(&env, "T"), &sme, &100, &100, &10, &token, &None, &treasury, &Some(tiers), &None, &None);
+    tiers.push_back(YieldTier {
+        min_lock_secs: 100,
+        yield_bps: 50,
+    });
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "T"),
+        &sme,
+        &100,
+        &100,
+        &10,
+        &token,
+        &None,
+        &treasury,
+        &Some(tiers),
+        &None,
+        &None,
+    );
 }
 
 #[test]
@@ -680,15 +1006,42 @@ fn test_get_yield_bps_empty_tiers_branch() {
     env.mock_all_auths();
     let (client, admin, sme) = setup(&env);
     let (token, treasury) = free_addresses(&env);
-    client.init(&admin, &soroban_sdk::String::from_str(&env, "T"), &sme, &100, &100, &10, &token, &None, &treasury, &None, &None, &None);
-    
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "T"),
+        &sme,
+        &100,
+        &100,
+        &10,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+    );
+
     // Inject empty tiers directly to trigger the branch in get_yield_bps_for_commitment
     env.as_contract(&client.address, || {
         let empty_tiers: SorobanVec<YieldTier> = SorobanVec::new(&env);
-        env.storage().instance().set(&DataKey::YieldTierTable, &empty_tiers);
+        env.storage()
+            .instance()
+            .set(&DataKey::YieldTierTable, &empty_tiers);
     });
-    
+
     let investor = Address::generate(&env);
     // This will trigger line 489 in lib.rs
     client.fund_with_commitment(&investor, &10, &0);
+}
+
+#[test]
+#[should_panic(expected = "tier yield_bps must be 0..=10_000")]
+fn test_init_tier_yield_out_of_range() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let (token, treasury) = free_addresses(&env);
+    let mut tiers = SorobanVec::new(&env);
+    tiers.push_back(YieldTier { min_lock_secs: 100, yield_bps: 10001 });
+    client.init(&admin, &soroban_sdk::String::from_str(&env, "T"), &sme, &100, &100, &10, &token, &None, &treasury, &Some(tiers), &None, &None);
 }
