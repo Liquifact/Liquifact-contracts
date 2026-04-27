@@ -127,7 +127,7 @@ fn withdraw_emits_event() {
     let contract_events = env.events().all();
     let events = contract_events.events();
     assert!(
-        events.len() > 0,
+        !events.is_empty(),
         "withdraw must emit at least one contract event"
     );
 }
@@ -202,7 +202,7 @@ fn fund_after_withdraw_panics() {
     fund_to_target(&client, &env);
     client.withdraw(); // status → 3
     let late_investor = Address::generate(&env);
-    client.fund(&late_investor, &1_000_0000000i128); // must panic — fund requires status == 0
+    client.fund(&late_investor, &10_000_000_000i128); // must panic — fund requires status == 0
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -570,7 +570,7 @@ fn claim_investor_payout_succeeds_after_settle() {
     let admin = Address::generate(&env);
     let sme = Address::generate(&env);
     let treasury = Address::generate(&env);
-    let (escrow_id, client) = deploy_with_id(&env);
+    let (_escrow_id, client) = deploy_with_id(&env);
     client.init(
         &admin,
         &soroban_sdk::String::from_str(&env, "SW003"),
@@ -665,7 +665,7 @@ fn claim_investor_payout_non_participant_panics() {
     let admin = Address::generate(&env);
     let sme = Address::generate(&env);
     let treasury = Address::generate(&env);
-    let (escrow_id, client) = deploy_with_id(&env);
+    let (_escrow_id, client) = deploy_with_id(&env);
     client.init(
         &admin,
         &soroban_sdk::String::from_str(&env, "SW006"),
@@ -705,7 +705,7 @@ fn funding_snapshot_survives_withdraw() {
     let admin = Address::generate(&env);
     let sme = Address::generate(&env);
     let treasury = Address::generate(&env);
-    let (escrow_id, client) = deploy_with_id(&env);
+    let (_escrow_id, client) = deploy_with_id(&env);
     client.init(
         &admin,
         &soroban_sdk::String::from_str(&env, "SW007"),
@@ -946,17 +946,6 @@ fn multi_investor_contributions_preserved_after_withdraw() {
 #[test]
 fn no_state_mutation_possible_after_withdraw() {
     // Each sub-case uses its own Env to keep failures isolated.
-    macro_rules! assert_panics_after_withdraw {
-        ($block:expr) => {{
-            let env = Env::default();
-            let (client, admin, sme) = setup(&env);
-            default_init(&client, &env, &admin, &sme);
-            fund_to_target(&client, &env);
-            client.withdraw();
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| $block));
-            assert!(result.is_err(), "expected panic but call succeeded");
-        }};
-    }
 
     // settle after withdraw
     {
@@ -993,7 +982,7 @@ fn no_state_mutation_possible_after_withdraw() {
         client.withdraw();
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let late = Address::generate(&env);
-            client.fund(&late, &1_000_0000000i128);
+            client.fund(&late, &10_000_000_000i128);
         }));
         assert!(r.is_err(), "fund after withdraw must panic");
     }

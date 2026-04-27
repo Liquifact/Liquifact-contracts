@@ -223,9 +223,7 @@ fn fuzz_multi_investor_fund_ordering_snapshot_once_only() {
         assert_eq!(
             client.get_funding_close_snapshot(),
             None,
-            "snapshot set before any funding (case_idx={}, seed={})",
-            case_idx,
-            case_seed
+            "snapshot set before any funding (case_idx={case_idx}, seed={case_seed})"
         );
 
         let mut transitions_to_funded = 0u32;
@@ -243,17 +241,13 @@ fn fuzz_multi_investor_fund_ordering_snapshot_once_only() {
                 assert_eq!(
                     client.get_funding_close_snapshot(),
                     None,
-                    "snapshot set before funded transition (case_idx={}, seed={}, pos={})",
-                    case_idx,
-                    case_seed,
-                    pos
+                    "snapshot set before funded transition (case_idx={case_idx}, seed={case_seed}, pos={pos})"
                 );
 
                 let before = client.get_escrow();
                 assert_eq!(
                     before.status, 0,
-                    "escrow closed before expected crossing (case_idx={}, seed={}, pos={})",
-                    case_idx, case_seed, pos
+                    "escrow closed before expected crossing (case_idx={case_idx}, seed={case_seed}, pos={pos})"
                 );
 
                 expected_funded_amount = expected_funded_amount
@@ -263,15 +257,13 @@ fn fuzz_multi_investor_fund_ordering_snapshot_once_only() {
 
                 assert_eq!(
                     after.funded_amount, expected_funded_amount,
-                    "funded_amount drift (case_idx={}, seed={}, pos={})",
-                    case_idx, case_seed, pos
+                    "funded_amount drift (case_idx={case_idx}, seed={case_seed}, pos={pos})"
                 );
 
                 if after.status == 1 {
                     assert_eq!(
                         pos, close_pos,
-                        "status became funded before threshold crossing (case_idx={}, seed={}, pos={}, expected_close_pos={})",
-                        case_idx, case_seed, pos, close_pos
+                        "status became funded before threshold crossing (case_idx={case_idx}, seed={case_seed}, pos={pos}, expected_close_pos={close_pos})"
                     );
                     transitions_to_funded += 1;
                     let snap = client
@@ -279,23 +271,19 @@ fn fuzz_multi_investor_fund_ordering_snapshot_once_only() {
                         .expect("missing FundingCloseSnapshot at funded transition");
                     assert_eq!(
                         snap.total_principal, after.funded_amount,
-                        "snapshot total_principal must equal funded_amount at close (case_idx={}, seed={})",
-                        case_idx, case_seed
+                        "snapshot total_principal must equal funded_amount at close (case_idx={case_idx}, seed={case_seed})"
                     );
                     assert_eq!(
                         snap.funding_target, TARGET,
-                        "snapshot funding_target must match escrow target (case_idx={}, seed={})",
-                        case_idx, case_seed
+                        "snapshot funding_target must match escrow target (case_idx={case_idx}, seed={case_seed})"
                     );
                     assert_eq!(
                         snap.closed_at_ledger_timestamp, ts,
-                        "snapshot timestamp must match close ledger timestamp (case_idx={}, seed={})",
-                        case_idx, case_seed
+                        "snapshot timestamp must match close ledger timestamp (case_idx={case_idx}, seed={case_seed})"
                     );
                     assert_eq!(
                         snap.closed_at_ledger_sequence, seq,
-                        "snapshot sequence must match close ledger sequence (case_idx={}, seed={})",
-                        case_idx, case_seed
+                        "snapshot sequence must match close ledger sequence (case_idx={case_idx}, seed={case_seed})"
                     );
                     captured_snapshot = Some(snap.clone());
 
@@ -303,9 +291,7 @@ fn fuzz_multi_investor_fund_ordering_snapshot_once_only() {
                     assert_eq!(
                         client.get_funding_close_snapshot().unwrap(),
                         snap,
-                        "snapshot changed across read (case_idx={}, seed={})",
-                        case_idx,
-                        case_seed
+                        "snapshot changed across read (case_idx={case_idx}, seed={case_seed})"
                     );
 
                     // Once funded, further funding should not be possible.
@@ -315,9 +301,7 @@ fn fuzz_multi_investor_fund_ordering_snapshot_once_only() {
                     }));
                     assert!(
                         res.is_err(),
-                        "fund succeeded after escrow became funded (case_idx={}, seed={})",
-                        case_idx,
-                        case_seed
+                        "fund succeeded after escrow became funded (case_idx={case_idx}, seed={case_seed})"
                     );
 
                     // Snapshot must remain unchanged across later state transitions.
@@ -325,23 +309,17 @@ fn fuzz_multi_investor_fund_ordering_snapshot_once_only() {
                     assert_eq!(
                         client.get_funding_close_snapshot().unwrap(),
                         snap,
-                        "snapshot changed after settle (case_idx={}, seed={})",
-                        case_idx,
-                        case_seed
+                        "snapshot changed after settle (case_idx={case_idx}, seed={case_seed})"
                     );
                 } else {
                     assert_eq!(
                         after.status, 0,
-                        "status must remain open prior to threshold crossing (case_idx={}, seed={}, pos={})",
-                        case_idx, case_seed, pos
+                        "status must remain open prior to threshold crossing (case_idx={case_idx}, seed={case_seed}, pos={pos})"
                     );
                     if pos < close_pos {
                         assert!(
                             after.funded_amount < TARGET,
-                            "funded_amount must stay below target before close_pos (case_idx={}, seed={}, pos={})",
-                            case_idx,
-                            case_seed,
-                            pos
+                            "funded_amount must stay below target before close_pos (case_idx={case_idx}, seed={case_seed}, pos={pos})"
                         );
                     }
                 }
@@ -354,23 +332,18 @@ fn fuzz_multi_investor_fund_ordering_snapshot_once_only() {
 
         assert_eq!(
             transitions_to_funded, 1,
-            "status must become funded exactly once (case_idx={}, seed={})",
-            case_idx, case_seed
+            "status must become funded exactly once (case_idx={case_idx}, seed={case_seed})"
         );
         let snap = captured_snapshot.expect("expected snapshot after reaching funding target");
         assert_eq!(
             client.get_funding_close_snapshot().unwrap(),
             snap,
-            "snapshot should remain stable at end of case (case_idx={}, seed={})",
-            case_idx,
-            case_seed
+            "snapshot should remain stable at end of case (case_idx={case_idx}, seed={case_seed})"
         );
         assert_eq!(
             client.get_escrow().status,
             2,
-            "expected escrow to be settled at end of case (case_idx={}, seed={})",
-            case_idx,
-            case_seed
+            "expected escrow to be settled at end of case (case_idx={case_idx}, seed={case_seed})"
         );
     }
 }

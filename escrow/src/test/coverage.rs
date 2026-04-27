@@ -297,7 +297,7 @@ fn test_all_getters() {
     assert_eq!(client.get_treasury(), treasury);
     assert_eq!(client.get_registry_ref(), Some(registry));
     assert_eq!(client.get_version(), 5);
-    assert_eq!(client.get_legal_hold(), false);
+    assert!(!client.get_legal_hold());
     assert_eq!(client.get_min_contribution_floor(), 10);
     assert_eq!(client.get_max_unique_investors_cap(), Some(5));
     assert_eq!(client.get_unique_funder_count(), 0);
@@ -666,9 +666,9 @@ fn test_clear_legal_hold_convenience() {
     );
 
     client.set_legal_hold(&true);
-    assert_eq!(client.get_legal_hold(), true);
+    assert!(client.get_legal_hold());
     client.clear_legal_hold();
-    assert_eq!(client.get_legal_hold(), false);
+    assert!(!client.get_legal_hold());
 }
 
 #[test]
