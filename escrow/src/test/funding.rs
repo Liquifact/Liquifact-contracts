@@ -149,6 +149,65 @@ fn test_repeated_funding_accumulates_contribution() {
 }
 
 #[test]
+#[should_panic(expected = "funded_amount overflow")]
+fn test_funding_amount_accumulation_overflow_panics() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "OVF001"),
+        &sme,
+        &i128::MAX,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+    );
+
+    client.fund(&investor, &(i128::MAX - 1));
+    client.fund(&investor, &2i128);
+}
+
+#[test]
+fn test_funding_amount_overflow_does_not_mutate_state() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "OVF002"),
+        &sme,
+        &i128::MAX,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+    );
+
+    client.fund(&investor, &(i128::MAX - 1));
+    let before = client.get_escrow();
+
+    let overflowed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.fund(&investor, &2i128);
+    }));
+    assert!(overflowed.is_err());
+
+    let after = client.get_escrow();
+    assert_eq!(after.funded_amount, before.funded_amount);
+    assert_eq!(after.status, 0);
+    assert_eq!(client.get_contribution(&investor), i128::MAX - 1);
+}
+
+#[test]
 fn test_multiple_investors_tracked_independently() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
@@ -626,6 +685,106 @@ fn test_fund_with_commitment_zero_lock_behaves_as_fund() {
     client.fund_with_commitment(&inv, &5_000i128, &0u64);
     assert_eq!(client.get_investor_yield_bps(&inv), 800);
     assert_eq!(client.get_investor_claim_not_before(&inv), 0);
+}
+
+#[test]
+fn test_commitment_claim_time_allows_u64_max_boundary() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|ledger| {
+        ledger.timestamp = u64::MAX - 5;
+    });
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let investor = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "CLKMAX1"),
+        &sme,
+        &1_000i128,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+    );
+
+    client.fund_with_commitment(&investor, &100i128, &5u64);
+
+    assert_eq!(client.get_investor_claim_not_before(&investor), u64::MAX);
+}
+
+#[test]
+#[should_panic(expected = "investor claim time overflow")]
+fn test_commitment_claim_time_overflow_panics() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|ledger| {
+        ledger.timestamp = u64::MAX - 5;
+    });
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let investor = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "CLKMAX2"),
+        &sme,
+        &1_000i128,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+    );
+
+    client.fund_with_commitment(&investor, &100i128, &6u64);
+}
+
+#[test]
+fn test_commitment_claim_time_overflow_does_not_record_position() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|ledger| {
+        ledger.timestamp = u64::MAX - 5;
+    });
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let investor = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "CLKMAX3"),
+        &sme,
+        &1_000i128,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+    );
+
+    let overflowed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.fund_with_commitment(&investor, &100i128, &6u64);
+    }));
+    assert!(overflowed.is_err());
+
+    assert_eq!(client.get_escrow().funded_amount, 0);
+    assert_eq!(client.get_contribution(&investor), 0);
+    assert_eq!(client.get_investor_claim_not_before(&investor), 0);
 }
 
 #[test]
