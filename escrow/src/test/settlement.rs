@@ -688,9 +688,6 @@ fn settle_on_withdrawn_escrow_panics() {
     client.settle();
 }
 
-    assert_eq!(client.get_escrow().status, 2u32);
-}
-
 /// `sweep_terminal_dust` must reject open/funded escrows before terminal state.
 #[test]
 #[should_panic(expected = "dust sweep only in terminal states (settled or withdrawn)")]

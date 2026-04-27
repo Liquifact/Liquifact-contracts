@@ -327,6 +327,7 @@ pub struct AdminTransferredEvent {
     pub name: Symbol,
     #[topic]
     pub invoice_id: Symbol,
+    pub old_admin: Address,
     pub new_admin: Address,
 }
 
@@ -1416,11 +1417,13 @@ impl LiquifactEscrow {
     pub fn transfer_admin(env: Env, new_admin: Address) -> InvoiceEscrow {
         // env.clone(): env is used again after this call for storage set and publish.
         let mut escrow = Self::get_escrow(env.clone());
-
         escrow.admin.require_auth();
 
+        // Capture old_admin before mutation for the event
+        let old_admin = escrow.admin.clone();
+
         assert!(
-            escrow.admin != new_admin,
+            old_admin != new_admin,
             "New admin must differ from current admin"
         );
 
@@ -1431,6 +1434,7 @@ impl LiquifactEscrow {
         AdminTransferredEvent {
             name: symbol_short!("admin"),
             invoice_id: escrow.invoice_id.clone(),
+            old_admin,
             new_admin: escrow.admin.clone(),
         }
         .publish(&env);
