@@ -1,6 +1,6 @@
 use super::{
-    DataKey, LiquifactEscrow, LiquifactEscrowClient, YieldTier, MAX_DUST_SWEEP_AMOUNT,
-    SCHEMA_VERSION,
+    DataKey, FundingTargetUpdated, LiquifactEscrow, LiquifactEscrowClient, YieldTier,
+    MAX_DUST_SWEEP_AMOUNT, SCHEMA_VERSION,
 };
 use soroban_sdk::{
     symbol_short,

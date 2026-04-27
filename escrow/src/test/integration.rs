@@ -263,9 +263,9 @@ fn test_escrow_tiered_yield_with_commitment_locks() {
         &BASE_YIELD_BPS,
         &0u64, // No maturity for this test
         &funding_token,
-        &Some(yield_tiers),
-        &treasury,
         &None,
+        &treasury,
+        &Some(yield_tiers),
         &None,
         &None,
     );

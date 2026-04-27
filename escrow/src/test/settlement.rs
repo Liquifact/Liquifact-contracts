@@ -17,7 +17,7 @@
 //! defined in `escrow/src/test.rs`. No cross-test state is shared.
 
 #[cfg(test)]
-use super::{default_init, deploy, free_addresses, setup, TARGET};
+use super::*;
 use soroban_sdk::{
     testutils::{Address as _, Events, Ledger as _},
     Address, Env,
@@ -482,7 +482,7 @@ fn settle_twice_panics() {
 
 /// `settle` must be rejected if the current ledger timestamp is before maturity.
 #[test]
-#[should_panic]
+#[should_panic(expected = "Escrow has not yet reached maturity")]
 fn settle_before_maturity_panics() {
     let env = Env::default();
     env.mock_all_auths();
@@ -490,14 +490,15 @@ fn settle_before_maturity_panics() {
     let admin = Address::generate(&env);
     let sme = Address::generate(&env);
     let treasury = Address::generate(&env);
-    let (escrow_id, client) = deploy_with_id(&env);
+    let maturity = 1_000u64;
+    let (_escrow_id, client) = deploy_with_id(&env);
     client.init(
         &admin,
-        &soroban_sdk::String::from_str(&env, "INV_MAT_001"),
+        &String::from_str(&env, "INV_MAT_001"),
         &sme,
-        &1_000i128,
+        &TARGET,
         &100i64,
-        &0u64,
+        &maturity,
         &token.id,
         &None,
         &treasury,
@@ -506,11 +507,9 @@ fn settle_before_maturity_panics() {
         &None,
     );
 
-    token.stellar.mint(&escrow_id, &5_000i128);
-    let before_t = token.token.balance(&treasury);
-    let swept = client.sweep_terminal_dust(&5_000i128);
-    assert_eq!(swept, 5_000i128);
-    assert_eq!(token.token.balance(&treasury), before_t + 5_000i128);
+    fund_to_target(&client, &env);
+    env.ledger().with_mut(|l| l.timestamp = maturity - 1);
+    client.settle();
 }
 
 /// `settle` must succeed once ledger timestamp reaches maturity (inclusive).
@@ -522,14 +521,15 @@ fn settle_at_maturity_succeeds() {
     let admin = Address::generate(&env);
     let sme = Address::generate(&env);
     let treasury = Address::generate(&env);
-    let (escrow_id, client) = deploy_with_id(&env);
+    let maturity = 1_000u64;
+    let (_escrow_id, client) = deploy_with_id(&env);
     client.init(
         &admin,
-        &soroban_sdk::String::from_str(&env, "INV_MAT_002"),
+        &String::from_str(&env, "INV_MAT_002"),
         &sme,
-        &1_000i128,
+        &TARGET,
         &100i64,
-        &0u64,
+        &maturity,
         &token.id,
         &None,
         &treasury,
@@ -539,25 +539,16 @@ fn settle_at_maturity_succeeds() {
     );
 
     fund_to_target(&client, &env);
-
-    env.ledger().with_mut(|l| l.timestamp = maturity); // exactly at boundary
+    env.ledger().with_mut(|l| l.timestamp = maturity);
     client.settle();
 
-    token.stellar.mint(&escrow_id, &333i128);
-    let swept = client.sweep_terminal_dust(&333i128);
-    assert_eq!(swept, 333i128);
+    assert_eq!(client.get_escrow().status, 2u32);
 }
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Investor claim path (post-settle)
-// ──────────────────────────────────────────────────────────────────────────────
-
-/// `claim_investor_payout` succeeds for an investor after `settle`.
-///
-/// This is a state-marker call — no token transfer occurs inside the contract.
-/// The test verifies the call completes without panic and emits an event.
+/// `sweep_terminal_dust` must reject open/funded escrows before terminal state.
 #[test]
-fn claim_investor_payout_succeeds_after_settle() {
+#[should_panic(expected = "dust sweep only in terminal states (settled or withdrawn)")]
+fn sweep_terminal_dust_before_terminal_state_panics() {
     let env = Env::default();
     env.mock_all_auths();
     let token = install_stellar_asset_token(&env);
@@ -567,9 +558,9 @@ fn claim_investor_payout_succeeds_after_settle() {
     let (escrow_id, client) = deploy_with_id(&env);
     client.init(
         &admin,
-        &String::from_str(&env, "SW003"),
+        &String::from_str(&env, "SW001"),
         &sme,
-        &1_000i128,
+        &TARGET,
         &100i64,
         &0u64,
         &token.id,
@@ -579,8 +570,120 @@ fn claim_investor_payout_succeeds_after_settle() {
         &None,
         &None,
     );
-    token.stellar.mint(&escrow_id, &100i128);
+    fund_to_target(&client, &env);
+    token.stellar.mint(&escrow_id, &1_000i128);
     client.sweep_terminal_dust(&100i128);
+}
+
+/// `sweep_terminal_dust` requires treasury auth.
+#[test]
+#[should_panic]
+fn sweep_terminal_dust_requires_treasury_auth() {
+    let env = Env::default();
+    let token = install_stellar_asset_token(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let treasury = Address::generate(&env);
+    let (escrow_id, client) = deploy_with_id(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "SW002"),
+        &sme,
+        &TARGET,
+        &100i64,
+        &0u64,
+        &token.id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+    );
+    fund_to_target(&client, &env);
+    client.settle();
+    token.stellar.mint(&escrow_id, &1_000i128);
+    env.mock_auths(&[]);
+    client.sweep_terminal_dust(&100i128);
+}
+
+/// `sweep_terminal_dust` caps the sweep amount to the contract balance.
+#[test]
+fn sweep_terminal_dust_caps_amount_to_balance() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let token = install_stellar_asset_token(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let treasury = Address::generate(&env);
+    let (escrow_id, client) = deploy_with_id(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "SW007"),
+        &sme,
+        &TARGET,
+        &100i64,
+        &0u64,
+        &token.id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+    );
+    fund_to_target(&client, &env);
+    client.settle();
+    token.stellar.mint(&escrow_id, &50i128);
+
+    let swept = client.sweep_terminal_dust(&100i128);
+    assert_eq!(swept, 50i128);
+    assert_eq!(token.token.balance(&treasury), 50i128);
+}
+
+/// `sweep_terminal_dust` rejects amounts above the configured cap.
+#[test]
+#[should_panic(expected = "sweep amount exceeds MAX_DUST_SWEEP_AMOUNT")]
+fn sweep_terminal_dust_rejects_amount_above_cap() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let token = install_stellar_asset_token(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let treasury = Address::generate(&env);
+    let (escrow_id, client) = deploy_with_id(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "SW008"),
+        &sme,
+        &TARGET,
+        &100i64,
+        &0u64,
+        &token.id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+    );
+    fund_to_target(&client, &env);
+    client.settle();
+    token.stellar.mint(&escrow_id, &(MAX_DUST_SWEEP_AMOUNT + 1));
+
+    client.sweep_terminal_dust(&(MAX_DUST_SWEEP_AMOUNT + 1));
+}
+
+/// `claim_investor_payout` succeeds for an investor after `settle`.
+#[test]
+fn claim_investor_payout_succeeds_after_settle() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+
+    default_init(&client, &env, &admin, &sme);
+    client.fund(&investor, &TARGET);
+    client.settle();
+    client.claim_investor_payout(&investor);
+    assert!(client.is_investor_claimed(&investor));
 }
 
 /// `claim_investor_payout` must be idempotency-guarded: a second call panics.
@@ -589,30 +692,14 @@ fn claim_investor_payout_succeeds_after_settle() {
 fn claim_investor_payout_twice_panics() {
     let env = Env::default();
     env.mock_all_auths();
-    let token = install_stellar_asset_token(&env);
-    let admin = Address::generate(&env);
-    let sme = Address::generate(&env);
-    let treasury = Address::generate(&env);
-    let (_escrow_id, client) = deploy_with_id(&env);
-    client.init(
-        &admin,
-        &String::from_str(&env, "SW004"),
-        &sme,
-        &1_000i128,
-        &100i64,
-        &0u64,
-        &token.id,
-        &None,
-        &treasury,
-        &None,
-        &None,
-        &None,
-    );
+    let (client, admin, sme) = setup(&env);
     let investor = Address::generate(&env);
-    client.fund(&investor, &1_000i128);
+
+    default_init(&client, &env, &admin, &sme);
+    client.fund(&investor, &TARGET);
     client.settle();
-    client.set_legal_hold(&true);
-    client.claim_investor_payout(&investor); // must panic
+    client.claim_investor_payout(&investor);
+    client.claim_investor_payout(&investor);
 }
 
 /// `claim_investor_payout` must fail before `settle` (status != 2).
@@ -621,29 +708,12 @@ fn claim_investor_payout_twice_panics() {
 fn claim_investor_payout_before_settle_panics() {
     let env = Env::default();
     env.mock_all_auths();
-    let token = install_stellar_asset_token(&env);
-    let admin = Address::generate(&env);
-    let sme = Address::generate(&env);
-    let treasury = Address::generate(&env);
-    let (_escrow_id, client) = deploy_with_id(&env);
-    client.init(
-        &admin,
-        &String::from_str(&env, "SW005"),
-        &sme,
-        &1_000i128,
-        &100i64,
-        &0u64,
-        &token.id,
-        &None,
-        &treasury,
-        &None,
-        &None,
-        &None,
-    );
+    let (client, admin, sme) = setup(&env);
     let investor = Address::generate(&env);
-    client.fund(&investor, &1_000i128);
-    client.settle();
-    client.sweep_terminal_dust(&(MAX_DUST_SWEEP_AMOUNT + 1));
+
+    default_init(&client, &env, &admin, &sme);
+    client.fund(&investor, &TARGET);
+    client.claim_investor_payout(&investor);
 }
 
 /// An investor that did not participate cannot claim.
@@ -652,32 +722,14 @@ fn claim_investor_payout_before_settle_panics() {
 fn claim_investor_payout_non_participant_panics() {
     let env = Env::default();
     env.mock_all_auths();
-    let token = install_stellar_asset_token(&env);
-    let admin = Address::generate(&env);
-    let sme = Address::generate(&env);
-    let treasury = Address::generate(&env);
-    let (escrow_id, client) = deploy_with_id(&env);
-    client.init(
-        &admin,
-        &String::from_str(&env, "SW006"),
-        &sme,
-        &1_000i128,
-        &100i64,
-        &0u64,
-        &token.id,
-        &None,
-        &treasury,
-        &None,
-        &None,
-        &None,
-    );
+    let (client, admin, sme) = setup(&env);
     let investor = Address::generate(&env);
-    client.fund(&investor, &1_000i128);
-    client.settle();
+    let stranger = Address::generate(&env);
 
-    token.stellar.mint(&escrow_id, &50i128);
-    let swept = client.sweep_terminal_dust(&100i128);
-    assert_eq!(swept, 50i128);
+    default_init(&client, &env, &admin, &sme);
+    client.fund(&investor, &TARGET);
+    client.settle();
+    client.claim_investor_payout(&stranger);
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -693,43 +745,29 @@ fn claim_investor_payout_non_participant_panics() {
 fn funding_snapshot_survives_withdraw() {
     let env = Env::default();
     env.mock_all_auths();
-    let token = install_stellar_asset_token(&env);
-    let admin = Address::generate(&env);
-    let sme = Address::generate(&env);
-    let treasury = Address::generate(&env);
-    let (escrow_id, client) = deploy_with_id(&env);
-    client.init(
-        &admin,
-        &String::from_str(&env, "SW007"),
-        &sme,
-        &1_000i128,
-        &100i64,
-        &0u64,
-        &token.id,
-        &None,
-        &treasury,
-        &None,
-        &None,
-        &None,
-    );
-    assert_eq!(
-        snapshot_after.unwrap().total_principal,
-        TARGET,
-        "snapshot total_principal must equal funded amount"
-    );
+    let (client, admin, sme) = setup(&env);
+
+    default_init(&client, &env, &admin, &sme);
+    fund_to_target(&client, &env);
+    let snapshot_before = client.get_funding_close_snapshot();
+    client.withdraw();
+    let snapshot_after = client.get_funding_close_snapshot();
+
+    assert_eq!(snapshot_before, snapshot_after);
 }
 
 /// After `settle` the snapshot still matches what was recorded at fund-close.
 #[test]
 fn funding_snapshot_survives_settle() {
     let env = Env::default();
+    env.mock_all_auths();
     let (client, admin, sme) = setup(&env);
+
     default_init(&client, &env, &admin, &sme);
     fund_to_target(&client, &env);
-
     let snapshot_before = client.get_funding_close_snapshot();
     client.settle();
-    token.stellar.mint(&escrow_id, &10i128);
+    let snapshot_after = client.get_funding_close_snapshot();
 
     assert_eq!(snapshot_before, snapshot_after);
 }
