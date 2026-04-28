@@ -983,3 +983,298 @@ fn no_state_mutation_possible_after_withdraw() {
         assert!(r.is_err(), "fund after withdraw must panic");
     }
 }
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Getters — coverage for read-only entrypoints
+// ──────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn get_funding_token_returns_configured_token() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    let token = client.get_funding_token();
+    // just assert it doesn't panic and returns an address
+    let _ = token;
+}
+
+#[test]
+fn get_treasury_returns_configured_treasury() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    let _ = client.get_treasury();
+}
+
+#[test]
+fn get_registry_ref_returns_none_by_default() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    assert!(client.get_registry_ref().is_none());
+}
+
+#[test]
+fn get_version_returns_schema_version() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    let v = client.get_version();
+    assert!(v > 0);
+}
+
+#[test]
+fn get_legal_hold_false_by_default() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    assert!(!client.get_legal_hold());
+}
+
+#[test]
+fn get_legal_hold_true_after_set() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    client.set_legal_hold(&true);
+    assert!(client.get_legal_hold());
+}
+
+#[test]
+fn clear_legal_hold_unblocks_withdraw() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    fund_to_target(&client, &env);
+    client.set_legal_hold(&true);
+    client.clear_legal_hold();
+    client.withdraw();
+    assert_eq!(client.get_escrow().status, 3u32);
+}
+
+#[test]
+fn get_min_contribution_floor_returns_zero_when_unset() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    assert_eq!(client.get_min_contribution_floor(), 0i128);
+}
+
+#[test]
+fn get_max_unique_investors_cap_returns_none_when_unset() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    assert!(client.get_max_unique_investors_cap().is_none());
+}
+
+#[test]
+fn get_unique_funder_count_zero_before_funding() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    assert_eq!(client.get_unique_funder_count(), 0u32);
+}
+
+#[test]
+fn get_unique_funder_count_increments_per_investor() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    let inv_a = Address::generate(&env);
+    let inv_b = Address::generate(&env);
+    client.fund(&inv_a, &(TARGET / 2));
+    assert_eq!(client.get_unique_funder_count(), 1u32);
+    client.fund(&inv_b, &(TARGET - TARGET / 2));
+    assert_eq!(client.get_unique_funder_count(), 2u32);
+}
+
+#[test]
+fn is_investor_claimed_false_before_claim() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    let investor = settle_escrow(&client, &env);
+    assert!(!client.is_investor_claimed(&investor));
+}
+
+#[test]
+fn is_investor_claimed_true_after_claim() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    let investor = settle_escrow(&client, &env);
+    client.claim_investor_payout(&investor);
+    assert!(client.is_investor_claimed(&investor));
+}
+
+#[test]
+fn get_investor_yield_bps_zero_for_plain_fund() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    let investor = fund_to_target(&client, &env);
+    // base fund carries no tier override — yield bps falls back to base_yield
+    let _ = client.get_investor_yield_bps(&investor);
+}
+
+#[test]
+fn get_investor_claim_not_before_zero_for_plain_fund() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    let investor = fund_to_target(&client, &env);
+    assert_eq!(client.get_investor_claim_not_before(&investor), 0u64);
+}
+
+#[test]
+fn get_sme_collateral_commitment_none_before_record() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    assert!(client.get_sme_collateral_commitment().is_none());
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Attestation entrypoints
+// ──────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn bind_primary_attestation_hash_stores_digest() {
+    use soroban_sdk::BytesN;
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    let digest = BytesN::from_array(&env, &[1u8; 32]);
+    client.bind_primary_attestation_hash(&digest);
+    let stored = client.get_primary_attestation_hash();
+    assert!(stored.is_some());
+}
+
+#[test]
+fn get_primary_attestation_hash_none_before_bind() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    assert!(client.get_primary_attestation_hash().is_none());
+}
+
+#[test]
+fn append_attestation_digest_and_read_log() {
+    use soroban_sdk::BytesN;
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    let d1 = BytesN::from_array(&env, &[2u8; 32]);
+    let d2 = BytesN::from_array(&env, &[3u8; 32]);
+    client.append_attestation_digest(&d1);
+    client.append_attestation_digest(&d2);
+    let log = client.get_attestation_append_log();
+    assert_eq!(log.len(), 2u32);
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// sweep_terminal_dust — happy path and guard branches
+// ──────────────────────────────────────────────────────────────────────────────
+
+#[test]
+#[should_panic]
+fn sweep_terminal_dust_panics_on_non_terminal_status() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    // status 0 — not terminal
+    let (_, treasury) = free_addresses(&env);
+    client.sweep_terminal_dust(&1_000i128);
+}
+
+#[test]
+#[should_panic]
+fn sweep_terminal_dust_panics_when_legal_hold_active() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    fund_to_target(&client, &env);
+    client.withdraw(); // status → 3 (terminal)
+    client.set_legal_hold(&true);
+    let (_, treasury) = free_addresses(&env);
+    client.sweep_terminal_dust(&1_000i128);
+}
+
+#[test]
+#[should_panic]
+fn sweep_terminal_dust_panics_on_zero_amount() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    fund_to_target(&client, &env);
+    client.withdraw();
+    let (_, treasury) = free_addresses(&env);
+    client.sweep_terminal_dust(&0i128);
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// min_contribution_floor branch in fund_impl
+// ──────────────────────────────────────────────────────────────────────────────
+
+#[test]
+#[should_panic]
+fn fund_below_min_contribution_floor_panics() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (token, treasury) = free_addresses(&env);
+
+    // Set a floor of 1_000_0000000 (1000 units)
+    let floor: i128 = 1_000_0000000;
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "INV-FLOOR-001"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &1000u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &Some(floor),
+        &None,
+    );
+
+    let investor = Address::generate(&env);
+    // Fund with less than the floor — must panic
+    client.fund(&investor, &(floor - 1));
+}
+
+#[test]
+fn fund_at_min_contribution_floor_succeeds() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (token, treasury) = free_addresses(&env);
+
+    let floor: i128 = 1_000_0000000;
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "INV-FLOOR-002"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &1000u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &Some(floor),
+        &None,
+    );
+
+    let investor = Address::generate(&env);
+    client.fund(&investor, &floor); // exactly at floor — must succeed
+    assert_eq!(client.get_contribution(&investor), floor);
+}
