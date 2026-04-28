@@ -1041,6 +1041,14 @@ impl LiquifactEscrow {
     /// terminates with a `panic!` (aborts the Soroban transaction). This is intentional:
     /// it makes the "no migration" guarantee explicit rather than silently returning success.
     ///
+    /// **Execution order:** the function first reads [`DataKey::Version`] from instance
+    /// storage, then asserts the supplied `from_version` matches, then panics. No storage
+    /// writes ever occur; the storage read is read-only and side-effect-free. There is
+    /// **no [`Address::require_auth`] call** — any account may invoke `migrate`. This is
+    /// safe only because the final `panic!` is reached on every code path and no state
+    /// is mutated. Adding migration logic without also adding an auth guard would make
+    /// this entrypoint callable by any account.
+    ///
     /// Do **not** call `migrate` expecting it to perform bookkeeping work in the current
     /// release. To add a real migration path (e.g. rewriting a stored struct after a field
     /// addition), implement the transformation above the final `panic!` branch, update
