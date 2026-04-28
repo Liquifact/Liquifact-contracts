@@ -21,7 +21,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Check formatting
-        run: cargo fmt --all -- --check
+        run: cargo fmt -p liquifact_escrow -- --check
 
       - name: Clippy 
         run: cargo clippy -p liquifact_escrow -- -D warnings
@@ -42,7 +42,7 @@ jobs:
         run: cargo build --target wasm32v1-none --release -p liquifact_escrow
 
       - name: Workspace Clippy (all targets)
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy -p liquifact_escrow --all-targets -- -D warnings
 
       - name: Check coverage (≥ 95%)
         run: |

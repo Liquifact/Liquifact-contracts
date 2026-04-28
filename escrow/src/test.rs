@@ -1,7 +1,7 @@
 #[allow(unused_imports)]
 use super::{
-    DataKey, FundingTargetUpdated, LiquifactEscrow, LiquifactEscrowClient, YieldTier,
-    MAX_DUST_SWEEP_AMOUNT, SCHEMA_VERSION,
+    DataKey, FundingTargetUpdated, LegalHoldChanged, LiquifactEscrow, LiquifactEscrowClient,
+    YieldTier, MAX_ATTESTATION_APPEND_ENTRIES, MAX_DUST_SWEEP_AMOUNT, SCHEMA_VERSION,
 };
 use soroban_sdk::{
     symbol_short,
@@ -13,6 +13,7 @@ use soroban_sdk::{
 // Focused test tree for escrow behavior. Shared helpers live here so feature
 // modules stay assertion-focused and each test still owns a fresh Env.
 mod admin;
+mod attestations;
 mod cap_validation;
 mod external_calls;
 mod external_calls_mocked;

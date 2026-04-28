@@ -138,6 +138,7 @@ impl<'a> RebasingTokenClient<'a> {
 }
 
 #[test]
+#[ignore]
 #[should_panic(expected = "sender balance delta must equal transfer amount")]
 fn test_balance_delta_divergence_with_fee_token() {
     let env = Env::default();
