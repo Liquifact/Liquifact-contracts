@@ -659,3 +659,284 @@ fn test_update_funding_target_negative_panics() {
     );
     client.update_funding_target(&-1i128);
 }
+// --- update_maturity: open-only, ledger time semantics, MaturityUpdatedEvent ---
+
+/// `update_maturity` must emit a `MaturityUpdatedEvent` with the correct
+/// topic (`symbol_short!("maturity")`), `invoice_id`, `old_maturity`, and
+/// `new_maturity` fields. Ledger timestamps are validator-observed integers;
+/// the contract stores and compares them as raw `u64` seconds.
+#[test]
+fn test_update_maturity_event_fields() {
+    use soroban_sdk::testutils::Events as _;
+    use crate::MaturityUpdatedEvent;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let client = deploy(&env);
+    let contract_id = client.address.clone();
+
+    let token = Address::generate(&env);
+    let treasury = Address::generate(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "MAT001"),
+        &sme,
+        &5_000i128,
+        &800i64,
+        &1000u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+    );
+
+    client.update_maturity(&2000u64);
+
+    assert_eq!(
+        env.events().all(),
+        std::vec![MaturityUpdatedEvent {
+            name: symbol_short!("maturity"),
+            invoice_id: client.get_escrow().invoice_id,
+            old_maturity: 1000u64,
+            new_maturity: 2000u64,
+        }
+        .to_xdr(&env, &contract_id)]
+    );
+}
+
+/// `update_maturity` must be rejected when the escrow is in the **funded**
+/// state (status == 1); only Open (0) is permitted.
+#[test]
+#[should_panic(expected = "Maturity can only be updated in Open state")]
+fn test_update_maturity_fails_when_funded() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let investor = Address::generate(&env);
+    let client = deploy(&env);
+
+    let token = Address::generate(&env);
+    let treasury = Address::generate(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "MAT002"),
+        &sme,
+        &5_000i128,
+        &800i64,
+        &1000u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+    );
+    client.fund(&investor, &5_000i128); // status → 1 (funded)
+    client.update_maturity(&2000u64);
+}
+
+/// `update_maturity` must be rejected when the escrow is **settled**
+/// (status == 2); only Open (0) is permitted.
+#[test]
+#[should_panic(expected = "Maturity can only be updated in Open state")]
+fn test_update_maturity_fails_when_settled() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let investor = Address::generate(&env);
+    let client = deploy(&env);
+
+    let token = Address::generate(&env);
+    let treasury = Address::generate(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "MAT003"),
+        &sme,
+        &5_000i128,
+        &800i64,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+    );
+    client.fund(&investor, &5_000i128); // status → 1
+    client.settle();                    // status → 2
+    client.update_maturity(&2000u64);
+}
+
+/// `update_maturity` must be rejected when the escrow is **withdrawn**
+/// (status == 3); only Open (0) is permitted.
+#[test]
+#[should_panic(expected = "Maturity can only be updated in Open state")]
+fn test_update_maturity_fails_when_withdrawn() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let investor = Address::generate(&env);
+    let client = deploy(&env);
+
+    let token = Address::generate(&env);
+    let treasury = Address::generate(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "MAT004"),
+        &sme,
+        &5_000i128,
+        &800i64,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+    );
+    client.fund(&investor, &5_000i128); // status → 1
+    client.withdraw();                  // status → 3
+    client.update_maturity(&2000u64);
+}
+
+/// Setting maturity to zero is valid — it means no maturity gate.
+/// The contract must accept zero as new_maturity in Open state.
+#[test]
+fn test_update_maturity_to_zero_succeeds() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let client = deploy(&env);
+
+    let token = Address::generate(&env);
+    let treasury = Address::generate(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "MAT005"),
+        &sme,
+        &5_000i128,
+        &800i64,
+        &1000u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+    );
+    let updated = client.update_maturity(&0u64);
+    assert_eq!(updated.maturity, 0u64);
+    assert_eq!(updated.status, 0);
+}
+
+/// Ledger time semantics: `settle` uses `env.ledger().timestamp()`
+/// (validator-observed seconds). Settle must pass exactly at maturity —
+/// confirming the boundary is `now >= maturity` (inclusive).
+#[test]
+fn test_settle_passes_exactly_at_maturity_ledger_time() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let investor = Address::generate(&env);
+    let client = deploy(&env);
+
+    let token = Address::generate(&env);
+    let treasury = Address::generate(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "MAT006"),
+        &sme,
+        &5_000i128,
+        &800i64,
+        &5000u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+    );
+    client.fund(&investor, &5_000i128);
+
+    // Advance ledger to exactly maturity — must succeed
+    env.ledger().with_mut(|l| l.timestamp = 5000);
+    let settled = client.settle();
+    assert_eq!(settled.status, 2);
+}
+
+/// Ledger time semantics: settle must panic one second before maturity —
+/// confirming the `>=` boundary strictly excludes values below maturity.
+#[test]
+#[should_panic(expected = "Escrow has not yet reached maturity")]
+fn test_settle_fails_one_second_before_maturity() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let investor = Address::generate(&env);
+    let client = deploy(&env);
+
+    let token = Address::generate(&env);
+    let treasury = Address::generate(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "MAT007"),
+        &sme,
+        &5_000i128,
+        &800i64,
+        &5000u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+    );
+    client.fund(&investor, &5_000i128);
+
+    // One second before maturity — must reject
+    env.ledger().with_mut(|l| l.timestamp = 4999);
+    client.settle();
+}
+
+/// A second `update_maturity` call in the same Open state must overwrite
+/// the previous value correctly — storage is atomic per call.
+#[test]
+fn test_update_maturity_twice_overwrites() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let client = deploy(&env);
+
+    let token = Address::generate(&env);
+    let treasury = Address::generate(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "MAT008"),
+        &sme,
+        &5_000i128,
+        &800i64,
+        &1000u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+    );
+
+    client.update_maturity(&2000u64);
+    let updated = client.update_maturity(&3000u64);
+    assert_eq!(updated.maturity, 3000u64);
+    assert_eq!(client.get_escrow().maturity, 3000u64);
+}
