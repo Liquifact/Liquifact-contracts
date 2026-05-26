@@ -9,8 +9,8 @@
 #[allow(unused_imports)]
 use super::{
     DataKey, EscrowInitialized, FundingTargetUpdated, LegalHoldChanged, LiquifactEscrow,
-    LiquifactEscrowClient, MaxUniqueInvestorsCapLowered, YieldTier,
-    MAX_ATTESTATION_APPEND_ENTRIES, MAX_DUST_SWEEP_AMOUNT, SCHEMA_VERSION,
+    LiquifactEscrowClient, MaxUniqueInvestorsCapLowered, YieldTier, MAX_ATTESTATION_APPEND_ENTRIES,
+    MAX_DUST_SWEEP_AMOUNT, SCHEMA_VERSION,
 };
 use soroban_sdk::{
     symbol_short,

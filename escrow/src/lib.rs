@@ -806,10 +806,7 @@ impl LiquifactEscrow {
         let escrow = Self::get_escrow(env.clone());
         escrow.admin.require_auth();
 
-        assert!(
-            escrow.status == 0,
-            "Cap can only be lowered in Open state"
-        );
+        assert!(escrow.status == 0, "Cap can only be lowered in Open state");
 
         let old_cap = env
             .storage()
@@ -827,7 +824,10 @@ impl LiquifactEscrow {
             new_cap > 0,
             "max_unique_investors must be positive when configured"
         );
-        assert!(new_cap < old_cap, "new cap must be strictly lower than current cap");
+        assert!(
+            new_cap < old_cap,
+            "new cap must be strictly lower than current cap"
+        );
         assert!(
             cur_count <= new_cap,
             "new cap cannot be below current unique funder count"
