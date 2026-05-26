@@ -16,6 +16,43 @@ All events follow the Soroban `contractevent` format. Key fields like `invoice_i
 
 ## 📋 Event Catalog
 
+### `EscrowInitialized`
+Emitted once by `init()`. Carries the escrow snapshot plus immutable bound references so
+indexers can register `funding_token`, `treasury`, and optional `registry` without follow-up reads.
+
+**Topics:**
+1. `escrow_ii` (Symbol)
+
+**Data Payload:**
+- `escrow` (`InvoiceEscrow`)
+- `funding_token` (`Address`) — equals `DataKey::FundingToken`
+- `treasury` (`Address`) — equals `DataKey::Treasury`
+- `registry` (`Option<Address>`) — equals `DataKey::RegistryRef`
+
+**Example (JSON Decoded):**
+```json
+{
+  "topics": ["escrow_ii"],
+  "data": {
+    "escrow": { "invoice_id": "INV_001", "status": 0 },
+    "funding_token": "CTOKEN...",
+    "treasury": "GTREAS...",
+    "registry": "GREG..."
+  }
+}
+```
+
+### `MaxUniqueInvestorsCapLowered`
+Emitted when admin calls `lower_max_unique_investors` while the escrow is open.
+
+**Topics:**
+1. `inv_cap` (Symbol)
+2. `invoice_id` (Symbol)
+
+**Data Payload:**
+- `old_cap` (u32)
+- `new_cap` (u32)
+
 ### `EscrowFunded`
 Emitted when an investor deposits principal.
 

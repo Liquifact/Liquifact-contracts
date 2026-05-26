@@ -492,6 +492,89 @@ fn test_init_registry_none_roundtrip() {
     assert_eq!(client.get_registry_ref(), None);
 }
 
+#[test]
+fn test_init_escrow_initialized_event_includes_bound_refs() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let contract_id = client.address.clone();
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let token = Address::generate(&env);
+    let treasury = Address::generate(&env);
+    let registry = Address::generate(&env);
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "INIT_EVT"),
+        &sme,
+        &5_000i128,
+        &100i64,
+        &0u64,
+        &token,
+        &Some(registry.clone()),
+        &treasury,
+        &None,
+        &None,
+        &None,
+    );
+
+    assert_eq!(
+        env.events().all(),
+        std::vec![EscrowInitialized {
+            name: symbol_short!("escrow_ii"),
+            escrow: client.get_escrow(),
+            funding_token: token,
+            treasury,
+            registry: Some(registry),
+        }
+        .to_xdr(&env, &contract_id)]
+    );
+}
+
+#[test]
+fn test_init_escrow_initialized_event_registry_none() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let contract_id = client.address.clone();
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let token = Address::generate(&env);
+    let treasury = Address::generate(&env);
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "INIT_EVT2"),
+        &sme,
+        &5_000i128,
+        &100i64,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+    );
+
+    assert_eq!(
+        env.events().all(),
+        std::vec![EscrowInitialized {
+            name: symbol_short!("escrow_ii"),
+            escrow: client.get_escrow(),
+            funding_token: token,
+            treasury,
+            registry: None,
+        }
+        .to_xdr(&env, &contract_id)]
+    );
+}
+
 // ---------------------------------------------------------------------------
 // invoice_id boundary and charset fuzz/parameterized tests
 // ---------------------------------------------------------------------------

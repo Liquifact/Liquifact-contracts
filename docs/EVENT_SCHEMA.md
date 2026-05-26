@@ -43,17 +43,29 @@ Each event has:
 
 ## Events
 
-### 1. `escrow.initialized` — Escrow Created
+### 1. `escrow_ii` — Escrow Created
 
 Emitted by `init()`. Marks the beginning of an invoice escrow lifecycle.
 
 | Field | Value |
 |---|---|
-| `Topic[0]` | `"escrow"` |
-| `Topic[1]` | `"initd"` *(≤ 8 chars — Soroban `symbol_short` limit)* |
-| Payload type | `InvoiceEscrow` |
+| Topic[0] | `"escrow_ii"` (`symbol_short!("escrow_ii")`) |
+| Payload type | `EscrowInitialized` |
 
-#### Payload: `InvoiceEscrow` (intended view)
+#### Payload: `EscrowInitialized`
+
+| Field | Rust type | Description |
+|---|---|---|
+| `escrow` | `InvoiceEscrow` | Full escrow snapshot at init |
+| `funding_token` | `Address` | Bound SEP-41 token; equals `DataKey::FundingToken` |
+| `treasury` | `Address` | Bound treasury; equals `DataKey::Treasury` |
+| `registry` | `Option<Address>` | Optional registry hint; equals `DataKey::RegistryRef` (`None` when unset) |
+
+**Compatibility:** Additive fields on `EscrowInitialized` — old indexers may ignore
+`funding_token`, `treasury`, and `registry`; new indexers can bootstrap bound references
+from this single event without follow-up `get_funding_token` / `get_treasury` polls.
+
+#### Nested `InvoiceEscrow` fields (within `escrow`)
 
 | Field | Rust type | Description |
 |---|---|---|
@@ -82,23 +94,60 @@ storage section for the canonical persisted-layout discussion.
   "funded_amount" : 0,
   "yield_bps"     : 800,
   "maturity"      : 1750000000,
-  "status"        : 0
+  "status"        : 0,
+  "funding_token" : "CTOKEN...",
+  "treasury"      : "GTREAS...",
+  "registry"      : null
 }
 ```
 
 ---
 
-### 2. `escrow.funded` — Investor Contribution Recorded
+### 1a. `inv_cap` — Investor Cap Lowered
 
-Emitted by `fund()` on **every successful call**, regardless of whether the
-target was just met. Use `status == 1` in the payload to detect the moment
+Emitted by `lower_max_unique_investors()` when admin tightens the distinct-investor limit
+while the escrow is **open** (status `0`). Added in Issue #255.
+
+| Field | Value |
+|---|---|
+| Topic[0] | `"inv_cap"` (`symbol_short!("inv_cap")`) |
+| Topic[1] | `invoice_id` (Symbol) |
+| Payload type | `MaxUniqueInvestorsCapLowered` |
+
+#### Payload: `MaxUniqueInvestorsCapLowered`
+
+| Field | Rust type | Description |
+|---|---|---|
+| `name` | `Symbol` | Always `"inv_cap"` |
+| `invoice_id` | `Symbol` | Invoice whose cap was lowered |
+| `old_cap` | `u32` | Previous `MaxUniqueInvestorsCap` value |
+| `new_cap` | `u32` | New (lower) cap value now stored |
+
+#### Example (JSON representation after XDR decode)
+
+```json
+{
+  "event"     : "inv_cap",
+  "invoice_id": "INV1023",
+  "old_cap"   : 10,
+  "new_cap"   : 5
+}
+```
+
+---
+
+### 2. `funded` — Investor Contribution Recorded
+
+Emitted by `fund()` and `fund_with_commitment()` on **every successful call**, regardless of
+whether the target was just met. Use `status == 1` in the payload to detect the moment
 the escrow became fully funded.
 
 | Field | Value |
 |---|---|
-| `Topic[0]` | `"escrow"` |
-| `Topic[1]` | `"funded"` |
-| Payload type | `FundedPayload` |
+| Topic[0] | `"funded"` (`symbol_short!("funded")`) |
+| Topic[1] | `invoice_id` (Symbol) |
+| Topic[2] | `investor` (Address) |
+| Payload type | `EscrowFunded` |
 
 #### Payload: `FundedPayload` (intended view)
 
@@ -133,15 +182,14 @@ is not reflected consistently across the rest of the contract.
 
 ### 3. `escrow.settled` — Invoice Settled by Buyer
 
-Emitted by `settle()` once, when the buyer has paid and the contract marks
-the escrow as settled (status 2). Contains everything needed to compute
-investor payouts without re-reading contract storage.
+Emitted by `settle()` once, when the SME finalizes the escrow after maturity (status → 2).
+Contains everything needed to compute investor payouts without re-reading contract storage.
 
 | Field | Value |
 |---|---|
-| `Topic[0]` | `"escrow"` |
-| `Topic[1]` | `"settled"` |
-| Payload type | `SettledPayload` |
+| Topic[0] | `"escrow_sd"` (`symbol_short!("escrow_sd")`) |
+| Topic[1] | `invoice_id` (Symbol) |
+| Payload type | `EscrowSettled` |
 
 #### Payload: `SettledPayload` (intended view)
 
@@ -189,22 +237,30 @@ the contract file itself.
 
 ## Topic Filter Cheat Sheet
 
-Use these filters with `getEvents` (Stellar RPC) or Mercury subscriptions:
+Use these filters with `getEvents` (Stellar RPC) or Mercury subscriptions.
 
-```json
-{
-  "contractId": "<CONTRACT_ADDRESS>",
-  "topics": [
-    ["AAAADwAAAAZlc2Nyb3c=", "AAAADwAAAAVpbml0ZA=="]
-  ]
-}
-```
+> **Important:** Filter by `Topic[0]` (the event name Symbol) for each event type.
+> The contract does **not** use a shared namespace topic — each event struct has its
+> own `symbol_short!` name as the first topic.
 
-| Event | Topic[0] (base64 XDR) | Topic[1] (base64 XDR) | Human label |
-|---|---|---|---|
-| `initialized` | `AAAADwAAAAZlc2Nyb3c=` | `AAAADwAAAAVpbml0ZA==` | `"escrow"` / `"initd"` |
-| `funded` | `AAAADwAAAAZlc2Nyb3c=` | `AAAADwAAAAZmdW5kZWQ=` | `"escrow"` / `"funded"` |
-| `settled` | `AAAADwAAAAZlc2Nyb3c=` | `AAAADwAAAAdzZXR0bGVk` | `"escrow"` / `"settled"` |
+| Event | Topic[0] symbol | Human label |
+|---|---|---|
+| Escrow created | `escrow_ii` | `EscrowInitialized` |
+| Investor funded | `funded` | `EscrowFunded` |
+| Escrow settled | `escrow_sd` | `EscrowSettled` |
+| SME withdrew | `sme_wd` | `SmeWithdrew` |
+| Investor claimed | `inv_claim` | `InvestorPayoutClaimed` |
+| Dust swept | `dust_sw` | `TreasuryDustSwept` |
+| Legal hold changed | `legalhld` | `LegalHoldChanged` |
+| Funding target updated | `fund_tgt` | `FundingTargetUpdated` |
+| Maturity updated | `maturity` | `MaturityUpdatedEvent` |
+| Admin transferred | `admin` | `AdminTransferredEvent` |
+| Collateral recorded | `coll_rec` | `CollateralRecordedEvt` |
+| Primary attestation bound | `att_bind` | `PrimaryAttestationBound` |
+| Attestation log appended | `att_app` | `AttestationDigestAppended` |
+| Investor cap lowered | `inv_cap` | `MaxUniqueInvestorsCapLowered` |
+| Allowlist enabled/disabled | `al_ena` | `AllowlistEnabledChanged` |
+| Investor allowlist changed | `al_set` | `InvestorAllowlistChanged` |
 
 ---
 
@@ -229,3 +285,6 @@ Use these filters with `getEvents` (Stellar RPC) or Mercury subscriptions:
 | Date | Version | Change |
 |---|---|---|
 | 2026-03-23 | v0.1 | Initial schema — `initialized`, `funded`, `settled` events defined |
+| 2026-05-27 | v0.2 | **Issue #251** — Extended `EscrowInitialized` payload with `funding_token`, `treasury`, `registry` fields (additive; backward-compatible) |
+| 2026-05-27 | v0.2 | **Issue #255** — Added `MaxUniqueInvestorsCapLowered` (`inv_cap`) event for `lower_max_unique_investors` |
+| 2026-05-27 | v0.2 | **Doc fix** — Corrected topic cheat sheet: replaced stale `"escrow"/"initd"` with actual per-event `symbol_short!` names; added complete event catalogue |

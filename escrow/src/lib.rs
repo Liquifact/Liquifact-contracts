@@ -282,6 +282,22 @@ pub struct EscrowInitialized {
     #[topic]
     pub name: Symbol,
     pub escrow: InvoiceEscrow,
+    /// Bound funding token; equals [`DataKey::FundingToken`].
+    pub funding_token: Address,
+    /// Bound treasury; equals [`DataKey::Treasury`].
+    pub treasury: Address,
+    /// Optional registry hint; equals [`DataKey::RegistryRef`] (`None` when unset).
+    pub registry: Option<Address>,
+}
+
+#[contractevent]
+pub struct MaxUniqueInvestorsCapLowered {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    pub old_cap: u32,
+    pub new_cap: u32,
 }
 
 #[contractevent]
@@ -624,9 +640,11 @@ impl LiquifactEscrow {
 
         EscrowInitialized {
             name: symbol_short!("escrow_ii"),
-            // Read the stored value so we do not clone an in-memory escrow snapshot.
-            // env.clone(): env is used again after this call for .publish(&env).
+            // Read stored values so event fields match persisted keys (indexer single-event bootstrap).
             escrow: Self::get_escrow(env.clone()),
+            funding_token: Self::get_funding_token(env.clone()),
+            treasury: Self::get_treasury(env.clone()),
+            registry: Self::get_registry_ref(env.clone()),
         }
         .publish(&env);
 
@@ -762,10 +780,72 @@ impl LiquifactEscrow {
     }
 
     /// Optional cap on **distinct** investor addresses (`prev == 0` at fund time); [`None`] if unlimited.
+    ///
+    /// Reflects the current stored cap, including any admin reduction via
+    /// [`LiquifactEscrow::lower_max_unique_investors`].
     pub fn get_max_unique_investors_cap(env: Env) -> Option<u32> {
         env.storage()
             .instance()
             .get(&DataKey::MaxUniqueInvestorsCap)
+    }
+
+    /// Admin-only: reduce the distinct-investor cap while the escrow is **open** (status `0`).
+    ///
+    /// # Rules
+    /// - Requires [`InvoiceEscrow::admin`] authorization.
+    /// - Only permitted when a cap exists ([`DataKey::MaxUniqueInvestorsCap`]).
+    /// - `new_cap` must satisfy `unique_funder_count <= new_cap < old_cap` (strict decrease).
+    /// - Raising the cap or imposing a cap on an unlimited escrow is rejected.
+    ///
+    /// Existing funders remain honored; new addresses are blocked once
+    /// `unique_funder_count >= new_cap`.
+    ///
+    /// # Returns
+    /// The stored cap after update (same as [`LiquifactEscrow::get_max_unique_investors_cap`]).
+    pub fn lower_max_unique_investors(env: Env, new_cap: u32) -> u32 {
+        let escrow = Self::get_escrow(env.clone());
+        escrow.admin.require_auth();
+
+        assert!(
+            escrow.status == 0,
+            "Cap can only be lowered in Open state"
+        );
+
+        let old_cap = env
+            .storage()
+            .instance()
+            .get::<DataKey, u32>(&DataKey::MaxUniqueInvestorsCap)
+            .unwrap_or_else(|| panic!("no investor cap configured"));
+
+        let cur_count = env
+            .storage()
+            .instance()
+            .get(&DataKey::UniqueFunderCount)
+            .unwrap_or(0);
+
+        assert!(
+            new_cap > 0,
+            "max_unique_investors must be positive when configured"
+        );
+        assert!(new_cap < old_cap, "new cap must be strictly lower than current cap");
+        assert!(
+            cur_count <= new_cap,
+            "new cap cannot be below current unique funder count"
+        );
+
+        env.storage()
+            .instance()
+            .set(&DataKey::MaxUniqueInvestorsCap, &new_cap);
+
+        MaxUniqueInvestorsCapLowered {
+            name: symbol_short!("inv_cap"),
+            invoice_id: escrow.invoice_id.clone(),
+            old_cap,
+            new_cap,
+        }
+        .publish(&env);
+
+        new_cap
     }
 
     /// Distinct funders counted so far (each address counted once when it first receives principal).

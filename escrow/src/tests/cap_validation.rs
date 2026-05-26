@@ -53,7 +53,6 @@ fn test_unique_funder_count_basic_functionality() {
 }
 
 #[test]
-#[ignore]
 #[should_panic(expected = "unique investor cap reached")]
 fn test_cap_enforcement_blocks_excess_investors() {
     let env = Env::default();
@@ -62,12 +61,13 @@ fn test_cap_enforcement_blocks_excess_investors() {
     let admin = Address::generate(&env);
     let sme = Address::generate(&env);
 
-    // Initialize escrow with cap of 2 investors
+    // Use a target (200B) larger than inv1+inv2 (50B+50B=100B) so the escrow
+    // remains open (status=0) when the third investor hits the cap gate.
     client.init(
         &admin,
         &String::from_str(&env, "CAP_TEST2"),
         &sme,
-        &100_000_000_000i128,
+        &200_000_000_000i128,
         &800i64,
         &0u64,
         &Address::generate(&env),
@@ -78,20 +78,20 @@ fn test_cap_enforcement_blocks_excess_investors() {
         &Some(2u32),
     );
 
-    // Add two investors (reaches cap)
+    // Add two investors — reaches the investor cap but NOT the funding target.
     let inv1 = Address::generate(&env);
     let inv2 = Address::generate(&env);
     client.fund(&inv1, &50_000_000_000i128);
     client.fund(&inv2, &50_000_000_000i128);
     assert_eq!(client.get_unique_funder_count(), 2);
+    assert_eq!(client.get_escrow().status, 0); // still open
 
-    // Try to add third investor - should panic
+    // Third investor hits the cap — must panic "unique investor cap reached".
     let inv3 = Address::generate(&env);
     client.fund(&inv3, &1_000_000_000i128);
 }
 
 #[test]
-#[ignore]
 fn test_re_funding_same_address_doesnt_count_against_cap() {
     let env = Env::default();
     env.mock_all_auths();
@@ -214,4 +214,317 @@ fn test_cap_with_fund_with_commitment() {
     assert_eq!(client.get_investor_yield_bps(&inv2), 800);
 
     assert_eq!(client.get_escrow().status, 1); // Funded
+}
+
+// --- lower_max_unique_investors (#255) ---
+
+#[test]
+fn test_lower_max_unique_investors_success() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "CAP_LOWER"),
+        &sme,
+        &100_000_000_000i128,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &Some(5u32),
+    );
+
+    let inv1 = Address::generate(&env);
+    let inv2 = Address::generate(&env);
+    client.fund(&inv1, &20_000_000_000i128);
+    client.fund(&inv2, &20_000_000_000i128);
+    assert_eq!(client.get_unique_funder_count(), 2);
+
+    let new_cap = client.lower_max_unique_investors(&2u32);
+    assert_eq!(new_cap, 2);
+    assert_eq!(client.get_max_unique_investors_cap(), Some(2));
+}
+
+#[test]
+#[should_panic(expected = "unique investor cap reached")]
+fn test_lower_cap_blocks_new_investors_at_lowered_limit() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "CAP_LOWER2"),
+        &sme,
+        &100_000_000_000i128,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &Some(3u32),
+    );
+
+    client.fund(&Address::generate(&env), &20_000_000_000i128);
+    client.fund(&Address::generate(&env), &20_000_000_000i128);
+    client.lower_max_unique_investors(&2u32);
+
+    client.fund(&Address::generate(&env), &1_000_000_000i128);
+}
+
+#[test]
+fn test_lower_cap_existing_investors_may_refund() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "CAP_LOWER3"),
+        &sme,
+        &100_000_000_000i128,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &Some(3u32),
+    );
+
+    let inv1 = Address::generate(&env);
+    let inv2 = Address::generate(&env);
+    client.fund(&inv1, &30_000_000_000i128);
+    client.fund(&inv2, &30_000_000_000i128);
+    client.lower_max_unique_investors(&2u32);
+
+    client.fund(&inv1, &20_000_000_000i128);
+    client.fund(&inv2, &20_000_000_000i128);
+    assert_eq!(client.get_unique_funder_count(), 2);
+}
+
+#[test]
+#[should_panic(expected = "new cap must be strictly lower than current cap")]
+fn test_lower_cap_rejects_raise() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "CAP_LOWER4"),
+        &sme,
+        &100_000_000_000i128,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &Some(3u32),
+    );
+
+    client.lower_max_unique_investors(&4u32);
+}
+
+#[test]
+#[should_panic(expected = "new cap cannot be below current unique funder count")]
+fn test_lower_cap_rejects_below_funder_count() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "CAP_LOWER5"),
+        &sme,
+        &100_000_000_000i128,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &Some(5u32),
+    );
+
+    client.fund(&Address::generate(&env), &10_000_000_000i128);
+    client.fund(&Address::generate(&env), &10_000_000_000i128);
+    client.fund(&Address::generate(&env), &10_000_000_000i128);
+    client.lower_max_unique_investors(&2u32);
+}
+
+#[test]
+#[should_panic(expected = "Cap can only be lowered in Open state")]
+fn test_lower_cap_rejects_non_open_state() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "CAP_LOWER6"),
+        &sme,
+        &100_000_000_000i128,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &Some(3u32),
+    );
+
+    client.fund(&Address::generate(&env), &100_000_000_000i128);
+    assert_eq!(client.get_escrow().status, 1);
+    client.lower_max_unique_investors(&2u32);
+}
+
+#[test]
+#[should_panic(expected = "no investor cap configured")]
+fn test_lower_cap_rejects_unlimited_escrow() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "CAP_LOWER7"),
+        &sme,
+        &100_000_000_000i128,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+    );
+
+    client.lower_max_unique_investors(&10u32);
+}
+
+#[test]
+fn test_lower_cap_requires_admin_auth() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let client = deploy(&env);
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "CAP_LOWER8"),
+        &sme,
+        &100_000_000_000i128,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &Some(5u32),
+    );
+
+    client.lower_max_unique_investors(&3u32);
+    assert!(
+        env.auths().iter().any(|(addr, _)| *addr == admin),
+        "admin auth was not recorded for lower_max_unique_investors"
+    );
+}
+
+#[test]
+#[should_panic]
+fn test_lower_cap_unauthorized_panics() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let client = deploy(&env);
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "CAP_LOWER9"),
+        &sme,
+        &100_000_000_000i128,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &Some(5u32),
+    );
+
+    env.mock_auths(&[]);
+    client.lower_max_unique_investors(&3u32);
+}
+
+#[test]
+fn test_lower_cap_emits_event() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let client = deploy(&env);
+    let contract_id = client.address.clone();
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "CAP_EVT"),
+        &sme,
+        &100_000_000_000i128,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &Some(5u32),
+    );
+
+    client.fund(&Address::generate(&env), &10_000_000_000i128);
+    client.lower_max_unique_investors(&3u32);
+
+    assert_eq!(
+        env.events().all(),
+        std::vec![MaxUniqueInvestorsCapLowered {
+            name: symbol_short!("inv_cap"),
+            invoice_id: client.get_escrow().invoice_id,
+            old_cap: 5,
+            new_cap: 3,
+        }
+        .to_xdr(&env, &contract_id)]
+    );
 }

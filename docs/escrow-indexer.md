@@ -25,7 +25,7 @@ Recommended split:
 
 Contract event names (`symbol_short`) emitted by `escrow/src/lib.rs`:
 
-- `escrow_ii` - escrow initialized
+- `escrow_ii` - escrow initialized (payload includes `escrow`, `funding_token`, `treasury`, `registry`)
 - `funded` - contribution recorded
 - `escrow_sd` - settled
 - `sme_wd` - SME withdraw
@@ -40,6 +40,7 @@ Contract event names (`symbol_short`) emitted by `escrow/src/lib.rs`:
 - `att_app` - attestation append-log updated
 - `al_ena` - allowlist mode enabled/disabled
 - `al_set` - investor allowlist membership set
+- `inv_cap` - max unique investors cap lowered (admin, open state only)
 
 See also: `docs/EVENT_SCHEMA.md`.
 
@@ -77,9 +78,9 @@ Read endpoints and their backing keys (`docs/escrow-read-api.md`):
 
 ### Poll at startup + periodically (config/hints)
 
-- `get_funding_token()` -> `DataKey::FundingToken` (immutable after init)
-- `get_treasury()` -> `DataKey::Treasury` (immutable after init)
-- `get_registry_ref()` -> `DataKey::RegistryRef` (optional hint only)
+- `get_funding_token()` -> `DataKey::FundingToken` (immutable after init; also duplicated on `escrow_ii` for indexers)
+- `get_treasury()` -> `DataKey::Treasury` (immutable after init; also on `escrow_ii`)
+- `get_registry_ref()` -> `DataKey::RegistryRef` (optional hint only; also on `escrow_ii`)
 - `get_min_contribution_floor()` -> `DataKey::MinContributionFloor`
 - `get_max_unique_investors_cap()` -> `DataKey::MaxUniqueInvestorsCap`
 - `get_primary_attestation_hash()` -> `DataKey::PrimaryAttestationHash`
