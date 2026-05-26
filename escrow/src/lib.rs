@@ -1485,7 +1485,10 @@ impl LiquifactEscrow {
         let mut escrow = Self::get_escrow(env.clone());
         escrow.admin.require_auth();
 
-        assert!(escrow.status == 0, "cancel_funding only allowed in Open state");
+        assert!(
+            escrow.status == 0,
+            "cancel_funding only allowed in Open state"
+        );
 
         escrow.status = 4;
         env.storage().instance().set(&DataKey::Escrow, &escrow);
@@ -1515,11 +1518,7 @@ impl LiquifactEscrow {
         assert!(escrow.status == 4, "refund only allowed in Cancelled state");
 
         let contribution_key = DataKey::InvestorContribution(investor.clone());
-        let amount: i128 = env
-            .storage()
-            .instance()
-            .get(&contribution_key)
-            .unwrap_or(0);
+        let amount: i128 = env.storage().instance().get(&contribution_key).unwrap_or(0);
         assert!(amount > 0, "no contribution to refund");
 
         // Zero out contribution before transfer (checks-effects-interactions).
