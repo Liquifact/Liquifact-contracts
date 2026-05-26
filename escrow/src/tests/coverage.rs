@@ -645,6 +645,98 @@ fn test_sme_collateral_commitment() {
 }
 
 #[test]
+#[should_panic(expected = "Collateral asset symbol must not be empty")]
+fn test_sme_collateral_empty_asset_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let (token, treasury) = free_addresses(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "T"),
+        &sme,
+        &100,
+        &10,
+        &10,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+    );
+    let empty_asset = soroban_sdk::Symbol::new(&env, "");
+    client.record_sme_collateral_commitment(&empty_asset, &5000);
+}
+
+#[test]
+#[should_panic(expected = "Collateral commitment timestamp must not go backward")]
+fn test_sme_collateral_stale_timestamp_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let (token, treasury) = free_addresses(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "T"),
+        &sme,
+        &100,
+        &10,
+        &10,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+    );
+
+    let asset = soroban_sdk::Symbol::new(&env, "GOLD");
+    client.record_sme_collateral_commitment(&asset, &5000);
+
+    // Simulate stale replay: move ledger timestamp backward
+    env.ledger().with_mut(|li| li.timestamp = 100);
+
+    client.record_sme_collateral_commitment(&asset, &7000);
+}
+
+#[test]
+fn test_sme_collateral_replacement_preserves_prior_amount() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let (token, treasury) = free_addresses(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "T"),
+        &sme,
+        &100,
+        &10,
+        &10,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+    );
+
+    let asset = soroban_sdk::Symbol::new(&env, "GOLD");
+    let first = client.record_sme_collateral_commitment(&asset, &5000);
+    assert_eq!(first.amount, 5000);
+
+    // Advance timestamp so the replacement is not stale
+    env.ledger().with_mut(|li| li.timestamp = 20000);
+
+    let second = client.record_sme_collateral_commitment(&asset, &7000);
+    assert_eq!(second.amount, 7000);
+    assert_eq!(second.recorded_at, 20000);
+
+    let stored = client.get_sme_collateral_commitment().unwrap();
+    assert_eq!(stored.amount, 7000);
+}
+
+#[test]
 fn test_clear_legal_hold_convenience() {
     let env = Env::default();
     env.mock_all_auths();
