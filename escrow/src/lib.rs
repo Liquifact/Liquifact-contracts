@@ -204,6 +204,9 @@ pub enum DataKey {
     AllowlistActive,
     /// Whether a specific address is permitted to fund when [`DataKey::AllowlistActive`] is true.
     InvestorAllowlisted(Address),
+    /// Set to `true` once an investor's principal has been refunded in a cancelled escrow.
+    /// Absent ⇒ `false`. Written once; prevents double-refund.
+    InvestorRefunded(Address),
 }
 
 // --- Data types ---
@@ -227,7 +230,7 @@ pub struct InvoiceEscrow {
     pub funded_amount: i128,
     pub yield_bps: i64,
     pub maturity: u64,
-    /// 0 = open, 1 = funded, 2 = settled, 3 = withdrawn (SME pulled liquidity)
+    /// 0 = open, 1 = funded, 2 = settled, 3 = withdrawn (SME pulled liquidity), 4 = cancelled (admin-gated; investors may refund)
     pub status: u32,
 }
 
@@ -382,6 +385,26 @@ pub struct InvestorPayoutClaimed {
     pub investor: Address,
     #[topic]
     pub invoice_id: Symbol,
+}
+
+#[contractevent]
+pub struct FundingCancelled {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    pub funded_amount: i128,
+}
+
+#[contractevent]
+pub struct InvestorRefundedEvt {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub investor: Address,
+    #[topic]
+    pub invoice_id: Symbol,
+    pub amount: i128,
 }
 
 #[contractevent]
@@ -690,8 +713,8 @@ impl LiquifactEscrow {
         // env.clone(): env is used again after this call for treasury/token reads and publish.
         let escrow = Self::get_escrow(env.clone());
         assert!(
-            escrow.status == 2 || escrow.status == 3,
-            "dust sweep only in terminal states (settled or withdrawn)"
+            escrow.status == 2 || escrow.status == 3 || escrow.status == 4,
+            "dust sweep only in terminal states (settled, withdrawn, or cancelled)"
         );
 
         let treasury: Address = env
@@ -1443,6 +1466,98 @@ impl LiquifactEscrow {
         .publish(&env);
 
         escrow
+    }
+
+    /// Transition an **open** escrow (status 0) to **cancelled** (status 4).
+    ///
+    /// Only the [`InvoiceEscrow::admin`] may call this. Blocked while a legal hold is active.
+    /// After cancellation, investors may recover their principal via [`LiquifactEscrow::refund`].
+    ///
+    /// # Panics
+    /// - If legal hold is active.
+    /// - If escrow is not in status 0 (open).
+    pub fn cancel_funding(env: Env) -> InvoiceEscrow {
+        assert!(
+            !Self::legal_hold_active(&env),
+            "Legal hold blocks cancel_funding"
+        );
+
+        let mut escrow = Self::get_escrow(env.clone());
+        escrow.admin.require_auth();
+
+        assert!(escrow.status == 0, "cancel_funding only allowed in Open state");
+
+        escrow.status = 4;
+        env.storage().instance().set(&DataKey::Escrow, &escrow);
+
+        FundingCancelled {
+            name: symbol_short!("fund_can"),
+            invoice_id: escrow.invoice_id.clone(),
+            funded_amount: escrow.funded_amount,
+        }
+        .publish(&env);
+
+        escrow
+    }
+
+    /// Return an investor's recorded principal when the escrow is **cancelled** (status 4).
+    ///
+    /// Requires `investor` auth. Zeroes [`DataKey::InvestorContribution`] after transfer so a
+    /// second call is a no-op (contribution is 0 → panics with "no contribution to refund").
+    ///
+    /// # Panics
+    /// - If escrow is not in status 4 (cancelled).
+    /// - If the investor has no recorded contribution (or has already been refunded).
+    pub fn refund(env: Env, investor: Address) {
+        investor.require_auth();
+
+        let escrow = Self::get_escrow(env.clone());
+        assert!(escrow.status == 4, "refund only allowed in Cancelled state");
+
+        let contribution_key = DataKey::InvestorContribution(investor.clone());
+        let amount: i128 = env
+            .storage()
+            .instance()
+            .get(&contribution_key)
+            .unwrap_or(0);
+        assert!(amount > 0, "no contribution to refund");
+
+        // Zero out contribution before transfer (checks-effects-interactions).
+        env.storage().instance().set(&contribution_key, &0i128);
+        env.storage()
+            .instance()
+            .set(&DataKey::InvestorRefunded(investor.clone()), &true);
+
+        let token_addr: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::FundingToken)
+            .expect("funding token must be initialized");
+        let this = env.current_contract_address();
+
+        external_calls::transfer_funding_token_with_balance_checks(
+            &env,
+            &token_addr,
+            &this,
+            &investor,
+            amount,
+        );
+
+        InvestorRefundedEvt {
+            name: symbol_short!("refunded"),
+            investor: investor.clone(),
+            invoice_id: escrow.invoice_id.clone(),
+            amount,
+        }
+        .publish(&env);
+    }
+
+    /// Whether an investor has already received a refund in a cancelled escrow.
+    pub fn is_investor_refunded(env: Env, investor: Address) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::InvestorRefunded(investor))
+            .unwrap_or(false)
     }
 }
 
