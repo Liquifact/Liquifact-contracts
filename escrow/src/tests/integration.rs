@@ -2,8 +2,9 @@ use super::super::external_calls::transfer_funding_token_with_balance_checks;
 use super::*;
 use crate::{CollateralRecordedEvt, DataKey, InvoiceEscrow};
 use soroban_sdk::{
-    contract, contractimpl, testutils::{Events as _, Ledger as _}, vec, IntoVal, Map, MuxedAddress,
-    Symbol, Val,
+    contract, contractimpl,
+    testutils::{Events as _, Ledger as _},
+    vec, IntoVal, Map, MuxedAddress, Symbol, Val,
 };
 
 // External-call and token-integration assumptions that should stay separate

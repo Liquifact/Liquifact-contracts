@@ -925,10 +925,8 @@ impl LiquifactEscrow {
         escrow.sme_address.require_auth();
 
         let now = env.ledger().timestamp();
-        let prior: Option<SmeCollateralCommitment> = env
-            .storage()
-            .instance()
-            .get(&DataKey::SmeCollateralPledge);
+        let prior: Option<SmeCollateralCommitment> =
+            env.storage().instance().get(&DataKey::SmeCollateralPledge);
         let prior_amount = prior.as_ref().map(|c| c.amount).unwrap_or(0);
 
         if let Some(ref existing) = prior {
