@@ -363,6 +363,8 @@ pub struct CollateralRecordedEvt {
     pub invoice_id: Symbol,
     /// SME-reported amount in the off-chain asset's own units; not a locked token balance.
     pub amount: i128,
+    /// Prior recorded amount, or 0 if no prior commitment existed.
+    pub prior_amount: i128,
 }
 
 #[contractevent]
@@ -900,20 +902,46 @@ impl LiquifactEscrow {
     /// **Metadata-only:** this writes [`DataKey::SmeCollateralPledge`] and emits
     /// [`CollateralRecordedEvt`]. It does not transfer tokens, reserve balances, verify custody,
     /// create an on-chain encumbrance, or block unrelated flows.
+    ///
+    /// # Validation
+    ///
+    /// - `amount` must be positive.
+    /// - `asset` must be a non-empty symbol.
+    /// - When replacing an existing commitment, the current ledger timestamp must not be
+    ///   earlier than the prior `recorded_at` (defense-in-depth against stale writes).
     pub fn record_sme_collateral_commitment(
         env: Env,
         asset: Symbol,
         amount: i128,
     ) -> SmeCollateralCommitment {
         assert!(amount > 0, "Collateral amount must be positive");
-        // env.clone(): env is used again after this call for ledger timestamp, storage set, and publish.
+        assert!(
+            asset != Symbol::new(&env, ""),
+            "Collateral asset symbol must not be empty"
+        );
+
+        // env.clone(): env is used again after this call for storage read/write, timestamp, and publish.
         let escrow = Self::get_escrow(env.clone());
         escrow.sme_address.require_auth();
+
+        let now = env.ledger().timestamp();
+        let prior: Option<SmeCollateralCommitment> = env
+            .storage()
+            .instance()
+            .get(&DataKey::SmeCollateralPledge);
+        let prior_amount = prior.as_ref().map(|c| c.amount).unwrap_or(0);
+
+        if let Some(ref existing) = prior {
+            assert!(
+                now >= existing.recorded_at,
+                "Collateral commitment timestamp must not go backward"
+            );
+        }
 
         let commitment = SmeCollateralCommitment {
             asset,
             amount,
-            recorded_at: env.ledger().timestamp(),
+            recorded_at: now,
         };
         env.storage()
             .instance()
@@ -923,6 +951,7 @@ impl LiquifactEscrow {
             name: symbol_short!("coll_rec"),
             invoice_id: escrow.invoice_id.clone(),
             amount,
+            prior_amount,
         }
         .publish(&env);
 

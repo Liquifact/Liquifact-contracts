@@ -5,10 +5,13 @@
 ## On-chain behavior
 
 - Authorization: only `InvoiceEscrow.sme_address` may call the entrypoint.
-- Validation: `amount` must be positive.
+- Validation:
+  - `amount` must be positive.
+  - `asset` must be a non-empty symbol (empty symbols rejected).
+  - When replacing an existing commitment, the current ledger timestamp must not be earlier than the prior `recorded_at` (stale replacement rejected).
 - Storage: the call writes one `SmeCollateralCommitment` under `DataKey::SmeCollateralPledge`, replacing any previous record for the escrow.
 - Timestamp: `recorded_at` is the current Soroban ledger timestamp from `Env::ledger()`.
-- Event: the call emits `CollateralRecordedEvt` to signal that the metadata record changed.
+- Event: the call emits `CollateralRecordedEvt` to signal that the metadata record changed, including the prior recorded amount (or 0 if none) in `prior_amount`.
 
 ## What `CollateralRecordedEvt` means
 

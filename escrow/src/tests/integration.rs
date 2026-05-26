@@ -1,8 +1,9 @@
 use super::super::external_calls::transfer_funding_token_with_balance_checks;
 use super::*;
-use crate::{DataKey, InvoiceEscrow};
+use crate::{CollateralRecordedEvt, DataKey, InvoiceEscrow};
 use soroban_sdk::{
-    contract, contractimpl, testutils::Events as _, vec, IntoVal, Map, MuxedAddress, Symbol, Val,
+    contract, contractimpl, testutils::{Events as _, Ledger as _}, vec, IntoVal, Map, MuxedAddress,
+    Symbol, Val,
 };
 
 // External-call and token-integration assumptions that should stay separate
@@ -574,11 +575,82 @@ fn test_collateral_record_event_payload_is_metadata_only() {
                     [
                         (Symbol::new(&env, "amount"), 5_000i128.into_val(&env),),
                         (Symbol::new(&env, "invoice_id"), invoice_id.into_val(&env),),
+                        (Symbol::new(&env, "prior_amount"), 0i128.into_val(&env),),
                     ],
                 )
                 .into_val(&env),
             )
         ]
+    );
+}
+
+#[test]
+fn test_collateral_replacement_event_contains_prior_amount() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (contract_id, client) = deploy_with_id(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let invoice_id = Symbol::new(&env, "COLEV002");
+
+    env.as_contract(&contract_id, || {
+        env.storage().instance().set(
+            &DataKey::Escrow,
+            &InvoiceEscrow {
+                invoice_id: invoice_id.clone(),
+                admin,
+                sme_address: sme,
+                amount: 10_000i128,
+                funding_target: 10_000i128,
+                funded_amount: 0i128,
+                yield_bps: 800i64,
+                maturity: 0u64,
+                status: 0u32,
+            },
+        );
+    });
+
+    // First record: check event has prior_amount = 0
+    client.record_sme_collateral_commitment(&symbol_short!("USDC"), &5_000i128);
+    let events_first = env.events().all().filter_by_contract(&contract_id);
+    assert_eq!(
+        events_first.events().len(),
+        1,
+        "Expected exactly one event from the first invocation"
+    );
+    let expected_first = CollateralRecordedEvt {
+        name: symbol_short!("coll_rec"),
+        invoice_id: invoice_id.clone(),
+        amount: 5_000i128,
+        prior_amount: 0i128,
+    };
+    assert_eq!(
+        events_first.events()[0],
+        expected_first.to_xdr(&env, &contract_id),
+        "First event should have prior_amount = 0"
+    );
+
+    // Advance timestamp and record replacement
+    env.ledger().with_mut(|li| li.timestamp = 20000);
+    client.record_sme_collateral_commitment(&symbol_short!("USDC"), &7_000i128);
+
+    // Check second event has prior_amount = 5000 (replacement)
+    let events_second = env.events().all().filter_by_contract(&contract_id);
+    assert_eq!(
+        events_second.events().len(),
+        1,
+        "Expected exactly one event from the replacement invocation"
+    );
+    let expected_second = CollateralRecordedEvt {
+        name: symbol_short!("coll_rec"),
+        invoice_id: invoice_id.clone(),
+        amount: 7_000i128,
+        prior_amount: 5_000i128,
+    };
+    assert_eq!(
+        events_second.events()[0],
+        expected_second.to_xdr(&env, &contract_id),
+        "Second event should have prior_amount = 5000"
     );
 }
 
