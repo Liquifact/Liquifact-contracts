@@ -1,5 +1,6 @@
 use super::{LiquifactEscrow, LiquifactEscrowClient};
 use soroban_sdk::{testutils::Address as _, Address, Env};
+use soroban_sdk::Vec as SorobanVec;
 
 fn deploy(env: &Env) -> LiquifactEscrowClient<'_> {
     let id = env.register(LiquifactEscrow, ());
@@ -288,4 +289,78 @@ fn test_multiple_investors_independent_allowlist_entries() {
         client.fund(&c, &1_000i128);
     }));
     assert!(blocked.is_err());
+}
+
+#[test]
+fn test_batch_add_and_remove_from_allowlist() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init(&env, &client);
+
+    let a = Address::generate(&env);
+    let b = Address::generate(&env);
+    let c = Address::generate(&env);
+
+    let mut v: SorobanVec<Address> = SorobanVec::new(&env);
+    v.push_back(a.clone());
+    v.push_back(b.clone());
+    v.push_back(c.clone());
+
+    client.set_investors_allowlisted(&v, &true);
+
+    assert!(client.is_investor_allowlisted(&a));
+    assert!(client.is_investor_allowlisted(&b));
+    assert!(client.is_investor_allowlisted(&c));
+
+    client.set_investors_allowlisted(&v, &false);
+
+    assert!(!client.is_investor_allowlisted(&a));
+    assert!(!client.is_investor_allowlisted(&b));
+    assert!(!client.is_investor_allowlisted(&c));
+}
+
+#[test]
+#[should_panic(expected = "investors vector must be non-empty")]
+fn test_batch_rejects_empty_vector() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init(&env, &client);
+
+    let v: SorobanVec<Address> = SorobanVec::new(&env);
+    client.set_investors_allowlisted(&v, &true);
+}
+
+#[test]
+#[should_panic(expected = "investors vector length exceeds MAX_INVESTOR_ALLOWLIST_BATCH")]
+fn test_batch_rejects_too_large_vector() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init(&env, &client);
+
+    let mut v: SorobanVec<Address> = SorobanVec::new(&env);
+    let cap = super::MAX_INVESTOR_ALLOWLIST_BATCH as usize;
+    for _ in 0..(cap + 1) {
+        v.push_back(Address::generate(&env));
+    }
+
+    client.set_investors_allowlisted(&v, &true);
+}
+
+#[test]
+#[should_panic]
+fn test_batch_requires_admin_auth() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init(&env, &client);
+
+    let a = Address::generate(&env);
+    let mut v: SorobanVec<Address> = SorobanVec::new(&env);
+    v.push_back(a.clone());
+
+    env.mock_auths(&[]);
+    client.set_investors_allowlisted(&v, &true);
 }

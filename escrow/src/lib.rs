@@ -116,6 +116,10 @@ pub const SCHEMA_VERSION: u32 = 5;
 /// Upper bound on [`LiquifactEscrow::append_attestation_digest`] entries to keep storage bounded.
 pub const MAX_ATTESTATION_APPEND_ENTRIES: u32 = 32;
 
+/// Upper bound on batch allowlist mutation entries to keep storage/CPU bounded.
+/// Mirrors the spirit of `MAX_ATTESTATION_APPEND_ENTRIES` to limit per-call work.
+pub const MAX_INVESTOR_ALLOWLIST_BATCH: u32 = 32;
+
 /// Upper bound on [`LiquifactEscrow::sweep_terminal_dust`] per call (base units of the funding token).
 ///
 /// Caps blast radius if instrumentation mis-estimates “dust”; tune per asset decimals off-chain.
@@ -987,6 +991,43 @@ impl LiquifactEscrow {
             allowed: if allowed { 1 } else { 0 },
         }
         .publish(&env);
+    }
+
+    /// Batch add or remove investors from the allowlist.
+    ///
+    /// Accepts a `Vec<Address>` and a single `allowed` flag. Requires admin authorization
+    /// once. The call is rejected for empty vectors or vectors longer than
+    /// `MAX_INVESTOR_ALLOWLIST_BATCH` to keep storage and CPU bounded.
+    ///
+    /// Invariant: the end state and emitted events are identical to calling
+    /// `set_investor_allowlisted` individually for each element in `investors`.
+    pub fn set_investors_allowlisted(env: Env, investors: Vec<Address>, allowed: bool) {
+        // env.clone(): env is used again after this call for storage writes and publish.
+        let escrow = Self::get_escrow(env.clone());
+        escrow.admin.require_auth();
+
+        let n = investors.len();
+        assert!(n > 0, "investors vector must be non-empty");
+        assert!(
+            (n as u32) <= MAX_INVESTOR_ALLOWLIST_BATCH,
+            "investors vector length exceeds MAX_INVESTOR_ALLOWLIST_BATCH"
+        );
+
+        // Iterate and perform per-address persistent storage write and event emission.
+        for i in 0..n {
+            let inv = investors.get(i).unwrap();
+            env.storage()
+                .persistent()
+                .set(&DataKey::InvestorAllowlisted(inv.clone()), &allowed);
+
+            InvestorAllowlistChanged {
+                name: symbol_short!("al_set"),
+                invoice_id: escrow.invoice_id.clone(),
+                investor: inv.clone(),
+                allowed: if allowed { 1 } else { 0 },
+            }
+            .publish(&env);
+        }
     }
 
     pub fn is_investor_allowlisted(env: Env, investor: Address) -> bool {

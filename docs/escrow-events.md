@@ -83,6 +83,24 @@ Emitted when an investor records their payout claim.
 }
 ```
 
+### `InvestorAllowlistChanged`
+Emitted when an admin adds or removes an investor from the allowlist. This event is
+emitted per-address even when the change is performed via the batch entrypoint
+`set_investors_allowlisted`, so indexers receive one `InvestorAllowlistChanged` event
+for each address in the batch.
+
+**Topics:**
+1. `al_set` (Symbol)
+2. `invoice_id` (Symbol)
+3. `investor` (Address)
+
+**Data Payload:**
+- `allowed` (u32): `1` for allowed, `0` for blocked.
+
+**Notes:**
+- Batch mutations via `set_investors_allowlisted` emit one `al_set` event per affected
+  investor to preserve parity with individual `set_investor_allowlisted` calls.
+
 ### `LegalHoldChanged`
 Emitted when an admin toggles the compliance hold.
 
