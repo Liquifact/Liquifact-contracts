@@ -1,6 +1,6 @@
 use crate::{
     test::{free_addresses, setup},
-    DataKey, YieldTier, EscrowSummary, EscrowCloseSnapshot,
+    DataKey, EscrowCloseSnapshot, EscrowSummary, YieldTier,
 };
 use soroban_sdk::{
     testutils::{Address as _, Ledger},
@@ -36,7 +36,7 @@ fn test_migrate_already_current() {
         &None,
         &None,
         &None,
-        &None
+        &None,
     );
 
     client.migrate(&5);
@@ -63,7 +63,7 @@ fn test_migrate_no_path() {
         &None,
         &None,
         &None,
-        &None
+        &None,
     );
 
     env.as_contract(&client.address, || {
@@ -74,7 +74,7 @@ fn test_migrate_no_path() {
 }
 
 #[test]
-fn test_admin_and_maturity_updates() {
+fn test_admin_handover_and_maturity_updates() {
     let env = Env::default();
     env.mock_all_auths();
     let (client, admin, sme) = setup(&env);
@@ -93,15 +93,21 @@ fn test_admin_and_maturity_updates() {
         &None,
         &None,
         &None,
-        &None
+        &None,
     );
 
     let updated = client.update_maturity(&200);
     assert_eq!(updated.maturity, 200);
 
     let new_admin = Address::generate(&env);
-    let updated = client.transfer_admin(&new_admin);
+    let pending = client.propose_admin(&new_admin);
+    assert_eq!(pending, new_admin);
+    assert_eq!(client.get_escrow().admin, admin);
+    assert_eq!(client.get_pending_admin(), Some(new_admin.clone()));
+
+    let updated = client.accept_admin();
     assert_eq!(updated.admin, new_admin);
+    assert_eq!(client.get_pending_admin(), None);
 }
 
 #[test]
@@ -125,7 +131,7 @@ fn test_update_maturity_not_open() {
         &None,
         &None,
         &None,
-        &None
+        &None,
     );
 
     let investor = Address::generate(&env);
@@ -135,7 +141,7 @@ fn test_update_maturity_not_open() {
 
 #[test]
 #[should_panic(expected = "New admin must differ from current admin")]
-fn test_transfer_admin_same_admin() {
+fn test_propose_admin_same_admin() {
     let env = Env::default();
     env.mock_all_auths();
     let (client, admin, sme) = setup(&env);
@@ -154,10 +160,10 @@ fn test_transfer_admin_same_admin() {
         &None,
         &None,
         &None,
-        &None
+        &None,
     );
 
-    client.transfer_admin(&admin);
+    client.propose_admin(&admin);
 }
 
 #[test]
@@ -686,6 +692,8 @@ fn test_sme_collateral_empty_asset_rejected() {
         &None,
         &None,
         &None,
+
+        &None,
     );
     let empty_asset = soroban_sdk::Symbol::new(&env, "");
     client.record_sme_collateral_commitment(&empty_asset, &5000);
@@ -710,6 +718,8 @@ fn test_sme_collateral_stale_timestamp_rejected() {
         &treasury,
         &None,
         &None,
+        &None,
+
         &None,
     );
 
@@ -740,6 +750,8 @@ fn test_sme_collateral_replacement_preserves_prior_amount() {
         &treasury,
         &None,
         &None,
+        &None,
+
         &None,
     );
 
@@ -1219,6 +1231,8 @@ fn test_get_escrow_summary_happy_path() {
         &None,
         &None,
         &None,
+
+        &None,
     );
 
     let summary = client.get_escrow_summary();
@@ -1263,6 +1277,8 @@ fn test_get_escrow_summary_after_state_changes() {
         &treasury,
         &None,
         &None,
+        &None,
+
         &None,
     );
 

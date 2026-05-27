@@ -123,7 +123,8 @@ their principal:
 | `cancel_funding()` | Admin only |
 | `set_legal_hold()` | Admin only |
 | `update_maturity()` | Admin only |
-| `transfer_admin()` | Admin only |
+| `propose_admin()` | Admin only |
+| `accept_admin()` | Pending admin only |
 
 The SME role represents the off-chain settlement policy authority. The admin role
 handles on-chain configuration and compliance controls.

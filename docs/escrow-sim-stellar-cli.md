@@ -747,7 +747,7 @@ stellar contract invoke \
   --new_maturity 1767139200
 ```
 
-### `transfer_admin`
+### `propose_admin`
 
 **Auth required:** current `admin`.
 
@@ -758,8 +758,20 @@ stellar contract invoke \
   --id "$CONTRACT_ID" \
   --source admin \
   --network local \
-  -- transfer_admin \
+  -- propose_admin \
   --new_admin "$NEW_ADMIN"
+```
+
+### `accept_admin`
+
+**Auth required:** pending admin from `propose_admin`.
+
+```bash
+stellar contract invoke \
+  --id "$CONTRACT_ID" \
+  --source new_admin \
+  --network local \
+  -- accept_admin
 ```
 
 ### `sweep_terminal_dust`
@@ -884,7 +896,8 @@ for that address. For the common case where `--source` is the authorizing addres
 | `sweep_terminal_dust` | `treasury` | `treasury` |
 | `set_legal_hold` / `clear_legal_hold` | `admin` | `admin` |
 | `update_maturity` | `admin` | `admin` |
-| `transfer_admin` | `admin` (current) | `admin` |
+| `propose_admin` | `admin` (current) | `admin` |
+| `accept_admin` | pending admin | new admin |
 | `bind_primary_attestation_hash` | `admin` | `admin` |
 | `append_attestation_digest` | `admin` | `admin` |
 | `update_funding_target` | `admin` | `admin` |

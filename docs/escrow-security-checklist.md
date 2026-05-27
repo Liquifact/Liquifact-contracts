@@ -13,7 +13,8 @@ Every state-mutating entrypoint and the identity required to authorize it.
 | Entrypoint | Required signer | Auth call site | Notes |
 |---|---|---|---|
 | `init` | `admin` (caller-supplied) | `admin.require_auth()` | One-time; panics if escrow exists |
-| `transfer_admin` | current `escrow.admin` | `escrow.admin.require_auth()` | `new_admin` must differ; overwrites stored admin |
+| `propose_admin` | current `escrow.admin` | `escrow.admin.require_auth()` | `new_admin` must differ; writes `DataKey::PendingAdmin` only |
+| `accept_admin` | `DataKey::PendingAdmin` | `pending.require_auth()` | Promotes pending address into `escrow.admin`; clears pending key |
 | `update_maturity` | `escrow.admin` | `escrow.admin.require_auth()` | Only in `status == 0` |
 | `update_funding_target` | `escrow.admin` | `escrow.admin.require_auth()` | Only in `status == 0`; `new_target >= funded_amount` |
 | `set_legal_hold` / `clear_legal_hold` | `escrow.admin` | `escrow.admin.require_auth()` | No timelock; no multisig enforced on-chain |
@@ -40,7 +41,7 @@ All `get_*` and `is_*` functions carry no `require_auth`. They expose full escro
 
 ### 2.1 Admin (`InvoiceEscrow::admin`)
 
-- Set at `init`; mutable only via `transfer_admin` (requires current admin signature).
+- Set at `init`; mutable only via `propose_admin` plus `accept_admin` (current admin and successor signatures).
 - Controls: hold activation, allowlist, attestation binding, maturity, funding target, schema migration (future).
 - **Risk**: a single EOA admin can indefinitely freeze funds via `set_legal_hold`. Production deployments **must** use a governed contract or multisig at this address. There is no on-chain escape hatch if the admin key is lost or malicious.
 
@@ -189,10 +190,11 @@ This creates a window where `funded_amount` > actual token balance (unfunded com
 There is no timelock, no council override, and no programmatic expiry. A
 compromised or malicious admin can freeze `settle`, `withdraw`,
 `claim_investor_payout`, and `sweep_terminal_dust` indefinitely. **Recovery:**
-governance executes `transfer_admin` (not blocked by the hold), then the new
-admin calls `clear_legal_hold`. See `docs/escrow-legal-hold.md` and ADR-004.
-Production deployments **must** use a governed admin (multisig or DAO) so a
-single lost key cannot strand funds without a documented rotation playbook.
+governance executes `propose_admin` and the successor executes `accept_admin`
+(both not blocked by the hold), then the new admin calls `clear_legal_hold`.
+See `docs/escrow-legal-hold.md` and ADR-004. Production deployments **must**
+use a governed admin (multisig or DAO) so a single lost key cannot strand funds
+without a documented rotation playbook.
 
 ### 5.4 Storage type mismatch: AllowlistActive vs. InvestorAllowlisted
 
@@ -204,10 +206,11 @@ single lost key cannot strand funds without a documented rotation playbook.
 
 ### 5.6 Admin key loss is unrecoverable without admin authority
 
-There is no guardian, recovery address, or protocol DAO escape hatch beyond
-`transfer_admin`. If **all** current-admin signers are lost while a legal hold
-is active, funds remain blocked until signing capability is restored off-chain.
-If at least one signer remains, rotate via `transfer_admin` then clear the hold.
+There is no guardian, recovery address, or protocol DAO escape hatch beyond the
+two-step admin handover. If **all** current-admin signers are lost while a legal
+hold is active, funds remain blocked until signing capability is restored
+off-chain. If at least one signer remains, rotate via `propose_admin` and
+`accept_admin`, then clear the hold.
 See `docs/escrow-legal-hold.md` § "Failure mode: hold + lost admin key".
 
 ### 5.7 Over-funding is intentional and unbound above the target
@@ -248,7 +251,8 @@ and does not weaken the auth boundary. Refactors must not move step 3 above step
 | Entrypoint | Signer | Pre-auth reads (no writes) | `require_auth` | First mutation |
 |---|---|---|---|---|
 | `init` | `admin` | — | line ~549 (`admin`) | `DataKey::Escrow` set |
-| `transfer_admin` | current `escrow.admin` | `get_escrow` | line ~1427 | `DataKey::Escrow` set |
+| `propose_admin` | current `escrow.admin` | `get_escrow` | line ~1888 | `DataKey::PendingAdmin` set |
+| `accept_admin` | `DataKey::PendingAdmin` | pending read, `get_escrow` after auth | line ~1917 | `DataKey::Escrow` set |
 | `update_maturity` | `escrow.admin` | `get_escrow` | line ~1400 | `DataKey::Escrow` set |
 | `update_funding_target` | `escrow.admin` | `get_escrow` | line ~1007 | `DataKey::Escrow` set |
 | `set_legal_hold` / `clear_legal_hold` | current `escrow.admin` | `get_escrow` | line ~940 | `DataKey::LegalHold` set |
@@ -271,7 +275,7 @@ Line numbers refer to `escrow/src/lib.rs` at schema version 5; re-audit after re
 | Entrypoint | Test location |
 |---|---|
 | `init` | `escrow/src/tests/init.rs` |
-| `transfer_admin`, `fund`, `fund_with_commitment`, `settle`, `withdraw`, `claim_investor_payout`, attestation, allowlist, sweep | `escrow/src/tests/admin.rs` § auth audit |
+| `propose_admin`, `accept_admin`, `fund`, `fund_with_commitment`, `settle`, `withdraw`, `claim_investor_payout`, attestation, allowlist, sweep | `escrow/src/tests/admin.rs` § auth audit |
 | `update_maturity`, `update_funding_target`, collateral | `escrow/src/tests/admin.rs` |
 | `set_legal_hold`, `clear_legal_hold` | `escrow/src/tests/legal_hold.rs` |
 | `bind_primary_attestation_hash`, `append_attestation_digest` | `escrow/src/tests/attestations.rs` |

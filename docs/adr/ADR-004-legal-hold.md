@@ -35,4 +35,4 @@ There is no timelock or automatic expiry — clearing always requires an explici
 ## Rejected alternatives
 
 - **Timelock on hold:** adds complexity and a false sense of safety; governance should decide duration.
-- **Separate hold roles (compliance officer vs admin):** out of scope for v1; can be added via `transfer_admin` to a multisig that includes a compliance key.
+- **Separate hold roles (compliance officer vs admin):** out of scope for v1; can be added by rotating admin authority through `propose_admin` and `accept_admin` to a multisig that includes a compliance key.

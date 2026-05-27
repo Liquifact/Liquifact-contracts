@@ -28,7 +28,7 @@ Operations that are **not** gated (read-only or metadata-only):
 - `get_*` accessors
 - `record_sme_collateral_commitment` (metadata record, no token movement)
 - `bind_primary_attestation_hash` / `append_attestation_digest`
-- `update_maturity`, `update_funding_target`, `transfer_admin`, `migrate`
+- `update_maturity`, `update_funding_target`, `propose_admin`, `accept_admin`, `migrate`
 
 ---
 
@@ -73,7 +73,8 @@ as a governed address:
   `set_legal_hold`.
 - **Off-chain playbook** covering: who may initiate a hold, required evidence,
   maximum hold duration, escalation path if the admin key is lost or
-  compromised, and emergency recovery via `transfer_admin` + governance vote.
+  compromised, and emergency recovery via `propose_admin` + `accept_admin`
+  with governance approval.
 
 Without one of the above, a single compromised admin key can freeze all
 investor funds with no on-chain recourse.
@@ -83,7 +84,7 @@ investor funds with no on-chain recourse.
 | Requirement | Rationale |
 |---|---|
 | Governed `admin` at `init` (multisig or DAO contract) | Single EOA admin + hold + key loss = indefinite fund lock |
-| Documented recovery playbook | Operators must know how to execute `transfer_admin` under hold |
+| Documented recovery playbook | Operators must know how to execute `propose_admin` and `accept_admin` under hold |
 | Testnet rotation drill before mainnet | Confirms new admin can `clear_legal_hold` after rotation |
 | Indexer monitoring of `LegalHoldChanged` | Detect holds that exceed policy duration |
 
@@ -106,29 +107,35 @@ lost or destroyed:
 
 **On-chain recovery (only path):**
 
-1. Governance executes [`transfer_admin`](../../escrow/src/lib.rs) using a
+1. Governance executes [`propose_admin`](../../escrow/src/lib.rs) using a
    **still-available** current-admin authorization (e.g. remaining multisig
    signers or DAO vote output). This entrypoint is **not** blocked by the hold.
-2. The **new** admin calls `clear_legal_hold` (or `set_legal_hold(false)`).
-3. Risk-bearing flows resume (`settle`, `withdraw`, etc.).
+2. The proposed successor executes [`accept_admin`](../../escrow/src/lib.rs)
+   with its own authorization. This promotes the successor into
+   `InvoiceEscrow::admin` and clears `DataKey::PendingAdmin`.
+3. The **new** admin calls `clear_legal_hold` (or `set_legal_hold(false)`).
+4. Risk-bearing flows resume (`settle`, `withdraw`, etc.).
 
 **Invariant:** a hold is always clearable by the current admin; recovery
 requires controlling admin authority — not merely controlling the SME or
 treasury roles.
 
 If governance cannot produce a valid current-admin signature for
-`transfer_admin`, funds remain locked until off-chain legal or operational
-recovery restores signing capability. This is why single-signer production
-admins are prohibited.
+`propose_admin`, funds remain locked until off-chain legal or operational
+recovery restores signing capability. If a proposal was created with the wrong
+address, the current admin can overwrite it by calling `propose_admin` again.
+This is why single-signer production admins are prohibited.
 
 ---
 
 ## Admin rotation during a hold
 
-`transfer_admin` is not gated by the hold. This is intentional: if the current
-admin is compromised or unresponsive, governance must be able to rotate the
-admin key even while a hold is active. After rotation the new admin inherits
-the hold state and must explicitly call `clear_legal_hold` to unfreeze.
+`propose_admin` and `accept_admin` are not gated by the hold. This is
+intentional: if the current admin is compromised or unresponsive, governance
+must be able to rotate the admin key even while a hold is active. The handover
+still requires both the current admin and successor to authorize. After
+acceptance the new admin inherits the hold state and must explicitly call
+`clear_legal_hold` to unfreeze.
 
 ---
 
@@ -156,8 +163,8 @@ The matrix in `escrow/src/tests/legal_hold.rs` covers:
 5. Hold defaults to `false` after `init`.
 6. Hold persists across status transitions (no bypass via state change).
 7. Hold can be toggled and re-blocks operations after re-set.
-8. Hold persists after `admin transfer`; new admin must explicitly clear it.
+8. Hold persists after two-step admin handover; new admin must explicitly clear it.
 9. Edge cases: hold check fires before amount / status / auth validation.
-10. Non-gated ops (`update_maturity`, `transfer_admin`, getters) are not blocked.
+10. Non-gated ops (`update_maturity`, `propose_admin`, `accept_admin`, getters) are not blocked.
 11. Claim idempotency survives a hold toggle.
 12. Single hold toggle blocks all gated entrypoints in separate escrows.
