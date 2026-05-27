@@ -1308,7 +1308,7 @@ fn claim_before_commitment_lock_panics_with_exact_message() {
         &sme,
         &1_000i128,
         &400i64,
-        &0u64,   // maturity = 0 (no extra settle gate)
+        &0u64, // maturity = 0 (no extra settle gate)
         &tok,
         &None,
         &tre,
@@ -1540,7 +1540,7 @@ fn claim_investor_payout_repeated_calls_are_all_no_ops() {
     env.ledger().set_timestamp(500 + lock_secs);
 
     client.claim_investor_payout(&inv); // first — effective
-    // env.events().all() is per-call; first call must emit exactly one event.
+                                        // env.events().all() is per-call; first call must emit exactly one event.
     assert_eq!(
         env.events().all().events().len(),
         1,
@@ -1549,7 +1549,7 @@ fn claim_investor_payout_repeated_calls_are_all_no_ops() {
 
     for _ in 0..5 {
         client.claim_investor_payout(&inv); // 2nd … 6th — all no-ops
-        // Each no-op call must produce zero events (early-return path).
+                                            // Each no-op call must produce zero events (early-return path).
         assert_eq!(
             env.events().all().events().len(),
             0,
@@ -1718,10 +1718,7 @@ fn claim_idempotency_of_one_investor_does_not_affect_another() {
     );
 
     // B is still unclaimed.
-    assert!(
-        client.is_investor_claimed(&inv_a),
-        "A must be claimed"
-    );
+    assert!(client.is_investor_claimed(&inv_a), "A must be claimed");
     assert!(
         !client.is_investor_claimed(&inv_b),
         "B must NOT be claimed yet (A's repeat calls must not affect B)"
@@ -1766,7 +1763,7 @@ fn unexpired_lock_for_a_does_not_block_b() {
     );
 
     client.fund_with_commitment(&inv_a, &1_000i128, &1_000u64); // A: not_before = 1000
-    client.fund_with_commitment(&inv_b, &1_000i128, &100u64);   // B: not_before = 100
+    client.fund_with_commitment(&inv_b, &1_000i128, &100u64); // B: not_before = 100
     client.settle();
 
     // Timestamp is between B's expiry and A's expiry.
@@ -1893,7 +1890,10 @@ fn combined_idempotency_and_lock_gate_scenario() {
         1,
         "I-2/I-4: exactly one event on first post-lock claim"
     );
-    assert!(client.is_investor_claimed(&inv), "I-2: marked after first claim");
+    assert!(
+        client.is_investor_claimed(&inv),
+        "I-2: marked after first claim"
+    );
 
     // ── I-3: second claim is a no-op ─────────────────────────────────────────
     // No-op path returns before the event publish; event count for this call = 0.
@@ -1903,7 +1903,10 @@ fn combined_idempotency_and_lock_gate_scenario() {
         0,
         "I-3: second claim must not emit a new event"
     );
-    assert!(client.is_investor_claimed(&inv), "I-3: still marked after second call");
+    assert!(
+        client.is_investor_claimed(&inv),
+        "I-3: still marked after second call"
+    );
 
     // ── I-3 (continued): third claim is also a no-op ─────────────────────────
     client.claim_investor_payout(&inv);
