@@ -208,6 +208,164 @@ fn test_funding_amount_overflow_does_not_mutate_state() {
 }
 
 #[test]
+#[should_panic(expected = "funded_amount overflow")]
+fn test_fund_with_commitment_overflow_panics() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor_a = Address::generate(&env);
+    let investor_b = Address::generate(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "OVF001b"),
+        &sme,
+        &i128::MAX,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+    );
+
+    client.fund(&investor_a, &(i128::MAX - 1));
+    client.fund_with_commitment(&investor_b, &2i128, &0u64);
+}
+
+#[test]
+fn test_fund_with_commitment_overflow_does_not_mutate_state() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor_a = Address::generate(&env);
+    let investor_b = Address::generate(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "OVF002b"),
+        &sme,
+        &i128::MAX,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+    );
+
+    client.fund(&investor_a, &(i128::MAX - 1));
+    let before = client.get_escrow();
+
+    let overflowed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.fund_with_commitment(&investor_b, &2i128, &0u64);
+    }));
+    assert!(overflowed.is_err());
+
+    let after = client.get_escrow();
+    assert_eq!(after.funded_amount, before.funded_amount);
+    assert_eq!(after.status, 0);
+    assert_eq!(client.get_contribution(&investor_b), 0);
+}
+
+#[test]
+#[should_panic(expected = "investor contribution overflow")]
+fn test_investor_contribution_overflow_panics_even_if_state_is_inconsistent() {
+    // This test intentionally constructs an inconsistent storage snapshot to ensure
+    // the per-investor accounting never wraps even under corrupted / unexpected state.
+    //
+    // Rationale: `funded_amount` overflow is already guarded by checked_add. This test
+    // separately proves the per-investor `InvestorContribution` update uses checked_add.
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let contract_id = client.address.clone();
+
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let investor = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "OVF003"),
+        &sme,
+        &1_000i128,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+    );
+
+    env.as_contract(&contract_id, || {
+        // Force the contribution near i128::MAX while keeping funded_amount small.
+        // `fund` must still trap on contribution overflow even if funded_amount would not.
+        env.storage()
+            .instance()
+            .set(&DataKey::InvestorContribution(investor.clone()), &(i128::MAX - 1));
+        let mut escrow = LiquifactEscrow::get_escrow(env.clone());
+        escrow.funded_amount = 0;
+        escrow.status = 0;
+        env.storage().instance().set(&DataKey::Escrow, &escrow);
+    });
+
+    client.fund(&investor, &2i128);
+}
+
+#[test]
+fn test_investor_contribution_overflow_does_not_mutate_state() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let contract_id = client.address.clone();
+
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let investor = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "OVF004"),
+        &sme,
+        &1_000i128,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+    );
+
+    env.as_contract(&contract_id, || {
+        env.storage()
+            .instance()
+            .set(&DataKey::InvestorContribution(investor.clone()), &(i128::MAX - 1));
+        let mut escrow = LiquifactEscrow::get_escrow(env.clone());
+        escrow.funded_amount = 0;
+        escrow.status = 0;
+        env.storage().instance().set(&DataKey::Escrow, &escrow);
+    });
+
+    let before_escrow = client.get_escrow();
+    let before_contribution = client.get_contribution(&investor);
+
+    let overflowed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.fund(&investor, &2i128);
+    }));
+    assert!(overflowed.is_err());
+
+    assert_eq!(client.get_escrow(), before_escrow);
+    assert_eq!(client.get_contribution(&investor), before_contribution);
+}
+
+#[test]
 fn test_multiple_investors_tracked_independently() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);

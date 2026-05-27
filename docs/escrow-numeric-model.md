@@ -8,6 +8,7 @@ This contract uses Soroban host values and Rust integer types directly. It does 
 - State-changing entrypoints that accept funding-like amounts require strictly positive values before storage updates.
 - Token amounts must be passed in the token's smallest unit. The escrow contract does not read token decimals to rescale user-facing amounts.
 - `funded_amount` is accumulated with `checked_add`. If `funded_amount + amount` exceeds `i128::MAX`, the contract panics with `funded_amount overflow` and the Soroban invocation aborts.
+- Per-investor `InvestorContribution(Address)` is accumulated with `checked_add`. If `prev_contribution + amount` exceeds `i128::MAX`, the contract panics with `investor contribution overflow` and the Soroban invocation aborts.
 - The contract does not saturate, clamp, or intentionally wrap funding totals.
 
 ## Commitment locks: `u64`

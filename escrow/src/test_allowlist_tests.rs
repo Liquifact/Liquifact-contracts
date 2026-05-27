@@ -1,5 +1,6 @@
-use super::{LiquifactEscrow, LiquifactEscrowClient};
-use soroban_sdk::{testutils::Address as _, Address, Env};
+use super::{DataKey, LiquifactEscrow, LiquifactEscrowClient};
+use crate::{AllowlistEnabledChanged, InvestorAllowlistChanged};
+use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env, Event};
 
 fn deploy(env: &Env) -> LiquifactEscrowClient<'_> {
     let id = env.register(LiquifactEscrow, ());
@@ -53,16 +54,49 @@ fn test_is_allowlisted_false_by_default() {
 
 #[test]
 fn test_enable_and_disable_allowlist() {
+    use soroban_sdk::testutils::Events as _;
+
     let env = Env::default();
     env.mock_all_auths();
     let client = deploy(&env);
     init(&env, &client);
+    let invoice_id = client.get_escrow().invoice_id;
+    let contract_id = client.address.clone();
 
     client.set_allowlist_active(&true);
-    assert!(client.is_allowlist_active());
+    let enabled_events = env.events().all();
+    env.as_contract(&contract_id, || {
+        assert!(
+            env.storage().instance().get::<DataKey, bool>(&DataKey::AllowlistActive) == Some(true)
+        );
+    });
 
     client.set_allowlist_active(&false);
-    assert!(!client.is_allowlist_active());
+    let disabled_events = env.events().all();
+    env.as_contract(&contract_id, || {
+        assert!(
+            env.storage().instance().get::<DataKey, bool>(&DataKey::AllowlistActive) == Some(false)
+        );
+    });
+
+    assert_eq!(
+        enabled_events,
+        std::vec![AllowlistEnabledChanged {
+            name: symbol_short!("al_ena"),
+            invoice_id: invoice_id.clone(),
+            active: 1,
+        }
+        .to_xdr(&env, &contract_id)]
+    );
+    assert_eq!(
+        disabled_events,
+        std::vec![AllowlistEnabledChanged {
+            name: symbol_short!("al_ena"),
+            invoice_id,
+            active: 0,
+        }
+        .to_xdr(&env, &contract_id)]
+    );
 }
 
 #[test]
@@ -92,17 +126,58 @@ fn test_disable_allowlist_requires_admin_auth() {
 
 #[test]
 fn test_add_and_remove_from_allowlist() {
+    use soroban_sdk::testutils::Events as _;
+
     let env = Env::default();
     env.mock_all_auths();
     let client = deploy(&env);
     init(&env, &client);
+    let invoice_id = client.get_escrow().invoice_id;
+    let contract_id = client.address.clone();
     let investor = Address::generate(&env);
 
     client.set_investor_allowlisted(&investor, &true);
-    assert!(client.is_investor_allowlisted(&investor));
+    let added_events = env.events().all();
+    env.as_contract(&contract_id, || {
+        assert!(
+            env.storage()
+                .persistent()
+                .get::<DataKey, bool>(&DataKey::InvestorAllowlisted(investor.clone()))
+                == Some(true)
+        );
+    });
 
     client.set_investor_allowlisted(&investor, &false);
-    assert!(!client.is_investor_allowlisted(&investor));
+    let removed_events = env.events().all();
+    env.as_contract(&contract_id, || {
+        assert!(
+            env.storage()
+                .persistent()
+                .get::<DataKey, bool>(&DataKey::InvestorAllowlisted(investor.clone()))
+                == Some(false)
+        );
+    });
+
+    assert_eq!(
+        added_events,
+        std::vec![InvestorAllowlistChanged {
+            name: symbol_short!("al_set"),
+            invoice_id: invoice_id.clone(),
+            investor: investor.clone(),
+            allowed: 1,
+        }
+        .to_xdr(&env, &contract_id)]
+    );
+    assert_eq!(
+        removed_events,
+        std::vec![InvestorAllowlistChanged {
+            name: symbol_short!("al_set"),
+            invoice_id,
+            investor: investor.clone(),
+            allowed: 0,
+        }
+        .to_xdr(&env, &contract_id)]
+    );
 }
 
 #[test]
@@ -153,6 +228,18 @@ fn test_fund_allowed_when_allowlist_disabled() {
     let investor = Address::generate(&env);
     // Allowlist off — anyone can fund.
     let escrow = client.fund(&investor, &5_000i128);
+    assert_eq!(escrow.funded_amount, 5_000i128);
+}
+
+#[test]
+fn test_fund_with_commitment_allowed_when_allowlist_disabled() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init(&env, &client);
+    let investor = Address::generate(&env);
+    // Allowlist off — anyone can fund with commitment.
+    let escrow = client.fund_with_commitment(&investor, &5_000i128, &0u64);
     assert_eq!(escrow.funded_amount, 5_000i128);
 }
 
@@ -288,4 +375,170 @@ fn test_multiple_investors_independent_allowlist_entries() {
         client.fund(&c, &1_000i128);
     }));
     assert!(blocked.is_err());
+}
+
+#[test]
+fn test_allowlist_membership_is_persistent_storage() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init(&env, &client);
+
+    let investor = Address::generate(&env);
+    client.set_investor_allowlisted(&investor, &true);
+
+    let contract_id = client.address.clone();
+    env.as_contract(&contract_id, || {
+        // Membership entries are intentionally stored in persistent storage.
+        assert!(
+            env.storage()
+                .persistent()
+                .has(&DataKey::InvestorAllowlisted(investor.clone())),
+            "expected allowlist membership to be stored in persistent storage"
+        );
+        assert!(
+            !env.storage().instance().has(&DataKey::InvestorAllowlisted(investor)),
+            "allowlist membership must not be stored in instance storage"
+        );
+    });
+}
+
+#[test]
+fn test_toggle_investor_off_mid_funding_blocks_further_increases() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init(&env, &client);
+
+    let investor = Address::generate(&env);
+    client.set_allowlist_active(&true);
+    client.set_investor_allowlisted(&investor, &true);
+
+    // First deposit succeeds.
+    client.fund(&investor, &2_000i128);
+    let before = client.get_escrow().funded_amount;
+    assert_eq!(before, 2_000i128);
+
+    // Toggle address off and prove it can never increase funded_amount.
+    client.set_investor_allowlisted(&investor, &false);
+    let blocked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.fund(&investor, &1_000i128);
+    }));
+    assert!(blocked.is_err());
+
+    let after = client.get_escrow().funded_amount;
+    assert_eq!(
+        after, before,
+        "blocked investor must not be able to increase funded_amount"
+    );
+}
+
+#[test]
+fn test_toggle_investor_off_after_commitment_blocks_follow_on_fund() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init(&env, &client);
+
+    let investor = Address::generate(&env);
+    client.set_allowlist_active(&true);
+    client.set_investor_allowlisted(&investor, &true);
+
+    // First deposit is tier/commitment path.
+    client.fund_with_commitment(&investor, &2_000i128, &0u64);
+    let before = client.get_escrow().funded_amount;
+    assert_eq!(before, 2_000i128);
+
+    // Remove membership: subsequent principal must be blocked (follow-on uses fund()).
+    client.set_investor_allowlisted(&investor, &false);
+    let blocked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.fund(&investor, &1_000i128);
+    }));
+    assert!(blocked.is_err());
+
+    let after = client.get_escrow().funded_amount;
+    assert_eq!(
+        after, before,
+        "blocked investor must not be able to increase funded_amount"
+    );
+}
+
+#[test]
+fn test_fund_and_fund_with_commitment_allowed_when_allowlist_disabled_and_investor_explicitly_blocked() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init(&env, &client);
+
+    let investor_a = Address::generate(&env);
+    let investor_b = Address::generate(&env);
+
+    // Explicitly set allowed = false.
+    client.set_investor_allowlisted(&investor_a, &false);
+    client.set_investor_allowlisted(&investor_b, &false);
+
+    // Gating is inactive, so both calls must succeed despite explicit false value.
+    let escrow = client.fund(&investor_a, &3_000i128);
+    assert_eq!(escrow.funded_amount, 3_000i128);
+
+    let escrow = client.fund_with_commitment(&investor_b, &4_000i128, &0u64);
+    assert_eq!(escrow.funded_amount, 7_000i128);
+}
+
+#[test]
+fn test_enable_allowlist_mid_funding_blocks_unallowlisted_investor_from_further_increases() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init(&env, &client);
+
+    let investor = Address::generate(&env);
+
+    // Initial deposit under disabled allowlist.
+    client.fund(&investor, &2_000i128);
+    let before = client.get_escrow().funded_amount;
+    assert_eq!(before, 2_000i128);
+
+    // Toggle allowlist on mid-funding. Investor is NOT allowlisted.
+    client.set_allowlist_active(&true);
+
+    let blocked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.fund(&investor, &1_000i128);
+    }));
+    assert!(blocked.is_err());
+
+    let after = client.get_escrow().funded_amount;
+    assert_eq!(
+        after, before,
+        "unallowlisted investor must not be able to increase funded_amount after allowlist is enabled"
+    );
+}
+
+#[test]
+fn test_enable_allowlist_after_commitment_mid_funding_blocks_unallowlisted_investor_from_further_increases() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init(&env, &client);
+
+    let investor = Address::generate(&env);
+
+    // Initial commitment deposit under disabled allowlist.
+    client.fund_with_commitment(&investor, &2_000i128, &0u64);
+    let before = client.get_escrow().funded_amount;
+    assert_eq!(before, 2_000i128);
+
+    // Toggle allowlist on mid-funding. Investor is NOT allowlisted.
+    client.set_allowlist_active(&true);
+
+    let blocked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.fund(&investor, &1_000i128);
+    }));
+    assert!(blocked.is_err());
+
+    let after = client.get_escrow().funded_amount;
+    assert_eq!(
+        after, before,
+        "unallowlisted investor must not be able to increase funded_amount after allowlist is enabled"
+    );
 }

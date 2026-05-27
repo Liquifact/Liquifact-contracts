@@ -1242,9 +1242,12 @@ impl LiquifactEscrow {
             }
         }
 
+        let next_contribution = prev
+            .checked_add(amount)
+            .expect("investor contribution overflow");
         env.storage()
             .instance()
-            .set(&contribution_key, &(prev + amount));
+            .set(&contribution_key, &next_contribution);
 
         if prev == 0 {
             // Use the hoisted cur_funder_count; no second storage read needed.

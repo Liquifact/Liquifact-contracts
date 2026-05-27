@@ -10,9 +10,13 @@ For the policy that governs schema evolution see [ADR-007](adr/ADR-007-storage-k
 
 ## Storage backend
 
-All keys use `env.storage().instance()`. Instance storage is scoped to a single contract address
-and is loaded in full on every host-function invocation. There is no persistent or temporary storage
-in this contract.
+Most keys use `env.storage().instance()`. Instance storage is scoped to a single contract address
+and is loaded in full on every host-function invocation.
+
+The contract also uses `env.storage().persistent()` for allowlist membership entries
+(`DataKey::InvestorAllowlisted(Address)`), which are per-address and naturally modeled as
+independent persistent keys (see Stellar/Soroban storage guidance on instance vs persistent
+storage).
 
 Consequence: the total serialised size of all instance entries must stay within Soroban's
 contract-data entry limit. The investor-contribution map is the main growth vector; it is bounded
@@ -66,6 +70,18 @@ These variants carry an `Address` discriminator so each investor gets an indepen
 
 All four per-address keys are written together on an investor's first `fund` or
 `fund_with_commitment` call. Subsequent `fund` calls update only `InvestorContribution`.
+
+### Per-address keys in persistent storage (allowlist)
+
+These entries live in **persistent** storage (not instance storage).
+
+| Variant | Rust type stored | Set by | Default when absent |
+|---------|------------------|--------|---------------------|
+| `InvestorAllowlisted(Address)` | `bool` | `set_investor_allowlisted` | `false` |
+
+When `AllowlistActive` is enabled (instance storage flag), `fund_impl` gates `fund` and
+`fund_with_commitment` by asserting `InvestorAllowlisted(investor) == true`. Only the admin may
+mutate allowlist membership.
 
 ---
 
