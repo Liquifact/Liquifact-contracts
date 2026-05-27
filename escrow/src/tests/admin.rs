@@ -940,3 +940,167 @@ fn test_update_maturity_twice_overwrites() {
     assert_eq!(updated.maturity, 3000u64);
     assert_eq!(client.get_escrow().maturity, 3000u64);
 }
+
+// ── Authorization guard ordering audit (issue #265) ───────────────────────────
+//
+// Negative tests: each guarded entrypoint must trap when `require_auth` fails
+// (Soroban host aborts the transaction). Canonical ordering is documented in
+// `docs/escrow-security-checklist.md` §6 and ADR-002.
+
+fn auth_audit_init_funded(
+    env: &Env,
+) -> (
+    LiquifactEscrowClient<'_>,
+    Address,
+    Address,
+    Address,
+    Address,
+) {
+    env.mock_all_auths();
+    let admin = Address::generate(env);
+    let sme = Address::generate(env);
+    let investor = Address::generate(env);
+    let client = deploy(env);
+    default_init(&client, env, &admin, &sme);
+    client.fund(&investor, &TARGET);
+    (client, admin, sme, investor, Address::generate(env))
+}
+
+#[test]
+#[should_panic]
+fn auth_audit_transfer_admin_requires_current_admin() {
+    let env = Env::default();
+    let (client, _, _, _, _) = auth_audit_init_funded(&env);
+    let new_admin = Address::generate(&env);
+    env.mock_auths(&[]);
+    client.transfer_admin(&new_admin);
+}
+
+#[test]
+#[should_panic]
+fn auth_audit_fund_requires_investor() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    let investor = Address::generate(&env);
+    env.mock_auths(&[]);
+    client.fund(&investor, &TARGET);
+}
+
+#[test]
+#[should_panic]
+fn auth_audit_fund_with_commitment_requires_investor() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    let investor = Address::generate(&env);
+    env.mock_auths(&[]);
+    client.fund_with_commitment(&investor, &TARGET, &0u64);
+}
+
+#[test]
+#[should_panic]
+fn auth_audit_settle_requires_sme() {
+    let env = Env::default();
+    let (client, _, _, _, _) = auth_audit_init_funded(&env);
+    env.mock_auths(&[]);
+    client.settle();
+}
+
+#[test]
+#[should_panic]
+fn auth_audit_withdraw_requires_sme() {
+    let env = Env::default();
+    let (client, _, _, _, _) = auth_audit_init_funded(&env);
+    env.mock_auths(&[]);
+    client.withdraw();
+}
+
+#[test]
+#[should_panic]
+fn auth_audit_claim_investor_payout_requires_investor() {
+    let env = Env::default();
+    let (client, _, _, investor, _) = auth_audit_init_funded(&env);
+    client.settle();
+    env.mock_auths(&[]);
+    client.claim_investor_payout(&investor);
+}
+
+#[test]
+#[should_panic]
+fn auth_audit_set_legal_hold_requires_admin() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    env.mock_auths(&[]);
+    client.set_legal_hold(&true);
+}
+
+#[test]
+#[should_panic]
+fn auth_audit_bind_primary_attestation_requires_admin() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    env.mock_auths(&[]);
+    client.bind_primary_attestation_hash(&soroban_sdk::BytesN::from_array(&env, &[0u8; 32]));
+}
+
+#[test]
+#[should_panic]
+fn auth_audit_append_attestation_requires_admin() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    env.mock_auths(&[]);
+    client.append_attestation_digest(&soroban_sdk::BytesN::from_array(&env, &[0u8; 32]));
+}
+
+#[test]
+#[should_panic]
+fn auth_audit_set_allowlist_active_requires_admin() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    env.mock_auths(&[]);
+    client.set_allowlist_active(&true);
+}
+
+#[test]
+#[should_panic]
+fn auth_audit_sweep_terminal_dust_requires_treasury() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let investor = Address::generate(&env);
+    let token = install_stellar_asset_token(&env);
+    let treasury = Address::generate(&env);
+    let escrow_id = deploy_id(&env);
+    let client = LiquifactEscrowClient::new(&env, &escrow_id);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "AUTHSW"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &token.id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+    );
+    client.fund(&investor, &TARGET);
+    client.settle();
+    token.stellar.mint(&escrow_id, &100i128);
+    env.mock_auths(&[]);
+    client.sweep_terminal_dust(&100i128);
+}

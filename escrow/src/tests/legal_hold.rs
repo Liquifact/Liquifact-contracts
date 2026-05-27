@@ -412,3 +412,63 @@ fn hold_persists_after_admin_transfer() {
     let settled = client.settle();
     assert_eq!(settled.status, 2);
 }
+
+// ── 11. Governance recovery (issue #269) ────────────────────────────────────
+
+/// Recovery path when hold is active: rotate admin, new admin clears hold, `settle` succeeds.
+#[test]
+fn legal_hold_recovery_via_admin_rotation_settle() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    let new_admin = Address::generate(&env);
+    init_funded(&client, &env, &admin, &sme, &investor, "LHR001");
+    client.set_legal_hold(&true);
+    assert!(client.get_legal_hold());
+
+    client.transfer_admin(&new_admin);
+    assert_eq!(client.get_escrow().admin, new_admin);
+    assert!(
+        client.get_legal_hold(),
+        "hold must persist until explicitly cleared"
+    );
+
+    client.clear_legal_hold();
+    assert!(!client.get_legal_hold());
+    let settled = client.settle();
+    assert_eq!(settled.status, 2);
+}
+
+/// Recovery path when hold is active: rotate admin, new admin clears hold, `withdraw` succeeds.
+#[test]
+fn legal_hold_recovery_via_admin_rotation_withdraw() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    let new_admin = Address::generate(&env);
+    init_funded(&client, &env, &admin, &sme, &investor, "LHR002");
+    client.set_legal_hold(&true);
+    client.transfer_admin(&new_admin);
+    assert!(client.get_legal_hold());
+
+    client.clear_legal_hold();
+    let withdrawn = client.withdraw();
+    assert_eq!(withdrawn.status, 3);
+}
+
+/// Documents the failure mode: after rotation, the **previous** admin cannot clear the hold.
+#[test]
+#[should_panic]
+fn clear_legal_hold_requires_current_admin_after_rotation() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let new_admin = Address::generate(&env);
+    let client = deploy(&env);
+    init_open(&client, &env, &admin, &sme, "LHR003");
+    client.set_legal_hold(&true);
+    client.transfer_admin(&new_admin);
+    env.mock_auths(&[]);
+    client.clear_legal_hold();
+}
