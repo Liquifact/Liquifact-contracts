@@ -185,7 +185,14 @@ This creates a window where `funded_amount` > actual token balance (unfunded com
 
 ### 5.3 Legal hold has no on-chain expiry
 
-`LegalHold` is a boolean toggled exclusively by `escrow.admin`. There is no timelock, no council override, and no programmatic expiry. A compromised or malicious admin can freeze `settle`, `withdraw`, `claim_investor_payout`, and `sweep_terminal_dust` indefinitely. Off-chain governance (multisig rotation, emergency procedures) is the only recovery path. Document the admin governance model before deploying to production.
+`LegalHold` is a boolean toggled exclusively by the **current** `escrow.admin`.
+There is no timelock, no council override, and no programmatic expiry. A
+compromised or malicious admin can freeze `settle`, `withdraw`,
+`claim_investor_payout`, and `sweep_terminal_dust` indefinitely. **Recovery:**
+governance executes `transfer_admin` (not blocked by the hold), then the new
+admin calls `clear_legal_hold`. See `docs/escrow-legal-hold.md` and ADR-004.
+Production deployments **must** use a governed admin (multisig or DAO) so a
+single lost key cannot strand funds without a documented rotation playbook.
 
 ### 5.4 Storage type mismatch: AllowlistActive vs. InvestorAllowlisted
 
@@ -195,9 +202,13 @@ This creates a window where `funded_amount` > actual token balance (unfunded com
 
 `settle`, `claim_investor_payout`, and `fund_with_commitment` (claim lock calculation) rely on `env.ledger().timestamp()`. This is validator-observed ledger close time, not a wall-clock oracle. Boundaries are `>=` / `<` comparisons on integer seconds. There is measurable skew between simulated environments (Futurenet, local) and mainnet. Do not assume sub-minute maturity precision.
 
-### 5.6 Admin key loss is unrecoverable
+### 5.6 Admin key loss is unrecoverable without admin authority
 
-There is no guardian, recovery address, or protocol DAO escape hatch. If `escrow.admin` is lost: legal holds cannot be cleared, attestation digests cannot be appended, and future schema migrations cannot be authorized (once implemented). `sme_address` is also immutable. Key management for both addresses is a deployment prerequisite, not a contract-level guarantee.
+There is no guardian, recovery address, or protocol DAO escape hatch beyond
+`transfer_admin`. If **all** current-admin signers are lost while a legal hold
+is active, funds remain blocked until signing capability is restored off-chain.
+If at least one signer remains, rotate via `transfer_admin` then clear the hold.
+See `docs/escrow-legal-hold.md` § "Failure mode: hold + lost admin key".
 
 ### 5.7 Over-funding is intentional and unbound above the target
 
@@ -210,3 +221,58 @@ There is no guardian, recovery address, or protocol DAO escape hatch. If `escrow
 ### 5.9 InvestorClaimed is an event marker, not a payment proof
 
 `claim_investor_payout` marks an investor as claimed and emits `InvestorPayoutClaimed`. It does not transfer tokens. Off-chain systems that release principal or yield based on this event must implement their own idempotency and replay guards. A re-emitted or replayed event must not trigger a second disbursement.
+
+---
+
+## 6. Authorization guard ordering (issue #265)
+
+Per [Stellar contract authorization](https://developers.stellar.org/docs/build/guides/auth/contract-authorization),
+`Address::require_auth()` is the contract's security policy boundary: the Soroban
+host validates signatures, replay protection, and authorization entries before the
+call proceeds. **Invariant:** no storage write (`instance` or `persistent`) and no
+SEP-41 token transfer occurs until the relevant `require_auth` succeeds.
+
+### Canonical sequence
+
+```
+1. Read-only preconditions (legal hold, status, input asserts)
+2. Address::require_auth() for the bound role
+3. Storage writes and token transfers (external_calls only)
+```
+
+Reading `DataKey::Escrow` before step 2 is **intentional** — it is read-only
+and does not weaken the auth boundary. Refactors must not move step 3 above step 2.
+
+### Entrypoint checklist
+
+| Entrypoint | Signer | Pre-auth reads (no writes) | `require_auth` | First mutation |
+|---|---|---|---|---|
+| `init` | `admin` | — | line ~549 (`admin`) | `DataKey::Escrow` set |
+| `transfer_admin` | current `escrow.admin` | `get_escrow` | line ~1427 | `DataKey::Escrow` set |
+| `update_maturity` | `escrow.admin` | `get_escrow` | line ~1400 | `DataKey::Escrow` set |
+| `update_funding_target` | `escrow.admin` | `get_escrow` | line ~1007 | `DataKey::Escrow` set |
+| `set_legal_hold` / `clear_legal_hold` | current `escrow.admin` | `get_escrow` | line ~940 | `DataKey::LegalHold` set |
+| `set_allowlist_active` | `escrow.admin` | `get_escrow` | line ~956 | `DataKey::AllowlistActive` set |
+| `set_investor_allowlisted` | `escrow.admin` | `get_escrow` | line ~978 | persistent allowlist set |
+| `bind_primary_attestation_hash` | `escrow.admin` | `get_escrow`, `has` check | line ~791 | `PrimaryAttestationHash` set |
+| `append_attestation_digest` | `escrow.admin` | `get_escrow`, log read | line ~820 | log append + set |
+| `fund` / `fund_with_commitment` | `investor` | floor read | line ~1119 (`investor`) | per-investor keys |
+| `record_sme_collateral_commitment` | `escrow.sme_address` | `get_escrow` | line ~911 | collateral set |
+| `settle` | `escrow.sme_address` | legal hold, `get_escrow` | line ~1282 | `DataKey::Escrow` set |
+| `withdraw` | `escrow.sme_address` | legal hold, `get_escrow` | line ~1321 | `DataKey::Escrow` set |
+| `claim_investor_payout` | `investor` | legal hold, contribution read | line ~1350 | `InvestorClaimed` set |
+| `sweep_terminal_dust` | `treasury` | legal hold, `get_escrow`, treasury read | line ~702 | SEP-41 transfer |
+| `migrate` | **none** (panics) | version read only | — | none (all paths panic) |
+
+Line numbers refer to `escrow/src/lib.rs` at schema version 5; re-audit after refactors.
+
+### Negative-auth test coverage
+
+| Entrypoint | Test location |
+|---|---|
+| `init` | `escrow/src/tests/init.rs` |
+| `transfer_admin`, `fund`, `fund_with_commitment`, `settle`, `withdraw`, `claim_investor_payout`, attestation, allowlist, sweep | `escrow/src/tests/admin.rs` § auth audit |
+| `update_maturity`, `update_funding_target`, collateral | `escrow/src/tests/admin.rs` |
+| `set_legal_hold`, `clear_legal_hold` | `escrow/src/tests/legal_hold.rs` |
+| `bind_primary_attestation_hash`, `append_attestation_digest` | `escrow/src/tests/attestations.rs` |
+| `set_allowlist_active`, `set_investor_allowlisted` | `escrow/src/test_allowlist_tests.rs` |

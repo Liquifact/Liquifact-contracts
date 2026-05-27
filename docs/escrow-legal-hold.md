@@ -78,6 +78,49 @@ as a governed address:
 Without one of the above, a single compromised admin key can freeze all
 investor funds with no on-chain recourse.
 
+### Required deployment posture
+
+| Requirement | Rationale |
+|---|---|
+| Governed `admin` at `init` (multisig or DAO contract) | Single EOA admin + hold + key loss = indefinite fund lock |
+| Documented recovery playbook | Operators must know how to execute `transfer_admin` under hold |
+| Testnet rotation drill before mainnet | Confirms new admin can `clear_legal_hold` after rotation |
+| Indexer monitoring of `LegalHoldChanged` | Detect holds that exceed policy duration |
+
+See [ADR-004](adr/ADR-004-legal-hold.md) and [`OPERATOR_RUNBOOK.md`](OPERATOR_RUNBOOK.md)
+§7–§8 for upgrade-window coordination and admin key hygiene.
+
+---
+
+## Failure mode: hold + lost admin key
+
+When `DataKey::LegalHold` is `true` and the **current** admin signing key is
+lost or destroyed:
+
+- `settle`, `withdraw`, `claim_investor_payout`, `fund`, and
+  `sweep_terminal_dust` remain blocked.
+- `clear_legal_hold` requires authorization from whoever is stored as
+  `InvoiceEscrow::admin` — the lost key cannot satisfy this.
+- There is **no** timelock expiry, guardian, or protocol-level bypass in this
+  contract version.
+
+**On-chain recovery (only path):**
+
+1. Governance executes [`transfer_admin`](../../escrow/src/lib.rs) using a
+   **still-available** current-admin authorization (e.g. remaining multisig
+   signers or DAO vote output). This entrypoint is **not** blocked by the hold.
+2. The **new** admin calls `clear_legal_hold` (or `set_legal_hold(false)`).
+3. Risk-bearing flows resume (`settle`, `withdraw`, etc.).
+
+**Invariant:** a hold is always clearable by the current admin; recovery
+requires controlling admin authority — not merely controlling the SME or
+treasury roles.
+
+If governance cannot produce a valid current-admin signature for
+`transfer_admin`, funds remain locked until off-chain legal or operational
+recovery restores signing capability. This is why single-signer production
+admins are prohibited.
+
 ---
 
 ## Admin rotation during a hold
@@ -104,7 +147,7 @@ the hold state and must explicitly call `clear_legal_hold` to unfreeze.
 
 ## Test coverage
 
-The matrix in `escrow/src/test/legal_hold.rs` covers:
+The matrix in `escrow/src/tests/legal_hold.rs` covers:
 
 1. Each gated function panics with the exact message when hold is `true`.
 2. Each gated function succeeds normally when hold is `false` (or cleared).
@@ -114,3 +157,6 @@ The matrix in `escrow/src/test/legal_hold.rs` covers:
 6. Hold persists across status transitions (no bypass via state change).
 7. Hold can be toggled and re-blocks operations after re-set.
 8. Hold persists after `transfer_admin`; new admin must explicitly clear it.
+9. **Governance recovery (issue #269):** hold → `transfer_admin` → new admin
+   clears hold → `settle` and `withdraw` succeed; previous admin cannot clear
+   after rotation.

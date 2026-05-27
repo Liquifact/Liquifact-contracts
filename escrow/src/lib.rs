@@ -29,11 +29,32 @@
 //!
 //! An admin may set [`DataKey::LegalHold`] to block risk-bearing transitions until cleared:
 //! [`LiquifactEscrow::settle`], SME [`LiquifactEscrow::withdraw`], and
-//! [`LiquifactEscrow::claim_investor_payout`]. **Clearing** requires the same governance admin
-//! to call [`LiquifactEscrow::set_legal_hold`] with `active = false`. This contract does not
-//! embed a timelock or council multisig: production deployments should treat `admin` as a
-//! governed contract or multisig so holds cannot be used for indefinite fund lock **without**
-//! off-chain governance recovery (rotation, vote, emergency procedures).
+//! [`LiquifactEscrow::claim_investor_payout`]. **Clearing** requires the **current**
+//! [`InvoiceEscrow::admin`] to call [`LiquifactEscrow::set_legal_hold`] with `active = false`
+//! (or [`LiquifactEscrow::clear_legal_hold`]). This contract does not embed a timelock or
+//! council multisig: production deployments **must** use a governed `admin` (multisig or
+//! protocol DAO) so a single lost key cannot strand funds indefinitely.
+//!
+//! **Failure mode:** a hold plus loss of the current admin signing key leaves funds blocked
+//! on-chain until governance regains control of admin authority. There is no break-glass bypass.
+//!
+//! **Recovery lever:** [`LiquifactEscrow::transfer_admin`] is **not** gated by the hold.
+//! Governance rotates to a new admin, then the new admin clears the hold. Invariant: a hold
+//! is always clearable by whoever holds `InvoiceEscrow::admin`; recovery requires controlling
+//! that authority. See `docs/escrow-legal-hold.md` and [ADR-004](docs/adr/ADR-004-legal-hold.md).
+//!
+//! ## Authorization guard ordering
+//!
+//! Every state-mutating entrypoint follows a canonical sequence (see
+//! `docs/escrow-security-checklist.md` §6 and [ADR-002](docs/adr/ADR-002-auth-boundaries.md)):
+//!
+//! 1. **Read-only** preconditions (legal hold, status checks, input validation).
+//! 2. **`Address::require_auth()`** for the bound role ([Stellar authorization](https://developers.stellar.org/docs/build/guides/auth/contract-authorization)).
+//! 3. **Storage writes** and **SEP-41 transfers** (via [`external_calls`]).
+//!
+//! Invariant: no instance/persistent storage mutation and no token transfer occurs until
+//! step 2 succeeds. Reading [`DataKey::Escrow`] before `require_auth` is intentional — it is
+//! read-only and does not weaken the auth boundary.
 //!
 //! ## Invoice identifier (`invoice_id`)
 //!
@@ -929,11 +950,15 @@ impl LiquifactEscrow {
         commitment
     }
 
-    /// Set or clear compliance hold. Only [`InvoiceEscrow::admin`] may call.
+    /// Set or clear compliance hold. Only the **current** [`InvoiceEscrow::admin`] may call.
     ///
-    /// **Emergency / override:** clearing always goes through this admin-gated path. Deployments
-    /// should use a governed `admin` (multisig or protocol DAO). There is no separate “break glass”
-    /// entrypoint in this version — operational playbooks live off-chain.
+    /// **Clearing:** always requires the current admin's authorization — there is no timelock,
+    /// council override, or break-glass entrypoint. After [`LiquifactEscrow::transfer_admin`],
+    /// only the **new** admin can clear a persisted hold.
+    ///
+    /// **Governance posture:** production `admin` must be a multisig or governed contract so
+    /// hold + key loss cannot strand funds without an off-chain recovery vote that executes
+    /// `transfer_admin` then `clear_legal_hold`. See `docs/escrow-legal-hold.md`.
     pub fn set_legal_hold(env: Env, active: bool) {
         // env.clone(): env is used again after this call for storage set and publish.
         let escrow = Self::get_escrow(env.clone());
@@ -1420,6 +1445,13 @@ impl LiquifactEscrow {
         escrow
     }
 
+    /// Rotate escrow admin. Requires authorization from the **current** admin.
+    ///
+    /// **Not gated by legal hold** — intentional recovery lever when the current admin is
+    /// compromised or unresponsive. The hold persists across rotation; the new admin must
+    /// explicitly call [`LiquifactEscrow::clear_legal_hold`] before risk-bearing flows resume.
+    ///
+    /// **Guard ordering:** read [`DataKey::Escrow`] → `escrow.admin.require_auth()` → write.
     pub fn transfer_admin(env: Env, new_admin: Address) -> InvoiceEscrow {
         // env.clone(): env is used again after this call for storage set and publish.
         let mut escrow = Self::get_escrow(env.clone());
