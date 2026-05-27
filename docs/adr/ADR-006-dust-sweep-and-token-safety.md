@@ -55,3 +55,4 @@ Tests live in `escrow/src/tests/external_calls_mocked.rs` and verify every guard
 | `test_balance_delta_invariants_with_multiple_recipients` | Two sequential transfers | Passes |
 
 **Core invariant:** value is always conserved exactly, or the call panics. There is no partial-credit success path.
+

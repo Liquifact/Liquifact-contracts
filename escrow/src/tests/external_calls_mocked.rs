@@ -4,7 +4,8 @@
 //! Uses mocked token implementations where feasible in the Soroban test harness.
 
 use super::super::external_calls::transfer_funding_token_with_balance_checks;
-use super::*;use soroban_sdk::{contract, contractimpl, token::TokenInterface, Address, Env, MuxedAddress};
+use super::*;
+use soroban_sdk::{contract, contractimpl, token::TokenInterface, Address, Env, MuxedAddress};
 // ---------------------------------------------------------------------------
 // Mock: fee-on-transfer token
 // Steals 1% on every transfer — recipient gets less than sender sent.
@@ -21,27 +22,37 @@ impl TokenInterface for FeeOnTransferToken {
     }
 
     fn transfer(env: Env, from: Address, to: MuxedAddress, amount: i128) {
-    from.require_auth();
-    let fee = amount / 100;       // steal 1%
-    let credited = amount - fee;  // recipient gets less
+        from.require_auth();
+        let fee = amount / 100; // steal 1%
+        let credited = amount - fee; // recipient gets less
 
-    let to_addr = to.address();
+        let to_addr = to.address();
 
-    let from_bal = Self::balance(env.clone(), from.clone());
-    env.storage().persistent().set(&from, &(from_bal - amount)); // full debit
+        let from_bal = Self::balance(env.clone(), from.clone());
+        env.storage().persistent().set(&from, &(from_bal - amount)); // full debit
 
-    let to_bal = Self::balance(env.clone(), to_addr.clone());
-    env.storage().persistent().set(&to_addr, &(to_bal + credited)); // under-credit
-}
+        let to_bal = Self::balance(env.clone(), to_addr.clone());
+        env.storage()
+            .persistent()
+            .set(&to_addr, &(to_bal + credited)); // under-credit
+    }
 
-    fn allowance(_env: Env, _from: Address, _spender: Address) -> i128 { 0 }
+    fn allowance(_env: Env, _from: Address, _spender: Address) -> i128 {
+        0
+    }
     fn approve(_env: Env, _from: Address, _spender: Address, _amount: i128, _exp: u32) {}
     fn transfer_from(_env: Env, _spender: Address, _from: Address, _to: Address, _amount: i128) {
         unimplemented!()
     }
-    fn burn(_env: Env, _from: Address, _amount: i128) { unimplemented!() }
-    fn burn_from(_env: Env, _spender: Address, _from: Address, _amount: i128) { unimplemented!() }
-    fn decimals(_env: Env) -> u32 { 7 }
+    fn burn(_env: Env, _from: Address, _amount: i128) {
+        unimplemented!()
+    }
+    fn burn_from(_env: Env, _spender: Address, _from: Address, _amount: i128) {
+        unimplemented!()
+    }
+    fn decimals(_env: Env) -> u32 {
+        7
+    }
     fn name(env: Env) -> soroban_sdk::String {
         soroban_sdk::String::from_str(&env, "FeeToken")
     }
@@ -75,9 +86,7 @@ fn test_fee_on_transfer_token_rejected() {
     mint_fee_token(&env, &fee_token_id, &holder, 1000i128);
 
     // Panics: recipient gets 990 but function expects exactly 1000
-    transfer_funding_token_with_balance_checks(
-        &env, &fee_token_id, &holder, &treasury, 1000i128,
-    );
+    transfer_funding_token_with_balance_checks(&env, &fee_token_id, &holder, &treasury, 1000i128);
 }
 
 // ---------------------------------------------------------------------------
@@ -197,7 +206,10 @@ fn test_large_transfer_no_overflow() {
     transfer_funding_token_with_balance_checks(&env, &token.id, &holder, &treasury, large_amount);
 
     assert_eq!(holder_before - token.token.balance(&holder), large_amount);
-    assert_eq!(token.token.balance(&treasury) - treasury_before, large_amount);
+    assert_eq!(
+        token.token.balance(&treasury) - treasury_before,
+        large_amount
+    );
 }
 
 #[test]
@@ -216,14 +228,32 @@ fn test_multiple_sequential_transfers() {
 
     let holder_before1 = token.token.balance(&holder);
     let t1_before = token.token.balance(&treasury1);
-    transfer_funding_token_with_balance_checks(&env, &token.id, &holder, &treasury1, transfer_amount);
-    assert_eq!(holder_before1 - token.token.balance(&holder), transfer_amount);
+    transfer_funding_token_with_balance_checks(
+        &env,
+        &token.id,
+        &holder,
+        &treasury1,
+        transfer_amount,
+    );
+    assert_eq!(
+        holder_before1 - token.token.balance(&holder),
+        transfer_amount
+    );
     assert_eq!(token.token.balance(&treasury1) - t1_before, transfer_amount);
 
     let holder_before2 = token.token.balance(&holder);
     let t2_before = token.token.balance(&treasury2);
-    transfer_funding_token_with_balance_checks(&env, &token.id, &holder, &treasury2, transfer_amount);
-    assert_eq!(holder_before2 - token.token.balance(&holder), transfer_amount);
+    transfer_funding_token_with_balance_checks(
+        &env,
+        &token.id,
+        &holder,
+        &treasury2,
+        transfer_amount,
+    );
+    assert_eq!(
+        holder_before2 - token.token.balance(&holder),
+        transfer_amount
+    );
     assert_eq!(token.token.balance(&treasury2) - t2_before, transfer_amount);
 
     assert_eq!(token.token.balance(&holder), 1000i128);
