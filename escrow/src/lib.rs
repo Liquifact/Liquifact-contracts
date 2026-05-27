@@ -304,6 +304,9 @@ pub struct EscrowFunded {
     pub status: u32,
     /// Investor-specific effective yield (bps) after this fund; see [`DataKey::InvestorEffectiveYield`].
     pub investor_effective_yield_bps: i64,
+    /// The `min_lock_secs` of the matched [`YieldTier`] (0 when base yield applies — no tier,
+    /// no lock commitment, or simple fund). See [`LiquifactEscrow::effective_yield_for_commitment`].
+    pub tier_lock_secs: u64,
 }
 
 #[contractevent]
@@ -518,29 +521,38 @@ impl LiquifactEscrow {
         }
     }
 
-    fn effective_yield_for_commitment(env: &Env, base_yield: i64, committed_lock_secs: u64) -> i64 {
+    /// Returns `(effective_yield_bps, matched_lock_secs)` for a given commitment.
+    /// `matched_lock_secs` is the [`YieldTier::min_lock_secs`] of the best matching tier,
+    /// or `0` when no tier was matched (base yield applies).
+    fn effective_yield_for_commitment(
+        env: &Env,
+        base_yield: i64,
+        committed_lock_secs: u64,
+    ) -> (i64, u64) {
         if committed_lock_secs == 0 {
-            return base_yield;
+            return (base_yield, 0);
         }
         let Some(tiers) = env
             .storage()
             .instance()
             .get::<DataKey, Vec<YieldTier>>(&DataKey::YieldTierTable)
         else {
-            return base_yield;
+            return (base_yield, 0);
         };
         if tiers.is_empty() {
-            return base_yield;
+            return (base_yield, 0);
         }
         let mut best = base_yield;
+        let mut best_lock = 0u64;
         let n = tiers.len();
         for i in 0..n {
             let t = tiers.get(i).unwrap();
             if committed_lock_secs >= t.min_lock_secs && t.yield_bps > best {
                 best = t.yield_bps;
+                best_lock = t.min_lock_secs;
             }
         }
-        best
+        (best, best_lock)
     }
 
     /// Initialize escrow. `funding_target` defaults to `amount`.
@@ -1242,13 +1254,15 @@ impl LiquifactEscrow {
             }
         }
 
-        // Capture the effective yield in a local so the event field can be populated without
-        // a post-write storage read of DataKey::InvestorEffectiveYield.
+        // Capture the effective yield and tier lock threshold in locals so event fields can
+        // be populated without post-write storage reads.
         let investor_effective_yield_bps: i64;
+        let tier_lock_secs: u64;
 
         if simple_fund {
             if prev == 0 {
                 investor_effective_yield_bps = escrow.yield_bps;
+                tier_lock_secs = 0;
                 env.storage().instance().set(
                     &DataKey::InvestorEffectiveYield(investor.clone()),
                     &escrow.yield_bps,
@@ -1263,6 +1277,7 @@ impl LiquifactEscrow {
                     .instance()
                     .get(&DataKey::InvestorEffectiveYield(investor.clone()))
                     .unwrap_or(escrow.yield_bps);
+                tier_lock_secs = 0;
             }
             // If prev > 0, preserve existing effective yield and claim lock
         } else {
@@ -1270,9 +1285,10 @@ impl LiquifactEscrow {
                 prev == 0,
                 "Additional principal after a tiered first deposit must use fund(), not fund_with_commitment()"
             );
-            let eff =
+            let (eff, lock) =
                 Self::effective_yield_for_commitment(&env, escrow.yield_bps, committed_lock_secs);
             investor_effective_yield_bps = eff;
+            tier_lock_secs = lock;
             env.storage()
                 .instance()
                 .set(&DataKey::InvestorEffectiveYield(investor.clone()), &eff);
@@ -1329,8 +1345,9 @@ impl LiquifactEscrow {
             amount,
             funded_amount: escrow.funded_amount,
             status: escrow.status,
-            // Local variable set at write time; no post-write storage read required.
+            // Locals set at write time; no post-write storage reads required.
             investor_effective_yield_bps,
+            tier_lock_secs,
         }
         .publish(&env);
 
