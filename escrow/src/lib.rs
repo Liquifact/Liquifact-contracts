@@ -322,6 +322,36 @@ pub struct FundingCloseSnapshot {
     pub closed_at_ledger_sequence: u32,
 }
 
+/// Custom option-like enum to represent the captured funding close snapshot.
+/// Models standard option semantics as a contracttype to avoid standard library
+/// blanket trait limitations in Soroban SDK testutils.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub enum EscrowCloseSnapshot {
+    None,
+    Some(FundingCloseSnapshot),
+}
+
+/// Comprehensive summary of the escrow contract state.
+/// Bundles multiple read-only values to allow a single host invocation
+/// for off-chain indexers and client rendering.
+#[contracttype]
+#[derive(Debug, PartialEq)]
+pub struct EscrowSummary {
+    /// Full escrow snapshot.
+    pub escrow: InvoiceEscrow,
+    /// Active legal or compliance hold flag.
+    pub legal_hold: bool,
+    /// The captured funding close snapshot (Option).
+    pub funding_close_snapshot: EscrowCloseSnapshot,
+    /// Unique investors count who funded the escrow.
+    pub unique_funder_count: u32,
+    /// Whether the investor allowlist is active.
+    pub is_allowlist_active: bool,
+    /// Persisted schema version of the contract data.
+    pub schema_version: u32,
+}
+
 // --- Events ---
 
 #[contractevent]
@@ -883,6 +913,31 @@ impl LiquifactEscrow {
             .instance()
             .get(&DataKey::UniqueFunderCount)
             .unwrap_or(0)
+    }
+
+    /// Bundles multiple read-only values to return a comprehensive summary of the escrow state
+    /// in a single host invocation.
+    pub fn get_escrow_summary(env: Env) -> EscrowSummary {
+        let escrow = Self::get_escrow(env.clone());
+        let legal_hold = Self::get_legal_hold(env.clone());
+        let funding_close_snapshot_opt = Self::get_funding_close_snapshot(env.clone());
+        let unique_funder_count = Self::get_unique_funder_count(env.clone());
+        let is_allowlist_active = Self::is_allowlist_active(env.clone());
+        let schema_version = Self::get_version(env);
+
+        let funding_close_snapshot = match funding_close_snapshot_opt {
+            Some(snap) => EscrowCloseSnapshot::Some(snap),
+            None => EscrowCloseSnapshot::None,
+        };
+
+        EscrowSummary {
+            escrow,
+            legal_hold,
+            funding_close_snapshot,
+            unique_funder_count,
+            is_allowlist_active,
+            schema_version,
+        }
     }
 
     /// Bind a **primary** 32-byte digest (e.g. SHA-256 of an IPFS CID or document bundle). **Single-set:**

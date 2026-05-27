@@ -174,45 +174,28 @@ Bounded by `MAX_ATTESTATION_APPEND_ENTRIES`.
 
 ---
 
-## `compute_investor_payout(investor: Address) → i128`
+## `get_escrow_summary() → EscrowSummary`
 
-**Storage keys read:** `DataKey::InvestorContribution(investor)`, `DataKey::FundingCloseSnapshot`,
-`DataKey::InvestorEffectiveYield(investor)`, `DataKey::Escrow` (yield fallback)
+Bundles multiple read-only values in a single host invocation, optimizing read latency and gas efficiency for off-chain indexers and frontend rendering.
 
-On-chain read-only pro-rata gross payout view. Implements the authoritative formula from
-`docs/escrow-pro-rata.md` using **floor (truncating) integer division** so that off-chain
-tooling and on-chain logic always agree on rounding.
+- **Pure Read** — view-only (no authorization required, no state writes).
+- **Safe Fallback** — matches individual getters exactly, returning defaults when optional keys are absent, and does not panic unless the escrow itself is uninitialized.
 
-### Formula
+### Return Type: `EscrowSummary`
 
-```
-coupon       = total_principal × effective_yield_bps / 10_000  (floor)
-settle_pool  = total_principal + coupon
-gross_payout = contribution × settle_pool / total_principal     (floor)
-```
+A `#[contracttype]` struct containing:
 
-The `effective_yield_bps` is the investor-specific tier yield locked in at their first deposit
-(`DataKey::InvestorEffectiveYield`), falling back to `InvoiceEscrow::yield_bps` when absent.
+- `escrow: InvoiceEscrow` — The full escrow snapshot.
+- `legal_hold: bool` — True if a compliance hold is active.
+- `funding_close_snapshot: EscrowCloseSnapshot` — Custom option-like representation of the captured pro-rata denominator snapshot (detailed below).
+- `unique_funder_count: u32` — Distinct address count of contributors.
+- `is_allowlist_active: bool` — True if the investor allowlist is active.
+- `schema_version: u32` — The schema version of the contract state.
 
-### Return values
+### Sub-type: `EscrowCloseSnapshot`
 
-| Condition | Return |
-|-----------|--------|
-| `FundingCloseSnapshot` absent (escrow not yet funded) | `0` |
-| `InvestorContribution` absent or zero | `0` |
-| Normal case | Floor-rounded gross payout in token base units |
+A `#[contracttype]` enum representing the optional `FundingCloseSnapshot`:
 
-### Invariant
+- `None` — Escrow is not yet funded; no close snapshot exists.
+- `Some(FundingCloseSnapshot)` — The pro-rata denominator snapshot captured when the escrow first transitioned to **funded**.
 
-The sum of `compute_investor_payout` over all investors is ≤ `total_principal + coupon`.
-Any rounding residual (dust) is recoverable via `sweep_terminal_dust`.
-
-### Authorization
-
-None — pure read; no auth required. Safe to call at any escrow status.
-
-### Overflow safety
-
-All multiplications use `i128::checked_mul`; divisions use `i128::checked_div`.
-Panics with `"compute_investor_payout: arithmetic overflow"` rather than silently
-returning a wrong value.

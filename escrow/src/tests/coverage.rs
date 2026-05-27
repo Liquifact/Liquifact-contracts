@@ -1,6 +1,6 @@
 use crate::{
     test::{free_addresses, setup},
-    DataKey, YieldTier,
+    DataKey, YieldTier, EscrowSummary, EscrowCloseSnapshot,
 };
 use soroban_sdk::{
     testutils::{Address as _, Ledger},
@@ -1189,4 +1189,118 @@ fn test_init_tier_yield_out_of_range() {
         &None,
         &None
     );
+}
+
+#[test]
+#[should_panic(expected = "Escrow not initialized")]
+fn test_get_escrow_summary_before_init() {
+    let env = Env::default();
+    let (client, _admin, _sme) = setup(&env);
+    client.get_escrow_summary();
+}
+
+#[test]
+fn test_get_escrow_summary_happy_path() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let (funding_token, treasury) = free_addresses(&env);
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "INV001"),
+        &sme,
+        &1000,
+        &100,
+        &100,
+        &funding_token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+    );
+
+    let summary = client.get_escrow_summary();
+
+    // Verify fields match individual getters
+    assert_eq!(summary.escrow, client.get_escrow());
+    assert_eq!(summary.legal_hold, client.get_legal_hold());
+    
+    let expected_snapshot = match client.get_funding_close_snapshot() {
+        Some(snap) => EscrowCloseSnapshot::Some(snap),
+        None => EscrowCloseSnapshot::None,
+    };
+    assert_eq!(summary.funding_close_snapshot, expected_snapshot);
+    assert_eq!(summary.unique_funder_count, client.get_unique_funder_count());
+    assert_eq!(summary.is_allowlist_active, client.is_allowlist_active());
+    assert_eq!(summary.schema_version, client.get_version());
+
+    // Verify default values specifically
+    assert!(!summary.legal_hold);
+    assert_eq!(summary.funding_close_snapshot, EscrowCloseSnapshot::None);
+    assert_eq!(summary.unique_funder_count, 0);
+    assert!(!summary.is_allowlist_active);
+    assert_eq!(summary.schema_version, 5);
+}
+
+#[test]
+fn test_get_escrow_summary_after_state_changes() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let (funding_token, treasury) = free_addresses(&env);
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "INV001"),
+        &sme,
+        &1000,
+        &100,
+        &100,
+        &funding_token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+    );
+
+    // Make state changes
+    client.set_legal_hold(&true);
+    client.set_allowlist_active(&true);
+
+    let investor = Address::generate(&env);
+    client.set_investor_allowlisted(&investor, &true);
+    // Fund enough to trigger funded status and capture snapshot
+    client.fund(&investor, &1000);
+
+    let summary = client.get_escrow_summary();
+
+    // Verify fields match individual getters under state changes
+    assert_eq!(summary.escrow, client.get_escrow());
+    assert_eq!(summary.legal_hold, client.get_legal_hold());
+    
+    let expected_snapshot = match client.get_funding_close_snapshot() {
+        Some(snap) => EscrowCloseSnapshot::Some(snap),
+        None => EscrowCloseSnapshot::None,
+    };
+    assert_eq!(summary.funding_close_snapshot, expected_snapshot);
+    assert_eq!(summary.unique_funder_count, client.get_unique_funder_count());
+    assert_eq!(summary.is_allowlist_active, client.is_allowlist_active());
+    assert_eq!(summary.schema_version, client.get_version());
+
+    // Verify state-specific values
+    assert!(summary.legal_hold);
+    assert!(summary.is_allowlist_active);
+    assert_eq!(summary.unique_funder_count, 1);
+    assert_eq!(summary.escrow.status, 1); // Funded
+    assert!(matches!(summary.funding_close_snapshot, EscrowCloseSnapshot::Some(_)));
+
+    let snapshot = match &summary.funding_close_snapshot {
+        EscrowCloseSnapshot::Some(snap) => snap.clone(),
+        EscrowCloseSnapshot::None => panic!("Expected Some snapshot"),
+    };
+    assert_eq!(snapshot.total_principal, 1000);
+    assert_eq!(snapshot.funding_target, 1000);
 }
