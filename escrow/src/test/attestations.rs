@@ -205,3 +205,124 @@ fn test_primary_and_append_coexist() {
     assert_eq!(client.get_primary_attestation_hash(), Some(primary));
     assert_eq!(client.get_attestation_append_log().len(), 4);
 }
+
+// ---------------------------------------------------------------------------
+// revoke_attestation_digest — revocation tombstone invariant
+// ---------------------------------------------------------------------------
+
+/// Happy path: revoke index 0 and confirm via `is_attestation_revoked`.
+#[test]
+fn test_revoke_single_entry() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    client.append_attestation_digest(&digest(&env, 0xAA));
+
+    assert!(!client.is_attestation_revoked(&0));
+    client.revoke_attestation_digest(&0);
+    assert!(client.is_attestation_revoked(&0));
+}
+
+/// Revoking index 1 (after two appends) leaves index 0 unaffected.
+#[test]
+fn test_revoke_later_index_does_not_affect_earlier() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    client.append_attestation_digest(&digest(&env, 0x01));
+    client.append_attestation_digest(&digest(&env, 0x02));
+
+    client.revoke_attestation_digest(&1);
+    assert!(!client.is_attestation_revoked(&0));
+    assert!(client.is_attestation_revoked(&1));
+}
+
+/// Revoking all entries sequentially succeeds.
+#[test]
+fn test_revoke_all_entries() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    for i in 0u8..5 {
+        client.append_attestation_digest(&digest(&env, i));
+    }
+    for i in 0u8..5 {
+        assert!(!client.is_attestation_revoked(&(i as u32)));
+        client.revoke_attestation_digest(&(i as u32));
+        assert!(client.is_attestation_revoked(&(i as u32)));
+    }
+}
+
+/// Revoking the same index twice must panic.
+#[test]
+#[should_panic(expected = "attestation already revoked at index")]
+fn test_double_revoke_panics() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    client.append_attestation_digest(&digest(&env, 0x42));
+    client.revoke_attestation_digest(&0);
+    client.revoke_attestation_digest(&0);
+}
+
+/// Revoking an index beyond the current log length must panic.
+#[test]
+#[should_panic(expected = "attestation index out of range")]
+fn test_revoke_out_of_range_panics() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    // Empty log, index 0 is out of range.
+    client.revoke_attestation_digest(&0);
+}
+
+/// Revoking an index equal to log length must panic (0-indexed).
+#[test]
+#[should_panic(expected = "attestation index out of range")]
+fn test_revoke_at_log_len_panics() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    client.append_attestation_digest(&digest(&env, 0x10));
+    // log.len() == 1, so index 1 is out of range.
+    client.revoke_attestation_digest(&1);
+}
+
+/// `is_attestation_revoked` returns `false` for any index on an empty log.
+#[test]
+fn test_is_revoked_empty_log() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    assert!(!client.is_attestation_revoked(&0));
+    assert!(!client.is_attestation_revoked(&99));
+}
+
+/// Non-admin caller must not be able to revoke.
+#[test]
+#[should_panic]
+fn test_revoke_non_admin_panics() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    client.append_attestation_digest(&digest(&env, 0xFF));
+    env.mock_auths(&[]);
+    client.revoke_attestation_digest(&0);
+}
+
+/// Revocation does not alter the append log contents — the digest remains readable.
+#[test]
+fn test_revoke_preserves_log_entry() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    let d = digest(&env, 0xBB);
+    client.append_attestation_digest(&d);
+    client.revoke_attestation_digest(&0);
+    let log = client.get_attestation_append_log();
+    assert_eq!(log.len(), 1);
+    assert_eq!(log.get(0).unwrap(), d);
+}
+
+/// Revocation does not affect the primary attestation hash.
+#[test]
+fn test_revoke_does_not_affect_primary_hash() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    let primary = digest(&env, 0xCC);
+    client.bind_primary_attestation_hash(&primary);
+    client.append_attestation_digest(&digest(&env, 0xDD));
+    client.revoke_attestation_digest(&0);
+    assert_eq!(client.get_primary_attestation_hash(), Some(primary));
+}

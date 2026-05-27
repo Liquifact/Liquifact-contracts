@@ -110,11 +110,13 @@ pub mod external_calls;
 /// | 3 | Added `FundingCloseSnapshot`, `MinContributionFloor`, `MaxUniqueInvestorsCap`, `UniqueFunderCount` | Additive keys — old instances return defaults |
 /// | 4 | Added `PrimaryAttestationHash`, `AttestationAppendLog` | Additive keys — no `migrate` call required |
 /// | 5 | Added `YieldTierTable`, `RegistryRef`, `Treasury`; `fund_with_commitment` | **Redeploy required** if `InvoiceEscrow` XDR changed |
+/// | 6 | Added `AttestationRevoked(u32)`; `revoke_attestation_digest` / `is_attestation_revoked` | Additive keys — no `migrate` call required |
 ///
 /// See `docs/OPERATOR_RUNBOOK.md` for the full redeploy-vs-upgrade decision tree.
-pub const SCHEMA_VERSION: u32 = 5;
+pub const SCHEMA_VERSION: u32 = 6;
 
 /// Upper bound on [`LiquifactEscrow::append_attestation_digest`] entries to keep storage bounded.
+/// Revocation via [`LiquifactEscrow::revoke_attestation_digest`] does not consume a slot.
 pub const MAX_ATTESTATION_APPEND_ENTRIES: u32 = 32;
 
 /// Upper bound on [`LiquifactEscrow::sweep_terminal_dust`] per call (base units of the funding token).
@@ -201,6 +203,10 @@ pub enum DataKey {
     /// Append-only audit chain of digests (bounded by [`MAX_ATTESTATION_APPEND_ENTRIES`]).
     /// Absent ⇒ empty log. See [`LiquifactEscrow::append_attestation_digest`].
     AttestationAppendLog,
+    /// Per-index revocation marker for [`DataKey::AttestationAppendLog`] entries.
+    /// Absent ⇒ not revoked. Written as `true` by [`LiquifactEscrow::revoke_attestation_digest`].
+    /// Preserves the original digest for auditability while signalling supersession.
+    AttestationRevoked(u32),
     /// When true, only allowlisted addresses may call [`LiquifactEscrow::fund`] or [`LiquifactEscrow::fund_with_commitment`].
     AllowlistActive,
     /// Whether a specific address is permitted to fund when [`DataKey::AllowlistActive`] is true.
@@ -298,6 +304,15 @@ pub struct EscrowFunded {
     pub status: u32,
     /// Investor-specific effective yield (bps) after this fund; see [`DataKey::InvestorEffectiveYield`].
     pub investor_effective_yield_bps: i64,
+}
+
+#[contractevent]
+pub struct EscrowPartialSettle {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    pub funded_amount: i128,
 }
 
 #[contractevent]
@@ -409,6 +424,14 @@ pub struct AttestationDigestAppended {
     pub invoice_id: Symbol,
     pub index: u32,
     pub digest: BytesN<32>,
+}
+
+#[contractevent]
+pub struct AttestationDigestRevoked {
+    #[topic]
+    pub name: Symbol,
+    pub invoice_id: Symbol,
+    pub index: u32,
 }
 
 #[contractevent]
@@ -851,6 +874,57 @@ impl LiquifactEscrow {
             .unwrap_or_else(|| Vec::new(&env))
     }
 
+    /// Revoke a previously appended attestation digest at the given `index`. Records a
+    /// boolean `true` under [`DataKey::AttestationRevoked(index)`] without removing the
+    /// original digest from the append log, preserving the full audit trail.
+    ///
+    /// **Authorization:** [`InvoiceEscrow::admin`].
+    ///
+    /// # Panics
+    ///
+    /// - If `index >= log.len()` (the append log does not have that many entries).
+    /// - If `index` has already been revoked (double-revocation guard).
+    pub fn revoke_attestation_digest(env: Env, index: u32) {
+        // env.clone(): env is used again after this call for storage get/has/set and publish.
+        let escrow = Self::get_escrow(env.clone());
+        escrow.admin.require_auth();
+
+        let log: Vec<BytesN<32>> = env
+            .storage()
+            .instance()
+            .get(&DataKey::AttestationAppendLog)
+            .unwrap_or_else(|| Vec::new(&env));
+        assert!(index < log.len(), "attestation index out of range");
+        assert!(
+            !env.storage()
+                .instance()
+                .has(&DataKey::AttestationRevoked(index)),
+            "attestation already revoked at index"
+        );
+
+        env.storage()
+            .instance()
+            .set(&DataKey::AttestationRevoked(index), &true);
+
+        AttestationDigestRevoked {
+            name: symbol_short!("att_rev"),
+            invoice_id: escrow.invoice_id.clone(),
+            index,
+        }
+        .publish(&env);
+    }
+
+    /// Check whether the attestation digest at `index` has been revoked.
+    ///
+    /// Returns `true` if [`LiquifactEscrow::revoke_attestation_digest`] has been called for
+    /// `index`; `false` otherwise (including when `index` is out of range of the append log).
+    pub fn is_attestation_revoked(env: Env, index: u32) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::AttestationRevoked(index))
+            .unwrap_or(false)
+    }
+
     pub fn get_contribution(env: Env, investor: Address) -> i128 {
         env.storage()
             .instance()
@@ -1257,6 +1331,55 @@ impl LiquifactEscrow {
             status: escrow.status,
             // Local variable set at write time; no post-write storage read required.
             investor_effective_yield_bps,
+        }
+        .publish(&env);
+
+        escrow
+    }
+
+    /// Closes funding early for an under-funded invoice, transitioning the escrow to a settleable state.
+    ///
+    /// # Authorization
+    /// The configured **SME** address must authorize this call.
+    ///
+    /// Blocked while [`DataKey::LegalHold`] is active.
+    pub fn partial_settle(env: Env) -> InvoiceEscrow {
+        assert!(
+            !Self::legal_hold_active(&env),
+            "Legal hold blocks partial settlement"
+        );
+
+        let mut escrow = Self::get_escrow(env.clone());
+
+        escrow.sme_address.require_auth();
+
+        assert!(
+            escrow.status == 0,
+            "Escrow must be in Open state for partial settlement"
+        );
+
+        // Transition to funded status early.
+        escrow.status = 1;
+
+        // Write FundingCloseSnapshot if not already present.
+        if !env.storage().instance().has(&DataKey::FundingCloseSnapshot) {
+            let snap = FundingCloseSnapshot {
+                total_principal: escrow.funded_amount,
+                funding_target: escrow.funding_target,
+                closed_at_ledger_timestamp: env.ledger().timestamp(),
+                closed_at_ledger_sequence: env.ledger().sequence(),
+            };
+            env.storage()
+                .instance()
+                .set(&DataKey::FundingCloseSnapshot, &snap);
+        }
+
+        env.storage().instance().set(&DataKey::Escrow, &escrow);
+
+        EscrowPartialSettle {
+            name: symbol_short!("part_set"),
+            invoice_id: escrow.invoice_id.clone(),
+            funded_amount: escrow.funded_amount,
         }
         .publish(&env);
 
