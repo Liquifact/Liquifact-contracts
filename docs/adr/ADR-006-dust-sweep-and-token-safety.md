@@ -39,3 +39,19 @@ This catches fee-on-transfer tokens and malicious implementations at the host bo
 - **Unrestricted sweep in any state:** would allow draining live principal as "dust."
 - **No balance delta check:** would silently accept fee-on-transfer tokens and produce incorrect accounting.
 - **Admin auth on sweep instead of treasury:** admin and treasury are separate roles by design; conflating them reduces separation of concerns.
+
+## Test Coverage
+
+Tests live in `escrow/src/tests/external_calls_mocked.rs` and verify every guard:
+
+| Test name | What it checks | Expected result |
+|-----------|---------------|-----------------|
+| `test_fee_on_transfer_token_rejected` | 1% fee token under-credits recipient | Panics |
+| `test_balance_delta_conservation_with_standard_token` | Normal token, happy path | Passes |
+| `test_zero_amount_rejected` | amount = 0 | Panics |
+| `test_negative_amount_rejected` | amount = -50 | Panics |
+| `test_insufficient_balance_rejected` | sender has 500, tries to send 1000 | Panics |
+| `test_balance_delta_invariants_with_large_transfers` | Very large amount, no overflow | Passes |
+| `test_balance_delta_invariants_with_multiple_recipients` | Two sequential transfers | Passes |
+
+**Core invariant:** value is always conserved exactly, or the call panics. There is no partial-credit success path.
