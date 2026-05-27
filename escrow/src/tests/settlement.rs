@@ -1277,3 +1277,639 @@ fn no_state_mutation_possible_after_withdraw() {
         assert!(r.is_err(), "fund after withdraw must panic");
     }
 }
+
+// ──────────────────────────────────────────────────────────────────────────────
+// I-1  Pre-lock claim panics with the documented error string
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// A claim attempted one second before `not_before` must trap with the exact
+/// message documented in the contract and in `docs/escrow-ledger-time.md`.
+///
+/// # Ledger time setup
+/// - Deposit at timestamp 2000 with a 600-second lock → `not_before` = 2600.
+/// - Settle at timestamp 2000 (maturity = 0 → no additional gate).
+/// - Attempt claim at timestamp 2599 → must panic.
+#[test]
+#[should_panic(expected = "Investor commitment lock not expired (ledger timestamp)")]
+fn claim_before_commitment_lock_panics_with_exact_message() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let inv = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
+    env.ledger().set_timestamp(2000);
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "I1_PRELOCK"),
+        &sme,
+        &1_000i128,
+        &400i64,
+        &0u64,   // maturity = 0 (no extra settle gate)
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+    );
+
+    let lock_secs: u64 = 600;
+    client.fund_with_commitment(&inv, &1_000i128, &lock_secs);
+    client.settle();
+
+    // One second before expiry: 2000 + 600 - 1 = 2599.
+    env.ledger().set_timestamp(2000 + lock_secs - 1);
+
+    // Must panic: "Investor commitment lock not expired (ledger timestamp)"
+    client.claim_investor_payout(&inv);
+}
+
+/// Claim at timestamp strictly before `not_before` with a large lock also
+/// panics.  Exercises a different magnitude to guard against off-by-one errors
+/// in the `checked_add` path.
+#[test]
+#[should_panic(expected = "Investor commitment lock not expired (ledger timestamp)")]
+fn claim_well_before_lock_expiry_panics() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let inv = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
+    env.ledger().set_timestamp(5_000);
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "I1_BIGLOCK"),
+        &sme,
+        &1_000i128,
+        &400i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+    );
+
+    let lock_secs: u64 = 86_400; // 24 h
+    client.fund_with_commitment(&inv, &1_000i128, &lock_secs);
+    client.settle();
+
+    // Far before expiry (5000 + 86400 = 91400); claim at 5001.
+    env.ledger().set_timestamp(5_001);
+
+    client.claim_investor_payout(&inv);
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// I-2  Post-lock first claim emits exactly one event
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// After the lock expires the first `claim_investor_payout` must emit exactly
+/// one new event.  We snapshot the total event count before the call and assert
+/// it increases by exactly one.
+///
+/// # Why "total event count + 1"?
+/// Soroban's test environment accumulates events across the whole test.
+/// Asserting the delta is 1 (rather than "> 0") proves a single emission with
+/// no hidden side effects (e.g. spurious collateral or settlement events).
+#[test]
+fn claim_post_lock_emits_exactly_one_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let inv = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
+    env.ledger().set_timestamp(1_000);
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "I2_ONEEVENT"),
+        &sme,
+        &1_000i128,
+        &400i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+    );
+
+    let lock_secs: u64 = 300;
+    client.fund_with_commitment(&inv, &1_000i128, &lock_secs);
+    client.settle();
+
+    // Advance to exactly the expiry boundary.
+    let expiry = 1_000 + lock_secs;
+    env.ledger().set_timestamp(expiry);
+
+    // env.events().all() reflects only the last call's events (not accumulated).
+    // A fresh call to claim_investor_payout must produce exactly one event.
+    client.claim_investor_payout(&inv);
+
+    assert_eq!(
+        env.events().all().events().len(),
+        1,
+        "exactly one InvestorPayoutClaimed event must be emitted on first claim"
+    );
+
+    // Marker must be set.
+    assert!(
+        client.is_investor_claimed(&inv),
+        "is_investor_claimed must be true after first successful claim"
+    );
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// I-3  Second (and further) claim is a strict no-op: no new event, no panic
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// The second call to `claim_investor_payout` for an already-claimed investor
+/// must:
+///   - return without panicking,
+///   - emit zero new events (early-return path in the contract), and
+///   - leave `is_investor_claimed` as `true`.
+///
+/// This is the core idempotency invariant (I-3).
+#[test]
+fn claim_investor_payout_second_call_emits_no_new_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let inv = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
+    env.ledger().set_timestamp(1_000);
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "I3_IDEM"),
+        &sme,
+        &1_000i128,
+        &400i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+    );
+
+    let lock_secs: u64 = 200;
+    client.fund_with_commitment(&inv, &1_000i128, &lock_secs);
+    client.settle();
+
+    env.ledger().set_timestamp(1_000 + lock_secs);
+
+    // ── First claim ──────────────────────────────────────────────────────────
+    // env.events().all() reflects only the last call's events.
+    client.claim_investor_payout(&inv);
+    // Check events immediately — any contract call (including is_investor_claimed)
+    // resets env.events().all() to that call's events, so this must come first.
+    assert_eq!(
+        env.events().all().events().len(),
+        1,
+        "first claim must emit exactly one InvestorPayoutClaimed event"
+    );
+    assert!(client.is_investor_claimed(&inv), "claimed after first call");
+
+    // ── Second claim (must be no-op) ─────────────────────────────────────────
+    // The contract returns early without writing storage or emitting an event.
+    client.claim_investor_payout(&inv);
+    assert_eq!(
+        env.events().all().events().len(),
+        0,
+        "second claim must NOT emit any new InvestorPayoutClaimed event"
+    );
+
+    // Marker must still be true.
+    assert!(
+        client.is_investor_claimed(&inv),
+        "is_investor_claimed must remain true after second call"
+    );
+}
+
+/// Third and fourth calls are also no-ops: the idempotency guarantee holds for
+/// arbitrarily many repeat calls, not just the second.
+#[test]
+fn claim_investor_payout_repeated_calls_are_all_no_ops() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let inv = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
+    env.ledger().set_timestamp(500);
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "I3_REPEATS"),
+        &sme,
+        &1_000i128,
+        &400i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+    );
+
+    let lock_secs: u64 = 100;
+    client.fund_with_commitment(&inv, &1_000i128, &lock_secs);
+    client.settle();
+    env.ledger().set_timestamp(500 + lock_secs);
+
+    client.claim_investor_payout(&inv); // first — effective
+    // env.events().all() is per-call; first call must emit exactly one event.
+    assert_eq!(
+        env.events().all().events().len(),
+        1,
+        "first claim must emit exactly one event"
+    );
+
+    for _ in 0..5 {
+        client.claim_investor_payout(&inv); // 2nd … 6th — all no-ops
+        // Each no-op call must produce zero events (early-return path).
+        assert_eq!(
+            env.events().all().events().len(),
+            0,
+            "none of the repeat calls must emit an event"
+        );
+    }
+    assert!(client.is_investor_claimed(&inv));
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// I-4  Inclusive boundary: claim succeeds at exactly `not_before`
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// The contract uses `now >= not_before` (inclusive).  A claim at timestamp
+/// exactly equal to `deposit_ts + committed_lock_secs` must succeed.
+///
+/// Pair with `claim_before_commitment_lock_panics_with_exact_message` which
+/// verifies the exclusive lower bound (timestamp = expiry - 1 fails).
+#[test]
+fn claim_succeeds_at_exact_not_before_boundary() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let inv = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
+    let deposit_ts: u64 = 9_000;
+    let lock_secs: u64 = 450;
+    let expiry = deposit_ts + lock_secs; // 9450 — the boundary
+
+    env.ledger().set_timestamp(deposit_ts);
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "I4_BOUNDARY"),
+        &sme,
+        &1_000i128,
+        &400i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+    );
+
+    client.fund_with_commitment(&inv, &1_000i128, &lock_secs);
+    client.settle();
+
+    // One second BEFORE expiry must panic (I-1 mirror).
+    let panic_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let env2 = env.clone();
+        env2.ledger().set_timestamp(expiry - 1);
+        client.claim_investor_payout(&inv);
+    }));
+    assert!(
+        panic_result.is_err(),
+        "claim at expiry-1 must panic (pre-lock guard)"
+    );
+
+    // AT expiry must succeed.
+    env.ledger().set_timestamp(expiry);
+    client.claim_investor_payout(&inv);
+
+    assert!(
+        client.is_investor_claimed(&inv),
+        "claim at exact expiry boundary must set the claimed marker"
+    );
+}
+
+/// Claim one second AFTER `not_before` also succeeds (basic post-boundary check).
+#[test]
+fn claim_succeeds_one_second_after_lock_expiry() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let inv = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
+    env.ledger().set_timestamp(3_000);
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "I4_POSTBND"),
+        &sme,
+        &1_000i128,
+        &400i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+    );
+
+    let lock_secs: u64 = 250;
+    client.fund_with_commitment(&inv, &1_000i128, &lock_secs);
+    client.settle();
+
+    env.ledger().set_timestamp(3_000 + lock_secs + 1); // expiry + 1
+    client.claim_investor_payout(&inv);
+    assert!(client.is_investor_claimed(&inv));
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// I-5  Per-investor independence: idempotent second call for A does not affect B
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// Two investors with different lock durations.  After both locks expire, A
+/// claims twice (idempotent) while B has never claimed.  B's `is_investor_claimed`
+/// must remain false; B can subsequently claim once and succeed.
+#[test]
+fn claim_idempotency_of_one_investor_does_not_affect_another() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let inv_a = Address::generate(&env);
+    let inv_b = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
+    env.ledger().set_timestamp(1_000);
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "I5_ISOLATE"),
+        &sme,
+        &2_000i128,
+        &400i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+    );
+
+    client.fund_with_commitment(&inv_a, &1_000i128, &100u64); // A: not_before = 1100
+    client.fund_with_commitment(&inv_b, &1_000i128, &200u64); // B: not_before = 1200
+    client.settle();
+
+    // Advance past both locks.
+    env.ledger().set_timestamp(1_300);
+
+    // A claims twice.
+    // env.events().all() is per-call: first call → 1 event, no-op → 0 events.
+    client.claim_investor_payout(&inv_a);
+    assert_eq!(
+        env.events().all().events().len(),
+        1,
+        "A's first claim must emit exactly one event"
+    );
+    client.claim_investor_payout(&inv_a); // no-op
+    assert_eq!(
+        env.events().all().events().len(),
+        0,
+        "A's second claim must emit no event"
+    );
+
+    // B is still unclaimed.
+    assert!(
+        client.is_investor_claimed(&inv_a),
+        "A must be claimed"
+    );
+    assert!(
+        !client.is_investor_claimed(&inv_b),
+        "B must NOT be claimed yet (A's repeat calls must not affect B)"
+    );
+
+    // B claims once → succeeds.
+    client.claim_investor_payout(&inv_b);
+    assert!(
+        client.is_investor_claimed(&inv_b),
+        "B must be claimed after its own first call"
+    );
+}
+
+/// Lock for investor A blocks A's claim but must not prevent investor B (with
+/// a shorter / expired lock) from claiming successfully in the same escrow.
+#[test]
+fn unexpired_lock_for_a_does_not_block_b() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let inv_a = Address::generate(&env);
+    let inv_b = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
+    env.ledger().set_timestamp(0);
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "I5_CROSS"),
+        &sme,
+        &2_000i128,
+        &400i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+    );
+
+    client.fund_with_commitment(&inv_a, &1_000i128, &1_000u64); // A: not_before = 1000
+    client.fund_with_commitment(&inv_b, &1_000i128, &100u64);   // B: not_before = 100
+    client.settle();
+
+    // Timestamp is between B's expiry and A's expiry.
+    env.ledger().set_timestamp(500);
+
+    // B can claim.
+    client.claim_investor_payout(&inv_b);
+    assert!(client.is_investor_claimed(&inv_b));
+
+    // A's claim must still be blocked.
+    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.claim_investor_payout(&inv_a);
+    }));
+    assert!(res.is_err(), "A's lock is not expired; claim must panic");
+    assert!(!client.is_investor_claimed(&inv_a));
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Zero-lock path: fund_with_commitment(lock = 0) should behave like fund()
+// (no_before = 0; claim is never time-gated)
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// When `committed_lock_secs == 0`, `InvestorClaimNotBefore` is stored as 0.
+/// Since every ledger timestamp satisfies `now >= 0`, the claim is never
+/// time-gated and must succeed at timestamp 0.
+#[test]
+fn claim_with_zero_lock_is_never_time_gated() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let inv = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
+    // Leave ledger at default timestamp (0).
+    client.init(
+        &admin,
+        &String::from_str(&env, "I_ZERO_LK"),
+        &sme,
+        &1_000i128,
+        &400i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+    );
+
+    // Zero lock → not_before stored as 0.
+    client.fund_with_commitment(&inv, &1_000i128, &0u64);
+    client.settle();
+
+    // Claim at timestamp 0 must succeed immediately.
+    client.claim_investor_payout(&inv);
+    assert!(
+        client.is_investor_claimed(&inv),
+        "zero-lock investor must be claimable at timestamp 0"
+    );
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Combined scenario: all five invariants in one lifecycle flow
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// End-to-end scenario exercising all five invariants together.
+///
+/// Timeline:
+///   - t = 0:    init + fund_with_commitment (lock = 400)  → not_before = 400
+///   - t = 0:    settle
+///   - t = 399:  claim → panic (I-1)
+///   - t = 400:  first claim → 1 event emitted (I-2/I-4)
+///   - t = 400:  second claim → 0 events, is_investor_claimed still true (I-3)
+///   - t = 400:  third claim → 0 events (I-3)
+#[test]
+fn combined_idempotency_and_lock_gate_scenario() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let inv = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
+    let deposit_ts: u64 = 0;
+    let lock_secs: u64 = 400;
+    let not_before = deposit_ts + lock_secs; // 400
+
+    env.ledger().set_timestamp(deposit_ts);
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "I_COMBINED"),
+        &sme,
+        &1_000i128,
+        &400i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+    );
+
+    client.fund_with_commitment(&inv, &1_000i128, &lock_secs);
+    client.settle();
+
+    // ── I-1 note ──────────────────────────────────────────────────────────────
+    // Pre-lock panic is verified in the dedicated #[should_panic] test
+    // `claim_before_commitment_lock_panics_with_exact_message`.
+    // We do NOT use catch_unwind here: unwinding a Soroban contract panic
+    // leaves the host in WasmVm/InvalidAction state, corrupting subsequent
+    // calls on the same Env.  I-1 is already fully covered separately.
+
+    // ── I-2 + I-4: first claim at exact boundary emits one event ─────────────
+    // env.events().all() is per-call; a successful first claim emits exactly 1.
+    env.ledger().set_timestamp(not_before);
+    client.claim_investor_payout(&inv);
+    assert_eq!(
+        env.events().all().events().len(),
+        1,
+        "I-2/I-4: exactly one event on first post-lock claim"
+    );
+    assert!(client.is_investor_claimed(&inv), "I-2: marked after first claim");
+
+    // ── I-3: second claim is a no-op ─────────────────────────────────────────
+    // No-op path returns before the event publish; event count for this call = 0.
+    client.claim_investor_payout(&inv);
+    assert_eq!(
+        env.events().all().events().len(),
+        0,
+        "I-3: second claim must not emit a new event"
+    );
+    assert!(client.is_investor_claimed(&inv), "I-3: still marked after second call");
+
+    // ── I-3 (continued): third claim is also a no-op ─────────────────────────
+    client.claim_investor_payout(&inv);
+    assert_eq!(
+        env.events().all().events().len(),
+        0,
+        "I-3: third call must not emit either"
+    );
+}
