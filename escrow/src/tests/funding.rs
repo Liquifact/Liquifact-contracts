@@ -304,9 +304,10 @@ fn test_investor_contribution_overflow_panics_even_if_state_is_inconsistent() {
     env.as_contract(&contract_id, || {
         // Force the contribution near i128::MAX while keeping funded_amount small.
         // `fund` must still trap on contribution overflow even if funded_amount would not.
-        env.storage()
-            .instance()
-            .set(&DataKey::InvestorContribution(investor.clone()), &(i128::MAX - 1));
+        env.storage().instance().set(
+            &DataKey::InvestorContribution(investor.clone()),
+            &(i128::MAX - 1),
+        );
         let mut escrow = LiquifactEscrow::get_escrow(env.clone());
         escrow.funded_amount = 0;
         escrow.status = 0;
@@ -344,9 +345,10 @@ fn test_investor_contribution_overflow_does_not_mutate_state() {
     );
 
     env.as_contract(&contract_id, || {
-        env.storage()
-            .instance()
-            .set(&DataKey::InvestorContribution(investor.clone()), &(i128::MAX - 1));
+        env.storage().instance().set(
+            &DataKey::InvestorContribution(investor.clone()),
+            &(i128::MAX - 1),
+        );
         let mut escrow = LiquifactEscrow::get_escrow(env.clone());
         escrow.funded_amount = 0;
         escrow.status = 0;

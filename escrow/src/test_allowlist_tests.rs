@@ -67,7 +67,10 @@ fn test_enable_and_disable_allowlist() {
     let enabled_events = env.events().all();
     env.as_contract(&contract_id, || {
         assert!(
-            env.storage().instance().get::<DataKey, bool>(&DataKey::AllowlistActive) == Some(true)
+            env.storage()
+                .instance()
+                .get::<DataKey, bool>(&DataKey::AllowlistActive)
+                == Some(true)
         );
     });
 
@@ -75,7 +78,10 @@ fn test_enable_and_disable_allowlist() {
     let disabled_events = env.events().all();
     env.as_contract(&contract_id, || {
         assert!(
-            env.storage().instance().get::<DataKey, bool>(&DataKey::AllowlistActive) == Some(false)
+            env.storage()
+                .instance()
+                .get::<DataKey, bool>(&DataKey::AllowlistActive)
+                == Some(false)
         );
     });
 
@@ -397,7 +403,9 @@ fn test_allowlist_membership_is_persistent_storage() {
             "expected allowlist membership to be stored in persistent storage"
         );
         assert!(
-            !env.storage().instance().has(&DataKey::InvestorAllowlisted(investor)),
+            !env.storage()
+                .instance()
+                .has(&DataKey::InvestorAllowlisted(investor)),
             "allowlist membership must not be stored in instance storage"
         );
     });
@@ -464,7 +472,8 @@ fn test_toggle_investor_off_after_commitment_blocks_follow_on_fund() {
 }
 
 #[test]
-fn test_fund_and_fund_with_commitment_allowed_when_allowlist_disabled_and_investor_explicitly_blocked() {
+fn test_fund_and_fund_with_commitment_allowed_when_allowlist_disabled_and_investor_explicitly_blocked(
+) {
     let env = Env::default();
     env.mock_all_auths();
     let client = deploy(&env);
@@ -515,7 +524,8 @@ fn test_enable_allowlist_mid_funding_blocks_unallowlisted_investor_from_further_
 }
 
 #[test]
-fn test_enable_allowlist_after_commitment_mid_funding_blocks_unallowlisted_investor_from_further_increases() {
+fn test_enable_allowlist_after_commitment_mid_funding_blocks_unallowlisted_investor_from_further_increases(
+) {
     let env = Env::default();
     env.mock_all_auths();
     let client = deploy(&env);
