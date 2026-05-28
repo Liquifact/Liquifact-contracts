@@ -165,6 +165,112 @@ pub const INSTANCE_TTL_MIN_EXTENSION_LEDGERS: u32 = 60 * 60; // Approx. 1h at 1 
 /// Extending persistent allowlist TTL reduces the risk of silent allowlist disablement.
 pub const PERSISTENT_TTL_MIN_EXTENSION_LEDGERS: u32 = 60 * 60; // Approx. 1h at 1 ledger/sec.
 
+/// Stable typed errors emitted by LiquiFact escrow entrypoints.
+///
+/// Codes are append-only: never reuse or renumber a variant. Client SDKs should branch on the
+/// numeric code rather than legacy panic strings. See `docs/escrow-error-messages.md`.
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(u32)]
+pub enum EscrowError {
+    AmountMustBePositive = 1,
+    YieldBpsOutOfRange = 2,
+    EscrowAlreadyInitialized = 3,
+    InvoiceIdInvalidLength = 4,
+    InvoiceIdInvalidCharset = 5,
+    MinContributionNotPositive = 6,
+    MinContributionExceedsAmount = 7,
+    MaxUniqueInvestorsNotPositive = 8,
+    MaxPerInvestorNotPositive = 9,
+    TierYieldOutOfRange = 10,
+    TierYieldBelowBase = 11,
+    TierLockNotIncreasing = 12,
+    TierYieldNotNonDecreasing = 13,
+
+    EscrowNotInitialized = 20,
+    FundingTokenNotSet = 21,
+    TreasuryNotSet = 22,
+
+    LegalHoldBlocksTreasuryDustSweep = 30,
+    SweepAmountNotPositive = 31,
+    SweepAmountExceedsMax = 32,
+    DustSweepNotTerminal = 33,
+    NoFundingTokenBalanceToSweep = 34,
+    EffectiveSweepAmountZero = 35,
+    TransferAmountNotPositive = 36,
+    InsufficientTokenBalanceBeforeTransfer = 37,
+    SenderBalanceUnderflow = 38,
+    RecipientBalanceUnderflow = 39,
+    SenderBalanceDeltaMismatch = 40,
+    RecipientBalanceDeltaMismatch = 41,
+    /// Sweep would reduce the contract balance below outstanding investor liabilities.
+    /// `balance - sweep_amt` must be `>= funded_amount - distributed_principal`.
+    SweepExceedsLiabilityFloor = 42,
+
+    PrimaryAttestationAlreadyBound = 50,
+    AttestationAppendLogCapacityReached = 51,
+
+    CollateralAmountNotPositive = 60,
+    CollateralAssetEmpty = 61,
+    CollateralTimestampBackwards = 62,
+
+    InvestorBatchEmpty = 70,
+    InvestorBatchTooLarge = 71,
+    TargetNotPositive = 72,
+    TargetUpdateNotOpen = 73,
+    TargetBelowFundedAmount = 74,
+    CapLowerNotOpen = 75,
+    NoInvestorCapConfigured = 76,
+    NewCapNotLower = 77,
+    NewCapBelowCurrentFunderCount = 78,
+    MaturityUpdateNotOpen = 79,
+    NewAdminSameAsCurrent = 80,
+
+    MigrationVersionMismatch = 90,
+    AlreadyCurrentSchemaVersion = 91,
+    NoMigrationPath = 92,
+
+    FundingAmountNotPositive = 100,
+    FundingBelowMinContribution = 101,
+    LegalHoldBlocksFunding = 102,
+    EscrowNotOpenForFunding = 103,
+    InvestorNotAllowlisted = 104,
+    InvestorContributionOverflow = 105,
+    InvestorContributionExceedsCap = 106,
+    UniqueInvestorCapReached = 107,
+    TieredSecondDeposit = 108,
+    InvestorClaimTimeOverflow = 109,
+    FundedAmountOverflow = 110,
+
+    LegalHoldBlocksSettlement = 120,
+    SettlementNotFunded = 121,
+    MaturityNotReached = 122,
+    LegalHoldBlocksWithdrawal = 123,
+    WithdrawalNotFunded = 124,
+    LegalHoldBlocksInvestorClaims = 125,
+    NoContributionToClaim = 126,
+    InvestorClaimNotSettled = 127,
+    InvestorCommitmentLockNotExpired = 128,
+    ComputePayoutArithmeticOverflow = 129,
+
+    LegalHoldBlocksCancelFunding = 140,
+    CancelFundingNotOpen = 141,
+    RefundNotCancelled = 142,
+    NoContributionToRefund = 143,
+}
+
+#[inline(always)]
+pub(crate) fn fail(env: &Env, error: EscrowError) -> ! {
+    panic_with_error!(env, error)
+}
+
+#[inline(always)]
+pub(crate) fn ensure(env: &Env, condition: bool, error: EscrowError) {
+    if !condition {
+        fail(env, error);
+    }
+}
+
 // --- Storage keys ---
 
 #[contracttype]
@@ -254,6 +360,11 @@ pub enum DataKey {
     /// Set to `true` once an investor's principal has been refunded in a cancelled escrow.
     /// Absent ⇒ `false`. Written once; prevents double-refund.
     InvestorRefunded(Address),
+    /// Running total of principal already returned to investors via [`LiquifactEscrow::refund`].
+    /// Absent ⇒ `0`. Incremented atomically with each successful refund transfer.
+    /// Used by [`LiquifactEscrow::sweep_terminal_dust`] to compute outstanding liabilities:
+    /// `outstanding = funded_amount - distributed_principal`.
+    DistributedPrincipal,
 }
 
 // --- Data types ---
@@ -835,6 +946,23 @@ impl LiquifactEscrow {
     /// **4 (cancelled)**. Open (0) or funded (1) states reject the call so live principal cannot
     /// be swept as dust.
     ///
+    /// # Liability floor invariant
+    /// In **cancelled** (status 4) escrows, the sweep is rejected if it would reduce the
+    /// contract's token balance below the amount still owed to investors who have not yet
+    /// called [`LiquifactEscrow::refund`]:
+    ///
+    /// ```text
+    /// outstanding = funded_amount - distributed_principal
+    /// assert balance - sweep_amt >= outstanding
+    /// ```
+    ///
+    /// `distributed_principal` ([`DataKey::DistributedPrincipal`]) is incremented atomically
+    /// by [`LiquifactEscrow::refund`] each time an investor's principal is returned. This makes
+    /// the invariant computable on-chain without iterating over all investor addresses.
+    ///
+    /// In **settled** (2) and **withdrawn** (3) states, disbursement is off-chain and this
+    /// floor does not apply.
+    ///
     /// # Authorization
     /// The configured **treasury** account must authorize this call; the admin cannot sweep unless
     /// it is also the treasury.
@@ -843,7 +971,8 @@ impl LiquifactEscrow {
     ///
     /// # Errors
     /// Emits typed [`EscrowError`] codes for legal hold, invalid sweep amount, non-terminal state,
-    /// missing initialized addresses, empty balances, and token transfer invariant failures.
+    /// missing initialized addresses, empty balances, liability floor violation, and token
+    /// transfer invariant failures.
     pub fn sweep_terminal_dust(env: Env, amount: i128) -> i128 {
         ensure(
             &env,
@@ -884,6 +1013,32 @@ impl LiquifactEscrow {
         ensure(&env, balance > 0, EscrowError::NoFundingTokenBalanceToSweep);
         let sweep_amt = amount.min(balance);
         ensure(&env, sweep_amt > 0, EscrowError::EffectiveSweepAmountZero);
+
+        // Liability floor (cancelled escrows only): sweep must not reduce the balance below
+        // principal still owed to investors who have not yet called refund().
+        //
+        // In settled (2) and withdrawn (3) states, disbursement is off-chain and
+        // distributed_principal stays 0, so the floor is not applicable there.
+        // In cancelled (4) state, refund() is the on-chain redemption path and increments
+        // distributed_principal atomically, making the invariant computable here.
+        //
+        // outstanding = funded_amount - distributed_principal
+        // Invariant: balance - sweep_amt >= outstanding
+        if escrow.status == 4 {
+            let distributed: i128 = env
+                .storage()
+                .instance()
+                .get(&DataKey::DistributedPrincipal)
+                .unwrap_or(0);
+            let outstanding = escrow.funded_amount.saturating_sub(distributed);
+            // sweep_amt <= balance (from amount.min(balance) above), so this subtraction is safe.
+            let balance_after_sweep = balance - sweep_amt;
+            ensure(
+                &env,
+                balance_after_sweep >= outstanding,
+                EscrowError::SweepExceedsLiabilityFloor,
+            );
+        }
 
         external_calls::transfer_funding_token_with_balance_checks(
             &env,
@@ -2086,6 +2241,16 @@ impl LiquifactEscrow {
             .instance()
             .set(&DataKey::InvestorRefunded(investor.clone()), &true);
 
+        // Track distributed principal so sweep_terminal_dust can enforce the liability floor.
+        let prev_distributed: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::DistributedPrincipal)
+            .unwrap_or(0);
+        env.storage()
+            .instance()
+            .set(&DataKey::DistributedPrincipal, &prev_distributed.saturating_add(amount));
+
         let token_addr: Address = env
             .storage()
             .instance()
@@ -2116,6 +2281,17 @@ impl LiquifactEscrow {
             .instance()
             .get(&DataKey::InvestorRefunded(investor))
             .unwrap_or(false)
+    }
+
+    /// Total principal already returned to investors via [`LiquifactEscrow::refund`].
+    ///
+    /// Used by [`LiquifactEscrow::sweep_terminal_dust`] to compute outstanding liabilities.
+    /// Absent ⇒ `0` (no refunds have occurred).
+    pub fn get_distributed_principal(env: Env) -> i128 {
+        env.storage()
+            .instance()
+            .get(&DataKey::DistributedPrincipal)
+            .unwrap_or(0)
     }
 }
 

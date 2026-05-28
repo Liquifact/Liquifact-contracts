@@ -198,3 +198,247 @@ fn test_edge_case_maximum_amount_transfer() {
     assert_eq!(holder_after, 0i128);
     assert_eq!(treasury_after, large_amount);
 }
+
+// ── Liability floor tests for sweep_terminal_dust ────────────────────────────
+
+fn setup_cancelled_with_token<'a>(
+    env: &'a Env,
+    client: &LiquifactEscrowClient<'a>,
+    admin: &Address,
+    sme: &Address,
+    investor: &Address,
+    fund_amount: i128,
+) -> (crate::tests::StellarTestToken<'a>, Address) {
+    let token = install_stellar_asset_token(env);
+    let treasury = Address::generate(env);
+    client.init(
+        admin,
+        &soroban_sdk::String::from_str(env, "FLOOR01"),
+        sme,
+        &fund_amount,
+        &0i64,
+        &0u64,
+        &token.id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+    // Mint tokens into the contract to simulate on-chain custody
+    token.stellar.mint(&client.address, &fund_amount);
+    client.fund(investor, &fund_amount);
+    client.cancel_funding();
+    (token, treasury)
+}
+
+#[test]
+fn sweep_liability_floor_allows_true_dust_after_all_refunded() {
+    // After all investors are refunded, outstanding = 0, so any dust can be swept.
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    let fund_amount = 1_000i128;
+    let (token, treasury) = setup_cancelled_with_token(&env, &client, &admin, &sme, &investor, fund_amount);
+
+    // Mint 1 extra unit of dust on top of the principal
+    token.stellar.mint(&client.address, &1i128);
+
+    // Refund the investor — this increments DistributedPrincipal by fund_amount
+    client.refund(&investor);
+
+    // Now outstanding = funded_amount - distributed = 1000 - 1000 = 0
+    // balance = 1 (the dust), sweep_amt = 1, floor check: 1 - 1 >= 0 ✓
+    let swept = client.sweep_terminal_dust(&1i128);
+    assert_eq!(swept, 1i128);
+    assert_eq!(token.token.balance(&treasury), 1i128);
+    assert_eq!(client.get_distributed_principal(), fund_amount);
+}
+
+#[test]
+#[should_panic]
+fn sweep_liability_floor_blocks_sweep_when_investor_not_yet_refunded() {
+    // No refunds yet: outstanding = funded_amount, balance = funded_amount.
+    // Any sweep would dip below the floor.
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    let fund_amount = 1_000i128;
+    let (token, _treasury) = setup_cancelled_with_token(&env, &client, &admin, &sme, &investor, fund_amount);
+
+    // balance == outstanding == 1000; sweep of even 1 unit violates the floor
+    client.sweep_terminal_dust(&1i128);
+}
+
+#[test]
+fn sweep_liability_floor_allows_sweep_of_excess_above_outstanding() {
+    // Two investors fund 500 each. One is refunded. 500 outstanding remains.
+    // Contract has 1001 tokens (500 refunded, 500 outstanding, 1 dust).
+    // Sweep of 1 is allowed; sweep of 501 is not.
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let investor_a = Address::generate(&env);
+    let investor_b = Address::generate(&env);
+    let token = install_stellar_asset_token(&env);
+    let treasury = Address::generate(&env);
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "FLOOR02"),
+        &sme,
+        &1_000i128,
+        &0i64,
+        &0u64,
+        &token.id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    // Mint 1001 into contract: 500 for A, 500 for B, 1 dust
+    token.stellar.mint(&client.address, &1_001i128);
+    client.fund(&investor_a, &500i128);
+    client.fund(&investor_b, &500i128);
+    client.cancel_funding();
+
+    // Refund investor_a → distributed = 500, outstanding = 500
+    client.refund(&investor_a);
+    assert_eq!(client.get_distributed_principal(), 500i128);
+
+    // balance = 501 (500 for B + 1 dust), outstanding = 500
+    // sweep of 1: 501 - 1 = 500 >= 500 ✓
+    let swept = client.sweep_terminal_dust(&1i128);
+    assert_eq!(swept, 1i128);
+    assert_eq!(token.token.balance(&treasury), 1i128);
+}
+
+#[test]
+#[should_panic]
+fn sweep_liability_floor_blocks_sweep_that_would_eat_into_outstanding() {
+    // Same setup as above but try to sweep 2 (which would leave 499 < 500 outstanding).
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let investor_a = Address::generate(&env);
+    let investor_b = Address::generate(&env);
+    let token = install_stellar_asset_token(&env);
+    let treasury = Address::generate(&env);
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "FLOOR03"),
+        &sme,
+        &1_000i128,
+        &0i64,
+        &0u64,
+        &token.id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    token.stellar.mint(&client.address, &1_001i128);
+    client.fund(&investor_a, &500i128);
+    client.fund(&investor_b, &500i128);
+    client.cancel_funding();
+    client.refund(&investor_a);
+
+    // balance = 501, outstanding = 500; sweep of 2 → 501 - 2 = 499 < 500 ✗
+    client.sweep_terminal_dust(&2i128);
+}
+
+#[test]
+fn sweep_liability_floor_zero_funded_amount_allows_sweep() {
+    // Edge case: escrow cancelled before any funding. funded_amount = 0,
+    // distributed = 0, outstanding = 0. Any dust can be swept.
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let token = install_stellar_asset_token(&env);
+    let treasury = Address::generate(&env);
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "FLOOR04"),
+        &sme,
+        &1_000i128,
+        &0i64,
+        &0u64,
+        &token.id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+    client.cancel_funding();
+
+    // Stray airdrop of 50 tokens
+    token.stellar.mint(&client.address, &50i128);
+
+    let swept = client.sweep_terminal_dust(&50i128);
+    assert_eq!(swept, 50i128);
+    assert_eq!(token.token.balance(&treasury), 50i128);
+}
+
+#[test]
+fn distributed_principal_accumulates_across_multiple_refunds() {
+    // Three investors; refund them one by one and verify the counter.
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let inv_a = Address::generate(&env);
+    let inv_b = Address::generate(&env);
+    let inv_c = Address::generate(&env);
+    let token = install_stellar_asset_token(&env);
+    let treasury = Address::generate(&env);
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "FLOOR05"),
+        &sme,
+        &900i128,
+        &0i64,
+        &0u64,
+        &token.id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    token.stellar.mint(&client.address, &900i128);
+    client.fund(&inv_a, &300i128);
+    client.fund(&inv_b, &300i128);
+    client.fund(&inv_c, &300i128);
+    client.cancel_funding();
+
+    assert_eq!(client.get_distributed_principal(), 0i128);
+
+    client.refund(&inv_a);
+    assert_eq!(client.get_distributed_principal(), 300i128);
+
+    client.refund(&inv_b);
+    assert_eq!(client.get_distributed_principal(), 600i128);
+
+    client.refund(&inv_c);
+    assert_eq!(client.get_distributed_principal(), 900i128);
+
+    // All refunded — outstanding = 0, any dust can be swept
+    token.stellar.mint(&client.address, &5i128);
+    let swept = client.sweep_terminal_dust(&5i128);
+    assert_eq!(swept, 5i128);
+}
