@@ -1,191 +1,188 @@
 # Escrow Data Model
 
-This document describes every value persisted by the LiquiFact escrow contract, how keys are
-structured in Soroban instance storage, and the rules that govern adding new keys without breaking
-existing deployments.
+Every value persisted by the LiquiFact escrow contract, its storage tier, value type,
+default-on-absence behavior, and the schema version that introduced it.
 
-For the policy that governs schema evolution see [ADR-007](adr/ADR-007-storage-key-evolution.md).
-
----
-
-## Storage backend
-
-Most keys use `env.storage().instance()`. Instance storage is scoped to a single contract address
-and is loaded in full on every host-function invocation.
-
-The contract also uses `env.storage().persistent()` for allowlist membership entries
-(`DataKey::InvestorAllowlisted(Address)`), which are per-address and naturally modeled as
-independent persistent keys (see Stellar/Soroban storage guidance on instance vs persistent
-storage).
-
-Consequence: the total serialised size of all instance entries must stay within Soroban's
-contract-data entry limit. The investor-contribution map is the main growth vector; it is bounded
-by `MaxUniqueInvestorsCap` (default 128 per the README guardrails).
+For the evolution policy see [ADR-007](adr/ADR-007-storage-key-evolution.md).
 
 ---
 
-## `DataKey` enum — complete reference
+## Storage tiers
 
-`DataKey` is a `#[contracttype]` enum. Each variant becomes a distinct XDR-encoded key in the
-instance storage map. The enum derives `Clone` so key values can be reused across get/set calls in
-the same execution path without moving ownership.
+| Tier | API | Scope | TTL |
+|------|-----|-------|-----|
+| **Instance** | `env.storage().instance()` | Loaded in full on every invocation | Shared with the contract instance; extend via `bump_ttl` |
+| **Persistent** | `env.storage().persistent()` | Independent per-key entry | Per-key; must be extended independently |
 
-### Scalar keys (always present after `init`)
+All `DataKey` variants use **instance** storage except `InvestorAllowlisted(Address)`, which uses
+**persistent** storage. This split means allowlist entries can expire independently of the rest of
+the contract state — operators must extend both tiers together (see §5.4 of
+`docs/escrow-security-checklist.md`).
 
-| Variant | Rust type stored | Set by | Mutable? |
-|---------|-----------------|--------|----------|
-| `Escrow` | `InvoiceEscrow` | `init`, every state-changing entrypoint | Yes — rewritten atomically on each transition |
-| `Version` | `u32` | `init` | Only via `migrate` |
-| `FundingToken` | `Address` | `init` | No — immutable after init |
-| `Treasury` | `Address` | `init` | No — immutable after init |
-| `MinContributionFloor` | `i128` | `init` | No |
-| `UniqueFunderCount` | `u32` | `init` (0), incremented by `fund_impl` | Yes — incremented on each new investor |
-| `LegalHold` | `bool` | `set_legal_hold` / `clear_legal_hold` | Yes — toggled by admin |
+---
 
-`MinContributionFloor` is written as `0` even when no floor is configured, so reads always succeed
-with `unwrap_or(0)`.
+## `DataKey` complete reference
 
-### Optional scalar keys (present only when configured)
+`DataKey` is a `#[contracttype]` enum. Each variant is XDR-encoded as a distinct key.
+`Clone` is derived so keys can be reused across get/set calls without moving ownership.
 
-| Variant | Rust type stored | Set by | Notes |
-|---------|-----------------|--------|-------|
-| `RegistryRef` | `Address` | `init` (when `registry` arg is `Some`) | Hint only — not an on-chain authority |
-| `YieldTierTable` | `Vec<YieldTier>` | `init` (when non-empty tiers supplied) | Immutable after init |
-| `FundingCloseSnapshot` | `FundingCloseSnapshot` | `fund_impl` on first transition to `status == 1` | Immutable once written |
-| `SmeCollateralPledge` | `SmeCollateralCommitment` | `record_sme_collateral_commitment` | Record-only; replaceable by SME |
-| `MaxUniqueInvestorsCap` | `u32` | `init` (when `max_unique_investors` arg is `Some`) | Absent means unlimited |
-| `PrimaryAttestationHash` | `BytesN<32>` | `bind_primary_attestation_hash` | Single-set; panics on second call |
-| `AttestationAppendLog` | `Vec<BytesN<32>>` | `append_attestation_digest` | Bounded by `MAX_ATTESTATION_APPEND_ENTRIES` (32) |
+### Schema version changelog
 
-### Per-address keys (one entry per investor address)
+| Version | Keys added | Upgrade path |
+|---------|-----------|-------------|
+| 1 | `Escrow`, `Version`, `InvestorContribution`, `LegalHold`, `SmeCollateralPledge`, `InvestorClaimed`, `FundingToken` | N/A |
+| 2 | `InvestorEffectiveYield`, `InvestorClaimNotBefore` | Additive — old instances return defaults |
+| 3 | `FundingCloseSnapshot`, `MinContributionFloor`, `MaxUniqueInvestorsCap`, `MaxPerInvestorCap`, `PendingAdmin`, `UniqueFunderCount` | Additive — old instances return defaults |
+| 4 | `PrimaryAttestationHash`, `AttestationAppendLog` | Additive — old instances return defaults |
+| 5 | `Treasury`, `RegistryRef`, `YieldTierTable`, `AllowlistActive`, `InvestorAllowlisted`, `InvestorRefunded` | Redeploy required if `InvoiceEscrow` XDR changed |
+| 5† | `DistributedPrincipal` | Additive — old instances return `0` |
 
-These variants carry an `Address` discriminator so each investor gets an independent storage slot.
+† Added after the v5 tag; backward-compatible additive key.
 
-| Variant | Rust type stored | Set by | Default when absent |
-|---------|-----------------|--------|---------------------|
-| `InvestorContribution(Address)` | `i128` | `fund_impl` | `0` |
-| `InvestorClaimed(Address)` | `bool` | `claim_investor_payout` | `false` |
-| `InvestorEffectiveYield(Address)` | `i64` (bps) | `fund_impl` on first deposit | `InvoiceEscrow::yield_bps` |
-| `InvestorClaimNotBefore(Address)` | `u64` (ledger timestamp) | `fund_impl` on first deposit | `0` (no gate) |
+---
 
-All four per-address keys are written together on an investor's first `fund` or
-`fund_with_commitment` call. Subsequent `fund` calls update only `InvestorContribution`.
+### All keys
 
-### Per-address keys in persistent storage (allowlist)
+| Variant | Storage | Value type | Default when absent | Schema version | Mutable? |
+|---------|---------|-----------|---------------------|---------------|---------|
+| `Escrow` | instance | `InvoiceEscrow` | — (panics if absent) | 1 | Yes — rewritten on every state transition |
+| `Version` | instance | `u32` | `0` | 1 | Only via `migrate` |
+| `InvestorContribution(Address)` | instance | `i128` | `0` | 1 | Yes — incremented per deposit; zeroed on `refund` |
+| `LegalHold` | instance | `bool` | `false` | 1 | Yes — toggled by admin |
+| `SmeCollateralPledge` | instance | `SmeCollateralCommitment` | absent | 1 | Yes — replaceable by SME |
+| `InvestorClaimed(Address)` | instance | `bool` | `false` | 1 | Write-once `true`; second claim is a no-op |
+| `FundingToken` | instance | `Address` | — (panics if absent) | 1 | No — immutable after init |
+| `Treasury` | instance | `Address` | — (panics if absent) | 5 | No — immutable after init |
+| `RegistryRef` | instance | `Address` | `None` | 5 | No — hint only, not an authority |
+| `YieldTierTable` | instance | `Vec<YieldTier>` | absent (base yield applies) | 5 | No — immutable after init |
+| `FundingCloseSnapshot` | instance | `FundingCloseSnapshot` | absent | 3 | Write-once on first `status → 1` |
+| `InvestorEffectiveYield(Address)` | instance | `i64` (bps) | `InvoiceEscrow::yield_bps` | 2 | Write-once on first deposit |
+| `InvestorClaimNotBefore(Address)` | instance | `u64` (ledger timestamp) | `0` (no gate) | 2 | Write-once on first deposit |
+| `MinContributionFloor` | instance | `i128` | `0` (no floor) | 3 | No — written as `0` even when unconfigured |
+| `MaxUniqueInvestorsCap` | instance | `u32` | absent (unlimited) | 3 | Lowerable via `lower_max_unique_investors` |
+| `MaxPerInvestorCap` | instance | `i128` | absent (unlimited) | 3 | No — immutable after init |
+| `PendingAdmin` | instance | `Address` | absent (no handover) | 3 | Set by `propose_admin`; cleared by `accept_admin` |
+| `UniqueFunderCount` | instance | `u32` | `0` | 3 | Yes — incremented once per new investor |
+| `PrimaryAttestationHash` | instance | `BytesN<32>` | absent | 4 | Write-once; panics on second call |
+| `AttestationAppendLog` | instance | `Vec<BytesN<32>>` | absent (empty) | 4 | Append-only; bounded at 32 entries |
+| `AllowlistActive` | instance | `bool` | `false` | 5 | Yes — toggled by admin |
+| `InvestorAllowlisted(Address)` | **persistent** | `bool` | `false` | 5 | Yes — set by admin |
+| `InvestorRefunded(Address)` | instance | `bool` | `false` | 5 | Write-once `true`; prevents double-refund |
+| `DistributedPrincipal` | instance | `i128` | `0` | 5† | Yes — incremented by `refund` |
 
-These entries live in **persistent** storage (not instance storage).
+---
 
-| Variant | Rust type stored | Set by | Default when absent |
-|---------|------------------|--------|---------------------|
-| `InvestorAllowlisted(Address)` | `bool` | `set_investor_allowlisted` | `false` |
+### Per-address keys
 
-When `AllowlistActive` is enabled (instance storage flag), `fund_impl` gates `fund` and
-`fund_with_commitment` by asserting `InvestorAllowlisted(investor) == true`. Only the admin may
-mutate allowlist membership.
+These variants carry an `Address` discriminator — each investor address gets an independent slot.
+
+**Instance storage (per-investor):**
+- `InvestorContribution(Address)` — principal credited; zeroed when `refund` runs
+- `InvestorClaimed(Address)` — settlement claim marker (event only, no token transfer)
+- `InvestorEffectiveYield(Address)` — yield bps locked at first deposit
+- `InvestorClaimNotBefore(Address)` — claim lock timestamp from `fund_with_commitment`
+- `InvestorRefunded(Address)` — double-refund guard in cancelled escrows
+
+**Persistent storage (per-investor):**
+- `InvestorAllowlisted(Address)` — funding gate when `AllowlistActive` is true
+
+The persistent/instance split means `InvestorAllowlisted` entries have a different TTL lifecycle
+from all other keys. If instance storage expires and `AllowlistActive` defaults to `false`, the
+allowlist gate silently disables even if persistent entries remain. Always extend both tiers
+together via `bump_ttl`.
 
 ---
 
 ## Stored struct reference
 
-### `InvoiceEscrow` (stored at `DataKey::Escrow`)
+### `InvoiceEscrow` — `DataKey::Escrow`
 
 ```rust
 pub struct InvoiceEscrow {
-    pub invoice_id: Symbol,       // validated ASCII [A-Za-z0-9_], max 32 chars
+    pub invoice_id: Symbol,       // ASCII [A-Za-z0-9_], max 32 chars
     pub admin: Address,
     pub sme_address: Address,
-    pub amount: i128,             // original invoice face value
-    pub funding_target: i128,     // may be updated while status == 0
+    pub amount: i128,             // original invoice face value (> 0)
+    pub funding_target: i128,     // updatable while status == 0
     pub funded_amount: i128,      // running total; checked_add on each fund call
     pub yield_bps: i64,           // base annualised yield, 0..=10_000
     pub maturity: u64,            // ledger timestamp; 0 = no maturity gate
-    pub status: u32,              // 0=open 1=funded 2=settled 3=withdrawn
+    pub status: u32,              // see state machine below
 }
 ```
 
-`status` transitions are strictly forward. See [ADR-001](adr/ADR-001-state-model.md).
+**Status values:**
 
-### `FundingCloseSnapshot` (stored at `DataKey::FundingCloseSnapshot`)
+| Value | Name | Terminal? | Sweep allowed? |
+|-------|------|-----------|---------------|
+| 0 | open | No | No |
+| 1 | funded | No | No |
+| 2 | settled | Yes | Yes |
+| 3 | withdrawn | Yes | Yes |
+| 4 | cancelled | Yes | Yes (liability floor applies) |
+
+Transitions are strictly forward: `0→1→2`, `0→1→3`, `0→4`. No entrypoint decrements status.
+
+### `FundingCloseSnapshot` — `DataKey::FundingCloseSnapshot`
 
 ```rust
 pub struct FundingCloseSnapshot {
-    pub total_principal: i128,           // funded_amount at the moment status became 1
+    pub total_principal: i128,           // funded_amount at status → 1 (includes over-funding)
     pub funding_target: i128,
     pub closed_at_ledger_timestamp: u64,
     pub closed_at_ledger_sequence: u32,
 }
 ```
 
-Written once, atomically, inside `fund_impl` on the first transition to `status == 1`. Immutable
-thereafter. Off-chain pro-rata share: `get_contribution(addr) / snapshot.total_principal`.
+Written once inside `fund_impl` on the first `status → 1` transition. Immutable thereafter.
+Pro-rata share: `get_contribution(addr) / snapshot.total_principal`.
 
-### `SmeCollateralCommitment` (stored at `DataKey::SmeCollateralPledge`)
+### `SmeCollateralCommitment` — `DataKey::SmeCollateralPledge`
 
 ```rust
 pub struct SmeCollateralCommitment {
     pub asset: Symbol,
     pub amount: i128,
-    pub recorded_at: u64,   // ledger timestamp at record time
+    pub recorded_at: u64,
 }
 ```
 
-Record-only. Does not custody tokens or trigger liquidation.
+Record-only metadata. Does not custody tokens, create a lien, or trigger liquidation.
 
-### `YieldTier` (element of `Vec<YieldTier>` at `DataKey::YieldTierTable`)
+### `YieldTier` — element of `DataKey::YieldTierTable`
 
 ```rust
 pub struct YieldTier {
-    pub min_lock_secs: u64,
-    pub yield_bps: i64,
+    pub min_lock_secs: u64,   // strictly increasing across tiers
+    pub yield_bps: i64,       // non-decreasing, each >= base yield_bps
 }
 ```
 
-Validated at `init`: `min_lock_secs` strictly increasing, `yield_bps` non-decreasing and each
-`>= base yield_bps`. See [ADR-005](adr/ADR-005-tiered-yield.md).
+Validated at `init`. Immutable after init. Used by `fund_with_commitment` to select effective yield.
 
 ---
 
-## Schema version
-
-`DataKey::Version` stores a `u32` written as `SCHEMA_VERSION` (currently `5`) at `init`. The
-`migrate` entrypoint validates `from_version == stored` before applying any migration path. No
-migration paths are currently implemented; adding a new optional key does not require a version bump
-(see additive-key policy below).
-
----
-
-## Additive-key policy
+## Additive-key policy (ADR-007)
 
 A new `DataKey` variant is **backward-compatible** when:
-
-1. It is read with `.get(...).unwrap_or(default)` so old deployments (where the key is absent)
-   behave as "unset / default".
-2. It does not change the XDR shape of any existing variant or stored struct.
-3. It does not alter the semantics of existing entrypoints when absent.
+1. Read with `.get(...).unwrap_or(default)` — absent on old deployments returns the default.
+2. Does not change the XDR shape of any existing variant or stored struct.
+3. Does not alter existing entrypoint semantics when absent.
 
 A change is **breaking** (requires migration or redeploy) when:
-
-- An existing stored struct gains a required field (e.g. a new non-optional field on
-  `InvoiceEscrow`).
+- An existing stored struct gains a required field.
 - An existing `DataKey` variant is renamed or its XDR discriminant changes.
-- An existing key's stored type changes (e.g. `LegalHold` from `bool` to `u32`).
+- An existing key's stored type changes.
 
-See [ADR-007](adr/ADR-007-storage-key-evolution.md) for the full decision record and compatibility
-test plan.
+`migrate` validates `stored_version == from_version` before any write. No migration paths are
+currently implemented. Adding an optional key with `unwrap_or` does not require a version bump.
 
 ---
 
 ## Security notes
 
-- **Token economics:** `external_calls::transfer_funding_token_with_balance_checks` asserts exact
-  pre/post balance deltas. Fee-on-transfer or rebasing tokens are out of scope and will cause a
-  safe panic. See [ADR-006](adr/ADR-006-dust-sweep-and-token-safety.md).
-- **Collateral record:** `SmeCollateralPledge` is metadata only. It is not proof of encumbrance
-  until a future version explicitly enforces token transfers.
-- **Registry hint:** `RegistryRef` must not be used as an authority without verifying registry
-  behavior off-chain or in a dedicated integration.
-- **Attestation digests:** `PrimaryAttestationHash` and `AttestationAppendLog` store raw byte
-  digests. The contract does not verify what the digest commits to; that is an off-chain concern.
-- **Storage growth:** per-address keys grow linearly with investor count. `MaxUniqueInvestorsCap`
-  (default 128) bounds this. Any schema change that adds per-address keys must re-evaluate the
-  storage footprint against Soroban's contract-data entry limits.
+- **`DistributedPrincipal`** is incremented before the token transfer in `refund` (checks-effects-interactions). `sweep_terminal_dust` uses it to enforce the liability floor in cancelled escrows: `balance - sweep_amt >= funded_amount - distributed_principal`.
+- **`InvestorRefunded`** is a double-spend guard. `InvestorContribution` is zeroed before the transfer; a second `refund` call fails at the `amount > 0` check.
+- **`InvestorClaimed`** is an event marker only — no token transfer occurs. Off-chain systems must implement their own idempotency.
+- **`AllowlistActive` / `InvestorAllowlisted` TTL mismatch** — see §5.4 of `docs/escrow-security-checklist.md`.
+- **Storage growth** — per-address instance keys grow linearly with investor count. `MaxUniqueInvestorsCap` bounds this. Any new per-address key must re-evaluate the instance storage footprint.

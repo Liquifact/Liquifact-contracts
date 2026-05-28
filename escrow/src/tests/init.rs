@@ -817,3 +817,74 @@ proptest! {
         );
     }
 }
+
+// ── DataKey default-on-absence verification (docs/escrow-data-model.md) ──────
+
+#[test]
+fn datakey_defaults_on_fresh_init() {
+    // Verifies that every key documented as "absent ⇒ default" actually returns
+    // the documented default on a freshly initialised escrow with no optional
+    // configuration supplied.
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    // Absent ⇒ false
+    assert!(!client.get_legal_hold());
+    assert!(!client.is_investor_allowlisted(&investor));
+    assert!(!client.is_allowlist_active());
+    assert!(!client.is_investor_refunded(&investor));
+
+    // Absent ⇒ 0
+    assert_eq!(client.get_contribution(&investor), 0i128);
+    assert_eq!(client.get_min_contribution_floor(), 0i128);
+    assert_eq!(client.get_unique_funder_count(), 0u32);
+    assert_eq!(client.get_distributed_principal(), 0i128);
+
+    // Optional caps absent ⇒ None
+    assert!(client.get_max_unique_investors_cap().is_none());
+    assert!(client.get_max_per_investor_cap().is_none());
+
+    // FundingCloseSnapshot absent until funded
+    assert!(client.get_funding_close_snapshot().is_none());
+
+    // Version written at init
+    assert_eq!(client.get_version(), crate::SCHEMA_VERSION);
+}
+
+#[test]
+fn datakey_distributed_principal_starts_at_zero_and_increments_on_refund() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    let token = install_stellar_asset_token(&env);
+    let treasury = Address::generate(&env);
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "DKTEST1"),
+        &sme,
+        &500i128,
+        &0i64,
+        &0u64,
+        &token.id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    assert_eq!(client.get_distributed_principal(), 0i128);
+
+    token.stellar.mint(&client.address, &500i128);
+    client.fund(&investor, &500i128);
+    client.cancel_funding();
+
+    assert_eq!(client.get_distributed_principal(), 0i128);
+
+    client.refund(&investor);
+    assert_eq!(client.get_distributed_principal(), 500i128);
+}
