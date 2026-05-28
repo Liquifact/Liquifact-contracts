@@ -303,6 +303,7 @@ fn test_lower_max_unique_investors_success() {
         &None,
         &None,
         &Some(5u32),
+        &None,
     );
 
     let inv1 = Address::generate(&env);
@@ -338,6 +339,7 @@ fn test_lower_cap_blocks_new_investors_at_lowered_limit() {
         &None,
         &None,
         &Some(3u32),
+        &None,
     );
 
     client.fund(&Address::generate(&env), &20_000_000_000i128);
@@ -368,6 +370,7 @@ fn test_lower_cap_existing_investors_may_refund() {
         &None,
         &None,
         &Some(3u32),
+        &None,
     );
 
     let inv1 = Address::generate(&env);
@@ -403,6 +406,7 @@ fn test_lower_cap_rejects_raise() {
         &None,
         &None,
         &Some(3u32),
+        &None,
     );
 
     client.lower_max_unique_investors(&4u32);
@@ -430,6 +434,7 @@ fn test_lower_cap_rejects_below_funder_count() {
         &None,
         &None,
         &Some(5u32),
+        &None,
     );
 
     client.fund(&Address::generate(&env), &10_000_000_000i128);
@@ -460,6 +465,7 @@ fn test_lower_cap_rejects_non_open_state() {
         &None,
         &None,
         &Some(3u32),
+        &None,
     );
 
     client.fund(&Address::generate(&env), &100_000_000_000i128);
@@ -489,6 +495,7 @@ fn test_lower_cap_rejects_unlimited_escrow() {
         &None,
         &None,
         &None,
+        &None,
     );
 
     client.lower_max_unique_investors(&10u32);
@@ -515,6 +522,7 @@ fn test_lower_cap_requires_admin_auth() {
         &None,
         &None,
         &Some(5u32),
+        &None,
     );
 
     client.lower_max_unique_investors(&3u32);
@@ -546,6 +554,7 @@ fn test_lower_cap_unauthorized_panics() {
         &None,
         &None,
         &Some(5u32),
+        &None,
     );
 
     env.mock_auths(&[]);
@@ -576,6 +585,7 @@ fn test_lower_cap_emits_event() {
         &None,
         &None,
         &Some(5u32),
+        &None,
     );
 
     client.fund(&Address::generate(&env), &10_000_000_000i128);

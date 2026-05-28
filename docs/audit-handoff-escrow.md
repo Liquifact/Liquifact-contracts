@@ -64,7 +64,7 @@ These map directly to property tests in `escrow/src/test/properties.rs` and `tes
 
 | Role | Stored at | Entrypoints authorized |
 |------|-----------|------------------------|
-| `admin` | `InvoiceEscrow::admin` (rotatable via `transfer_admin`) | `init`, `set_legal_hold`, `clear_legal_hold`, `update_maturity`, `update_funding_target`, `transfer_admin`, `migrate`, `bind_primary_attestation_hash`, `append_attestation_digest` |
+| `admin` | `InvoiceEscrow::admin` (rotatable via `propose_admin` + `accept_admin`) | `init`, `set_legal_hold`, `clear_legal_hold`, `update_maturity`, `update_funding_target`, `propose_admin`, `accept_admin`, `migrate`, `bind_primary_attestation_hash`, `append_attestation_digest` |
 | `sme_address` | `InvoiceEscrow::sme_address` (immutable) | `settle`, `withdraw`, `record_sme_collateral_commitment` |
 | `investor` | per-call argument (verified via `require_auth`) | `fund`, `fund_with_commitment`, `claim_investor_payout` |
 | `treasury` | `DataKey::Treasury` (immutable) | `sweep_terminal_dust` |
@@ -102,7 +102,8 @@ Read-only getters are never blocked. Only `admin` can set or clear the hold. The
 | `set_legal_hold(true)` | `LegalHoldChanged` | `legalhld` | Alert compliance dashboard; suspend investor UI funding flows |
 | `set_legal_hold(false)` / `clear_legal_hold` | `LegalHoldChanged` | `legalhld` | Resume operations; notify relevant parties |
 | `update_maturity` | `MaturityUpdatedEvent` | `maturity` | Update off-chain settlement schedule; re-notify investors if material |
-| `transfer_admin` | `AdminTransferredEvent` | `admin` | Update key registry and access control records |
+| `propose_admin` | `AdminProposedEvent` | `adm_prop` | Notify proposed successor; keep current admin active until acceptance |
+| `accept_admin` | `AdminTransferredEvent` | `admin` | Update key registry and access control records; confirm pending proposal cleared |
 | `update_funding_target` | `FundingTargetUpdated` | `fund_tgt` | Update off-chain target display; re-evaluate investor communications |
 | `record_sme_collateral_commitment` | `CollateralRecordedEvt` | `coll_rec` | Store in compliance/risk system; **do not treat as enforced on-chain lock** |
 | `sweep_terminal_dust` | `TreasuryDustSwept` | `dust_sw` | Reconcile treasury balance; log sweep amount and token address |

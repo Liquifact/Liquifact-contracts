@@ -38,10 +38,11 @@
 //! **Failure mode:** a hold plus loss of the current admin signing key leaves funds blocked
 //! on-chain until governance regains control of admin authority. There is no break-glass bypass.
 //!
-//! **Recovery lever:** [`LiquifactEscrow::transfer_admin`] is **not** gated by the hold.
-//! Governance rotates to a new admin, then the new admin clears the hold. Invariant: a hold
-//! is always clearable by whoever holds `InvoiceEscrow::admin`; recovery requires controlling
-//! that authority. See `docs/escrow-legal-hold.md` and [ADR-004](docs/adr/ADR-004-legal-hold.md).
+//! **Recovery lever:** [`LiquifactEscrow::propose_admin`] and
+//! [`LiquifactEscrow::accept_admin`] are **not** gated by the hold. Governance proposes a new
+//! admin, the proposed address accepts, then the new admin clears the hold. Invariant: a hold is
+//! always clearable by whoever holds `InvoiceEscrow::admin`; recovery requires controlling that
+//! authority. See `docs/escrow-legal-hold.md` and [ADR-004](docs/adr/ADR-004-legal-hold.md).
 //!
 //! ## Authorization guard ordering
 //!
@@ -150,19 +151,18 @@ pub const MAX_DUST_SWEEP_AMOUNT: i128 = 100_000_000;
 pub const MAX_INVOICE_ID_STRING_LEN: u32 = 32;
 
 /// Minimum instance storage TTL extension horizon for time-sensitive escrow entries.
-
 ///
 /// `bump_ttl` extends instance-storage entries to avoid rent/archival edge cases when
 /// maturity/claim locks are far in the future.
 ///
 /// Named as a constant so operators can reason about and audit the threshold.
-pub const INSTANCE_TTL_MIN_EXTENSION_SECS: u64 = 60 * 60; // 1h
+pub const INSTANCE_TTL_MIN_EXTENSION_LEDGERS: u32 = 60 * 60; // Approx. 1h at 1 ledger/sec.
 
 /// Minimum persistent storage TTL extension horizon for per-investor allowlist entries.
 ///
 /// When the escrow uses the allowlist gate, investor funding depends on persistent entries.
 /// Extending persistent allowlist TTL reduces the risk of silent allowlist disablement.
-pub const PERSISTENT_TTL_MIN_EXTENSION_SECS: u64 = 60 * 60; // 1h
+pub const PERSISTENT_TTL_MIN_EXTENSION_LEDGERS: u32 = 60 * 60; // Approx. 1h at 1 ledger/sec.
 
 // --- Storage keys ---
 
@@ -234,6 +234,9 @@ pub enum DataKey {
     /// Optional immutable per-investor cap on total principal credited to a single address.
     /// Absent ⇒ unlimited. Checked against [`DataKey::InvestorContribution`] on every deposit.
     MaxPerInvestorCap,
+    /// Proposed successor admin waiting for [`LiquifactEscrow::accept_admin`].
+    /// Absent ⇒ no pending handover. Cleared after successful acceptance.
+    PendingAdmin,
     /// Count of distinct investor addresses that have a non-zero [`DataKey::InvestorContribution`].
     /// Written as `0` at init; incremented once per new investor in `fund_impl`.
     UniqueFunderCount,
@@ -419,6 +422,16 @@ pub struct AdminTransferredEvent {
     #[topic]
     pub invoice_id: Symbol,
     pub new_admin: Address,
+}
+
+#[contractevent]
+pub struct AdminProposedEvent {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    pub current_admin: Address,
+    pub pending_admin: Address,
 }
 
 #[contractevent]
@@ -901,6 +914,14 @@ impl LiquifactEscrow {
         env.storage().instance().get(&DataKey::MaxPerInvestorCap)
     }
 
+    /// Proposed successor admin waiting to call [`LiquifactEscrow::accept_admin`].
+    ///
+    /// Returns [`None`] when no handover is pending. This is a read-only helper for governance
+    /// tooling and indexers; it performs no authorization.
+    pub fn get_pending_admin(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::PendingAdmin)
+    }
+
     /// Distinct funders counted so far (each address counted once when it first receives principal).
     ///
     /// **Sybil:** this limits distinct **chain accounts**, not real-world persons; Sybil resistance is
@@ -1115,12 +1136,14 @@ impl LiquifactEscrow {
     /// Set or clear compliance hold. Only the **current** [`InvoiceEscrow::admin`] may call.
     ///
     /// **Clearing:** always requires the current admin's authorization — there is no timelock,
-    /// council override, or break-glass entrypoint. After [`LiquifactEscrow::transfer_admin`],
-    /// only the **new** admin can clear a persisted hold.
+    /// council override, or break-glass entrypoint. After
+    /// [`LiquifactEscrow::propose_admin`] and [`LiquifactEscrow::accept_admin`], only the **new**
+    /// admin can clear a persisted hold.
     ///
     /// **Governance posture:** production `admin` must be a multisig or governed contract so
     /// hold + key loss cannot strand funds without an off-chain recovery vote that executes
-    /// `transfer_admin` then `clear_legal_hold`. See `docs/escrow-legal-hold.md`.
+    /// `propose_admin`, `accept_admin`, then `clear_legal_hold`. See
+    /// `docs/escrow-legal-hold.md`.
     pub fn set_legal_hold(env: Env, active: bool) {
         // env.clone(): env is used again after this call for storage set and publish.
         let escrow = Self::get_escrow(env.clone());
@@ -1192,7 +1215,7 @@ impl LiquifactEscrow {
         let n = investors.len();
         assert!(n > 0, "investors vector must be non-empty");
         assert!(
-            (n as u32) <= MAX_INVESTOR_ALLOWLIST_BATCH,
+            n <= MAX_INVESTOR_ALLOWLIST_BATCH,
             "investors vector length exceeds MAX_INVESTOR_ALLOWLIST_BATCH"
         );
 
@@ -1254,6 +1277,48 @@ impl LiquifactEscrow {
         .publish(&env);
 
         escrow
+    }
+
+    /// Lower the configured distinct-investor cap while the escrow is still open.
+    ///
+    /// This is admin-only and intentionally cannot raise a cap or impose one on an unlimited
+    /// escrow. Existing investors remain able to add principal after the cap is lowered; only new
+    /// investor addresses are blocked once `UniqueFunderCount >= new_cap`.
+    pub fn lower_max_unique_investors(env: Env, new_cap: u32) -> u32 {
+        let escrow = Self::get_escrow(env.clone());
+        escrow.admin.require_auth();
+
+        assert!(escrow.status == 0, "Cap can only be lowered in Open state");
+
+        let old_cap: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::MaxUniqueInvestorsCap)
+            .unwrap_or_else(|| panic!("no investor cap configured"));
+        let unique_count = Self::get_unique_funder_count(env.clone());
+
+        assert!(
+            new_cap < old_cap,
+            "new cap must be strictly lower than current cap"
+        );
+        assert!(
+            new_cap >= unique_count,
+            "new cap cannot be below current unique funder count"
+        );
+
+        env.storage()
+            .instance()
+            .set(&DataKey::MaxUniqueInvestorsCap, &new_cap);
+
+        MaxUniqueInvestorsCapLowered {
+            name: symbol_short!("inv_cap"),
+            invoice_id: escrow.invoice_id.clone(),
+            old_cap,
+            new_cap,
+        }
+        .publish(&env);
+
+        new_cap
     }
 
     /// Validate the stored schema version and apply a migration if one is implemented.
@@ -1480,9 +1545,6 @@ impl LiquifactEscrow {
             }
         }
 
-        let next_contribution = prev
-            .checked_add(amount)
-            .expect("investor contribution overflow");
         env.storage()
             .instance()
             .set(&contribution_key, &new_contribution);
@@ -1792,28 +1854,36 @@ impl LiquifactEscrow {
         // - ADR-007: storage key evolution policy (additive changes / key semantics).
         // - docs/escrow-ledger-time.md: all gating uses `Env::ledger().timestamp()` with `>=`.
 
-        // Extend the monolithic instance storage TTL (covers Escrow, Version, LegalHold,
-        // AllowlistActive, FundingCloseSnapshot, and per-investor contribution/claim gates).
+        // Instance storage keys required for settlement + gating behavior.
         env.storage().instance().extend_ttl(
-            INSTANCE_TTL_MIN_EXTENSION_SECS as u32,
-            INSTANCE_TTL_MIN_EXTENSION_SECS as u32,
+            INSTANCE_TTL_MIN_EXTENSION_LEDGERS,
+            INSTANCE_TTL_MIN_EXTENSION_LEDGERS,
         );
 
-        // Persistent allowlist entries are individual ledger entries.
+        // Instance storage TTL is contract-wide under Soroban SDK 25. The call above covers
+        // Escrow, Version, LegalHold, PendingAdmin, and all per-investor instance keys.
+
+        // Persistent allowlist entries.
         for addr in allowlisted.iter() {
             let k = DataKey::InvestorAllowlisted(addr.clone());
             env.storage().persistent().extend_ttl(
                 &k,
-                PERSISTENT_TTL_MIN_EXTENSION_SECS as u32,
-                PERSISTENT_TTL_MIN_EXTENSION_SECS as u32,
+                PERSISTENT_TTL_MIN_EXTENSION_LEDGERS,
+                PERSISTENT_TTL_MIN_EXTENSION_LEDGERS,
             );
         }
     }
 
-    pub fn transfer_admin(env: Env, new_admin: Address) -> InvoiceEscrow {
-        // env.clone(): env is used again after this call for storage set and publish.
-        let mut escrow = Self::get_escrow(env.clone());
-
+    /// Propose a successor admin for two-step governance handover.
+    ///
+    /// The current [`InvoiceEscrow::admin`] must authorize this call. The proposed address is stored
+    /// under [`DataKey::PendingAdmin`] and gains no authority until it calls
+    /// [`LiquifactEscrow::accept_admin`] with its own authorization. A later proposal overwrites the
+    /// pending address before acceptance.
+    ///
+    /// Panics when `new_admin` equals the current admin.
+    pub fn propose_admin(env: Env, new_admin: Address) -> Address {
+        let escrow = Self::get_escrow(env.clone());
         escrow.admin.require_auth();
 
         assert!(
@@ -1821,18 +1891,59 @@ impl LiquifactEscrow {
             "New admin must differ from current admin"
         );
 
-        escrow.admin = new_admin;
+        env.storage()
+            .instance()
+            .set(&DataKey::PendingAdmin, &new_admin);
+
+        AdminProposedEvent {
+            name: symbol_short!("adm_prop"),
+            invoice_id: escrow.invoice_id.clone(),
+            current_admin: escrow.admin,
+            pending_admin: new_admin.clone(),
+        }
+        .publish(&env);
+
+        new_admin
+    }
+
+    /// Accept a pending admin handover.
+    ///
+    /// The address stored in [`DataKey::PendingAdmin`] must authorize this call. On success it is
+    /// promoted into [`InvoiceEscrow::admin`] and the pending key is cleared, so admin authority
+    /// changes only after both the current admin and successor have explicitly authorized.
+    pub fn accept_admin(env: Env) -> InvoiceEscrow {
+        let pending: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::PendingAdmin)
+            .unwrap_or_else(|| panic!("No pending admin"));
+        pending.require_auth();
+
+        let mut escrow = Self::get_escrow(env.clone());
+        escrow.admin = pending.clone();
 
         env.storage().instance().set(&DataKey::Escrow, &escrow);
+        env.storage().instance().remove(&DataKey::PendingAdmin);
 
         AdminTransferredEvent {
             name: symbol_short!("admin"),
             invoice_id: escrow.invoice_id.clone(),
-            new_admin: escrow.admin.clone(),
+            new_admin: pending,
         }
         .publish(&env);
 
         escrow
+    }
+
+    /// Deprecated shim for the former one-step admin transfer API.
+    ///
+    /// This function now only proposes `new_admin` by delegating to
+    /// [`LiquifactEscrow::propose_admin`]. The proposed address must still call
+    /// [`LiquifactEscrow::accept_admin`] before admin authority changes.
+    #[deprecated(note = "use propose_admin followed by accept_admin")]
+    pub fn transfer_admin(env: Env, new_admin: Address) -> InvoiceEscrow {
+        Self::propose_admin(env.clone(), new_admin);
+        Self::get_escrow(env)
     }
 
     /// Transition an **open** escrow (status 0) to **cancelled** (status 4).

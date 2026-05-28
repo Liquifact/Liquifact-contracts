@@ -7,7 +7,7 @@
 //! Edge-case tests verify:
 //!   - Hold check fires before status validation (fund, settle, withdraw)
 //!   - Idempotent toggling (set true→true, clear false→false)
-//!   - Non-gated operations (`update_maturity`, `transfer_admin`, getters) are NOT blocked
+//!   - Non-gated operations (`update_maturity`, admin handover, getters) are NOT blocked
 //!   - Claim idempotency survives a hold toggle
 //!   - A single hold toggle blocks all gated ops in separate escrows
 //!
@@ -394,18 +394,19 @@ fn hold_can_be_toggled_and_re_blocks_operations() {
     assert!(client.is_investor_claimed(&investor));
 }
 
-/// Admin transfer does not grant the new admin a free bypass: the hold persists
+/// Admin handover does not grant the new admin a free bypass: the hold persists
 /// and the new admin must explicitly clear it.
 #[test]
-fn hold_persists_after_admin_transfer() {
+fn hold_persists_after_admin_handover() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
     let investor = Address::generate(&env);
     let new_admin = Address::generate(&env);
     init_funded(&client, &env, &admin, &sme, &investor, "LHX003");
     client.set_legal_hold(&true);
-    client.transfer_admin(&new_admin);
-    // Hold is still active after admin rotation.
+    client.propose_admin(&new_admin);
+    client.accept_admin();
+    // Hold is still active after admin handover.
     assert!(client.get_legal_hold());
     // settle is still blocked.
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -413,7 +414,7 @@ fn hold_persists_after_admin_transfer() {
     }));
     assert!(
         result.is_err(),
-        "settle must remain blocked after admin transfer"
+        "settle must remain blocked after admin handover"
     );
     // New admin clears the hold.
     client.clear_legal_hold();
@@ -509,7 +510,7 @@ fn clear_legal_hold_when_already_false_is_idempotent() {
 
 // ── 13. Non-gated operations are NOT blocked by hold ─────────────────────────
 
-/// `update_maturity`, `transfer_admin`, and getters must all work under hold.
+/// `update_maturity`, admin handover, and getters must all work under hold.
 #[test]
 fn non_risk_operations_not_blocked_by_hold() {
     let env = Env::default();
@@ -529,11 +530,14 @@ fn non_risk_operations_not_blocked_by_hold() {
     let updated = client.update_maturity(&9999u64);
     assert_eq!(updated.maturity, 9999u64);
 
-    // `transfer_admin` must not be blocked.
+    // Two-step admin handover must not be blocked.
     let new_admin = Address::generate(&env);
-    client.transfer_admin(&new_admin);
+    client.propose_admin(&new_admin);
+    assert_eq!(client.get_pending_admin(), Some(new_admin.clone()));
+    client.accept_admin();
     let escrow = client.get_escrow();
     assert_eq!(escrow.admin, new_admin);
+    assert_eq!(client.get_pending_admin(), None);
 }
 
 // ── 14. Re-entrancy / double-spend: claim idempotent after hold cleared ───────

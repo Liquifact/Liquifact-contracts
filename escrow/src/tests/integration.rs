@@ -174,6 +174,7 @@ fn test_escrow_gold_standard_happy_path_open_overfund_snapshot_settle_claim() {
         &None, // No yield tiers for simplicity
         &None, // No min contribution floor
         &None, // No max investors cap
+        &None,
     );
 
     let initial_escrow = client.get_escrow();

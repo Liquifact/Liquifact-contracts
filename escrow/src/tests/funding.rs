@@ -158,6 +158,7 @@ fn test_funding_amount_accumulation_overflow_panics() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
     let investor = Address::generate(&env);
+    let investor_b = Address::generate(&env);
     client.init(
         &admin,
         &String::from_str(&env, "OVF001"),
@@ -175,7 +176,7 @@ fn test_funding_amount_accumulation_overflow_panics() {
     );
 
     client.fund(&investor, &(i128::MAX - 1));
-    client.fund(&investor, &2i128);
+    client.fund(&investor_b, &2i128);
 }
 
 #[test]
@@ -233,6 +234,7 @@ fn test_fund_with_commitment_overflow_panics() {
         &None,
         &None,
         &None,
+        &None,
     );
 
     client.fund(&investor_a, &(i128::MAX - 1));
@@ -255,6 +257,7 @@ fn test_fund_with_commitment_overflow_does_not_mutate_state() {
         &Address::generate(&env),
         &None,
         &Address::generate(&env),
+        &None,
         &None,
         &None,
         &None,
@@ -305,6 +308,7 @@ fn test_investor_contribution_overflow_panics_even_if_state_is_inconsistent() {
         &None,
         &None,
         &None,
+        &None,
     );
 
     env.as_contract(&contract_id, || {
@@ -345,6 +349,7 @@ fn test_investor_contribution_overflow_does_not_mutate_state() {
         &tok,
         &None,
         &tre,
+        &None,
         &None,
         &None,
         &None,
@@ -1361,6 +1366,7 @@ fn test_max_unique_investors_cap_none_allows_unlimited() {
         &None,
         &None,
         &None, // No cap set
+        &None,
     );
 
     // Should be able to add many investors when no cap is set
@@ -1389,6 +1395,7 @@ fn test_max_unique_investors_cap_enforced_at_limit() {
         &None,
         &None,
         &Some(3u32), // Cap of 3 investors
+        &None,
     );
 
     assert_eq!(client.get_max_unique_investors_cap(), Some(3u32));
@@ -1430,6 +1437,7 @@ fn test_max_unique_investors_cap_blocks_excess_investors() {
         &None,
         &None,
         &Some(2u32), // Cap of 2 investors
+        &None,
     );
 
     // Add 2 investors
@@ -1472,6 +1480,7 @@ fn test_max_unique_investors_cap_blocks_fund_with_commitment() {
         &Some(tiers),
         &None,
         &Some(1u32), // Cap of 1 investor
+        &None,
     );
 
     // First investor succeeds
@@ -1502,6 +1511,7 @@ fn test_re_funding_same_address_doesnt_count_against_cap() {
         &None,
         &None,
         &Some(1u32), // Cap of 1 investor
+        &None,
     );
 
     // First fund should succeed
@@ -1536,6 +1546,7 @@ fn test_zero_contribution_then_non_zero_contribution_counts_as_unique_investor()
         &None,
         &None,
         &Some(2u32), // Cap of 2 investors
+        &None,
     );
 
     assert_eq!(client.get_unique_funder_count(), 0);
@@ -1567,6 +1578,7 @@ fn test_cap_validation_at_init_positive_value_required() {
         &None,
         &None,
         &Some(0u32), // Invalid: zero cap
+        &None,
     );
 }
 
@@ -1588,6 +1600,7 @@ fn test_init_panics_for_zero_cap() {
         &None,
         &None,
         &Some(0u32), // Invalid: zero cap
+        &None,
     );
 }
 
@@ -1609,6 +1622,7 @@ fn test_cap_edge_case_exact_limit_reached() {
         &None,
         &None,
         &Some(5u32), // Cap of 5 investors
+        &None,
     );
 
     // Add exactly 5 investors - should all succeed
@@ -1644,6 +1658,7 @@ fn test_cap_edge_case_exactly_one_over_limit_panics() {
         &None,
         &None,
         &Some(5u32), // Cap of 5 investors
+        &None,
     );
 
     // Add exactly 5 investors
@@ -1675,6 +1690,7 @@ fn test_cap_with_min_contribution_floor_interaction() {
         &None,
         &Some(1_000i128), // Min contribution floor
         &Some(3u32),      // Cap of 3 investors
+        &None,
     );
 
     // Should respect both cap and floor
@@ -1714,6 +1730,7 @@ fn test_cap_blocks_even_with_large_contribution() {
         &None,
         &None,
         &Some(1u32), // Cap of 1 investor
+        &None,
     );
 
     // First investor can fund large amount
@@ -1783,6 +1800,7 @@ fn init_with_token<'a>(
         &token.id,
         &None,
         &treasury,
+        &None,
         &None,
         &None,
         &None,

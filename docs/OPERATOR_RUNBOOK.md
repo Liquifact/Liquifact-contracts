@@ -349,8 +349,9 @@ on-chain entrypoint in the current release.
 
 - Use a multisig wallet or a governed contract as `admin` at all times.
 - Never use a single-signer hot wallet as `admin` in production.
-- `transfer_admin` requires the current admin's authorization — test the
-  rotation on Testnet before executing on Mainnet.
+- Admin rotation is two-step: `propose_admin` requires the current admin's
+  authorization, and `accept_admin` requires the proposed successor's
+  authorization. Test both steps on Testnet before executing on Mainnet.
 
 ### `migrate()` is not a no-op
 

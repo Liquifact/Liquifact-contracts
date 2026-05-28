@@ -537,6 +537,7 @@ fn test_init_escrow_initialized_event_includes_bound_refs() {
         &None,
         &None,
         &None,
+        &None,
     );
 
     assert_eq!(
@@ -575,6 +576,7 @@ fn test_init_escrow_initialized_event_registry_none() {
         &token,
         &None,
         &treasury,
+        &None,
         &None,
         &None,
         &None,

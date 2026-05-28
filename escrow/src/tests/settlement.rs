@@ -1345,6 +1345,7 @@ fn compute_payout_returns_zero_before_snapshot() {
         &None,
         &None,
         &None,
+        &None,
     );
     // Deposit below target — no snapshot written yet.
     client.fund(&investor, &1i128);
@@ -1376,6 +1377,7 @@ fn compute_payout_single_investor_full_target() {
         &tok,
         &None,
         &tre,
+        &None,
         &None,
         &None,
         &None,
@@ -1414,6 +1416,7 @@ fn compute_payout_two_equal_investors() {
         &None,
         &None,
         &None,
+        &None,
     );
     client.fund(&inv_a, &1_000i128);
     client.fund(&inv_b, &1_000i128);
@@ -1449,6 +1452,7 @@ fn compute_payout_aggregate_does_not_exceed_settle_pool() {
         &tok,
         &None,
         &tre,
+        &None,
         &None,
         &None,
         &None,
@@ -1497,6 +1501,7 @@ fn compute_payout_floor_rounding_unequal_split() {
         &None,
         &None,
         &None,
+        &None,
     );
     client.fund(&inv_a, &2i128);
     client.fund(&inv_b, &1i128);
@@ -1532,6 +1537,7 @@ fn compute_payout_zero_yield_equals_principal() {
         &None,
         &None,
         &None,
+        &None,
     );
     client.fund(&inv, &5_000i128);
     client.settle();
@@ -1563,6 +1569,7 @@ fn compute_payout_with_over_funding() {
         &tok,
         &None,
         &tre,
+        &None,
         &None,
         &None,
         &None,
@@ -1607,6 +1614,7 @@ fn claim_dedupe_single_read_happy_path() {
         &None,
         &None,
         &None,
+        &None,
     );
     client.fund(&investor, &1_000i128);
     client.settle();
@@ -1645,6 +1653,7 @@ fn claim_dedupe_stranger_still_rejected() {
         &None,
         &None,
         &None,
+        &None,
     );
     client.fund(&investor, &1_000i128);
     client.settle();
@@ -1673,6 +1682,7 @@ fn claim_dedupe_hold_still_blocks() {
         &tok,
         &None,
         &tre,
+        &None,
         &None,
         &None,
         &None,

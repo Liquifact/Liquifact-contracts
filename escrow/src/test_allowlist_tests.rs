@@ -3,7 +3,7 @@ use super::{
     LiquifactEscrowClient,
 };
 use soroban_sdk::Vec as SorobanVec;
-use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env};
+use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env, Event};
 
 fn deploy(env: &Env) -> LiquifactEscrowClient<'_> {
     let id = env.register(LiquifactEscrow, ());
