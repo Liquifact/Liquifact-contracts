@@ -1,5 +1,9 @@
 # Build
-target/
+/target/
+target_local/
+**/*.rs.bk
+Cargo.lock
+.cargo/
 
 # Local command outputs (generated)
 build_output*.txt
