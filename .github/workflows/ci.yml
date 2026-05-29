@@ -35,11 +35,10 @@ jobs:
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
 
-      - name: Add WASM target
-        run: rustup target add wasm32v1-none
-
+       - name: Add WASM target
+       run: rustup target add wasm32-unknown-unknown
       - name: Build WASM
-        run: cargo build --target wasm32v1-none --release -p liquifact_escrow
+        run: cargo build --target wasm32-unknown-unknown --release -p liquifact_escrow
 
       - name: Workspace Clippy (all targets)
         run: cargo clippy -p liquifact_escrow --all-targets -- -D warnings

@@ -49,6 +49,37 @@ fn init_open(
         &None,
         &None,
         &None,
+        &None,
+    );
+    (token, treasury)
+}
+
+/// Initialise an open escrow with a configured legal-hold clear delay.
+fn init_open_with_clear_delay(
+    client: &LiquifactEscrowClient<'_>,
+    env: &Env,
+    admin: &Address,
+    sme: &Address,
+    id: &str,
+    legal_hold_clear_delay: Option<u64>,
+) -> (Address, Address) {
+    let token = Address::generate(env);
+    let treasury = Address::generate(env);
+    client.init(
+        admin,
+        &soroban_sdk::String::from_str(env, id),
+        sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &legal_hold_clear_delay,
     );
     (token, treasury)
 }
@@ -90,6 +121,7 @@ fn init_settled<'a>(
         &token,
         &None,
         &treasury,
+        &None,
         &None,
         &None,
         &None,
@@ -314,6 +346,53 @@ fn clear_legal_hold_by_admin_succeeds() {
     client.set_legal_hold(&true);
     assert!(client.get_legal_hold());
     client.clear_legal_hold();
+    assert!(!client.get_legal_hold());
+}
+
+#[test]
+fn request_clear_legal_hold_by_admin_succeeds_with_zero_delay() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    init_open_with_clear_delay(&client, &env, &admin, &sme, "LHR001", Some(0));
+    client.set_legal_hold(&true);
+    client.request_clear_legal_hold();
+    assert!(client.get_legal_hold_clearable_at().is_some());
+    client.set_legal_hold(&false);
+    assert!(!client.get_legal_hold());
+}
+
+#[test]
+#[should_panic]
+fn request_clear_legal_hold_by_non_admin_panics() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    init_open_with_clear_delay(&client, &env, &admin, &sme, "LHR002", Some(0));
+    client.set_legal_hold(&true);
+    env.mock_auths(&[]);
+    client.request_clear_legal_hold();
+}
+
+#[test]
+#[should_panic]
+fn set_legal_hold_false_before_clearable_at_panics() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    init_open_with_clear_delay(&client, &env, &admin, &sme, "LHR003", Some(10));
+    client.set_legal_hold(&true);
+    client.request_clear_legal_hold();
+    client.set_legal_hold(&false);
+}
+
+#[test]
+fn set_legal_hold_false_after_clearable_at_succeeds() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    init_open_with_clear_delay(&client, &env, &admin, &sme, "LHR004", Some(10));
+    client.set_legal_hold(&true);
+    client.request_clear_legal_hold();
+    let now = env.ledger().timestamp();
+    env.ledger().set_timestamp(now + 10);
+    client.set_legal_hold(&false);
     assert!(!client.get_legal_hold());
 }
 

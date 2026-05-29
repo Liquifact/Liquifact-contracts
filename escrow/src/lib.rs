@@ -139,6 +139,80 @@ pub const SCHEMA_VERSION: u32 = 5;
 /// Upper bound on [`LiquifactEscrow::append_attestation_digest`] entries to keep storage bounded.
 pub const MAX_ATTESTATION_APPEND_ENTRIES: u32 = 32;
 
+/// Typed contract error codes for escrow validation and guard failures.
+#[contracterror]
+pub enum EscrowError {
+    AlreadyCurrentSchemaVersion,
+    AmountMustBePositive,
+    AttestationAppendLogCapacityReached,
+    CancelFundingNotOpen,
+    CollateralAmountNotPositive,
+    CollateralAssetEmpty,
+    CollateralTimestampBackwards,
+    ComputePayoutArithmeticOverflow,
+    DustSweepNotTerminal,
+    EffectiveSweepAmountZero,
+    EscrowAlreadyInitialized,
+    EscrowNotInitialized,
+    EscrowNotOpenForFunding,
+    FundedAmountOverflow,
+    FundingAmountNotPositive,
+    FundingBelowMinContribution,
+    FundingTokenNotSet,
+    InsufficientTokenBalanceBeforeTransfer,
+    InvestorClaimNotSettled,
+    InvestorClaimTimeOverflow,
+    InvestorCommitmentLockNotExpired,
+    InvestorContributionExceedsCap,
+    InvestorContributionOverflow,
+    InvestorNotAllowlisted,
+    InvoiceIdInvalidCharset,
+    InvoiceIdInvalidLength,
+    LegalHoldBlocksCancelFunding,
+    LegalHoldBlocksFunding,
+    LegalHoldBlocksInvestorClaims,
+    LegalHoldBlocksSettlement,
+    LegalHoldBlocksTreasuryDustSweep,
+    LegalHoldBlocksWithdrawal,
+    LegalHoldClearDelayOverflow,
+    LegalHoldClearNotReady,
+    LegalHoldClearRequestMissing,
+    MaturityNotReached,
+    MaturityUpdateNotOpen,
+    MaxPerInvestorNotPositive,
+    MaxUniqueInvestorsNotPositive,
+    MigrationVersionMismatch,
+    MinContributionExceedsAmount,
+    MinContributionNotPositive,
+    NewAdminSameAsCurrent,
+    NoContributionToClaim,
+    NoContributionToRefund,
+    NoFundingTokenBalanceToSweep,
+    NoMigrationPath,
+    PrimaryAttestationAlreadyBound,
+    RecipientBalanceDeltaMismatch,
+    RecipientBalanceUnderflow,
+    RefundNotCancelled,
+    SenderBalanceDeltaMismatch,
+    SenderBalanceUnderflow,
+    SettlementNotFunded,
+    SweepAmountExceedsMax,
+    SweepAmountNotPositive,
+    TargetBelowFundedAmount,
+    TargetNotPositive,
+    TargetUpdateNotOpen,
+    TierLockNotIncreasing,
+    TierYieldBelowBase,
+    TierYieldNotNonDecreasing,
+    TierYieldOutOfRange,
+    TieredSecondDeposit,
+    TransferAmountNotPositive,
+    TreasuryNotSet,
+    UniqueInvestorCapReached,
+    WithdrawalNotFunded,
+    YieldBpsOutOfRange,
+}
+
 /// Upper bound on batch allowlist mutation entries to keep storage/CPU bounded.
 /// Mirrors the spirit of `MAX_ATTESTATION_APPEND_ENTRIES` to limit per-call work.
 pub const MAX_INVESTOR_ALLOWLIST_BATCH: u32 = 32;
@@ -198,6 +272,13 @@ pub enum DataKey {
     /// When true, compliance/legal hold blocks payouts and settlement finalization.
     /// Absent ⇒ `false` (no hold). Toggled by admin via [`LiquifactEscrow::set_legal_hold`].
     LegalHold,
+    /// Optional minimum ledger timestamp when `LegalHold` may be cleared after a
+    /// [`LiquifactEscrow::request_clear_legal_hold`] call.
+    /// Absent ⇒ no clear request is pending.
+    LegalHoldClearableAt,
+    /// Configured minimum delay between [`LiquifactEscrow::request_clear_legal_hold`] and
+    /// [`LiquifactEscrow::set_legal_hold(env, false)`]. Absent ⇒ `0`.
+    LegalHoldClearDelay,
     /// Optional SME collateral commitment metadata (record-only — not an on-chain asset lock).
     /// Absent when no commitment has been recorded. Replaceable by the SME.
     SmeCollateralPledge,
@@ -463,6 +544,16 @@ pub struct LegalHoldChanged {
     pub active: u32,
 }
 
+#[contractevent]
+pub struct LegalHoldClearRequested {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    /// Inclusive ledger timestamp when clearing may occur.
+    pub clearable_at: u64,
+}
+
 /// SME collateral commitment metadata recorded.
 ///
 /// This event means only that [`DataKey::SmeCollateralPledge`] was written by the SME. It is not
@@ -689,6 +780,7 @@ impl LiquifactEscrow {
         min_contribution: Option<i128>,
         max_unique_investors: Option<u32>,
         max_per_investor: Option<i128>,
+        legal_hold_clear_delay: Option<u64>,
     ) -> InvoiceEscrow {
         admin.require_auth();
 
@@ -768,6 +860,13 @@ impl LiquifactEscrow {
             env.storage()
                 .instance()
                 .set(&DataKey::MaxUniqueInvestorsCap, &cap);
+        }
+
+        let delay = legal_hold_clear_delay.unwrap_or(0);
+        if delay > 0 {
+            env.storage()
+                .instance()
+                .set(&DataKey::LegalHoldClearDelay, &delay);
         }
 
         EscrowInitialized {
@@ -918,6 +1017,21 @@ impl LiquifactEscrow {
     /// Whether a compliance/legal hold is active (defaults to `false` if unset).
     pub fn get_legal_hold(env: Env) -> bool {
         Self::legal_hold_active(&env)
+    }
+
+    /// Configured minimum delay between [`LiquifactEscrow::request_clear_legal_hold`]
+    /// and [`LiquifactEscrow::set_legal_hold(env, false)`]. Defaults to `0`.
+    pub fn get_legal_hold_clear_delay(env: Env) -> u64 {
+        env.storage()
+            .instance()
+            .get(&DataKey::LegalHoldClearDelay)
+            .unwrap_or(0)
+    }
+
+    /// Reserved minimum ledger timestamp at which a pending legal-hold clear may be applied.
+    /// `None` means no request has been recorded.
+    pub fn get_legal_hold_clearable_at(env: Env) -> Option<u64> {
+        env.storage().instance().get(&DataKey::LegalHoldClearableAt)
     }
 
     /// Minimum principal per [`LiquifactEscrow::fund`] or [`LiquifactEscrow::fund_with_commitment`] call
@@ -1195,12 +1309,65 @@ impl LiquifactEscrow {
         let escrow = Self::get_escrow(env.clone());
         escrow.admin.require_auth();
 
+        if !active && Self::legal_hold_active(&env) {
+            let delay = Self::get_legal_hold_clear_delay(env.clone());
+            if delay > 0 {
+                let clearable_at: Option<u64> =
+                    env.storage().instance().get(&DataKey::LegalHoldClearableAt);
+                ensure(
+                    &env,
+                    clearable_at.is_some(),
+                    EscrowError::LegalHoldClearRequestMissing,
+                );
+                let now = env.ledger().timestamp();
+                ensure(
+                    &env,
+                    now >= clearable_at.unwrap(),
+                    EscrowError::LegalHoldClearNotReady,
+                );
+            }
+        }
+
+        env.storage()
+            .instance()
+            .remove(&DataKey::LegalHoldClearableAt);
+
         env.storage().instance().set(&DataKey::LegalHold, &active);
 
         LegalHoldChanged {
             name: symbol_short!("legalhld"),
             invoice_id: escrow.invoice_id.clone(),
             active: if active { 1 } else { 0 },
+        }
+        .publish(&env);
+    }
+
+    /// Schedule a compliance hold clear window. The current admin must authorize.
+    ///
+    /// If a non-zero clear delay is configured, the hold may not be lifted until the
+    /// returned ledger timestamp is reached.
+    pub fn request_clear_legal_hold(env: Env) {
+        // env.clone(): env is used again after this call for storage set and publish.
+        let escrow = Self::get_escrow(env.clone());
+        escrow.admin.require_auth();
+
+        let now = env.ledger().timestamp();
+        let delay = Self::get_legal_hold_clear_delay(env.clone());
+        let clearable_at = if delay == 0 {
+            now
+        } else {
+            now.checked_add(delay)
+                .unwrap_or_else(|| fail(&env, EscrowError::LegalHoldClearDelayOverflow))
+        };
+
+        env.storage()
+            .instance()
+            .set(&DataKey::LegalHoldClearableAt, &clearable_at);
+
+        LegalHoldClearRequested {
+            name: symbol_short!("lh_req"),
+            invoice_id: escrow.invoice_id.clone(),
+            clearable_at,
         }
         .publish(&env);
     }

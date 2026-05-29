@@ -40,6 +40,11 @@ set_legal_hold(active: bool)
     └─ storage().instance().set(DataKey::LegalHold, active)
     └─ emits LegalHoldChanged { active: 1 | 0 }
 
+request_clear_legal_hold()
+    └─ escrow.admin.require_auth()
+    └─ storage().instance().set(DataKey::LegalHoldClearableAt, now + delay)
+    └─ emits LegalHoldClearRequested { clearable_at }
+
 clear_legal_hold()
     └─ delegates to set_legal_hold(false)   ← same auth path, no shortcut
 ```
@@ -53,6 +58,9 @@ Key properties:
 - **Persistent across state transitions.** The hold is stored independently of
   `InvoiceEscrow::status`. A hold set while the escrow is open remains active
   after it becomes funded; a hold set after settlement blocks investor claims.
+- **Controlled-clear semantics.** When a hold-clear delay is configured,
+  `request_clear_legal_hold` must be called first and `set_legal_hold(false)` is
+  only allowed once the ledger timestamp has reached the returned boundary.
 - **Idempotent.** Calling `set_legal_hold(true)` when already `true` (or
   `false` when already `false`) is a no-op for state but still requires admin
   auth and emits an event.
@@ -75,6 +83,11 @@ as a governed address:
   maximum hold duration, escalation path if the admin key is lost or
   compromised, and emergency recovery via `propose_admin` + `accept_admin`
   with governance approval.
+- **On-chain cooling-off window** when configured: `request_clear_legal_hold`
+  schedules a ledger-time boundary before `set_legal_hold(false)` may unfreeze.
+  When a non-zero delay is configured, `set_legal_hold(false)` will fail until
+  the clear request has been made and the ledger time has reached the stored
+  `LegalHoldClearableAt` value.
 
 Without one of the above, a single compromised admin key can freeze all
 investor funds with no on-chain recourse.
@@ -164,7 +177,8 @@ The matrix in `escrow/src/tests/legal_hold.rs` covers:
 6. Hold persists across status transitions (no bypass via state change).
 7. Hold can be toggled and re-blocks operations after re-set.
 8. Hold persists after two-step admin handover; new admin must explicitly clear it.
-9. Edge cases: hold check fires before amount / status / auth validation.
+9. `request_clear_legal_hold` requires admin auth and the configured delay is enforced before the hold can be cleared.
+10. Edge cases: hold check fires before amount / status / auth validation.
 10. Non-gated ops (`update_maturity`, `propose_admin`, `accept_admin`, getters) are not blocked.
 11. Claim idempotency survives a hold toggle.
 12. Single hold toggle blocks all gated entrypoints in separate escrows.
