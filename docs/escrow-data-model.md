@@ -10,25 +10,26 @@ For the policy that governs schema evolution see [ADR-007](adr/ADR-007-storage-k
 
 ## Storage backend
 
-Most keys use `env.storage().instance()`. Instance storage is scoped to a single contract address
-and is loaded in full on every host-function invocation.
+Most scalar contract keys use `env.storage().instance()`. Instance storage is scoped to a single
+contract address and is loaded in full on every host-function invocation.
 
-The contract also uses `env.storage().persistent()` for allowlist membership entries
-(`DataKey::InvestorAllowlisted(Address)`), which are per-address and naturally modeled as
-independent persistent keys (see Stellar/Soroban storage guidance on instance vs persistent
-storage).
+The contract uses `env.storage().persistent()` for per-address entries:
+`DataKey::InvestorContribution(Address)`, `DataKey::InvestorEffectiveYield(Address)`,
+`DataKey::InvestorClaimNotBefore(Address)`, `DataKey::InvestorClaimed(Address)`, and
+`DataKey::InvestorAllowlisted(Address)`. These are naturally modeled as independent persistent keys
+with per-address TTLs (see Stellar/Soroban storage guidance on instance vs persistent storage).
 
 Consequence: the total serialised size of all instance entries must stay within Soroban's
-contract-data entry limit. The investor-contribution map is the main growth vector; it is bounded
-by `MaxUniqueInvestorsCap` (default 128 per the README guardrails).
+contract-data entry limit. Per-investor accounting no longer grows the instance footprint; investor
+cardinality is still bounded by `MaxUniqueInvestorsCap` when configured.
 
 ---
 
 ## `DataKey` enum — complete reference
 
-`DataKey` is a `#[contracttype]` enum. Each variant becomes a distinct XDR-encoded key in the
-instance storage map. The enum derives `Clone` so key values can be reused across get/set calls in
-the same execution path without moving ownership.
+`DataKey` is a `#[contracttype]` enum. Each variant becomes a distinct XDR-encoded key in whichever
+storage backend reads or writes it. The enum derives `Clone` so key values can be reused across
+get/set calls in the same execution path without moving ownership.
 
 ### Scalar keys (always present after `init`)
 
@@ -57,9 +58,10 @@ with `unwrap_or(0)`.
 | `PrimaryAttestationHash` | `BytesN<32>` | `bind_primary_attestation_hash` | Single-set; panics on second call |
 | `AttestationAppendLog` | `Vec<BytesN<32>>` | `append_attestation_digest` | Bounded by `MAX_ATTESTATION_APPEND_ENTRIES` (32) |
 
-### Per-address keys (one entry per investor address)
+### Per-address investor keys in persistent storage
 
-These variants carry an `Address` discriminator so each investor gets an independent storage slot.
+These variants carry an `Address` discriminator so each investor gets an independent persistent
+storage slot and TTL.
 
 | Variant | Rust type stored | Set by | Default when absent |
 |---------|-----------------|--------|---------------------|
@@ -71,9 +73,9 @@ These variants carry an `Address` discriminator so each investor gets an indepen
 All four per-address keys are written together on an investor's first `fund` or
 `fund_with_commitment` call. Subsequent `fund` calls update only `InvestorContribution`.
 
-### Per-address keys in persistent storage (allowlist)
+### Per-address allowlist keys in persistent storage
 
-These entries live in **persistent** storage (not instance storage).
+These entries also live in **persistent** storage (not instance storage).
 
 | Variant | Rust type stored | Set by | Default when absent |
 |---------|------------------|--------|---------------------|
@@ -147,7 +149,7 @@ Validated at `init`: `min_lock_secs` strictly increasing, `yield_bps` non-decrea
 
 ## Schema version
 
-`DataKey::Version` stores a `u32` written as `SCHEMA_VERSION` (currently `5`) at `init`. The
+`DataKey::Version` stores a `u32` written as `SCHEMA_VERSION` (currently `6`) at `init`. The
 `migrate` entrypoint validates `from_version == stored` before applying any migration path. No
 migration paths are currently implemented; adding a new optional key does not require a version bump
 (see additive-key policy below).
@@ -186,6 +188,6 @@ test plan.
   behavior off-chain or in a dedicated integration.
 - **Attestation digests:** `PrimaryAttestationHash` and `AttestationAppendLog` store raw byte
   digests. The contract does not verify what the digest commits to; that is an off-chain concern.
-- **Storage growth:** per-address keys grow linearly with investor count. `MaxUniqueInvestorsCap`
-  (default 128) bounds this. Any schema change that adds per-address keys must re-evaluate the
-  storage footprint against Soroban's contract-data entry limits.
+- **Storage growth:** per-address investor keys use persistent storage to avoid unbounded instance
+  growth. `MaxUniqueInvestorsCap` can still bound investor count. Any schema change that adds
+  per-address keys must re-evaluate storage footprint and TTL behavior.

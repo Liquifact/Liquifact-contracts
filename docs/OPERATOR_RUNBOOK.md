@@ -98,7 +98,7 @@ pub fn migrate(env: Env, from_version: u32) -> u32 {
 }
 ```
 
-**Current state (v5):** `migrate()` panics on **all** paths. No migration
+**Current state (v6):** `migrate()` panics on **all** paths. No migration
 work is implemented. Operators must redeploy if `InvoiceEscrow` layout changes.
 
 ---
@@ -190,7 +190,7 @@ stellar contract invoke \
   --min_contribution null \
   --max_unique_investors null
 
-# Verify stored version matches SCHEMA_VERSION (should return 5)
+# Verify stored version matches SCHEMA_VERSION (should return 6)
 stellar contract invoke \
   --id <CONTRACT_ID> \
   --source $SOURCE_SECRET \
@@ -366,10 +366,10 @@ first implementing the migration path.
 
 | WASM version (SCHEMA_VERSION) | Can read data from | Notes |
 |-------------------------------|-------------------|-------|
-| 5 | 5 | Same version — fully compatible |
-| 5 | 4 | Only if no struct layout changed; new optional keys absent → defaults |
-| 5 | ≤3 | Only if InvoiceEscrow XDR shape identical; new optional keys absent → defaults |
-| 4 reading 5 data | ❌ | Unknown keys ignored; may panic if struct layout changed |
+| 6 | 6 | Same version — fully compatible |
+| 6 | 5 | Requires redeploy for per-investor key relocation; no in-place migration path |
+| 6 | ≤4 | Only with an explicit migration path or redeploy; new optional keys absent → defaults when compatible |
+| ≤5 reading 6 data | ❌ | Older WASM reads per-investor accounting from instance storage |
 
 ---
 
