@@ -83,6 +83,29 @@ fn test_init_requires_admin_auth() {
 }
 
 #[test]
+fn test_migrate_requires_admin_auth_before_version_checks() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    env.mock_auths(&[]);
+    let result = client.try_migrate(&99u32);
+
+    assert!(
+        result.is_err(),
+        "migrate should reject an unauthenticated call"
+    );
+    assert!(
+        !matches!(
+            result,
+            Err(Err(soroban_sdk::InvokeError::Contract(code)))
+                if code == EscrowError::MigrationVersionMismatch as u32
+        ),
+        "migrate reached version checks before admin auth"
+    );
+}
+
+#[test]
 fn test_init_unauthorized_panics() {
     let env = Env::default();
     let client = deploy(&env);

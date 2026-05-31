@@ -148,7 +148,7 @@ and requires treasury auth. Intended for rounding residue — not for settling
 live liabilities.
 
 ### Schema version
-`SCHEMA_VERSION` (currently `5`) written to `DataKey::Version` at `init`. Used
+`SCHEMA_VERSION` (currently `6`) written to `DataKey::Version` at `init`. Used
 to gate the `migrate` entrypoint. See the
 [schema version changelog](../README.md#schema-version-changelog-datakeyversion).
 
