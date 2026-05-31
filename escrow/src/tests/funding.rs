@@ -1,6 +1,27 @@
 use super::*;
+use soroban_sdk::{Error, InvokeError};
+use std::fmt::Debug;
 
 // Funding, contributions, snapshots, tier selection, and fund-shaped cost baselines.
+
+fn assert_contract_error<T, E>(
+    result: Result<Result<T, E>, Result<Error, InvokeError>>,
+    expected: EscrowError,
+) where
+    T: Debug,
+    E: Debug,
+{
+    let expected_code = expected as u32;
+    match result {
+        Err(Ok(error)) => {
+            assert_eq!(error, Error::from_contract_error(expected_code));
+        }
+        Err(Err(InvokeError::Contract(code))) => {
+            assert_eq!(code, expected_code);
+        }
+        other => panic!("expected ContractError({expected_code}), got {other:?}"),
+    }
+}
 
 #[test]
 fn test_fund_and_settle() {
@@ -277,6 +298,49 @@ fn test_fund_with_commitment_overflow_does_not_mutate_state() {
     assert_eq!(client.get_contribution(&investor_b), 0);
 }
 
+/// Regression for issue #253: per-investor accounting must live in persistent storage, not instance.
+#[test]
+fn test_per_investor_contribution_uses_persistent_storage() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let contract_id = client.address.clone();
+    let investor = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "PERS01"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+    client.fund(&investor, &500i128);
+
+    env.as_contract(&contract_id, || {
+        assert_eq!(
+            env.storage()
+                .persistent()
+                .get::<DataKey, i128>(&DataKey::InvestorContribution(investor.clone())),
+            Some(500i128)
+        );
+        assert_eq!(
+            env.storage()
+                .instance()
+                .get::<DataKey, i128>(&DataKey::InvestorContribution(investor.clone())),
+            None
+        );
+    });
+}
+
 #[test]
 #[should_panic]
 fn test_investor_contribution_overflow_panics_even_if_state_is_inconsistent() {
@@ -314,7 +378,7 @@ fn test_investor_contribution_overflow_panics_even_if_state_is_inconsistent() {
     env.as_contract(&contract_id, || {
         // Force the contribution near i128::MAX while keeping funded_amount small.
         // `fund` must still trap on contribution overflow even if funded_amount would not.
-        env.storage().instance().set(
+        env.storage().persistent().set(
             &DataKey::InvestorContribution(investor.clone()),
             &(i128::MAX - 1),
         );
@@ -356,7 +420,7 @@ fn test_investor_contribution_overflow_does_not_mutate_state() {
     );
 
     env.as_contract(&contract_id, || {
-        env.storage().instance().set(
+        env.storage().persistent().set(
             &DataKey::InvestorContribution(investor.clone()),
             &(i128::MAX - 1),
         );
@@ -2226,10 +2290,9 @@ fn test_commitment_zero_lock_follow_on_fund_no_claim_gate() {
 }
 
 /// A second `fund_with_commitment` from the same investor (who already has a
-/// non-zero contribution) must panic with the documented error message, regardless
+/// non-zero contribution) must fail with the documented typed error, regardless
 /// of whether a tier table is configured.
 #[test]
-#[should_panic(expected = "Additional principal after a tiered first deposit")]
 fn test_second_fund_with_commitment_panics_without_tier_table() {
     let env = Env::default();
     env.mock_all_auths();
@@ -2258,14 +2321,16 @@ fn test_second_fund_with_commitment_panics_without_tier_table() {
 
     client.fund_with_commitment(&inv, &3_000i128, &0u64);
     // Second call must trap.
-    client.fund_with_commitment(&inv, &3_000i128, &0u64);
+    assert_contract_error(
+        client.try_fund_with_commitment(&inv, &3_000i128, &0u64),
+        EscrowError::TieredSecondDeposit,
+    );
 }
 
 /// After a plain `fund()` first deposit, calling `fund_with_commitment` on the same
 /// investor must panic — the tier/lock selection window is permanently closed.
 /// This is the "inverse" direction of the state-machine rule.
 #[test]
-#[should_panic(expected = "Additional principal after a tiered first deposit")]
 fn test_fund_first_then_commitment_second_panics() {
     let env = Env::default();
     env.mock_all_auths();
@@ -2300,7 +2365,10 @@ fn test_fund_first_then_commitment_second_panics() {
     // First leg via fund() → establishes base-yield position.
     client.fund(&inv, &3_000i128);
     // Attempt to re-select tier via fund_with_commitment → must panic.
-    client.fund_with_commitment(&inv, &3_000i128, &100u64);
+    assert_contract_error(
+        client.try_fund_with_commitment(&inv, &3_000i128, &100u64),
+        EscrowError::TieredSecondDeposit,
+    );
 }
 
 /// Verify that a plain `fund()` as first deposit sets the effective yield to the

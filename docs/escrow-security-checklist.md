@@ -2,7 +2,7 @@
 
 > Issue #167 — Soroban security research.
 > Scope: `escrow/src/lib.rs` and `escrow/src/external_calls.rs`.
-> Schema version: [`SCHEMA_VERSION`] = 5.
+> Schema version: [`SCHEMA_VERSION`] = 6.
 
 ---
 
@@ -268,7 +268,7 @@ and does not weaken the auth boundary. Refactors must not move step 3 above step
 | `sweep_terminal_dust` | `treasury` | legal hold, `get_escrow`, treasury read | line ~702 | SEP-41 transfer |
 | `migrate` | **none** (panics) | version read only | — | none (all paths panic) |
 
-Line numbers refer to `escrow/src/lib.rs` at schema version 5; re-audit after refactors.
+Line numbers refer to `escrow/src/lib.rs` at schema version 6; re-audit after refactors.
 
 ### Negative-auth test coverage
 

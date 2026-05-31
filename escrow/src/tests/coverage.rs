@@ -1,5 +1,5 @@
 use super::{free_addresses, setup};
-use crate::{DataKey, EscrowCloseSnapshot, YieldTier};
+use crate::{DataKey, EscrowCloseSnapshot, EscrowError, YieldTier};
 use soroban_sdk::{
     testutils::{Address as _, Ledger},
     Address, Env, Error, InvokeError, Vec as SorobanVec,
@@ -430,7 +430,7 @@ fn test_all_getters() {
     assert_eq!(client.get_funding_token(), funding_token);
     assert_eq!(client.get_treasury(), treasury);
     assert_eq!(client.get_registry_ref(), Some(registry));
-    assert_eq!(client.get_version(), 5);
+    assert_eq!(client.get_version(), 6);
     assert!(!client.get_legal_hold());
     assert_eq!(client.get_min_contribution_floor(), 10);
     assert_eq!(client.get_max_unique_investors_cap(), Some(5));
@@ -594,7 +594,39 @@ fn test_sweep_terminal_dust_happy_path() {
 }
 
 #[test]
-#[should_panic(expected = "dust sweep only in terminal states (settled, withdrawn, or cancelled)")]
+fn test_bump_ttl_covers_persistent_investor_keys() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    let (funding_token, treasury) = free_addresses(&env);
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "TTL001"),
+        &sme,
+        &100,
+        &10,
+        &0,
+        &funding_token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+    client.set_investor_allowlisted(&investor, &true);
+    client.fund(&investor, &100);
+    client.settle();
+    client.claim_investor_payout(&investor);
+
+    let mut investors = SorobanVec::new(&env);
+    investors.push_back(investor);
+    client.bump_ttl(&investors);
+}
+
+#[test]
 fn test_sweep_not_terminal() {
     let env = Env::default();
     env.mock_all_auths();
@@ -616,7 +648,10 @@ fn test_sweep_not_terminal() {
         &None,
     );
 
-    client.sweep_terminal_dust(&10);
+    assert_contract_error(
+        client.try_sweep_terminal_dust(&10),
+        EscrowError::DustSweepNotTerminal,
+    );
 }
 
 #[test]
@@ -1374,7 +1409,7 @@ fn test_get_escrow_summary_happy_path() {
     assert_eq!(summary.funding_close_snapshot, EscrowCloseSnapshot::None);
     assert_eq!(summary.unique_funder_count, 0);
     assert!(!summary.is_allowlist_active);
-    assert_eq!(summary.schema_version, 5);
+    assert_eq!(summary.schema_version, 6);
 }
 
 #[test]
