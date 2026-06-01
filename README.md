@@ -40,7 +40,9 @@ WASM.
 | 4 | Added attestation API (`PrimaryAttestationHash`, `AttestationAppendLog`) | Additive keys — no `migrate` call required |
 | 5 | Added `YieldTierTable` (`fund_with_commitment`), `RegistryRef`, `Treasury`; tightened `InvoiceEscrow` layout | **Redeploy required** if `InvoiceEscrow` struct layout differs from stored XDR |
 
-> **Current:** `SCHEMA_VERSION = 5`
+| 6 | Moved per-investor keys to persistent storage to bound instance footprint and decouple per-address TTL | **Redeploy required** — prior instances must be redeployed to pick up new storage locations |
+
+> **Current:** `SCHEMA_VERSION = 6`
 
 ---
 
@@ -64,7 +66,7 @@ WASM.
 ### `migrate` entrypoint — explicit panic semantics
 
 `LiquifactEscrow::migrate(from_version)` **panics in all current cases**.
-There is **no silent migration path** from any prior version to version 5.
+There is **no silent migration path** from any prior version to version 6.
 Callers must not assume it will do bookkeeping work:
 
 | Condition | Panic message |

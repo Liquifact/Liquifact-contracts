@@ -837,7 +837,7 @@ advance the stored schema version. The current contract panics for all `from_ver
 because no migration path is implemented — this entrypoint is a forward-compatibility hook for
 future schema upgrades.
 
-The current `SCHEMA_VERSION` is `5`. A fresh deployment stores version `5`. Two panic cases:
+The current `SCHEMA_VERSION` is `6`. A fresh deployment stores version `6`. Two panic cases:
 
 ```bash
 # Panics: "Already at current schema version" (from_version matches stored AND equals SCHEMA_VERSION)
@@ -846,7 +846,7 @@ stellar contract invoke \
   --source admin \
   --network local \
   -- migrate \
-  --from_version 5
+  --from_version 6
 
 # Panics: "from_version does not match stored version" (mismatch with what is stored)
 stellar contract invoke \

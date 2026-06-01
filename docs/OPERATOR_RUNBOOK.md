@@ -8,35 +8,41 @@
 
 ## 1. Decision tree — redeploy vs. on-chain WASM upgrade
 
-On Stellar/Soroban, "upgrading" a contract means uploading new WASM bytecode
-and calling the contract's own upgrade entrypoint (if it exposes one) **or**
-deploying a new contract instance entirely.
+On Stellar/Soroban, "upgrading" a contract means preserving the contract ID and
+stored ledger entries while switching the instance to new WASM bytecode. The
+standard contract pattern is an admin-gated entrypoint that calls
+`env.deployer().update_current_contract_wasm(new_wasm_hash)`. If the deployed
+contract does not expose that upgrade entrypoint, operators must redeploy a new
+contract instance instead.
 
 ```
-Is InvoiceEscrow struct layout or any stored contracttype XDR shape changed?
+Does the existing instance expose an admin-gated WASM upgrade entrypoint?
 │
-├─ YES → REDEPLOY (new contract address, new init)
-│         └─ Reason: Soroban deserializes stored XDR using the types embedded
-│                    in the *current* WASM. A layout change causes deserialization
-│                    panic on every read of old data under new WASM.
+├─ NO  → REDEPLOY (new contract address, new init)
 │
-└─ NO  → Are you adding only new optional DataKey variants read with .unwrap_or()?
+└─ YES → Did InvoiceEscrow or any stored #[contracttype] XDR shape change?
           │
-          ├─ YES → WASM UPGRADE IN PLACE is safe.
-          │         └─ Steps: upload new WASM → call upgrade entrypoint (if present)
-          │                   → call migrate() only if you want to bump DataKey::Version.
-          │                   migrate() currently panics — extend it first.
+          ├─ YES → REDEPLOY (new contract address, new init)
+          │         └─ Reason: stored XDR must decode against the new WASM's
+          │                    contract types; layout changes are breaking.
           │
-          └─ NO  → Review change carefully.
-                    If you rename/remove an existing DataKey variant → REDEPLOY.
-                    If you only add new behavior with no stored-state change → WASM UPGRADE.
+          └─ NO  → Is the change only new DataKey variants read with defaults?
+                    │
+                    ├─ YES → WASM UPGRADE IN PLACE. Do not call migrate().
+                    │
+                    └─ NO  → Does the change require rewriting existing storage?
+                              │
+                              ├─ YES → Extend migrate() first, test it, then upgrade
+                              │         and call migrate() with the stored version.
+                              │
+                              └─ NO  → WASM UPGRADE IN PLACE, after code review.
 ```
 
 > **Key Soroban difference from EVM:** there is no `delegatecall`-style proxy
-> pattern. Upgrading WASM replaces the bytecode for the *same* contract
-> address, but all stored data remains in place and is decoded against the
-> **new** WASM's types. A struct layout change is therefore a breaking storage
-> change.
+> pattern in this contract. A same-address upgrade preserves stored data and
+> runs the new WASM against that data. A stored type layout change is therefore
+> a breaking storage change unless an explicit, tested migration can decode the
+> old data shape and rewrite it safely.
 
 ---
 
@@ -69,37 +75,97 @@ Do **not** bump `SCHEMA_VERSION` for:
 - Adding a new `#[contracttype]` stored at a new key.
 - Behavioral changes that do not touch stored state.
 
+### Changelog-based transition classification
+
+This table is derived from the `SCHEMA_VERSION` changelog in
+`escrow/src/lib.rs`. It is the operator classification for historical
+transitions through version 5.
+
+| Transition | Changelog source | Operator action |
+|------------|------------------|-----------------|
+| Fresh deploy → 1 | Initial schema (`InvoiceEscrow` v1, basic fund / settle) | Fresh `init`; no migration exists before v1. |
+| 1 → 2 | Added `InvestorEffectiveYield`, `InvestorClaimNotBefore` | Additive. No `migrate()` call required when readers default missing values. |
+| 2 → 3 | Added `FundingCloseSnapshot`, `MinContributionFloor`, `MaxUniqueInvestorsCap`, `UniqueFunderCount` | Additive. No `migrate()` call required when readers default missing values. |
+| 3 → 4 | Added `PrimaryAttestationHash`, `AttestationAppendLog` | Additive. No `migrate()` call required. |
+| 4 → 5 | Added `YieldTierTable`, `RegistryRef`, `Treasury`; tightened `InvoiceEscrow` layout | Conditional. Additive keys alone need no `migrate()`, but any `InvoiceEscrow` XDR/layout change is breaking and requires redeploy. |
+| 5 → 6 | Per-investor keys moved to persistent storage | Breaking for existing instances. Redeploy required because prior per-investor instance keys are address-keyed and not enumerable by the contract. |
+
+Operational rule: additive keys are safe only when old instances can read them
+with explicit defaults. Changing, renaming, or removing an existing key or
+changing an existing stored type's XDR shape is not additive.
+
 ### Implementing a real migration in `migrate()`
 
 ```rust
-// Example: adding a new required field `fee_bps: i64` to InvoiceEscrow.
-// This requires a redeploy (new struct XDR) but illustrates the pattern
-// for a same-instance migration when only a primitive flag changes.
-
 pub fn migrate(env: Env, from_version: u32) -> u32 {
+    // Keep this guard first. Current code already requires admin auth before
+    // version checks so every future storage rewrite is admin-gated.
+    Self::get_escrow(env.clone()).admin.require_auth();
+
     let stored: u32 = env.storage().instance().get(&DataKey::Version).unwrap_or(0);
-    assert!(stored == from_version, "from_version does not match stored version");
-    if from_version >= SCHEMA_VERSION {
-        panic!("Already at current schema version");
-    }
-
-    // Example path: 4 → 5 (additive new key, no struct change)
-    if from_version == 4 {
-        // Initialize new optional key with a safe default.
-        env.storage().instance().set(&DataKey::MinContributionFloor, &0i128);
-        env.storage().instance().set(&DataKey::Version, &5u32);
-        return 5;
-    }
-
-    panic!(
-        "No migration path from version {} — extend migrate or redeploy",
-        from_version
+    ensure(
+        &env,
+        stored == from_version,
+        EscrowError::MigrationVersionMismatch,
     );
+
+    if from_version >= SCHEMA_VERSION {
+        fail(&env, EscrowError::AlreadyCurrentSchemaVersion)
+    }
+
+    // Example pattern for a future same-instance migration:
+    if from_version == 6 && SCHEMA_VERSION == 7 {
+        // 1. Read only old-version data that the new WASM can still decode.
+        // 2. Validate arithmetic with checked_* operations.
+        // 3. Write new keys or rewritten values exactly once.
+        // 4. Write DataKey::Version last.
+        env.storage().instance().set(&DataKey::Version, &7u32);
+        return 7;
+    }
+
+    fail(&env, EscrowError::NoMigrationPath)
 }
 ```
 
-**Current state (v5):** `migrate()` panics on **all** paths. No migration
-work is implemented. Operators must redeploy if `InvoiceEscrow` layout changes.
+Step-by-step implementation requirements for a real migration:
+
+1. Bump `SCHEMA_VERSION` in `escrow/src/lib.rs`.
+2. Add the migration branch above the terminal `EscrowError::NoMigrationPath`.
+3. Keep `Self::get_escrow(env.clone()).admin.require_auth()` before all version
+   checks and before every storage write.
+4. Read `DataKey::Version` and require `stored == from_version`.
+5. For each migrated value, prove the new WASM can decode the old stored value;
+   otherwise redeploy instead of migrating in place.
+6. Use checked arithmetic for transformed numeric values and keep writes
+   bounded. The migration should be O(number of explicitly supplied or
+   enumerable keys); do not design a migration that assumes contract storage can
+   enumerate all investors.
+7. Write all transformed state before writing `DataKey::Version`.
+8. Write `DataKey::Version` last and return the new version.
+9. Add unit tests for version mismatch, already-current version, unauthorized
+   caller, the successful migration path, and repeated calls after success.
+10. Update this runbook, the rustdoc changelog, and any affected read/API docs.
+
+**Current state (v6):** `migrate()` fails with typed contract errors on **all**
+paths. No migration work is implemented. The entrypoint is admin-gated before
+version checks so any future storage-mutating migration path is authenticated by
+construction. See [ADR-007](adr/ADR-007-storage-key-evolution.md) for the
+storage-key evolution policy. Operators must redeploy if `InvoiceEscrow` layout
+changes.
+
+### Current `migrate()` panic policy
+
+This table must match the `migrate` rustdoc in `escrow/src/lib.rs`.
+
+| Condition | Typed error |
+|-----------|-------------|
+| `stored_version != from_version` | `EscrowError::MigrationVersionMismatch` |
+| `from_version >= SCHEMA_VERSION` | `EscrowError::AlreadyCurrentSchemaVersion` |
+| Any `from_version < SCHEMA_VERSION` without an implemented migration branch | `EscrowError::NoMigrationPath` |
+
+Because Soroban aborts the transaction on contract panic, these errors perform
+no storage writes in the current release. Operators must not call `migrate()` as
+a bookkeeping step after additive upgrades.
 
 ---
 
@@ -190,7 +256,7 @@ stellar contract invoke \
   --min_contribution null \
   --max_unique_investors null
 
-# Verify stored version matches SCHEMA_VERSION (should return 5)
+# Verify stored version matches SCHEMA_VERSION (should return 6)
 stellar contract invoke \
   --id <CONTRACT_ID> \
   --source $SOURCE_SECRET \
@@ -202,7 +268,9 @@ stellar contract invoke \
 
 ## 4. WASM upgrade in place (additive-only changes)
 
-Use this path only when no `#[contracttype]` stored struct layout has changed.
+Use this path only when no `#[contracttype]` stored struct layout has changed
+and the currently deployed contract exposes an admin-gated upgrade entrypoint
+that calls `env.deployer().update_current_contract_wasm(new_wasm_hash)`.
 
 ```bash
 # Step 1: Upload new WASM (get new hash)
@@ -211,21 +279,22 @@ stellar contract upload \
   --source $SOURCE_SECRET \
   --network $STELLAR_NETWORK
 
-# Step 2: Upgrade the existing contract instance's WASM
-stellar contract upgrade \
+# Step 2: Invoke the deployed contract's upgrade entrypoint, if present.
+# The current LiquiFact escrow contract does not expose this entrypoint.
+stellar contract invoke \
   --id <EXISTING_CONTRACT_ID> \
-  --wasm-hash <NEW_WASM_HASH> \
   --source $SOURCE_SECRET \
-  --network $STELLAR_NETWORK
+  --network $STELLAR_NETWORK \
+  -- upgrade --new_wasm_hash <NEW_WASM_HASH>
 
 # Step 3 (optional): Call migrate() only if you implemented a migration path.
 # In the current release, migrate() panics — do NOT call it unless extended.
 # stellar contract invoke --id <CONTRACT_ID> ... -- migrate --from_version 4
 ```
 
-> **Soroban note:** `stellar contract upgrade` replaces the WASM for the
-> contract at the given ID. The stored instance data is preserved. Old XDR is
-> decoded against the **new** WASM types on the next read.
+> **Soroban note:** `env.deployer().update_current_contract_wasm` replaces the
+> WASM for the contract at the current ID. The stored instance data is
+> preserved. Old XDR is decoded against the **new** WASM types on the next read.
 
 ---
 
@@ -267,13 +336,14 @@ support contract destruction. Operators must:
 
 ## 6. Rollback protocol
 
-There is **no on-chain downgrade** path on Soroban. If a WASM upgrade
-introduces a bug:
+There is **no automatic on-chain downgrade** path on Soroban. If a WASM upgrade
+introduces a bug, recovery still requires an available admin-gated upgrade
+entrypoint on the deployed contract:
 
 ```
-Option A (safest): Re-upload previous WASM, call stellar contract upgrade
-                   back to old hash. Works only if stored data is still
-                   compatible with old WASM types.
+Option A (safest): Re-upload previous WASM, invoke the contract's upgrade
+                   entrypoint back to the old hash. Works only if stored data
+                   is still compatible with old WASM types.
 
 Option B (layout-broken): Redeploy from old WASM hash (already uploaded).
                            Migrate investor positions off-chain.
@@ -284,12 +354,12 @@ Option C (emergency): Activate legal hold on the broken contract to block
 ```
 
 ```bash
-# Option A — revert WASM (requires previous hash)
-stellar contract upgrade \
+# Option A — revert WASM through the contract's upgrade entrypoint
+stellar contract invoke \
   --id <CONTRACT_ID> \
-  --wasm-hash <PREVIOUS_WASM_HASH> \
   --source $SOURCE_SECRET \
-  --network $STELLAR_NETWORK
+  --network $STELLAR_NETWORK \
+  -- upgrade --new_wasm_hash <PREVIOUS_WASM_HASH>
 
 # Emergency hold (before investigating)
 stellar contract invoke \
@@ -310,7 +380,8 @@ stellar contract invoke \
    stellar contract invoke --id <ID> ... -- set_legal_hold --active true
    ```
 
-2. **Perform** the WASM upload and (if applicable) `stellar contract upgrade`.
+2. **Perform** the WASM upload and, if the contract supports it, invoke the
+   admin-gated upgrade entrypoint.
 
 3. **Verify** the upgraded contract: call `get_version`, `get_escrow`, and
    run smoke tests on Testnet mirror.
@@ -341,9 +412,10 @@ used as `funding_token` in an escrow instance.
 ### No EVM proxy patterns
 
 This contract does not implement a proxy pattern (no `delegatecall` equivalent
-on Soroban). Upgrade authority flows through `stellar contract upgrade`
-(protocol-level, requires the deployer footprint) and is not exposed as an
-on-chain entrypoint in the current release.
+on Soroban). Same-address upgrade authority should flow through a contract
+entrypoint that requires admin authorization before calling
+`env.deployer().update_current_contract_wasm`. The current release does not
+expose that entrypoint, so operators should use redeploy for new WASM.
 
 ### Admin key hygiene
 
@@ -366,10 +438,10 @@ first implementing the migration path.
 
 | WASM version (SCHEMA_VERSION) | Can read data from | Notes |
 |-------------------------------|-------------------|-------|
-| 5 | 5 | Same version — fully compatible |
-| 5 | 4 | Only if no struct layout changed; new optional keys absent → defaults |
-| 5 | ≤3 | Only if InvoiceEscrow XDR shape identical; new optional keys absent → defaults |
-| 4 reading 5 data | ❌ | Unknown keys ignored; may panic if struct layout changed |
+| 6 | 6 | Same version — fully compatible |
+| 6 | 5 | Requires redeploy for per-investor key relocation; no in-place migration path |
+| 6 | ≤4 | Only with an explicit migration path or redeploy; new optional keys absent → defaults when compatible |
+| ≤5 reading 6 data | ❌ | Older WASM reads per-investor accounting from instance storage |
 
 ---
 
@@ -378,7 +450,7 @@ first implementing the migration path.
 | Term | Meaning in this context |
 |------|------------------------|
 | WASM upload | `stellar contract upload` — publishes bytecode to network; returns a hash |
-| WASM upgrade | `stellar contract upgrade` — replaces bytecode for an existing contract ID |
+| WASM upgrade | Admin-gated contract entrypoint calling `env.deployer().update_current_contract_wasm` for an existing contract ID |
 | Redeploy | Deploy a **new** contract instance; old instance is not migrated automatically |
 | `DataKey::Version` | On-chain stored schema version set by `init` and updated by `migrate` |
 | `SCHEMA_VERSION` | Compile-time constant in WASM; the target version for `init` and migration |
