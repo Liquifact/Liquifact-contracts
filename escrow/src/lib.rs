@@ -11,7 +11,7 @@
 //! ## Schema version ([`SCHEMA_VERSION`] / [`DataKey::Version`])
 //!
 //! The constant [`SCHEMA_VERSION`] is written to [`DataKey::Version`] by [`LiquifactEscrow::init`]
-//! and is the canonical source of truth for upgrade decisions. **Current value: 5.**
+//! and is the canonical source of truth for upgrade decisions. **Current value: 6.**
 //!
 //! [`LiquifactEscrow::migrate`] **fails with typed errors in all current execution paths** — no
 //! silent migration work is promised or performed. Operators must extend `migrate` before calling
