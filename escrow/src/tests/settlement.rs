@@ -1890,3 +1890,9 @@ fn claim_dedupe_hold_still_blocks() {
 
     client.claim_investor_payout(&investor); // must panic: hold active
 }
+}
+}
+}
+}
+}
+}

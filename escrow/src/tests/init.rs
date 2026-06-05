@@ -380,6 +380,8 @@ fn test_init_invoice_id_embedded_null_panics() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 }
 

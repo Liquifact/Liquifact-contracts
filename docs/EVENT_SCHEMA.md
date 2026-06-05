@@ -44,6 +44,7 @@ The current contract defines 19 event structs.
 | `MaturityUpdatedEvent` | `maturity` | `update_maturity` |
 | `AdminTransferredEvent` | `admin` | `accept_admin` |
 | `AdminProposedEvent` | `adm_prop` | `propose_admin`, `transfer_admin` |
+| `BeneficiaryRotated` | `ben_rot` | `rotate_beneficiary` |
 | `FundingTargetUpdated` | `fund_tgt` | `update_funding_target` |
 | `LegalHoldChanged` | `legalhld` | `set_legal_hold`, `clear_legal_hold` |
 | `CollateralRecordedEvt` | `coll_rec` | `record_sme_collateral_commitment` |
@@ -198,6 +199,25 @@ Data:
 |---|---|
 | `current_admin` | `Address` |
 | `pending_admin` | `Address` |
+
+### `BeneficiaryRotated`
+
+Emitted after successful `rotate_beneficiary`.
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `beneficiary_rotated` |
+| 1 | `name` | `Symbol` | `ben_rot` |
+| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
+
+Data:
+
+| Field | Type |
+|---|---|
+| `prior_sme` | `Address` |
+| `new_sme` | `Address` |
 
 ### `FundingTargetUpdated`
 

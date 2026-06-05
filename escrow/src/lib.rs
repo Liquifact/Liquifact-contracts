@@ -121,97 +121,6 @@ use soroban_sdk::{
 
 pub mod external_calls;
 
-// Typed contract errors used throughout the contract. Keep in sync with
-// `docs/escrow-error-messages.md`.
-#[contracterror]
-#[derive(Debug, PartialEq, Eq)]
-pub enum EscrowError {
-    AmountMustBePositive = 1,
-    YieldBpsOutOfRange = 2,
-    EscrowAlreadyInitialized = 3,
-    InvoiceIdInvalidLength = 4,
-    InvoiceIdInvalidCharset = 5,
-    MinContributionNotPositive = 6,
-    MinContributionExceedsAmount = 7,
-    MaxUniqueInvestorsNotPositive = 8,
-    MaxPerInvestorNotPositive = 9,
-    TierYieldOutOfRange = 10,
-    TierYieldBelowBase = 11,
-    TierLockNotIncreasing = 12,
-    TierYieldNotNonDecreasing = 13,
-    EscrowNotInitialized = 20,
-    FundingTokenNotSet = 21,
-    TreasuryNotSet = 22,
-    LegalHoldBlocksTreasuryDustSweep = 30,
-    SweepAmountNotPositive = 31,
-    SweepAmountExceedsMax = 32,
-    DustSweepNotTerminal = 33,
-    NoFundingTokenBalanceToSweep = 34,
-    EffectiveSweepAmountZero = 35,
-    TransferAmountNotPositive = 36,
-    InsufficientTokenBalanceBeforeTransfer = 37,
-    SenderBalanceUnderflow = 38,
-    RecipientBalanceUnderflow = 39,
-    SenderBalanceDeltaMismatch = 40,
-    RecipientBalanceDeltaMismatch = 41,
-    PrimaryAttestationAlreadyBound = 50,
-    AttestationAppendLogCapacityReached = 51,
-    CollateralAmountNotPositive = 60,
-    CollateralAssetEmpty = 61,
-    CollateralTimestampBackwards = 62,
-    InvestorBatchEmpty = 70,
-    InvestorBatchTooLarge = 71,
-    TargetNotPositive = 72,
-    TargetUpdateNotOpen = 73,
-    TargetBelowFundedAmount = 74,
-    CapLowerNotOpen = 75,
-    NoInvestorCapConfigured = 76,
-    NewCapNotLower = 77,
-    NewCapBelowCurrentFunderCount = 78,
-    MaturityUpdateNotOpen = 79,
-    NewAdminSameAsCurrent = 80,
-    MigrationVersionMismatch = 90,
-    AlreadyCurrentSchemaVersion = 91,
-    NoMigrationPath = 92,
-    FundingAmountNotPositive = 100,
-    FundingBelowMinContribution = 101,
-    LegalHoldBlocksFunding = 102,
-    EscrowNotOpenForFunding = 103,
-    InvestorNotAllowlisted = 104,
-    InvestorContributionOverflow = 105,
-    InvestorContributionExceedsCap = 106,
-    UniqueInvestorCapReached = 107,
-    TieredSecondDeposit = 108,
-    InvestorClaimTimeOverflow = 109,
-    FundedAmountOverflow = 110,
-    LegalHoldBlocksSettlement = 120,
-    SettlementNotFunded = 121,
-    MaturityNotReached = 122,
-    LegalHoldBlocksWithdrawal = 123,
-    WithdrawalNotFunded = 124,
-    LegalHoldBlocksInvestorClaims = 125,
-    NoContributionToClaim = 126,
-    InvestorClaimNotSettled = 127,
-    InvestorCommitmentLockNotExpired = 128,
-    ComputePayoutArithmeticOverflow = 129,
-    LegalHoldBlocksCancelFunding = 140,
-    CancelFundingNotOpen = 141,
-    RefundNotCancelled = 142,
-    NoContributionToRefund = 143,
-}
-
-/// Panic with a typed `EscrowError` if `cond` is false.
-pub fn ensure(env: &Env, cond: bool, err: EscrowError) {
-    if !cond {
-        panic_with_error!(env, err);
-    }
-}
-
-/// Generic fail helper that panics with a typed `EscrowError` and coerces to any return type.
-pub fn fail<T>(env: &Env, err: EscrowError) -> T {
-    panic_with_error!(env, err)
-}
-
 /// Current storage schema version written to [`DataKey::Version`] by [`LiquifactEscrow::init`].
 ///
 /// # Schema version changelog
@@ -231,80 +140,6 @@ pub const SCHEMA_VERSION: u32 = 6;
 /// Upper bound on [`LiquifactEscrow::append_attestation_digest`] entries to keep storage bounded.
 /// Revocation via [`LiquifactEscrow::revoke_attestation_digest`] does not consume a slot.
 pub const MAX_ATTESTATION_APPEND_ENTRIES: u32 = 32;
-
-/// Typed contract error codes for escrow validation and guard failures.
-#[contracterror]
-pub enum EscrowError {
-    AlreadyCurrentSchemaVersion,
-    AmountMustBePositive,
-    AttestationAppendLogCapacityReached,
-    CancelFundingNotOpen,
-    CollateralAmountNotPositive,
-    CollateralAssetEmpty,
-    CollateralTimestampBackwards,
-    ComputePayoutArithmeticOverflow,
-    DustSweepNotTerminal,
-    EffectiveSweepAmountZero,
-    EscrowAlreadyInitialized,
-    EscrowNotInitialized,
-    EscrowNotOpenForFunding,
-    FundedAmountOverflow,
-    FundingAmountNotPositive,
-    FundingBelowMinContribution,
-    FundingTokenNotSet,
-    InsufficientTokenBalanceBeforeTransfer,
-    InvestorClaimNotSettled,
-    InvestorClaimTimeOverflow,
-    InvestorCommitmentLockNotExpired,
-    InvestorContributionExceedsCap,
-    InvestorContributionOverflow,
-    InvestorNotAllowlisted,
-    InvoiceIdInvalidCharset,
-    InvoiceIdInvalidLength,
-    LegalHoldBlocksCancelFunding,
-    LegalHoldBlocksFunding,
-    LegalHoldBlocksInvestorClaims,
-    LegalHoldBlocksSettlement,
-    LegalHoldBlocksTreasuryDustSweep,
-    LegalHoldBlocksWithdrawal,
-    LegalHoldClearDelayOverflow,
-    LegalHoldClearNotReady,
-    LegalHoldClearRequestMissing,
-    MaturityNotReached,
-    MaturityUpdateNotOpen,
-    MaxPerInvestorNotPositive,
-    MaxUniqueInvestorsNotPositive,
-    MigrationVersionMismatch,
-    MinContributionExceedsAmount,
-    MinContributionNotPositive,
-    NewAdminSameAsCurrent,
-    NoContributionToClaim,
-    NoContributionToRefund,
-    NoFundingTokenBalanceToSweep,
-    NoMigrationPath,
-    PrimaryAttestationAlreadyBound,
-    RecipientBalanceDeltaMismatch,
-    RecipientBalanceUnderflow,
-    RefundNotCancelled,
-    SenderBalanceDeltaMismatch,
-    SenderBalanceUnderflow,
-    SettlementNotFunded,
-    SweepAmountExceedsMax,
-    SweepAmountNotPositive,
-    TargetBelowFundedAmount,
-    TargetNotPositive,
-    TargetUpdateNotOpen,
-    TierLockNotIncreasing,
-    TierYieldBelowBase,
-    TierYieldNotNonDecreasing,
-    TierYieldOutOfRange,
-    TieredSecondDeposit,
-    TransferAmountNotPositive,
-    TreasuryNotSet,
-    UniqueInvestorCapReached,
-    WithdrawalNotFunded,
-    YieldBpsOutOfRange,
-}
 
 /// Upper bound on batch allowlist mutation entries to keep storage/CPU bounded.
 /// Mirrors the spirit of `MAX_ATTESTATION_APPEND_ENTRIES` to limit per-call work.
@@ -424,6 +259,14 @@ pub enum EscrowError {
     CancelFundingNotOpen = 141,
     RefundNotCancelled = 142,
     NoContributionToRefund = 143,
+
+    LegalHoldClearDelayOverflow = 144,
+    LegalHoldClearNotReady = 145,
+    LegalHoldClearRequestMissing = 146,
+
+    LegalHoldBlocksBeneficiaryRotation = 150,
+    RotationNotOpen = 151,
+    NewSmeSameAsCurrent = 152,
 }
 
 #[inline(always)]
@@ -737,6 +580,16 @@ pub struct AdminTransferredEvent {
     #[topic]
     pub invoice_id: Symbol,
     pub new_admin: Address,
+}
+
+#[contractevent]
+pub struct BeneficiaryRotated {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    pub prior_sme: Address,
+    pub new_sme: Address,
 }
 
 #[contractevent]
@@ -2069,7 +1922,7 @@ impl LiquifactEscrow {
         // Capture the effective yield and tier lock threshold in locals so event fields can
         // be populated without post-write storage reads.
         let investor_effective_yield_bps: i64;
-        let tier_lock_secs: u64;
+        let mut tier_lock_secs: u64 = 0;
 
         if simple_fund {
             if prev == 0 {
@@ -2095,6 +1948,7 @@ impl LiquifactEscrow {
             let (eff, lock) =
                 Self::effective_yield_for_commitment(&env, escrow.yield_bps, committed_lock_secs);
             investor_effective_yield_bps = eff;
+            tier_lock_secs = lock;
             Self::set_persistent_investor_effective_yield(&env, investor.clone(), eff);
             let now = env.ledger().timestamp();
             let claim_nb = if committed_lock_secs == 0 {
@@ -2684,6 +2538,98 @@ impl LiquifactEscrow {
             .instance()
             .get(&DataKey::InvestorRefunded(investor))
             .unwrap_or(false)
+    }
+
+    /// Rotate the SME beneficiary address with dual authorization.
+    ///
+    /// Requires **both** the current SME's authorization and the admin's authorization.
+    /// The new SME takes immediate effect and becomes the sole authority for `withdraw`, `settle`,
+    /// and `record_sme_collateral_commitment`. Collateral metadata ownership transfers atomically with it.
+    ///
+    /// # State requirements
+    ///
+    /// - Escrow must be in **non-terminal** state: `status == 0` (open) or `status == 1` (funded).
+    /// - Cannot rotate in states 2 (settled), 3 (withdrawn), or 4 (cancelled).
+    /// - Legal hold must not be active.
+    ///
+    /// # Authorization sequence
+    ///
+    /// 1. **Legal-hold gate** (read-only).
+    /// 2. **Status validation** (escrow read).
+    /// 3. **Same-address rejection**.
+    /// 4. **Current SME auth** (`escrow.sme_address.require_auth()`).
+    /// 5. **Admin auth** (`admin.require_auth()`).
+    /// 6. **Storage write** and **event emit**.
+    ///
+    /// # Errors
+    ///
+    /// Emits typed [`EscrowError`] codes for:
+    /// - `LegalHoldBlocksBeneficiaryRotation` (active legal hold).
+    /// - `RotationNotOpen` (escrow in terminal state).
+    /// - `NewSmeSameAsCurrent` (rotation attempted to the same address).
+    ///
+    /// # Security invariants
+    ///
+    /// - **Dual consent:** rotation requires signatures from both current SME and admin.
+    /// - **Atomic state:** `sme_address` is rewritten atomically; no partially-applied rotations.
+    /// - **Authority transfer:** new SME immediately gains sole authority for SME-gated operations.
+    /// - **No replay:** state mutation occurs only after successful dual auth.
+    ///
+    /// # Events
+    ///
+    /// Emits [`BeneficiaryRotated`] with the prior and new SME addresses.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // Current SME and admin both authorize rotation to new_sme_address.
+    /// client.rotate_beneficiary(&new_sme_address);
+    /// ```
+    pub fn rotate_beneficiary(env: Env, new_sme_address: Address) -> InvoiceEscrow {
+        // 1. Legal-hold gate (read-only).
+        ensure(
+            &env,
+            !Self::legal_hold_active(&env),
+            EscrowError::LegalHoldBlocksBeneficiaryRotation,
+        );
+
+        // 2. Read escrow for status and current SME.
+        // env.clone(): used again for storage write and event.
+        let mut escrow = Self::get_escrow(env.clone());
+
+        // 3. Status validation — only allowed in non-terminal states.
+        ensure(
+            &env,
+            escrow.status == 0 || escrow.status == 1,
+            EscrowError::RotationNotOpen,
+        );
+
+        // 4. Reject rotation to the same address.
+        ensure(
+            &env,
+            new_sme_address != escrow.sme_address,
+            EscrowError::NewSmeSameAsCurrent,
+        );
+
+        // 5. Dual authorization: current SME + admin.
+        escrow.sme_address.require_auth();
+        escrow.admin.require_auth();
+
+        // 6. Storage write and event emit.
+        let prior_sme = escrow.sme_address.clone();
+        escrow.sme_address = new_sme_address.clone();
+
+        env.storage().instance().set(&DataKey::Escrow, &escrow);
+
+        BeneficiaryRotated {
+            name: symbol_short!("ben_rot"),
+            invoice_id: escrow.invoice_id.clone(),
+            prior_sme,
+            new_sme: new_sme_address,
+        }
+        .publish(&env);
+
+        escrow
     }
 
     /// Total principal already returned to investors via [`LiquifactEscrow::refund`].

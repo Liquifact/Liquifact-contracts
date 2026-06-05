@@ -1,6 +1,7 @@
 use super::*;
-use crate::{AdminProposedEvent, EscrowCloseSnapshot, FundingTargetUpdated};
-use soroban_sdk::Event;
+use crate::{AdminProposedEvent, BeneficiaryRotated, EscrowCloseSnapshot, FundingTargetUpdated};
+use soroban_sdk::token::TokenClient;
+use soroban_sdk::{Event, symbol_short, token::StellarAssetClient};
 
 // Admin/governance operations: target changes, maturity changes, admin handover,
 // legal hold, migration guards, and collateral metadata.
@@ -1326,4 +1327,320 @@ fn auth_audit_sweep_terminal_dust_requires_treasury() {
     token.stellar.mint(&escrow_id, &100i128);
     env.mock_auths(&[]);
     client.sweep_terminal_dust(&100i128);
+}
+
+// --- Beneficiary Rotation Tests ---
+
+#[test]
+fn test_rotate_beneficiary_success_open_state() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let new_sme = Address::generate(&env);
+    let (token, treasury) = free_addresses(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    let updated = client.rotate_beneficiary(&new_sme);
+    assert_eq!(updated.sme_address, new_sme);
+    assert_eq!(updated.status, 0);
+}
+
+#[test]
+fn test_rotate_beneficiary_success_funded_state() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    let new_sme = Address::generate(&env);
+    default_init(&client, &env, &admin, &sme);
+    client.fund(&investor, &TARGET);
+
+    let updated = client.rotate_beneficiary(&new_sme);
+    assert_eq!(updated.sme_address, new_sme);
+    assert_eq!(updated.status, 1);
+}
+
+#[test]
+#[should_panic]
+fn test_rotate_beneficiary_rejects_settled_state() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    let new_sme = Address::generate(&env);
+    default_init(&client, &env, &admin, &sme);
+    client.fund(&investor, &TARGET);
+    client.settle();
+
+    // State is now 2 (settled) — terminal. Rotation must fail.
+    client.rotate_beneficiary(&new_sme);
+}
+
+#[test]
+#[should_panic]
+fn test_rotate_beneficiary_rejects_withdrawn_state() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    let new_sme = Address::generate(&env);
+    default_init(&client, &env, &admin, &sme);
+    client.fund(&investor, &TARGET);
+    client.withdraw();
+
+    // State is now 3 (withdrawn) — terminal. Rotation must fail.
+    client.rotate_beneficiary(&new_sme);
+}
+
+#[test]
+#[should_panic]
+fn test_rotate_beneficiary_rejects_cancelled_state() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let new_sme = Address::generate(&env);
+    default_init(&client, &env, &admin, &sme);
+    client.cancel_funding();
+
+    // State is now 4 (cancelled) — terminal. Rotation must fail.
+    client.rotate_beneficiary(&new_sme);
+}
+
+#[test]
+#[should_panic]
+fn test_rotate_beneficiary_rejects_same_address() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    // Attempt to rotate to the same address should fail.
+    client.rotate_beneficiary(&sme);
+}
+
+#[test]
+#[should_panic]
+fn test_rotate_beneficiary_requires_sme_auth() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let new_sme = Address::generate(&env);
+    let (client, _, _) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    // Mock auth only for admin, not for current SME.
+    env.mock_auths(&[soroban_sdk::testutils::MockAuth {
+        address: admin.clone(),
+        nonce: 0,
+        invoke_contract: false,
+    }]);
+
+    client.rotate_beneficiary(&new_sme);
+}
+
+#[test]
+#[should_panic]
+fn test_rotate_beneficiary_requires_admin_auth() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let new_sme = Address::generate(&env);
+    let (client, _, _) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    // Mock auth only for current SME, not for admin.
+    env.mock_auths(&[soroban_sdk::testutils::MockAuth {
+        address: sme.clone(),
+        nonce: 0,
+        invoke_contract: false,
+    }]);
+
+    client.rotate_beneficiary(&new_sme);
+}
+
+#[test]
+#[should_panic]
+fn test_rotate_beneficiary_blocked_by_legal_hold() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let new_sme = Address::generate(&env);
+    default_init(&client, &env, &admin, &sme);
+    client.set_legal_hold(&true);
+
+    // Legal hold is now active. Rotation must fail.
+    client.rotate_beneficiary(&new_sme);
+}
+
+#[test]
+fn test_rotate_beneficiary_emits_event() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let new_sme = Address::generate(&env);
+    let contract_id = client.address.clone();
+    default_init(&client, &env, &admin, &sme);
+
+    client.rotate_beneficiary(&new_sme);
+
+    let all_events = env.events().all();
+    let events = all_events.events();
+    let last_event = events.last().unwrap().clone();
+    let expected = crate::BeneficiaryRotated {
+        name: symbol_short!("ben_rot"),
+        invoice_id: client.get_escrow().invoice_id,
+        prior_sme: sme,
+        new_sme: new_sme.clone(),
+    }
+    .to_xdr(&env, &contract_id);
+
+    assert_eq!(last_event, expected);
+}
+
+#[test]
+fn test_rotate_beneficiary_new_sme_can_withdraw_after_rotation() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    let new_sme = Address::generate(&env);
+    let (token_addr, treasury) = free_addresses(&env);
+    let token = TokenClient::new(&env, &token_addr);
+    let stellar = StellarAssetClient::new(&env, &token_addr);
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "ROT001"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &token_addr,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    // Setup token and fund the escrow.
+    stellar.mint(&client.address, &TARGET);
+    client.fund(&investor, &TARGET);
+
+    // Rotate to new SME.
+    client.rotate_beneficiary(&new_sme);
+
+    // New SME should be able to withdraw.
+    let withdrawn = client.withdraw();
+    assert_eq!(withdrawn.status, 3); // withdrawn state
+}
+
+#[test]
+fn test_rotate_beneficiary_old_sme_cannot_withdraw_after_rotation() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    let new_sme = Address::generate(&env);
+    let (token_addr, treasury) = free_addresses(&env);
+    let token = TokenClient::new(&env, &token_addr);
+    let stellar = StellarAssetClient::new(&env, &token_addr);
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "ROT002"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &token_addr,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    stellar.mint(&client.address, &TARGET);
+    client.fund(&investor, &TARGET);
+    client.rotate_beneficiary(&new_sme);
+
+    // Old SME should not be able to withdraw (no auth for new SME address).
+    env.mock_all_auths();
+    env.mock_auths(&[soroban_sdk::testutils::MockAuth {
+        address: sme.clone(),
+        nonce: 0,
+        invoke_contract: false,
+    }]);
+
+    assert!(matches!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            client.withdraw();
+        })),
+        Err(_)
+    ));
+}
+
+#[test]
+fn test_rotate_beneficiary_new_sme_can_settle_after_rotation() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    let new_sme = Address::generate(&env);
+    default_init(&client, &env, &admin, &sme);
+    client.fund(&investor, &TARGET);
+
+    // Rotate to new SME.
+    client.rotate_beneficiary(&new_sme);
+
+    // New SME should be able to settle.
+    let settled = client.settle();
+    assert_eq!(settled.status, 2); // settled state
+}
+
+#[test]
+fn test_rotate_beneficiary_collateral_ownership_transfers() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let new_sme = Address::generate(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    // Original SME records collateral.
+    let commitment = client.record_sme_collateral_commitment(
+        &symbol_short!("GOLD"),
+        &1_000_000i128,
+    );
+    assert_eq!(commitment.amount, 1_000_000);
+
+    // Rotate to new SME.
+    client.rotate_beneficiary(&new_sme);
+
+    // New SME should be able to update the collateral.
+    let updated = client.record_sme_collateral_commitment(
+        &symbol_short!("SLVR"),
+        &2_000_000i128,
+    );
+    assert_eq!(updated.amount, 2_000_000);
+}
+
+#[test]
+fn test_rotate_beneficiary_multiple_rotations() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let sme1 = Address::generate(&env);
+    let sme2 = Address::generate(&env);
+    let sme3 = Address::generate(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    // First rotation.
+    client.rotate_beneficiary(&sme1);
+    assert_eq!(client.get_escrow().sme_address, sme1);
+
+    // Second rotation.
+    client.rotate_beneficiary(&sme2);
+    assert_eq!(client.get_escrow().sme_address, sme2);
+
+    // Third rotation.
+    client.rotate_beneficiary(&sme3);
+    assert_eq!(client.get_escrow().sme_address, sme3);
 }
