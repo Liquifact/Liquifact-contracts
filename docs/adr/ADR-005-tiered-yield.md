@@ -34,6 +34,96 @@ Some invoice products offer higher yield to investors who commit to a longer loc
 - If no tier table is set, `fund_with_commitment` with `committed_lock_secs == 0` behaves identically to `fund`.
 - Yield values are integer basis points only; fractional coupon math belongs off-chain.
 
+## Worked Examples
+
+Assume an escrow is initialized with `yield_bps = 500` (5%) and this tier table:
+
+| Tier | `min_lock_secs` | `yield_bps` | Meaning |
+|---:|---:|---:|---|
+| 1 | `2_592_000` | `650` | 30-day commitment earns 6.5% |
+| 2 | `7_776_000` | `800` | 90-day commitment earns 8.0% |
+| 3 | `15_552_000` | `950` | 180-day commitment earns 9.5% |
+
+### Tier-table validation
+
+The table is accepted because:
+
+- every tier yield is in `0..=10_000`;
+- every tier yield is `>= base yield_bps` (`500`);
+- `min_lock_secs` strictly increases (`30d < 90d < 180d`);
+- `yield_bps` is non-decreasing (`650 <= 800 <= 950`).
+
+Rejected examples:
+
+| Invalid table fragment | Rejection |
+|---|---|
+| `[{ min_lock_secs: 2_592_000, yield_bps: 400 }]` | `TierYieldBelowBase` because `400 < base 500` |
+| `[{ min_lock_secs: 2_592_000, yield_bps: 650 }, { min_lock_secs: 2_592_000, yield_bps: 800 }]` | `TierLockNotIncreasing` because lock thresholds must be strictly increasing |
+| `[{ min_lock_secs: 2_592_000, yield_bps: 800 }, { min_lock_secs: 7_776_000, yield_bps: 700 }]` | `TierYieldNotNonDecreasing` because later tiers must not reduce yield |
+
+### First deposit selects the effective yield
+
+At ledger timestamp `1_710_000_000`, an investor calls:
+
+```text
+fund_with_commitment(investor, 1_000_000_000, 7_776_000)
+```
+
+The commitment is 90 days, so `effective_yield_for_commitment` selects tier 2:
+
+| Stored key | Stored value |
+|---|---:|
+| `InvestorEffectiveYield(investor)` | `800` |
+| `InvestorClaimNotBefore(investor)` | `1_717_776_000` |
+
+The emitted `EscrowFunded` event includes:
+
+| Field | Value |
+|---|---:|
+| `investor_effective_yield_bps` | `800` |
+| `tier_lock_secs` | `7_776_000` |
+
+### Commitments between thresholds
+
+If the same tier table receives `committed_lock_secs = 5_184_000` (60 days), the
+best matching threshold is the 30-day tier, not the 90-day tier:
+
+| Input commitment | Matched `tier_lock_secs` | Effective yield |
+|---:|---:|---:|
+| `0` | `0` | `500` |
+| `2_592_000` | `2_592_000` | `650` |
+| `5_184_000` | `2_592_000` | `650` |
+| `7_776_000` | `7_776_000` | `800` |
+| `15_552_000` | `15_552_000` | `950` |
+
+### Follow-on principal must use `fund`
+
+After a first `fund_with_commitment`, a second `fund_with_commitment` from the
+same investor is rejected with `TieredSecondDeposit`. The investor may add
+principal only through `fund`, which preserves the stored effective yield and
+claim lock.
+
+Example:
+
+1. First call: `fund_with_commitment(investor, 1_000_000_000, 7_776_000)` stores
+   `InvestorEffectiveYield = 800` and `InvestorClaimNotBefore = 1_717_776_000`.
+2. Follow-on call: `fund(investor, 250_000_000)` increases contribution but
+   keeps the same `InvestorEffectiveYield` and `InvestorClaimNotBefore`.
+3. Invalid call: `fund_with_commitment(investor, 250_000_000, 15_552_000)` is
+   rejected; the investor cannot upgrade to the 180-day tier after the first leg.
+
+### Claim lock enforcement
+
+`claim_investor_payout` compares the current ledger timestamp against
+`InvestorClaimNotBefore`.
+
+| Ledger timestamp | Result |
+|---:|---|
+| `1_717_775_999` | rejected with `InvestorCommitmentLockNotExpired` |
+| `1_717_776_000` | allowed if the escrow is settled and the investor has contribution |
+
+The comparison is inclusive: `now >= InvestorClaimNotBefore` is sufficient.
+
 ## Rejected alternatives
 
 - **Mutable tier selection:** allows gaming; immutability after first deposit is the fairness guarantee.
@@ -55,4 +145,3 @@ The state-machine rules above are verified in `escrow/src/tests/funding.rs`:
 | `test_fund_with_commitment_zero_lock_behaves_as_fund` | `committed_lock_secs == 0` → base yield, `InvestorClaimNotBefore == 0` |
 | `test_commitment_zero_lock_follow_on_fund_no_claim_gate` | Follow-on `fund()` after zero-lock preserves both zero guards |
 | `test_fund_first_deposit_sets_base_yield_and_no_claim_gate` | Plain `fund()` first deposit → base yield, no claim gate |
-
