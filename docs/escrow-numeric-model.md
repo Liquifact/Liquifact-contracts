@@ -19,10 +19,42 @@ This contract uses Soroban host values and Rust integer types directly. It does 
 - A zero commitment stores `0`, meaning no additional investor claim-time gate.
 - Boundary values are inclusive: a timestamp plus commitment that equals `u64::MAX` is representable; only values above `u64::MAX` fail.
 
+### Tiered-yield examples
+
+Tiered yield uses integer basis points. A base yield of `500` means 5%, and a
+tier yield of `800` means 8%. The contract stores the selected yield in
+`InvestorEffectiveYield(Address)` on the investor's first deposit.
+
+With this tier table:
+
+| `min_lock_secs` | `yield_bps` |
+|---:|---:|
+| `2_592_000` | `650` |
+| `7_776_000` | `800` |
+| `15_552_000` | `950` |
+
+and base `yield_bps = 500`, the selection rules are:
+
+| `committed_lock_secs` | Stored effective yield | Stored claim lock |
+|---:|---:|---|
+| `0` | `500` | `0` |
+| `2_592_000` | `650` | `ledger.timestamp() + 2_592_000` |
+| `5_184_000` | `650` | `ledger.timestamp() + 5_184_000` |
+| `7_776_000` | `800` | `ledger.timestamp() + 7_776_000` |
+| `15_552_000` | `950` | `ledger.timestamp() + 15_552_000` |
+
+`tier_lock_secs` in `EscrowFunded` records the matched tier threshold, while
+`InvestorClaimNotBefore` records the full investor commitment duration. A
+60-day commitment can therefore emit `tier_lock_secs = 2_592_000` while storing
+`InvestorClaimNotBefore = now + 5_184_000`.
+
+Follow-on principal uses `fund()` and does not recalculate these values.
+
 ## Integration Guidance
 
 - Off-chain callers should validate amount and lock-duration inputs before submitting transactions, especially when simulating near integer limits.
 - Risk and accounting systems should use integer arithmetic for base-unit amounts and rational math for pro-rata ratios; avoid floating-point rounding when reconciling on-chain state.
 - Maturity and claim-lock checks are ledger-time checks, not wall-clock oracle checks.
+- UI and SDK code should display both the matched tier threshold and the full
+  commitment unlock timestamp when they differ.
 - Unsupported token economics remain out of scope. Fee-on-transfer, rebasing, malicious, or callback-heavy tokens are covered separately in [`escrow/src/external_calls.rs`](../escrow/src/external_calls.rs) and [`ESCROW_TOKEN_INTEGRATION_CHECKLIST.md`](ESCROW_TOKEN_INTEGRATION_CHECKLIST.md).
-
