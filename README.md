@@ -163,6 +163,10 @@ cargo clippy --all-targets -- -D warnings
 | `get_escrow` | Read current escrow state. |
 | `get_version` | Read stored `DataKey::Version`. |
 
+Typed contract failures use stable numeric `EscrowError` codes. Client SDKs
+should branch on the numeric code and follow the handling guidance in
+[`docs/escrow-error-messages.md`](docs/escrow-error-messages.md).
+
 ---
 
 ## Storage guardrails
