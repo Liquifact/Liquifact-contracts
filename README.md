@@ -151,9 +151,12 @@ cargo clippy --all-targets -- -D warnings
 | `init` | Create an invoice escrow; binds funding token, treasury, optional registry. |
 | `fund` | Record investor principal; marks escrow funded when target is met. |
 | `fund_with_commitment` | First deposit with optional lock period; selects tiered yield. |
+| `partial_settle` | Close open funding early and move the escrow to funded status. |
 | `settle` | Mark a funded escrow as settled (SME auth required; maturity enforced). |
 | `withdraw` | SME pulls funded liquidity (accounting record). |
 | `claim_investor_payout` | Investor records a payout claim after settlement. |
+| `cancel_funding` | Admin cancels an open escrow so investors can recover principal. |
+| `refund` | Investor recovers recorded principal from a cancelled escrow. |
 | `sweep_terminal_dust` | Treasury sweeps rounding residue from a terminal escrow. |
 | `migrate` | Schema version gate — **panics on all paths** in the current release. |
 | `set_legal_hold` | Admin activates/clears compliance hold. |
@@ -205,7 +208,7 @@ Core design decisions are captured in [`docs/adr/`](docs/adr/):
 
 | ADR | Decision |
 |-----|---------|
-| [ADR-001](docs/adr/ADR-001-state-model.md) | Escrow state model (`status` 0–3, forward-only transitions) |
+| [ADR-001](docs/adr/ADR-001-state-model.md) | Escrow state model (`status` 0–4, forward-only transitions including cancellation/refunds) |
 | [ADR-002](docs/adr/ADR-002-auth-boundaries.md) | Authorization boundaries per role (admin, SME, investor, treasury) |
 | [ADR-003](docs/adr/ADR-003-settlement-flow.md) | Two-phase settlement flow and funding-close snapshot |
 | [ADR-004](docs/adr/ADR-004-legal-hold.md) | Legal / compliance hold mechanism |
