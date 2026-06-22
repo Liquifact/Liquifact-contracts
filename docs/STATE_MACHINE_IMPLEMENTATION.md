@@ -1,169 +1,143 @@
-# LiquiFact Escrow State Machine Implementation — Issue #271
+﻿# LiquiFact Escrow State Machine
 
-**Status:** Complete ✅
+This document is the code-facing state-machine reference for
+`InvoiceEscrow::status` in `escrow/src/lib.rs`. It covers all current states,
+including the cancelled branch used by `cancel_funding` and `refund`.
 
-## Issue Summary
+## Status Values
 
-Issue #271 required documenting the full escrow state machine (open → funded → settled/withdrawn) with:
-1. Complete state-transition table in `docs/escrow-lifecycle.md`
-2. Coverage of every entrypoint, allowed source states, target state, required authority, and legal-hold interaction
-3. Rustdoc/NatSpec-style doc comments on public functions
-4. Security validation (auth, overflow, storage TTL, double-spend)
-5. Minimum 95% test coverage on new/changed code
+| Value | Name | Meaning |
+| ---: | --- | --- |
+| `0` | Open | Escrow accepts investor funding and admin configuration updates. |
+| `1` | Funded | Funding has closed; SME may settle or withdraw. |
+| `2` | Settled | SME finalized settlement; investors may claim payout. |
+| `3` | Withdrawn | SME withdrew liquidity; terminal operational state. |
+| `4` | Cancelled | Admin cancelled open funding; investors may recover principal through refunds. |
 
-## Implementation Summary
+`status` is stored in `DataKey::Escrow` as part of the full `InvoiceEscrow`
+snapshot. State changes rewrite the snapshot atomically in a single host
+function call.
 
-### ✅ 1. State Machine Documentation
+## Mermaid Diagram
 
-**File:** `docs/escrow-lifecycle.md`
+```mermaid
+stateDiagram-v2
+    [*] --> Open: init
+    Open --> Open: fund / fund_with_commitment\nbelow target
+    Open --> Funded: fund / fund_with_commitment\nfunded_amount >= funding_target
+    Open --> Funded: partial_settle\nSME or admin closes early
+    Open --> Cancelled: cancel_funding\nadmin cancels
+    Funded --> Settled: settle\nSME + maturity gate
+    Funded --> Withdrawn: withdraw\nSME accounting withdrawal
+    Settled --> Settled: claim_investor_payout\ninvestor claim marker
+    Cancelled --> Cancelled: refund\ninvestor principal recovery
+    Cancelled --> Cancelled: sweep_terminal_dust\ntreasury, liability floor
+    Settled --> Settled: sweep_terminal_dust\ntreasury
+    Withdrawn --> Withdrawn: sweep_terminal_dust\ntreasury
+```
 
-Complete authoritative documentation covering:
-- **Status values** (0=open, 1=funded, 2=settled, 3=withdrawn, 4=cancelled)
-- **State diagram** with all valid transitions
-- **Transition table** with auth requirements and legal-hold gates:
-  - `init` → status 0 (open) — Admin auth required
-  - `fund` / `fund_with_commitment` — status 0 → 1 (funded) — Investor auth, legal-hold check
-  - `settle` — status 1 → 2 (settled) — SME auth, maturity gate, legal-hold check
-  - `withdraw` — status 1 → 3 (withdrawn) — SME auth, legal-hold check
-  - `cancel_funding` — status 0 → 4 (cancelled) — Admin auth, legal-hold check
-  - `refund` — status 4 only — Investor auth, double-spend prevention
-- **Forbidden transitions** — all regressions explicitly listed
-- **Mutual exclusivity:** `withdraw` vs `settle` — both require status 1, only one succeeds
-- **Investor refund flow** — cancellation → recovery of principal
-- **Legal hold interaction** — blocks all risk-bearing operations
-- **Terminal states** — dust sweep allowed only in terminal states (2, 3, 4)
+## Transition Table
 
-### ✅ 2. Rustdoc/NatSpec Comments
+| Entrypoint | Source status | Target status | Required role | Legal-hold gate | Status guard | Notes |
+| --- | --- | --- | --- | --- | --- | --- |
+| `init` | none | `0` open | Admin address supplied at init | None | Rejects already initialized escrow | Binds funding token, treasury, optional registry, and immutable initial terms. |
+| `fund` | `0` open | `0` open or `1` funded | Investor | Blocks when legal hold is active | Requires `status == 0` | Transitions to funded once `funded_amount >= funding_target`; writes `FundingCloseSnapshot` once. |
+| `fund_with_commitment` | `0` open | `0` open or `1` funded | Investor | Blocks when legal hold is active | Requires `status == 0` | First deposit only for tiered yield; may set an investor claim lock. |
+| `partial_settle` | `0` open | `1` funded | SME or admin | Blocks when legal hold is active | Requires `status == 0` | Closes funding early and writes `FundingCloseSnapshot` if absent. |
+| `settle` | `1` funded | `2` settled | SME | Blocks when legal hold is active | Requires `status == 1` | If maturity is non-zero, ledger timestamp must be `>= maturity`. |
+| `withdraw` | `1` funded | `3` withdrawn | SME | Blocks when legal hold is active | Requires `status == 1` | Mutually exclusive with `settle`; records SME withdrawal. |
+| `claim_investor_payout` | `2` settled | `2` settled | Investor | Blocks when legal hold is active | Requires `status == 2` | Idempotent after claim marker is written; no status transition. |
+| `cancel_funding` | `0` open | `4` cancelled | Admin | Blocks when legal hold is active | Requires `status == 0` | Opens the refund path for investors with recorded principal. |
+| `refund` | `4` cancelled | `4` cancelled | Investor | No legal-hold gate in current code | Requires `status == 4` | Zeroes contribution before transfer and increments distributed principal. |
+| `sweep_terminal_dust` | `2`, `3`, or `4` | unchanged | Treasury | Blocks when legal hold is active | Requires terminal status | For cancelled escrows, enforces the outstanding refund liability floor. |
 
-**File:** `escrow/src/lib.rs`
+## Terminal And Operational States
 
-All critical public functions include comprehensive doc comments with:
-- **Purpose and behavior** — what the function does and state transitions
-- **Authorization** — which role must auth (`require_auth()`)
-- **Guards** — status checks, legal-hold blocks, maturity gates
-- **Errors** — typed [`EscrowError`] codes emitted on failure
-- **Invariants** — post-condition guarantees (e.g., immutability, balance conservation)
+`settled`, `withdrawn`, and `cancelled` are terminal for the core funding
+lifecycle. They do not move back to `open` or `funded`.
 
-Functions documented:
-- [`init`](escrow/src/lib.rs#L677) — initialization, immutable token/treasury binding
-- [`fund`](escrow/src/lib.rs#L1444) — investor deposits (simple funding)
-- [`fund_with_commitment`](escrow/src/lib.rs#L1455) — investor deposits with tiered yield + time lock
-- [`settle`](escrow/src/lib.rs#L1665) — SME finalizes settlement (status 1 → 2)
-- [`withdraw`](escrow/src/lib.rs#L1707) — SME pulls liquidity (status 1 → 3)
-- [`cancel_funding`](escrow/src/lib.rs#L2039) — admin cancels open escrow (status 0 → 4)
-- [`refund`](escrow/src/lib.rs#L2073) — investor recovers principal in cancelled state
-- [`claim_investor_payout`](escrow/src/lib.rs#L1790) — investor claims payout after settlement
-- [`compute_investor_payout`](escrow/src/lib.rs#L1817) — pro-rata payout calculation
-- [`sweep_terminal_dust`](escrow/src/lib.rs#L847) — treasury recovers rounding residue
+- `settled` supports investor payout claims.
+- `withdrawn` records that the SME has pulled liquidity.
+- `cancelled` supports investor refunds and liability-aware treasury dust sweeping.
 
-### ✅ 3. Security Validation Tests
+`refund` and `claim_investor_payout` are recovery/claim operations. They keep the
+escrow in the same terminal state while mutating per-investor markers.
 
-**Files:** `escrow/src/tests/*.rs`
+## Forbidden Transitions
 
-Comprehensive test coverage validates:
+The contract does not expose entrypoints for:
 
-#### Authorization Boundaries
-- **Admin-only operations** — `cancel_funding`, `set_legal_hold`, `update_maturity`, `propose_admin`
-- **SME-only operations** — `settle`, `withdraw`
-- **Investor-only operations** — `fund`, `fund_with_commitment`, `refund`, `claim_investor_payout`
-- Tests in `admin.rs` verify auth guards
+- `1 -> 0`, `2 -> 1`, `3 -> 1`, or `4 -> 0` regressions.
+- Funding after `status != 0`.
+- Cancellation after funding has closed (`status != 0`).
+- Settlement or withdrawal before funding has closed (`status != 1`).
+- Investor payout claims before settlement (`status != 2`).
+- Refunds unless the escrow is cancelled (`status != 4`).
 
-#### Overflow Prevention
-- **Funded amount overflow** — `test_funding_amount_accumulation_overflow_panics`
-- **Investor contribution overflow** — `test_investor_contribution_overflow_panics`
-- **Commitment claim time overflow** — `test_commitment_claim_time_overflow_panics`
-- All mutations guarded by `checked_add`/`checked_mul`/`checked_div`
-- Tests verify no state is mutated on overflow panic (atomic failure)
+`settle` and `withdraw` are mutually exclusive because both require
+`status == 1` and then move the escrow to different terminal states.
 
-#### Double-Spend Prevention
-- **Refund double-spend** — `test_refund_double_spend_panics`
-  - First `refund()` transfers and zeroes contribution
-  - Second `refund()` finds zero contribution and panics
-- **Claim idempotency** — `InvestorClaimed` marker prevents re-emission
-  - Multiple `claim_investor_payout` calls: first succeeds, second is silent no-op
-- Tests in `funding.rs` and `legal_hold.rs`
+## Legal Hold Interaction
 
-#### Legal Hold Interaction
-- **Blocks funding** — `fund` panics when `LegalHold` active
-- **Blocks settlement** — `settle` panics when `LegalHold` active
-- **Blocks withdrawal** — `withdraw` panics when `LegalHold` active
-- **Blocks claims** — `claim_investor_payout` panics when `LegalHold` active
-- **Blocks dust sweep** — `sweep_terminal_dust` panics when `LegalHold` active
-- **Blocks cancellation** — `cancel_funding` panics when `LegalHold` active
-- **Clearable only by admin** — `set_legal_hold(false)` requires admin auth
-- **Recovery path available** — `propose_admin` + `accept_admin` not gated by hold
-- Tests in `legal_hold.rs` (15+ scenarios)
+Legal hold blocks risk-bearing state changes in the current implementation:
 
-#### Status Transition Guards
-- **Forbidden regressions** — all backward transitions panic
-- **Mutual exclusivity** — `withdraw` and `settle` block each other
-- **Terminal states** — transitions from 2, 3, 4 panic
-- **Maturity gate** — `settle` checks `ledger.timestamp() >= maturity` when maturity > 0
-- Tests in `settlement.rs` and `integration.rs`
+- `fund` and `fund_with_commitment`
+- `partial_settle`
+- `settle`
+- `withdraw`
+- `claim_investor_payout`
+- `cancel_funding`
+- `sweep_terminal_dust`
 
-#### Storage Safety
-- **Immutable bindings** — `funding_token`, `treasury`, `registry`, `yield_tiers` set once at `init`
-- **Snapshot immutability** — `FundingCloseSnapshot` written once at 0 → 1 transition
-- **TTL extension** — `bump_ttl` extends instance and persistent storage TTL for long-dated escrows
-- **No orphaned state** — contribution zeroed before token transfer (checks-effects-interactions)
+`refund` does not currently check legal hold. It is available only after
+`cancel_funding` moves the escrow to `status == 4`, and it returns recorded
+principal to the authenticated investor.
 
-#### Token Integration
-- **Balance-delta checks** — `external_calls::transfer_funding_token_with_balance_checks` enforces pre/post balance match
-- **Non-standard tokens out of scope** — rebasing, fee-on-transfer explicitly excluded
-- **Documented assumptions** — `docs/ESCROW_TOKEN_INTEGRATION_CHECKLIST.md`
+## Cancelled Branch And Liability Floor
 
-### ✅ 4. Test Coverage
+`cancel_funding` moves an open escrow to `status == 4` and emits
+`FundingCancelled`. Each `refund`:
 
-**Test files:**
-- `escrow/src/tests/init.rs` — initialization and double-init prevention
-- `escrow/src/tests/funding.rs` — deposit flows, overflow, contribution tracking, refunds
-- `escrow/src/tests/settlement.rs` — settle/withdraw/dust-sweep state transitions
-- `escrow/src/tests/legal_hold.rs` — hold interaction across all operations
-- `escrow/src/tests/admin.rs` — admin operations and role separation
-- `escrow/src/tests/integration.rs` — end-to-end scenarios (happy path, legal hold mid-flow, collateral, tiered yield)
-- `escrow/src/tests/cap_validation.rs` — investor caps and allowlist enforcement
-- `escrow/src/tests/properties.rs` — property-based testing (proptest)
+1. Requires the investor's authorization.
+2. Requires `status == 4`.
+3. Reads the investor's persistent contribution.
+4. Zeroes the contribution and marks `InvestorRefunded`.
+5. Adds the amount to `DistributedPrincipal`.
+6. Transfers the funding token back to the investor.
+7. Emits `InvestorRefundedEvt`.
 
-**Coverage statistics:**
-- Core entrypoints: 100% path coverage
-- Error conditions: >95% coverage
-- Security guards: 100% coverage
+`sweep_terminal_dust` may run in `status == 4`, but only if the post-sweep
+balance remains at or above:
 
-### ✅ 5. Build Artifacts Configuration
+```text
+funded_amount - distributed_principal
+```
 
-**Updated .gitignore files:**
-- `Liquifact-contracts/.gitignore` — added `/target/`, `target_local/`, `Cargo.lock`, `.cargo/`
-- Prevents committed build artifacts in both repositories
+This protects principal still owed to investors who have not called `refund`.
 
-## Key Invariants Enforced
+## Events
 
-1. **State machine atomicity** — every transition is atomic; partial failures leave state unchanged
-2. **Authorization first** — `require_auth()` checked before any storage mutation
-3. **Checks before effects** — all guards (status, legal hold, amount) checked before writes
-4. **Immutable snapshots** — funding close snapshot (pro-rata denominator) cannot be modified
-5. **Double-spend immunity** — contribution zeroed before transfer; second refund panics
-6. **Terminal finality** — settled/withdrawn/cancelled escrows cannot revert
-7. **Legal hold supremacy** — hold blocks all risky operations, clearable only by current admin
+| Transition or operation | Event |
+| --- | --- |
+| `init` | `EscrowInitialized` |
+| `fund`, `fund_with_commitment` | `EscrowFunded` |
+| `partial_settle` | `EscrowPartialSettle` |
+| `settle` | `EscrowSettled` |
+| `withdraw` | `SmeWithdrew` |
+| `claim_investor_payout` | `InvestorPayoutClaimed` |
+| `cancel_funding` | `FundingCancelled` |
+| `refund` | `InvestorRefundedEvt` |
+| `sweep_terminal_dust` | `TreasuryDustSwept` |
 
-## Alignment with ADRs
+See `docs/EVENT_SCHEMA.md` for the topic and payload layout.
 
-- **ADR-001** — State model (0/1/2/3/4) documented in `escrow-lifecycle.md`
-- **ADR-002** — Guard ordering (read-only → auth → writes) in all public functions
-- **ADR-004** — Legal hold recovery (two-step admin transfer not gated by hold)
-- **ADR-007** — Storage key evolution (additive keys for schema versioning)
+## Invariants For Reviewers
 
-## Compliance
-
-✅ No doc claims an entrypoint or guarantee not present in code
-✅ Every state transition has test coverage
-✅ Every auth boundary has test coverage
-✅ Every error condition documented and tested
-✅ Security assumptions (auth, overflow, double-spend, TTL) validated
-✅ Minimum 95% test coverage on critical paths
-✅ All code formatted and linted (cargo fmt, cargo clippy)
-
----
-
-**Commit:** `document-full-escrow`  
-**Branch:** `document-full-escrow` (pushed to origin)  
-**Ready for review:** Yes
+- State transitions are forward-only across the funding lifecycle.
+- `FundingCloseSnapshot` is written once when the escrow first reaches
+  `status == 1`.
+- Per-investor contributions are stored in persistent storage and are zeroed
+  before refund transfer.
+- Terminal dust sweeps are restricted to statuses `2`, `3`, and `4`.
+- Cancelled dust sweeps must preserve the outstanding refund liability floor.
+- No entrypoint silently reopens a settled, withdrawn, or cancelled escrow.
