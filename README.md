@@ -231,6 +231,10 @@ See [`docs/escrow-sme-collateral.md`](docs/escrow-sme-collateral.md) for the ris
 
 - **Auth:** state-changing entrypoints use `require_auth()` for the
   appropriate role (admin, SME, investor, **treasury** for dust sweep).
+- **Typed errors:** integrators should branch on stable `EscrowError` numeric
+  codes, not panic strings. See
+  [`docs/escrow-error-messages.md`](docs/escrow-error-messages.md) for the
+  append-only error-code table, emitting entrypoints, and client actions.
 - **Legal hold:** governance-controlled; misuse risk is mitigated by using a
   multisig `admin` and operational policy (see
   [`docs/OPERATOR_RUNBOOK.md`](docs/OPERATOR_RUNBOOK.md)).
