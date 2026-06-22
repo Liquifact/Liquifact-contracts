@@ -247,6 +247,8 @@ See [`docs/escrow-sme-collateral.md`](docs/escrow-sme-collateral.md) for the ris
   equality checks.
 - **Tiered yield / claim locks:** first-deposit discipline prevents changing
   an investor's tier after their initial leg; claim timestamps are ledger-based.
+  See [`docs/adr/ADR-005-tiered-yield.md`](docs/adr/ADR-005-tiered-yield.md)
+  for tier-selection and claim-lock worked examples.
 - **Funding snapshot:** single-write immutability avoids shifting pro-rata
   denominators after close.
 - **Registry ref:** stored for discoverability only; must not be used as
