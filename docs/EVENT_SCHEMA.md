@@ -33,13 +33,16 @@ short routing symbol passed with `symbol_short!(...)`, such as `funded` or
 
 ## Event Catalog
 
-The current contract defines 19 event structs.
+The current contract defines 23 `#[contractevent]` structs. Of those, 22 are
+currently emitted by `.publish(&env)` call sites in `escrow/src/lib.rs`;
+`AttestationDigestRevoked` is reserved but has no current publish call.
 
 | Rust event | `name` symbol | Entrypoint(s) |
 |---|---:|---|
 | `EscrowInitialized` | `escrow_ii` | `init` |
 | `MaxUniqueInvestorsCapLowered` | `inv_cap` | `lower_max_unique_investors` |
 | `EscrowFunded` | `funded` | `fund`, `fund_with_commitment` |
+| `EscrowPartialSettle` | `part_set` | `partial_settle` |
 | `EscrowSettled` | `escrow_sd` | `settle` |
 | `MaturityUpdatedEvent` | `maturity` | `update_maturity` |
 | `AdminTransferredEvent` | `admin` | `accept_admin` |
@@ -47,6 +50,7 @@ The current contract defines 19 event structs.
 | `BeneficiaryRotated` | `ben_rot` | `rotate_beneficiary` |
 | `FundingTargetUpdated` | `fund_tgt` | `update_funding_target` |
 | `LegalHoldChanged` | `legalhld` | `set_legal_hold`, `clear_legal_hold` |
+| `LegalHoldClearRequested` | `lh_req` | `request_clear_legal_hold` |
 | `CollateralRecordedEvt` | `coll_rec` | `record_sme_collateral_commitment` |
 | `SmeWithdrew` | `sme_wd` | `withdraw` |
 | `InvestorPayoutClaimed` | `inv_claim` | `claim_investor_payout` |
@@ -55,6 +59,7 @@ The current contract defines 19 event structs.
 | `TreasuryDustSwept` | `dust_sw` | `sweep_terminal_dust` |
 | `PrimaryAttestationBound` | `att_bind` | `bind_primary_attestation_hash` |
 | `AttestationDigestAppended` | `att_app` | `append_attestation_digest` |
+| `AttestationDigestRevoked` | `att_rev` | Reserved; no current publish call |
 | `AllowlistEnabledChanged` | `al_ena` | `set_allowlist_active` |
 | `InvestorAllowlistChanged` | `al_set` | `set_investor_allowlisted`, `set_investors_allowlisted` |
 
@@ -121,6 +126,28 @@ Data:
 | `funded_amount` | `i128` |
 | `status` | `u32` |
 | `investor_effective_yield_bps` | `i64` |
+| `tier_lock_secs` | `u64` |
+
+`tier_lock_secs` is the matched tier lock duration. It is `0` when base yield
+applies because there is no tier, no lock commitment, or a simple `fund` call.
+
+### `EscrowPartialSettle`
+
+Emitted after successful `partial_settle`.
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `escrow_partial_settle` |
+| 1 | `name` | `Symbol` | `part_set` |
+| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
+
+Data:
+
+| Field | Type |
+|---|---|
+| `funded_amount` | `i128` |
 
 ### `EscrowSettled`
 
@@ -256,6 +283,24 @@ Data:
 | Field | Type | Values |
 |---|---|---|
 | `active` | `u32` | `1` = enabled, `0` = cleared |
+
+### `LegalHoldClearRequested`
+
+Emitted after successful `request_clear_legal_hold`.
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `legal_hold_clear_requested` |
+| 1 | `name` | `Symbol` | `lh_req` |
+| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
+
+Data:
+
+| Field | Type | Values |
+|---|---|---|
+| `clearable_at` | `u64` | Inclusive ledger timestamp when `set_legal_hold(false)` may clear the hold |
 
 ### `CollateralRecordedEvt`
 
@@ -406,6 +451,27 @@ Data:
 | `index` | `u32` |
 | `digest` | `BytesN<32>` |
 
+### `AttestationDigestRevoked`
+
+Reserved event shape for attestation revocation. The struct is declared with
+`#[contractevent]`, but the current contract does not publish it from any
+entrypoint. Indexers should not expect to observe `att_rev` until a future
+release wires a publish call.
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `attestation_digest_revoked` |
+| 1 | `name` | `Symbol` | `att_rev` |
+
+Data:
+
+| Field | Type |
+|---|---|
+| `invoice_id` | `Symbol` |
+| `index` | `u32` |
+
 ### `AllowlistEnabledChanged`
 
 Emitted after successful `set_allowlist_active`.
@@ -482,7 +548,7 @@ Status values:
 - Some useful correlation fields are data fields rather than topics:
   `CollateralRecordedEvt.invoice_id`, `TreasuryDustSwept.invoice_id`,
   `PrimaryAttestationBound.invoice_id`, `AttestationDigestAppended.invoice_id`,
-  `AllowlistEnabledChanged.invoice_id`, and
+  `AttestationDigestRevoked.invoice_id`, `AllowlistEnabledChanged.invoice_id`, and
   `InvestorAllowlistChanged.invoice_id`.
 - Do not treat collateral or attestation events as proof of off-chain custody,
   KYC status, or legal enforceability. They are metadata/audit records emitted
@@ -508,3 +574,4 @@ Status values:
 | 2026-03-23 | v0.1 | Initial event schema reference |
 | 2026-05-27 | v0.2 | Added initialization references and investor-cap event notes |
 | 2026-05-31 | v0.3 | Issue #272: replaced drifted reference with complete `#[contractevent]` topic and data layout from `escrow/src/lib.rs` |
+| 2026-06-22 | v0.4 | Issue #331: reconciled catalog with all 23 current `#[contractevent]` structs, including reserved/unemitted events |
