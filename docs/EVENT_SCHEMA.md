@@ -137,10 +137,11 @@ Topics:
 Data:
 
 | Field | Type |
-|---|---|
+|---|---|---|
 | `funded_amount` | `i128` |
 | `yield_bps` | `i64` |
 | `maturity` | `u64` |
+| `settled_at_ledger_timestamp` | `u64` |
 
 ### `MaturityUpdatedEvent`
 
@@ -508,3 +509,4 @@ Status values:
 | 2026-03-23 | v0.1 | Initial event schema reference |
 | 2026-05-27 | v0.2 | Added initialization references and investor-cap event notes |
 | 2026-05-31 | v0.3 | Issue #272: replaced drifted reference with complete `#[contractevent]` topic and data layout from `escrow/src/lib.rs` |
+| 2026-06-24 | v0.4 | Added `settled_at_ledger_timestamp` field to `EscrowSettled` event; added `is_settleable` view |

@@ -93,6 +93,7 @@ Emitted when the SME finalizes the escrow after maturity.
 - `funded_amount` (i128)
 - `yield_bps` (i64)
 - `maturity` (u64)
+- `settled_at_ledger_timestamp` (u64) — the ledger timestamp when `settle` was called
 
 **Example (JSON Decoded):**
 ```json
@@ -101,7 +102,8 @@ Emitted when the SME finalizes the escrow after maturity.
   "data": {
     "funded_amount": "10000000000",
     "yield_bps": 500,
-    "maturity": 1714184400
+    "maturity": 1714184400,
+    "settled_at_ledger_timestamp": 1714184400
   }
 }
 ```
