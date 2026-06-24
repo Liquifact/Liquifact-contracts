@@ -55,6 +55,7 @@ fn test_legal_hold_midflow_blocks_and_resumes_with_ordered_events() {
         &None,
         &None,
         &None,
+        &None,
     );
 
     // We will not fund or settle — just exercise legal hold at multiple points.
@@ -157,6 +158,7 @@ fn test_escrow_gold_standard_happy_path_open_overfund_snapshot_settle_claim() {
         &None, // No yield tiers for simplicity
         &None, // No min contribution floor
         &None, // No max investors cap
+        &None,
         &None,
         &None,
     );
@@ -387,6 +389,7 @@ fn test_escrow_tiered_yield_with_commitment_locks() {
         &None,
         &None,
         &None,
+        &None,
     );
 
     let investor_base = Address::generate(&env);
@@ -507,6 +510,7 @@ fn test_collateral_record_is_metadata_only_and_does_not_invoke_token_contract() 
         &funding,
         &None,
         &treasury,
+        &None,
         &None,
         &None,
         &None,
@@ -737,6 +741,7 @@ fn test_legal_hold_midflow_blocks_then_resumes_with_ordered_events() {
         &funding_token,
         &None,
         &treasury,
+        &None,
         &None,
         &None,
         &None,

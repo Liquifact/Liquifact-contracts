@@ -266,6 +266,8 @@ pub enum EscrowError {
     LegalHoldClearNotReady = 151,
     /// Computing the legal-hold clear ready-at timestamp would overflow.
     LegalHoldClearDelayOverflow = 152,
+    /// Funding deadline has passed, new deposits are rejected.
+    FundingDeadlinePassed = 163,
 
     /// A legal hold blocks rotating the beneficiary (SME) address.
     LegalHoldBlocksBeneficiaryRotation = 160,
@@ -398,6 +400,8 @@ pub enum DataKey {
     /// Used by [`LiquifactEscrow::sweep_terminal_dust`] to compute outstanding liabilities:
     /// `outstanding = funded_amount - distributed_principal`.
     DistributedPrincipal,
+    /// Optional funding deadline (ledger timestamp); after it passes, new funds are rejected.
+    FundingDeadline,
 }
 
 // --- Data types ---
@@ -896,6 +900,7 @@ impl LiquifactEscrow {
         max_unique_investors: Option<u32>,
         max_per_investor: Option<i128>,
         legal_hold_clear_delay: Option<u64>,
+        funding_deadline: Option<u64>,
     ) -> InvoiceEscrow {
         admin.require_auth();
 
@@ -910,6 +915,12 @@ impl LiquifactEscrow {
             !env.storage().instance().has(&DataKey::Escrow),
             EscrowError::EscrowAlreadyInitialized,
         );
+
+        // Validate funding deadline
+        if let Some(deadline) = funding_deadline {
+            ensure(&env, deadline > env.ledger().timestamp(), EscrowError::FundingDeadlinePassed);
+            env.storage().instance().set(&DataKey::FundingDeadline, &deadline);
+        }
 
         Self::validate_yield_tiers_table(&env, &yield_tiers, yield_bps);
 
@@ -1257,6 +1268,20 @@ impl LiquifactEscrow {
 
     pub fn get_version(env: Env) -> u32 {
         env.storage().instance().get(&DataKey::Version).unwrap_or(0)
+    }
+
+    /// Get the optional funding deadline (ledger timestamp), returns None if not set.
+    pub fn get_funding_deadline(env: Env) -> Option<u64> {
+        env.storage().instance().get(&DataKey::FundingDeadline)
+    }
+
+    /// Check if funding has expired (deadline set and now > deadline).
+    pub fn is_funding_expired(env: Env) -> bool {
+        if let Some(deadline) = env.storage().instance().get(&DataKey::FundingDeadline) {
+            env.ledger().timestamp() > deadline
+        } else {
+            false
+        }
     }
 
     /// Whether a compliance/legal hold is active (defaults to `false` if unset).
@@ -1940,6 +1965,11 @@ impl LiquifactEscrow {
             escrow.status == 0,
             EscrowError::EscrowNotOpenForFunding,
         );
+
+        // Check funding deadline
+        if let Some(deadline) = env.storage().instance().get(&DataKey::FundingDeadline) {
+            ensure(&env, env.ledger().timestamp() <= deadline, EscrowError::FundingDeadlinePassed);
+        }
 
         if Self::is_allowlist_active(env.clone()) {
             ensure(

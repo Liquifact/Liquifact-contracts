@@ -50,6 +50,7 @@ fn init_open(
         &None,
         &None,
         &None,
+        &None,
     );
     (token, treasury)
 }
@@ -121,6 +122,7 @@ fn init_settled<'a>(
         &token,
         &None,
         &treasury,
+        &None,
         &None,
         &None,
         &None,

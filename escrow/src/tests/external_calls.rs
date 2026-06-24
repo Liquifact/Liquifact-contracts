@@ -225,6 +225,7 @@ fn setup_cancelled_with_token<'a>(
         &None,
         &None,
         &None,
+        &None,
     );
     // Mint tokens into the contract to simulate on-chain custody
     token.stellar.mint(&client.address, &fund_amount);
@@ -302,6 +303,7 @@ fn sweep_liability_floor_allows_sweep_of_excess_above_outstanding() {
         &None,
         &None,
         &None,
+        &None,
     );
 
     // Mint 1001 into contract: 500 for A, 500 for B, 1 dust
@@ -347,6 +349,7 @@ fn sweep_liability_floor_blocks_sweep_that_would_eat_into_outstanding() {
         &None,
         &None,
         &None,
+        &None,
     );
 
     token.stellar.mint(&client.address, &1_001i128);
@@ -379,6 +382,7 @@ fn sweep_liability_floor_zero_funded_amount_allows_sweep() {
         &token.id,
         &None,
         &treasury,
+        &None,
         &None,
         &None,
         &None,
@@ -416,6 +420,7 @@ fn distributed_principal_accumulates_across_multiple_refunds() {
         &token.id,
         &None,
         &treasury,
+        &None,
         &None,
         &None,
         &None,
