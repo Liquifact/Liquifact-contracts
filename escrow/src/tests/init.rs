@@ -1,4 +1,5 @@
 use super::*;
+use crate::{EscrowError, EscrowInitialized};
 use proptest::prelude::*;
 extern crate std;
 use std::format;
@@ -370,19 +371,7 @@ fn test_init_invoice_id_embedded_null_panics() {
     let s = soroban_sdk::String::from_bytes(&env, &bytes[..]);
 
     client.init(
-        &admin,
-        &s,
-        &sme,
-        &1000i128,
-        &500i64,
-        &0u64,
-        &t,
-        &None,
-        &tr,
-        &None,
-        &None,
-        &None,
-        &None,
+        &admin, &s, &sme, &1000i128, &500i64, &0u64, &t, &None, &tr, &None, &None, &None, &None,
         &None,
     );
 }
@@ -976,6 +965,7 @@ fn datakey_distributed_principal_starts_at_zero_and_increments_on_refund() {
         &token.id,
         &None,
         &treasury,
+        &None,
         &None,
         &None,
         &None,

@@ -46,6 +46,7 @@ fn typed_error_codes_cover_init_and_state_guards() {
             &None,
             &None,
             &None,
+            &None,
         ),
         EscrowError::AmountMustBePositive,
     );
@@ -628,6 +629,7 @@ fn test_bump_ttl_covers_persistent_investor_keys() {
         &funding_token,
         &None,
         &treasury,
+        &None,
         &None,
         &None,
         &None,

@@ -1,4 +1,5 @@
 use super::*;
+use crate::EscrowError;
 use soroban_sdk::{Error, InvokeError};
 use std::fmt::Debug;
 
@@ -326,6 +327,7 @@ fn test_per_investor_contribution_uses_persistent_storage() {
         &tok,
         &None,
         &tre,
+        &None,
         &None,
         &None,
         &None,
@@ -955,6 +957,8 @@ fn test_yield_tier_emitted_in_event() {
         &Some(tiers),
         &None,
         &None,
+        &None,
+        &None,
     );
 
     let inv = Address::generate(&env);
@@ -1027,6 +1031,8 @@ fn test_yield_tier_emitted_no_tiers() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 
     let inv = Address::generate(&env);
@@ -1082,6 +1088,8 @@ fn test_yield_tier_emitted_between_tiers() {
         &None,
         &tre,
         &Some(tiers),
+        &None,
+        &None,
         &None,
         &None,
     );

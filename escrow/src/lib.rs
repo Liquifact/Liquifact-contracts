@@ -1420,6 +1420,57 @@ impl LiquifactEscrow {
             .unwrap_or_else(|| Vec::new(&env))
     }
 
+    /// Revoke a previously appended attestation digest by index.
+    ///
+    /// Sets [`DataKey::AttestationRevoked(index)`] to `true`, preserving the original
+    /// digest for auditability while signalling supersession. Admin-gated.
+    ///
+    /// # Panics
+    /// - If `index` is out of range (>= log length).
+    /// - If the entry at `index` is already revoked.
+    pub fn revoke_attestation_digest(env: Env, index: u32) {
+        let escrow = Self::load_escrow_require_admin(&env);
+
+        let log: Vec<BytesN<32>> = env
+            .storage()
+            .instance()
+            .get(&DataKey::AttestationAppendLog)
+            .unwrap_or_else(|| Vec::new(&env));
+
+        if index >= log.len() {
+            panic!("attestation index out of range");
+        }
+
+        let already_revoked: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::AttestationRevoked(index))
+            .unwrap_or(false);
+        if already_revoked {
+            panic!("attestation already revoked at index");
+        }
+
+        env.storage()
+            .instance()
+            .set(&DataKey::AttestationRevoked(index), &true);
+
+        AttestationDigestRevoked {
+            name: symbol_short!("att_rev"),
+            invoice_id: escrow.invoice_id,
+            index,
+        }
+        .publish(&env);
+    }
+
+    /// Returns `true` if the attestation digest at `index` has been revoked.
+    /// Returns `false` for any index that is not yet revoked (including out-of-range indices).
+    pub fn is_attestation_revoked(env: Env, index: u32) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::AttestationRevoked(index))
+            .unwrap_or(false)
+    }
+
     // --- Persistent per-investor storage helpers ---
     fn get_persistent_investor_contribution(env: &Env, investor: Address) -> i128 {
         env.storage()

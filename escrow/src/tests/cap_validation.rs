@@ -2,6 +2,7 @@
 //! This test file validates the core functionality without dependencies on other test modules
 
 use super::*;
+use crate::MaxUniqueInvestorsCapLowered;
 use soroban_sdk::{Address, Env, String};
 
 #[test]

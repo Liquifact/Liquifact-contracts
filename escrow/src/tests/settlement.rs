@@ -387,7 +387,6 @@ fn settle_blocked_by_legal_hold() {
     client.settle();
 }
 
-
 #[test]
 #[should_panic]
 fn test_claim_blocked_until_commitment_ledger_time() {
@@ -1056,7 +1055,9 @@ fn test_sweep_requires_treasury_auth() {
     );
     fund_to_target(&client, &env);
     client.settle();
-    token.stellar.mint(&contract_id, &(MAX_DUST_SWEEP_AMOUNT + 1));
+    token
+        .stellar
+        .mint(&contract_id, &(MAX_DUST_SWEEP_AMOUNT + 1));
 
     client.sweep_terminal_dust(&(MAX_DUST_SWEEP_AMOUNT + 1));
 }
@@ -1516,7 +1517,10 @@ fn test_partial_settle_sme_happy_path() {
     client.partial_settle(&sme);
 
     let escrow = client.get_escrow();
-    assert_eq!(escrow.status, 1u32, "Status must be 1 (funded/settleable) after partial_settle");
+    assert_eq!(
+        escrow.status, 1u32,
+        "Status must be 1 (funded/settleable) after partial_settle"
+    );
     assert_eq!(escrow.funded_amount, TARGET / 2);
 }
 
@@ -1579,7 +1583,9 @@ fn test_partial_settle_writes_correct_snapshot() {
 
     client.partial_settle(&sme);
 
-    let snapshot = client.get_funding_close_snapshot().expect("Snapshot must exist");
+    let snapshot = client
+        .get_funding_close_snapshot()
+        .expect("Snapshot must exist");
     assert_eq!(snapshot.total_principal, amount);
     assert_eq!(snapshot.funding_target, TARGET);
 }
