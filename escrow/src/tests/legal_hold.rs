@@ -81,6 +81,7 @@ fn init_open_with_clear_delay(
         &None,
         &None,
         &legal_hold_clear_delay,
+        &None,
     );
     (token, treasury)
 }

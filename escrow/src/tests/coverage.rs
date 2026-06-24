@@ -47,6 +47,7 @@ fn typed_error_codes_cover_init_and_state_guards() {
             &None,
             &None,
             &None,
+            &None,
         ),
         EscrowError::AmountMustBePositive,
     );
@@ -646,6 +647,7 @@ fn test_bump_ttl_covers_persistent_investor_keys() {
         &funding_token,
         &None,
         &treasury,
+        &None,
         &None,
         &None,
         &None,
@@ -1634,6 +1636,7 @@ fn test_get_escrow_summary_with_collateral_and_attestations() {
         &None,
         &None,
         &None,
+        &None,
     );
 
     // Record SME collateral
@@ -1711,6 +1714,7 @@ fn test_record_sme_collateral_commitment_semantics() {
         &token.id,
         &None,
         &treasury,
+        &None,
         &None,
         &None,
         &None,

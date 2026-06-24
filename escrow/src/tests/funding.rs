@@ -339,6 +339,7 @@ fn test_per_investor_contribution_uses_persistent_storage() {
         &None,
         &None,
         &None,
+        &None,
     );
     client.fund(&investor, &500i128);
 
@@ -982,6 +983,7 @@ fn test_yield_tier_emitted_in_event() {
         &None,
         &None,
         &None,
+        &None,
     );
 
     let inv = Address::generate(&env);
@@ -1056,6 +1058,7 @@ fn test_yield_tier_emitted_no_tiers() {
         &None,
         &None,
         &None,
+        &None,
     );
 
     let inv = Address::generate(&env);
@@ -1111,6 +1114,7 @@ fn test_yield_tier_emitted_between_tiers() {
         &None,
         &tre,
         &Some(tiers),
+        &None,
         &None,
         &None,
         &None,
@@ -2754,6 +2758,7 @@ fn init_with_maturity(
         &None,
         &None,
         &None,
+        &None,
     );
 }
 
@@ -2861,6 +2866,18 @@ fn lock_with_zero_maturity_is_always_accepted() {
         &token,
         &None,
         &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+    // maturity = 0 → commitment lock accepted regardless of size
+    let escrow = client.fund_with_commitment(&investor, &10_000i128, &999_999u64);
+    assert_eq!(escrow.status, 1);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Tests for fund_batch entrypoint (Issue #311)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2916,6 +2933,7 @@ fn test_fund_batch_equals_n_single_funds() {
             &tok,
             &None,
             &tre,
+            &None,
             &None,
             &None,
             &None,
@@ -2989,6 +3007,7 @@ fn test_fund_batch_per_investor_cap_rejection() {
         &None,
         &Some(per_investor_cap),
         &None,
+        &None,
     );
 
     let mut entries = SorobanVec::new(&env);
@@ -3023,7 +3042,9 @@ fn test_fund_batch_mid_batch_funded_transition() {
         &None,
         &None,
         &None,
+        &None,
     );
+    let investor = Address::generate(&env);
     let escrow = client.fund_with_commitment(&investor, &1_000i128, &9999u64);
     assert_eq!(escrow.status, 0);
     assert_eq!(client.get_investor_claim_not_before(&investor), 10999u64);
@@ -3103,6 +3124,7 @@ fn test_fund_batch_duplicate_addresses() {
         &None,
         &Some(per_investor_cap),
         &None,
+        &None,
     );
 
     let mut entries = SorobanVec::new(&env);
@@ -3179,6 +3201,7 @@ fn test_fund_batch_max_batch_size() {
         &None,
         &None,
         &None,
+        &None,
     );
 
     // Create exactly MAX_FUND_BATCH entries
@@ -3221,6 +3244,7 @@ fn test_fund_batch_preserves_event_semantics() {
         &None,
         &None,
         &None,
+        &None,
     );
 
     let inv1 = Address::generate(&env);
@@ -3233,7 +3257,8 @@ fn test_fund_batch_preserves_event_semantics() {
     client.fund_batch(&entries);
 
     // Verify events emitted
-    let events = env.events().all();
+    let contract_events = env.events().all();
+    let events = contract_events.events();
     assert_eq!(events.len(), 2, "should emit 2 EscrowFunded events");
 
     // Each event corresponds to a fund operation

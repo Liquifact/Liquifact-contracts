@@ -431,7 +431,6 @@ fn test_unique_investor_cap_exact_value_accepted() {
         &None,
         &None,
         &None,
-        &None,
     );
 
     client.fund(&Address::generate(&env), &10_000_000_000i128);
@@ -465,7 +464,6 @@ fn test_unique_investor_cap_new_funder_one_over_rejected() {
         &None,
         &None,
         &None,
-        &None,
     );
 
     client.fund(&Address::generate(&env), &10_000_000_000i128);
@@ -496,7 +494,6 @@ fn test_unique_investor_cap_existing_investor_follow_on_succeeds() {
         &None,
         &None,
         &Some(1u32),
-        &None,
         &None,
         &None,
         &None,
@@ -586,7 +583,6 @@ fn test_init_zero_max_unique_investors_panics() {
         &None,
         &None,
         &Some(0u32),
-        &None,
         &None,
         &None,
         &None,

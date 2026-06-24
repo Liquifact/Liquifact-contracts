@@ -687,6 +687,7 @@ fn fuzz_multi_investor_fund_ordering_snapshot_once_only() {
             &None,
             &None,
             &None,
+            &None,
         );
 
         // Randomize investor count/order and positive amounts. Keep the sequence small so
@@ -855,6 +856,400 @@ fn fuzz_multi_investor_fund_ordering_snapshot_once_only() {
             client.get_escrow().status,
             2,
             "expected escrow to be settled at end of case (case_idx={case_idx}, seed={case_seed})"
+        );
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Pro-rata payout conservation and rounding invariants
+//
+// Reference: docs/escrow-pro-rata.md
+//
+// Formula (floor / truncating integer division):
+//   coupon      = total_principal × yield_bps / 10_000   (floor)
+//   settle_pool = total_principal + coupon
+//   payout_i    = contribution_i  × settle_pool / total_principal (floor)
+//
+// Invariants tested:
+//   1. Σ payout_i ≤ settle_pool  (conservation — no over-distribution)
+//   2. settle_pool - Σ payout_i ≥ 0  (non-negative residue swept as dust)
+//   3. Non-participant returns 0
+//   4. ComputePayoutArithmeticOverflow on overflow inputs
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Compute the expected settle_pool from raw inputs, mirroring the on-chain formula.
+fn settle_pool_for(total_principal: i128, yield_bps: i64) -> i128 {
+    let coupon = total_principal * (yield_bps as i128) / 10_000;
+    total_principal + coupon
+}
+
+/// Deploy and fund an escrow with multiple investors, then settle it.
+/// Returns (client, investors, amounts) ready for `compute_investor_payout` calls.
+fn funded_and_settled_escrow<'a>(
+    env: &'a Env,
+    invoice_id: &str,
+    yield_bps: i64,
+    contributions: &[(Address, i128)],
+) -> super::LiquifactEscrowClient<'a> {
+    let client = deploy(env);
+    let admin = Address::generate(env);
+    let sme = Address::generate(env);
+    let (token, treasury) = free_addresses(env);
+
+    let total: i128 = contributions.iter().map(|(_, a)| a).sum();
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(env, invoice_id),
+        &sme,
+        &total,
+        &yield_bps,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    for (investor, amount) in contributions {
+        client.fund(investor, amount);
+    }
+    client.settle();
+    client
+}
+
+/// Property: sum of all computed payouts never exceeds settle_pool.
+/// Covers single investor, equal splits, and prime-denominator splits.
+proptest! {
+    #[test]
+    fn prop_payout_sum_le_settle_pool(
+        // 2–6 investors, each contributing 1..=500_000
+        n_investors in 2usize..=6usize,
+        seed in 0u64..u64::MAX,
+        yield_bps in 0i64..=10_000i64,
+    ) {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        // Deterministic amounts from the proptest-provided seed
+        let investors: Vec<Address> = (0..n_investors)
+            .map(|_| Address::generate(&env))
+            .collect();
+
+        let mut rng = SplitMix64::new(seed);
+        let amounts: Vec<i128> = (0..n_investors)
+            .map(|_| rng.gen_i128_inclusive(1, 500_000))
+            .collect();
+
+        let pairs: Vec<(Address, i128)> = investors
+            .iter()
+            .cloned()
+            .zip(amounts.iter().cloned())
+            .collect();
+
+        let client = funded_and_settled_escrow(
+            &env,
+            "PRPAYOUT",
+            yield_bps,
+            &pairs,
+        );
+
+        let snap = client
+            .get_funding_close_snapshot()
+            .expect("snapshot must exist after funding");
+        let expected_pool = settle_pool_for(snap.total_principal, yield_bps);
+
+        let payout_sum: i128 = investors
+            .iter()
+            .map(|inv| client.compute_investor_payout(inv))
+            .sum();
+
+        prop_assert!(
+            payout_sum <= expected_pool,
+            "sum of payouts ({payout_sum}) exceeded settle_pool ({expected_pool})"
+        );
+        let residue = expected_pool - payout_sum;
+        prop_assert!(
+            residue >= 0,
+            "residue must be non-negative, got {residue}"
+        );
+    }
+}
+
+/// Single investor gets exactly settle_pool (no rounding loss when contribution == total_principal).
+#[test]
+fn payout_single_investor_equals_settle_pool() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let investor = Address::generate(&env);
+    let contribution = 10_000i128;
+    let yield_bps = 500i64; // 5%
+
+    let client = funded_and_settled_escrow(
+        &env,
+        "SINGLE01",
+        yield_bps,
+        &[(investor.clone(), contribution)],
+    );
+
+    let snap = client.get_funding_close_snapshot().unwrap();
+    let expected_pool = settle_pool_for(snap.total_principal, yield_bps);
+    let payout = client.compute_investor_payout(&investor);
+
+    // Single investor holds 100% of principal, so payout == settle_pool exactly.
+    assert_eq!(
+        payout, expected_pool,
+        "single investor must receive full settle_pool"
+    );
+    assert!(payout >= contribution, "payout must include principal back");
+}
+
+/// Equal split: two investors each with the same contribution → payouts are equal
+/// and their sum ≤ settle_pool.
+#[test]
+fn payout_equal_split_conservation() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let inv_a = Address::generate(&env);
+    let inv_b = Address::generate(&env);
+    let contribution = 7_777i128; // deliberately not round
+    let yield_bps = 800i64;
+
+    let client = funded_and_settled_escrow(
+        &env,
+        "EQUAL01",
+        yield_bps,
+        &[(inv_a.clone(), contribution), (inv_b.clone(), contribution)],
+    );
+
+    let snap = client.get_funding_close_snapshot().unwrap();
+    let settle_pool = settle_pool_for(snap.total_principal, yield_bps);
+
+    let pa = client.compute_investor_payout(&inv_a);
+    let pb = client.compute_investor_payout(&inv_b);
+
+    assert_eq!(pa, pb, "equal contributions must yield equal payouts");
+    assert!(pa + pb <= settle_pool, "sum must not exceed settle_pool");
+    let residue = settle_pool - pa - pb;
+    assert!(residue >= 0, "residue must be non-negative");
+}
+
+/// Zero yield: payout == contribution for every investor, sum == total_principal.
+#[test]
+fn payout_zero_yield_returns_principal_only() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let inv_a = Address::generate(&env);
+    let inv_b = Address::generate(&env);
+    let inv_c = Address::generate(&env);
+
+    let client = funded_and_settled_escrow(
+        &env,
+        "ZEROYLD1",
+        0i64, // zero yield
+        &[
+            (inv_a.clone(), 3_000i128),
+            (inv_b.clone(), 5_000i128),
+            (inv_c.clone(), 2_000i128),
+        ],
+    );
+
+    let pa = client.compute_investor_payout(&inv_a);
+    let pb = client.compute_investor_payout(&inv_b);
+    let pc = client.compute_investor_payout(&inv_c);
+
+    // With 0% yield, settle_pool == total_principal, so floor division
+    // must return the exact contribution.
+    assert_eq!(pa, 3_000, "zero yield: payout equals contribution");
+    assert_eq!(pb, 5_000, "zero yield: payout equals contribution");
+    assert_eq!(pc, 2_000, "zero yield: payout equals contribution");
+    assert_eq!(pa + pb + pc, 10_000, "zero yield: sum == total_principal");
+}
+
+/// Max yield (10_000 bps = 100%): settle_pool = 2 × total_principal.
+/// Conservation still holds.
+#[test]
+fn payout_max_yield_conservation() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let inv_a = Address::generate(&env);
+    let inv_b = Address::generate(&env);
+
+    let client = funded_and_settled_escrow(
+        &env,
+        "MAXYL001",
+        10_000i64, // 100% yield → settle_pool = 2 × principal
+        &[(inv_a.clone(), 3_001i128), (inv_b.clone(), 6_999i128)],
+    );
+
+    let snap = client.get_funding_close_snapshot().unwrap();
+    let settle_pool = settle_pool_for(snap.total_principal, 10_000);
+
+    let pa = client.compute_investor_payout(&inv_a);
+    let pb = client.compute_investor_payout(&inv_b);
+
+    assert!(
+        pa + pb <= settle_pool,
+        "sum must not exceed settle_pool at max yield"
+    );
+    assert!(settle_pool - pa - pb >= 0, "residue non-negative");
+}
+
+/// Prime denominator: total_principal is a prime so most floor divisions produce a remainder.
+/// Verifies the residue is always ≥ 0 and < n_investors.
+#[test]
+fn payout_prime_denominator_residue_bounded() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    // Use 3 investors contributing 97 + 101 + 103 = 301 (prime total)
+    let investors: Vec<Address> = (0..3).map(|_| Address::generate(&env)).collect();
+    let amounts = [97i128, 101i128, 103i128];
+    let yield_bps = 1_000i64; // 10%
+
+    let pairs: Vec<(Address, i128)> = investors
+        .iter()
+        .cloned()
+        .zip(amounts.iter().cloned())
+        .collect();
+
+    let client = funded_and_settled_escrow(&env, "PRIME001", yield_bps, &pairs);
+
+    let snap = client.get_funding_close_snapshot().unwrap();
+    let settle_pool = settle_pool_for(snap.total_principal, yield_bps);
+
+    let payout_sum: i128 = investors
+        .iter()
+        .map(|inv| client.compute_investor_payout(inv))
+        .sum();
+
+    assert!(
+        payout_sum <= settle_pool,
+        "prime denom: sum must not exceed settle_pool"
+    );
+    let residue = settle_pool - payout_sum;
+    assert!(residue >= 0, "residue must be non-negative");
+    // Residue is bounded by n_investors (each floor op drops at most 1 unit).
+    assert!(
+        residue < investors.len() as i128,
+        "residue {residue} must be < n_investors ({})",
+        investors.len()
+    );
+}
+
+/// Non-participant returns 0 from compute_investor_payout.
+#[test]
+fn payout_non_participant_returns_zero() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let investor = Address::generate(&env);
+    let stranger = Address::generate(&env);
+
+    let client =
+        funded_and_settled_escrow(&env, "NONPART1", 500i64, &[(investor.clone(), 5_000i128)]);
+
+    // stranger never funded → must return 0, not panic
+    let payout = client.compute_investor_payout(&stranger);
+    assert_eq!(payout, 0, "non-participant must get 0");
+}
+
+/// Overflow inputs trigger ComputePayoutArithmeticOverflow.
+///
+/// contribution × settle_pool overflows i128 when both are near i128::MAX.
+/// The contract must panic with the typed error rather than silently wrap.
+#[test]
+#[should_panic]
+fn payout_overflow_panics_with_typed_error() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    // We cannot reach i128::MAX contribution via normal fund() since the contract
+    // stores funded_amount as i128 and settles normally. Instead we exercise
+    // the overflow guard by constructing a scenario where contribution * settle_pool
+    // would overflow.
+    //
+    // contribution = i128::MAX / 2 + 1, yield_bps = 10_000 → settle_pool = 2 * principal
+    // contribution * settle_pool ~ (i128::MAX/2) * i128::MAX → overflows.
+    //
+    // To get such a large contribution through fund() we use a single investor
+    // who deposits exactly i128::MAX / 2, which is within i128 range, but the
+    // multiplication inside compute_investor_payout will overflow.
+    let large: i128 = i128::MAX / 2;
+
+    let investor = Address::generate(&env);
+    let client = funded_and_settled_escrow(
+        &env,
+        "OVERFLOW",
+        10_000i64, // 100% yield doubles settle_pool → triggers overflow
+        &[(investor.clone(), large)],
+    );
+
+    // This call must panic with ComputePayoutArithmeticOverflow.
+    client.compute_investor_payout(&investor);
+}
+
+/// Fuzz: random investor sets, contributions in [1, 1_000_000], yield in [0, 10_000].
+/// Core conservation invariant across diverse inputs.
+#[test]
+fn fuzz_payout_conservation_multi_investor() {
+    let cases: usize = std::env::var("ESCROW_FUZZ_CASES")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(64);
+
+    let base_seed = read_fuzz_seed_u64();
+
+    for case_idx in 0..cases {
+        let case_seed = base_seed ^ (case_idx as u64).wrapping_mul(0x6C62272E07BB0142u64);
+        let mut rng = SplitMix64::new(case_seed);
+
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let n = 1 + rng.gen_usize(8); // 1..=8 investors
+        let yield_bps = rng.gen_i128_inclusive(0, 10_000) as i64;
+
+        let investors: Vec<Address> = (0..n).map(|_| Address::generate(&env)).collect();
+        let amounts: Vec<i128> = (0..n)
+            .map(|_| rng.gen_i128_inclusive(1, 1_000_000))
+            .collect();
+
+        let pairs: Vec<(Address, i128)> = investors
+            .iter()
+            .cloned()
+            .zip(amounts.iter().cloned())
+            .collect();
+
+        // Unique invoice id per case to avoid EscrowAlreadyInitialized.
+        // We reuse the same env per case so each gets its own deployed contract.
+        let client = funded_and_settled_escrow(&env, "FUZZPAY0", yield_bps, &pairs);
+
+        let snap = client
+            .get_funding_close_snapshot()
+            .expect("snapshot must exist");
+        let settle_pool = settle_pool_for(snap.total_principal, yield_bps);
+
+        let payout_sum: i128 = investors
+            .iter()
+            .map(|inv| client.compute_investor_payout(inv))
+            .sum();
+
+        assert!(
+            payout_sum <= settle_pool,
+            "case {case_idx}: sum ({payout_sum}) > settle_pool ({settle_pool}), seed={case_seed}"
+        );
+        assert!(
+            settle_pool - payout_sum >= 0,
+            "case {case_idx}: residue negative, seed={case_seed}"
         );
     }
 }

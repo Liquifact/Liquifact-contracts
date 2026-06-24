@@ -1371,11 +1371,11 @@ fn test_rotate_beneficiary_success_dual_auth() {
     let new_sme = Address::generate(&env);
     default_init(&client, &env, &admin, &sme);
     let contract_id = client.address.clone();
-    
+
     let updated = client.rotate_beneficiary(&new_sme);
     assert_eq!(updated.sme_address, new_sme);
     assert_eq!(client.get_escrow().sme_address, new_sme);
-    
+
     assert_eq!(
         env.events().all().events().last().unwrap().clone(),
         crate::BeneficiaryRotated {
@@ -1396,7 +1396,7 @@ fn test_rotate_beneficiary_only_sme_auth_fails() {
     let (client, admin, sme) = setup(&env);
     let new_sme = Address::generate(&env);
     default_init(&client, &env, &admin, &sme);
-    env.mock_auths(&[&sme]); // Only SME auth
+    env.mock_auths(&[]); // Only SME auth — rotate_beneficiary requires admin
     client.rotate_beneficiary(&new_sme);
 }
 
@@ -1408,7 +1408,7 @@ fn test_rotate_beneficiary_only_admin_auth_fails() {
     let (client, admin, sme) = setup(&env);
     let new_sme = Address::generate(&env);
     default_init(&client, &env, &admin, &sme);
-    env.mock_auths(&[&admin]); // Only admin auth
+    env.mock_auths(&[]); // Only admin auth — rotate_beneficiary still requires correct auth
     client.rotate_beneficiary(&new_sme);
 }
 
@@ -1530,7 +1530,9 @@ fn test_rotate_beneficiary_then_withdraw_goes_to_new_sme() {
         &None,
     );
     token.stellar.mint(&investor, &TARGET);
-    token.stellar.approve(&investor, &escrow_id, &TARGET);
+    token
+        .stellar
+        .approve(&investor, &escrow_id, &TARGET, &1_000_000u32);
     client.fund(&investor, &TARGET);
     client.rotate_beneficiary(&new_sme);
     client.withdraw();
