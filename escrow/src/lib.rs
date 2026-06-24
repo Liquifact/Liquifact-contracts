@@ -2071,11 +2071,7 @@ impl LiquifactEscrow {
             }
             // If prev > 0, preserve existing effective yield and claim lock
         } else {
-            ensure(
-                &env,
-                prev == 0,
-                EscrowError::TieredSecondDeposit,
-            );
+            ensure(&env, prev == 0, EscrowError::TieredSecondDeposit);
             let (eff, lock) =
                 Self::effective_yield_for_commitment(&env, escrow.yield_bps, committed_lock_secs);
             investor_effective_yield_bps = eff;
