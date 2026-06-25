@@ -1,4 +1,4 @@
-﻿use super::super::external_calls::transfer_funding_token_with_balance_checks;
+use super::super::external_calls::transfer_funding_token_with_balance_checks;
 use super::*;
 use crate::{CollateralRecordedEvt, DataKey, InvoiceEscrow, LegalHoldChanged};
 use soroban_sdk::{
@@ -50,6 +50,7 @@ fn test_legal_hold_midflow_blocks_and_resumes_with_ordered_events() {
         &token,
         &None,
         &treasury,
+        &None,
         &None,
         &None,
         &None,
@@ -519,6 +520,7 @@ fn test_collateral_record_is_metadata_only_and_does_not_invoke_token_contract() 
         &None,
         &None,
         &None,
+        &None,
     );
 
     let commitment = client.record_sme_collateral_commitment(&symbol_short!("USDC"), &5_000i128);
@@ -751,6 +753,7 @@ fn test_legal_hold_midflow_blocks_then_resumes_with_ordered_events() {
         &None,
         &None,
         &None,
+        &None,
     );
 
     // Initial funding succeeds while hold is off.
@@ -875,6 +878,7 @@ fn setup_withdraw_with_token(
         &None,
         &None,
         &None,
+        &None,
     );
 
     let investor = soroban_sdk::Address::generate(env);
@@ -992,6 +996,7 @@ fn withdraw_rejected_wrong_status_open() {
         &None,
         &None,
         &None,
+        &None,
     );
     // No funding ÔÇö status is 0.
     client.withdraw(); // must panic: WithdrawalNotFunded
@@ -1027,6 +1032,7 @@ fn withdraw_rejected_insufficient_contract_balance() {
         &token_id,
         &None,
         &soroban_sdk::Address::generate(&env),
+        &None,
         &None,
         &None,
         &None,
