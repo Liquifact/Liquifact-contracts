@@ -425,6 +425,33 @@ expose that entrypoint, so operators should use redeploy for new WASM.
   authorization, and `accept_admin` requires the proposed successor's
   authorization. Test both steps on Testnet before executing on Mainnet.
 
+#### Cancelling a pending admin proposal
+
+If you proposed the wrong successor, or the handover is being abandoned before
+`accept_admin` is called, use `cancel_pending_admin` to retract the nomination.
+Until cancelled, the proposed address can call `accept_admin` at any future
+ledger — leaving the pending key live is a standing key-rotation risk.
+
+```bash
+# Cancel an unaccepted handover — requires current admin authorization.
+stellar contract invoke \
+  --id <CONTRACT_ID> \
+  --source $SOURCE_SECRET \
+  --network $STELLAR_NETWORK \
+  -- cancel_pending_admin
+```
+
+| State | Effect |
+|-------|--------|
+| `DataKey::PendingAdmin` present | Removed; `accept_admin` will now fail with `NoPendingAdmin` (code 163). |
+| `DataKey::PendingAdmin` absent | Panics with `NoPendingAdmin` (code 163) — nothing to cancel. |
+
+The current `InvoiceEscrow::admin` is **unchanged**. The operator may call
+`propose_admin` again after a cancel to nominate a different successor. The
+`AdminProposalCancelled` event (`adm_can`) carries `invoice_id` and the
+`cancelled_pending` address for indexer auditing.
+
+
 ### `migrate()` is not a no-op
 
 Calling `migrate()` with a mismatched `from_version` **panics and aborts the

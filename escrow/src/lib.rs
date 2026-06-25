@@ -727,6 +727,22 @@ pub struct AdminProposedEvent {
     pub pending_admin: Address,
 }
 
+/// Emitted when the current admin withdraws an unaccepted handover proposal.
+///
+/// # Fields
+/// - `name`: hardcoded `adm_can` symbol.
+/// - `invoice_id`: escrow invoice identifier.
+/// - `cancelled_pending`: the address whose nomination was revoked; it can no longer
+///   call [`LiquifactEscrow::accept_admin`].
+#[contractevent]
+pub struct AdminProposalCancelled {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    pub cancelled_pending: Address,
+}
+
 #[contractevent]
 pub struct FundingTargetUpdated {
     #[topic]
@@ -2890,6 +2906,48 @@ impl LiquifactEscrow {
     pub fn transfer_admin(env: Env, new_admin: Address) -> InvoiceEscrow {
         Self::propose_admin(env.clone(), new_admin);
         Self::get_escrow(env)
+    }
+
+    /// Cancel a pending admin handover proposal.
+    ///
+    /// Removes [`DataKey::PendingAdmin`] so the previously nominated address can no longer
+    /// call [`LiquifactEscrow::accept_admin`]. The current admin address and all other escrow
+    /// state remain unchanged.
+    ///
+    /// # Authorization
+    ///
+    /// The current [`InvoiceEscrow::admin`] must authorize this call (via
+    /// [`LiquifactEscrow::load_escrow_require_admin`]).
+    ///
+    /// # Errors
+    ///
+    /// - [`EscrowError::NoPendingAdmin`] — no proposal exists; nothing to cancel.
+    ///
+    /// # Returns
+    ///
+    /// The revoked pending address, so callers can record it off-chain without a
+    /// separate read.
+    ///
+    /// # Events
+    ///
+    /// Emits [`AdminProposalCancelled`] carrying `invoice_id` and `cancelled_pending`.
+    pub fn cancel_pending_admin(env: Env) -> Address {
+        let escrow = Self::load_escrow_require_admin(&env);
+
+        let pending: Option<Address> = env.storage().instance().get(&DataKey::PendingAdmin);
+        ensure(&env, pending.is_some(), EscrowError::NoPendingAdmin);
+        let cancelled = pending.unwrap();
+
+        env.storage().instance().remove(&DataKey::PendingAdmin);
+
+        AdminProposalCancelled {
+            name: symbol_short!("adm_can"),
+            invoice_id: escrow.invoice_id.clone(),
+            cancelled_pending: cancelled.clone(),
+        }
+        .publish(&env);
+
+        cancelled
     }
 
     /// Transition an **open** escrow (status 0) to **cancelled** (status 4).

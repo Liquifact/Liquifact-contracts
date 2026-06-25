@@ -1,5 +1,5 @@
 use super::*;
-use crate::{AdminProposedEvent, EscrowCloseSnapshot, FundingTargetUpdated};
+use crate::{AdminProposalCancelled, AdminProposedEvent, EscrowCloseSnapshot, FundingTargetUpdated};
 use soroban_sdk::Event;
 
 // Admin/governance operations: target changes, maturity changes, admin handover,
@@ -1516,4 +1516,116 @@ fn test_rotate_beneficiary_then_withdraw_goes_to_new_sme() {
     client.rotate_beneficiary(&new_sme);
     client.withdraw();
     assert_eq!(token.stellar.balance(&new_sme), TARGET);
+}
+
+// ── cancel_pending_admin ──────────────────────────────────────────────────────
+
+/// Happy path: propose then cancel — `get_pending_admin` returns `None` and current
+/// admin is unchanged.
+#[test]
+fn test_cancel_pending_admin_clears_pending() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let new_admin = Address::generate(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    client.propose_admin(&new_admin);
+    assert_eq!(client.get_pending_admin(), Some(new_admin.clone()));
+
+    let cancelled = client.cancel_pending_admin();
+    assert_eq!(cancelled, new_admin);
+    assert_eq!(client.get_pending_admin(), None);
+    // Existing admin must remain unchanged.
+    assert_eq!(client.get_escrow().admin, admin);
+}
+
+/// `accept_admin` must panic with `NoPendingAdmin` after the proposal is cancelled.
+#[test]
+#[should_panic]
+fn test_accept_after_cancel_panics() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let new_admin = Address::generate(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    client.propose_admin(&new_admin);
+    client.cancel_pending_admin();
+    // DataKey::PendingAdmin no longer exists — accept_admin must panic.
+    client.accept_admin();
+}
+
+/// `cancel_pending_admin` must panic when no proposal has been made.
+#[test]
+#[should_panic]
+fn test_cancel_without_pending_panics() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    // No prior propose_admin — must panic with NoPendingAdmin.
+    client.cancel_pending_admin();
+}
+
+/// A caller without admin authorization must be rejected.
+#[test]
+#[should_panic]
+fn test_cancel_non_admin_panics() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let new_admin = Address::generate(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    client.propose_admin(&new_admin);
+    // Strip all authorizations — cancel requires admin auth.
+    env.mock_auths(&[]);
+    client.cancel_pending_admin();
+}
+
+/// `AdminProposalCancelled` event must carry the correct `name`, `invoice_id`,
+/// and `cancelled_pending` address.
+#[test]
+fn test_cancel_pending_admin_emits_event() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let contract_id = client.address.clone();
+    let new_admin = Address::generate(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    client.propose_admin(&new_admin);
+    client.cancel_pending_admin();
+
+    assert_eq!(
+        env.events().all().events().last().unwrap().clone(),
+        AdminProposalCancelled {
+            name: symbol_short!("adm_can"),
+            invoice_id: client.get_escrow().invoice_id,
+            cancelled_pending: new_admin,
+        }
+        .to_xdr(&env, &contract_id)
+    );
+}
+
+/// After a cancel the admin may re-propose. A subsequent `accept_admin` succeeds.
+#[test]
+fn test_cancel_then_repropose_succeeds() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let first = Address::generate(&env);
+    let second = Address::generate(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    client.propose_admin(&first);
+    client.cancel_pending_admin();
+    assert_eq!(client.get_pending_admin(), None);
+
+    // Re-propose with a different address — must succeed.
+    client.propose_admin(&second);
+    assert_eq!(client.get_pending_admin(), Some(second.clone()));
+
+    // Full handover should still work after re-propose.
+    let updated = client.accept_admin();
+    assert_eq!(updated.admin, second);
+    assert_eq!(client.get_pending_admin(), None);
 }
