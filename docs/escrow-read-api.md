@@ -132,6 +132,29 @@ Returns the pro-rata denominator snapshot captured when the escrow first became 
 
 ---
 
+## `get_settlement_pool() -> i128`
+
+**Storage keys:** `DataKey::FundingCloseSnapshot`, `DataKey::Escrow`
+
+Returns the aggregate repayment pool the SME owes at settlement, using the escrow base yield:
+
+```text
+coupon          = total_principal * escrow.yield_bps / 10_000  (floor)
+settlement_pool = total_principal + coupon
+```
+
+Returns `0` until `DataKey::FundingCloseSnapshot` exists. Once the snapshot is present, the
+view uses the snapshot `total_principal` and the base `InvoiceEscrow::yield_bps`. It does not
+apply investor-specific tier yields; tier-specific effective yields are per-investor accounting
+and remain exposed through `compute_investor_payout(investor)`.
+
+- **Pure Read** - no authorization required and no state writes.
+- **Rounding** - matches the on-chain payout formula by flooring integer division.
+- **Overflow safety** - uses checked arithmetic and raises
+  `EscrowError::ComputePayoutArithmeticOverflow` on overflow.
+
+---
+
 ## `get_investor_yield_bps(investor: Address) → i64`
 
 **Storage key:** `DataKey::InvestorEffectiveYield(investor)`

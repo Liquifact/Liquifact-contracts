@@ -83,3 +83,25 @@ formula to guarantee identical rounding.
 
 See `docs/escrow-read-api.md` → `compute_investor_payout` for the full parameter, return-value,
 and authorization documentation.
+
+## On-Chain Aggregate View: `get_settlement_pool`
+
+The contract also exposes the aggregate base-yield repayment pool:
+
+```
+LiquifactEscrow::get_settlement_pool() -> i128
+```
+
+This view returns `0` until `DataKey::FundingCloseSnapshot` exists. After funding closes, it returns:
+
+```text
+coupon          = total_principal * escrow.yield_bps / 10_000  (floor)
+settlement_pool = total_principal + coupon
+```
+
+`get_settlement_pool` uses the escrow base `yield_bps` only. It is the SME-facing aggregate amount
+owed at settlement and is not the sum of investor-specific tiered payouts. Tier-specific effective
+yields remain investor-level accounting and are reflected by `compute_investor_payout(investor)`.
+
+The view uses the same floor rounding and checked arithmetic guard as the payout formula, raising
+`EscrowError::ComputePayoutArithmeticOverflow` on overflow instead of returning a divergent value.

@@ -2,7 +2,10 @@ use super::{
     free_addresses, install_stellar_asset_token, setup, MAX_ATTESTATION_APPEND_ENTRIES,
     SCHEMA_VERSION,
 };
-use crate::{CollateralCommitmentSnapshot, DataKey, EscrowCloseSnapshot, EscrowError, YieldTier};
+use crate::{
+    CollateralCommitmentSnapshot, DataKey, EscrowCloseSnapshot, EscrowError, FundingCloseSnapshot,
+    YieldTier,
+};
 use soroban_sdk::{
     testutils::{Address as _, Ledger},
     Address, BytesN, Env, Error, InvokeError, Vec as SorobanVec,
@@ -2416,6 +2419,205 @@ fn test_record_sme_collateral_commitment_semantics() {
 // ──────────────────────────────────────────────────────────────────────────────
 // `is_settleable` view — readiness across status/maturity/hold combinations
 // ──────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn get_settlement_pool_returns_zero_before_funding_snapshot() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let (funding_token, treasury) = free_addresses(&env);
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "POOLZERO"),
+        &sme,
+        &10_000,
+        &500,
+        &0,
+        &funding_token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    assert_eq!(client.get_settlement_pool(), 0);
+}
+
+#[test]
+fn get_settlement_pool_returns_principal_plus_floor_base_coupon() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let (funding_token, treasury) = free_addresses(&env);
+    let investor = Address::generate(&env);
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "POOLBASE"),
+        &sme,
+        &10_001,
+        &333,
+        &0,
+        &funding_token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+    client.fund(&investor, &10_001);
+
+    assert_eq!(client.get_settlement_pool(), 10_334);
+}
+
+#[test]
+fn get_settlement_pool_uses_base_yield_not_investor_tier_yield() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let (funding_token, treasury) = free_addresses(&env);
+    let investor = Address::generate(&env);
+
+    let mut tiers = SorobanVec::new(&env);
+    tiers.push_back(YieldTier {
+        min_lock_secs: 100,
+        yield_bps: 1_000,
+    });
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "POOLTYR"),
+        &sme,
+        &10_000,
+        &500,
+        &0,
+        &funding_token,
+        &None,
+        &treasury,
+        &Some(tiers),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+    client.fund_with_commitment(&investor, &10_000, &100);
+
+    assert_eq!(client.get_investor_yield_bps(&investor), 1_000);
+    assert_eq!(client.compute_investor_payout(&investor), 11_000);
+    assert_eq!(client.get_settlement_pool(), 10_500);
+}
+
+#[test]
+fn get_settlement_pool_allows_zero_base_yield() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let (funding_token, treasury) = free_addresses(&env);
+    let investor = Address::generate(&env);
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "POOLZBPS"),
+        &sme,
+        &10_000,
+        &0,
+        &0,
+        &funding_token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+    client.fund(&investor, &10_000);
+
+    assert_eq!(client.get_settlement_pool(), 10_000);
+}
+
+#[test]
+fn get_settlement_pool_allows_max_base_yield() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let (funding_token, treasury) = free_addresses(&env);
+    let investor = Address::generate(&env);
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "POOLMAX"),
+        &sme,
+        &10_000,
+        &10_000,
+        &0,
+        &funding_token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+    client.fund(&investor, &10_000);
+
+    assert_eq!(client.get_settlement_pool(), 20_000);
+}
+
+#[test]
+fn get_settlement_pool_overflow_uses_compute_payout_error() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let (funding_token, treasury) = free_addresses(&env);
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "POOLOVF"),
+        &sme,
+        &1,
+        &10_000,
+        &0,
+        &funding_token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    env.as_contract(&client.address, || {
+        env.storage().instance().set(
+            &DataKey::FundingCloseSnapshot,
+            &FundingCloseSnapshot {
+                total_principal: i128::MAX / 2 + 1,
+                funding_target: 1,
+                closed_at_ledger_timestamp: env.ledger().timestamp(),
+                closed_at_ledger_sequence: env.ledger().sequence(),
+            },
+        );
+    });
+
+    assert_contract_error(
+        client.try_get_settlement_pool(),
+        EscrowError::ComputePayoutArithmeticOverflow,
+    );
+}
 
 /// Helper: initialise a standard escrow for is_settleable tests.
 fn init_settleable_test(

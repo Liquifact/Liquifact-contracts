@@ -1668,6 +1668,47 @@ impl LiquifactEscrow {
         env.storage().instance().get(&DataKey::FundingCloseSnapshot)
     }
 
+    /// Aggregate settlement pool owed by the SME at the escrow base yield.
+    ///
+    /// Returns `0` until [`DataKey::FundingCloseSnapshot`] exists. Once funding has
+    /// closed, this returns:
+    ///
+    /// ```text
+    /// coupon          = total_principal * escrow.yield_bps / 10_000  (floor)
+    /// settlement_pool = total_principal + coupon
+    /// ```
+    ///
+    /// This view intentionally uses [`InvoiceEscrow::yield_bps`], not per-investor
+    /// tier yields. Tier-specific effective yields are investor-level accounting and
+    /// remain exposed through [`LiquifactEscrow::compute_investor_payout`].
+    ///
+    /// # Overflow safety
+    ///
+    /// Uses the same checked arithmetic and
+    /// [`EscrowError::ComputePayoutArithmeticOverflow`] guard as
+    /// [`LiquifactEscrow::compute_investor_payout`].
+    ///
+    /// # Authorization
+    ///
+    /// None - pure read; no auth required.
+    pub fn get_settlement_pool(env: Env) -> i128 {
+        let Some(snap) = env
+            .storage()
+            .instance()
+            .get::<DataKey, FundingCloseSnapshot>(&DataKey::FundingCloseSnapshot)
+        else {
+            return 0;
+        };
+
+        let total_principal = snap.total_principal;
+        if total_principal <= 0 {
+            return 0;
+        }
+
+        let escrow = Self::get_escrow(env.clone());
+        Self::settlement_pool_for_yield(&env, total_principal, escrow.yield_bps)
+    }
+
     /// Effective yield (bps) for this investor after their **first** deposit; later [`LiquifactEscrow::fund`]
     /// calls add principal at this rate. Defaults to [`InvoiceEscrow::yield_bps`] when unset (legacy positions).
     ///
@@ -2729,15 +2770,8 @@ impl LiquifactEscrow {
                 .unwrap_or(escrow.yield_bps);
 
         // coupon = total_principal × effective_yield_bps / 10_000  (floor)
-        let coupon = total_principal
-            .checked_mul(effective_yield_bps as i128)
-            .unwrap_or_else(|| fail(&env, EscrowError::ComputePayoutArithmeticOverflow))
-            .checked_div(10_000)
-            .unwrap_or_else(|| fail(&env, EscrowError::ComputePayoutArithmeticOverflow));
-
-        let settle_pool = total_principal
-            .checked_add(coupon)
-            .unwrap_or_else(|| fail(&env, EscrowError::ComputePayoutArithmeticOverflow));
+        let settle_pool =
+            Self::settlement_pool_for_yield(&env, total_principal, effective_yield_bps);
 
         // gross_payout = contribution × settle_pool / total_principal  (floor)
         contribution
@@ -2745,6 +2779,22 @@ impl LiquifactEscrow {
             .unwrap_or_else(|| fail(&env, EscrowError::ComputePayoutArithmeticOverflow))
             .checked_div(total_principal)
             .unwrap_or_else(|| fail(&env, EscrowError::ComputePayoutArithmeticOverflow))
+    }
+
+    fn settlement_pool_for_yield(env: &Env, total_principal: i128, yield_bps: i64) -> i128 {
+        if total_principal <= 0 {
+            return 0;
+        }
+
+        let coupon = total_principal
+            .checked_mul(yield_bps as i128)
+            .unwrap_or_else(|| fail(env, EscrowError::ComputePayoutArithmeticOverflow))
+            .checked_div(10_000)
+            .unwrap_or_else(|| fail(env, EscrowError::ComputePayoutArithmeticOverflow));
+
+        total_principal
+            .checked_add(coupon)
+            .unwrap_or_else(|| fail(env, EscrowError::ComputePayoutArithmeticOverflow))
     }
 
     pub fn update_maturity(env: Env, new_maturity: u64) -> InvoiceEscrow {
