@@ -2,13 +2,401 @@ use super::{
     free_addresses, install_stellar_asset_token, setup, MAX_ATTESTATION_APPEND_ENTRIES,
     SCHEMA_VERSION,
 };
-use crate::{CollateralCommitmentSnapshot, DataKey, EscrowCloseSnapshot, EscrowError, YieldTier};
+use crate::{
+    AdminProposedEvent, AdminTransferredEvent, AllowlistEnabledChanged, AttestationDigestAppended,
+    AttestationDigestRevoked, BeneficiaryRotated, CollateralCommitmentSnapshot,
+    CollateralRecordedEvt, ContractUpgraded, DataKey, EscrowCloseSnapshot, EscrowError,
+    EscrowFunded, EscrowInitialized, EscrowPartialSettle, EscrowSettled, FundingCancelled,
+    FundingTargetUpdated, InvestorAllowlistChanged, InvestorPayoutClaimed, InvestorRefundedEvt,
+    InvoiceEscrow, LegalHoldChanged, LegalHoldClearRequested, MaturityUpdatedEvent,
+    MaxUniqueInvestorsCapLowered, PrimaryAttestationBound, SmeWithdrew, TreasuryDustSwept,
+    YieldTier,
+};
+use soroban_sdk::Event as _;
 use soroban_sdk::{
-    testutils::{Address as _, Ledger},
-    Address, BytesN, Env, Error, InvokeError, Vec as SorobanVec,
+    symbol_short,
+    testutils::{Address as _, Events as _, Ledger},
+    Address, BytesN, Env, Error, InvokeError, Symbol, Vec as SorobanVec,
 };
 
 pub(crate) use super::assert_contract_error;
+
+/// A documented routing symbol emitted by a contract event struct.
+struct EventSymbolCase {
+    event_struct: &'static str,
+    entrypoint: &'static str,
+    symbol: Symbol,
+}
+
+/// Returns the short-symbol contract event routing map that indexers rely on.
+fn event_symbol_cases() -> std::vec::Vec<EventSymbolCase> {
+    std::vec![
+        EventSymbolCase {
+            event_struct: "EscrowInitialized",
+            entrypoint: "init",
+            symbol: symbol_short!("escrow_ii"),
+        },
+        EventSymbolCase {
+            event_struct: "MaxUniqueInvestorsCapLowered",
+            entrypoint: "lower_max_unique_investors",
+            symbol: symbol_short!("inv_cap"),
+        },
+        EventSymbolCase {
+            event_struct: "EscrowFunded",
+            entrypoint: "fund/fund_with_commitment/fund_batch",
+            symbol: symbol_short!("funded"),
+        },
+        EventSymbolCase {
+            event_struct: "BeneficiaryRotated",
+            entrypoint: "rotate_beneficiary",
+            symbol: symbol_short!("ben_rot"),
+        },
+        EventSymbolCase {
+            event_struct: "EscrowPartialSettle",
+            entrypoint: "partial_settle",
+            symbol: symbol_short!("part_set"),
+        },
+        EventSymbolCase {
+            event_struct: "EscrowSettled",
+            entrypoint: "settle",
+            symbol: symbol_short!("escrow_sd"),
+        },
+        EventSymbolCase {
+            event_struct: "MaturityUpdatedEvent",
+            entrypoint: "update_maturity",
+            symbol: symbol_short!("maturity"),
+        },
+        EventSymbolCase {
+            event_struct: "AdminTransferredEvent",
+            entrypoint: "accept_admin",
+            symbol: symbol_short!("admin"),
+        },
+        EventSymbolCase {
+            event_struct: "AdminProposedEvent",
+            entrypoint: "propose_admin/transfer_admin",
+            symbol: symbol_short!("adm_prop"),
+        },
+        EventSymbolCase {
+            event_struct: "FundingTargetUpdated",
+            entrypoint: "update_funding_target",
+            symbol: symbol_short!("fund_tgt"),
+        },
+        EventSymbolCase {
+            event_struct: "LegalHoldChanged",
+            entrypoint: "set_legal_hold/clear_legal_hold",
+            symbol: symbol_short!("legalhld"),
+        },
+        EventSymbolCase {
+            event_struct: "LegalHoldClearRequested",
+            entrypoint: "request_legal_hold_clear",
+            symbol: symbol_short!("lh_req"),
+        },
+        EventSymbolCase {
+            event_struct: "CollateralRecordedEvt",
+            entrypoint: "record_sme_collateral_commitment",
+            symbol: symbol_short!("coll_rec"),
+        },
+        EventSymbolCase {
+            event_struct: "SmeWithdrew",
+            entrypoint: "withdraw",
+            symbol: symbol_short!("sme_wd"),
+        },
+        EventSymbolCase {
+            event_struct: "InvestorPayoutClaimed",
+            entrypoint: "claim_investor_payout",
+            symbol: symbol_short!("inv_claim"),
+        },
+        EventSymbolCase {
+            event_struct: "FundingCancelled",
+            entrypoint: "cancel_funding",
+            symbol: symbol_short!("fund_can"),
+        },
+        EventSymbolCase {
+            event_struct: "InvestorRefundedEvt",
+            entrypoint: "refund",
+            symbol: symbol_short!("refunded"),
+        },
+        EventSymbolCase {
+            event_struct: "TreasuryDustSwept",
+            entrypoint: "sweep_terminal_dust",
+            symbol: symbol_short!("dust_sw"),
+        },
+        EventSymbolCase {
+            event_struct: "PrimaryAttestationBound",
+            entrypoint: "bind_primary_attestation_hash",
+            symbol: symbol_short!("att_bind"),
+        },
+        EventSymbolCase {
+            event_struct: "AttestationDigestAppended",
+            entrypoint: "append_attestation_digest",
+            symbol: symbol_short!("att_app"),
+        },
+        EventSymbolCase {
+            event_struct: "AttestationDigestRevoked",
+            entrypoint: "revoke_attestation_digest",
+            symbol: symbol_short!("att_rev"),
+        },
+        EventSymbolCase {
+            event_struct: "AllowlistEnabledChanged",
+            entrypoint: "set_allowlist_active",
+            symbol: symbol_short!("al_ena"),
+        },
+        EventSymbolCase {
+            event_struct: "InvestorAllowlistChanged",
+            entrypoint: "set_investor_allowlisted/set_investors_allowlisted",
+            symbol: symbol_short!("al_set"),
+        },
+        EventSymbolCase {
+            event_struct: "ContractUpgraded",
+            entrypoint: "upgrade",
+            symbol: symbol_short!("upgrade"),
+        },
+    ]
+}
+
+/// Builds one minimum event payload per `#[contractevent]` struct.
+fn expected_event_xdr_count(env: &Env, contract_id: &Address) -> usize {
+    let admin = Address::generate(env);
+    let sme = Address::generate(env);
+    let investor = Address::generate(env);
+    let treasury = Address::generate(env);
+    let token = Address::generate(env);
+    let digest = BytesN::from_array(env, &[7u8; 32]);
+    let wasm_hash = BytesN::from_array(env, &[9u8; 32]);
+    let invoice_id = symbol_short!("EVTSYM");
+
+    let expected = std::vec![
+        EscrowInitialized {
+            name: symbol_short!("escrow_ii"),
+            escrow: InvoiceEscrow {
+                invoice_id: invoice_id.clone(),
+                admin: admin.clone(),
+                sme_address: sme.clone(),
+                amount: 1_000,
+                funding_target: 1_000,
+                funded_amount: 0,
+                yield_bps: 100,
+                maturity: 0,
+                status: 0,
+            },
+            funding_token: token.clone(),
+            treasury: treasury.clone(),
+            registry: None,
+            has_maturity_lock: false,
+        }
+        .to_xdr(env, contract_id),
+        MaxUniqueInvestorsCapLowered {
+            name: symbol_short!("inv_cap"),
+            invoice_id: invoice_id.clone(),
+            old_cap: 10,
+            new_cap: 9,
+        }
+        .to_xdr(env, contract_id),
+        EscrowFunded {
+            name: symbol_short!("funded"),
+            invoice_id: invoice_id.clone(),
+            investor: investor.clone(),
+            amount: 100,
+            funded_amount: 100,
+            status: 0,
+            investor_effective_yield_bps: 100,
+            tier_lock_secs: 0,
+        }
+        .to_xdr(env, contract_id),
+        BeneficiaryRotated {
+            name: symbol_short!("ben_rot"),
+            invoice_id: invoice_id.clone(),
+            prior_sme: sme.clone(),
+            new_sme: Address::generate(env),
+        }
+        .to_xdr(env, contract_id),
+        EscrowPartialSettle {
+            name: symbol_short!("part_set"),
+            invoice_id: invoice_id.clone(),
+            funded_amount: 500,
+        }
+        .to_xdr(env, contract_id),
+        EscrowSettled {
+            name: symbol_short!("escrow_sd"),
+            invoice_id: invoice_id.clone(),
+            funded_amount: 1_000,
+            yield_bps: 100,
+            maturity: 0,
+            settled_at_ledger_timestamp: 12_345,
+        }
+        .to_xdr(env, contract_id),
+        MaturityUpdatedEvent {
+            name: symbol_short!("maturity"),
+            invoice_id: invoice_id.clone(),
+            old_maturity: 1,
+            new_maturity: 2,
+        }
+        .to_xdr(env, contract_id),
+        AdminTransferredEvent {
+            name: symbol_short!("admin"),
+            invoice_id: invoice_id.clone(),
+            new_admin: Address::generate(env),
+        }
+        .to_xdr(env, contract_id),
+        AdminProposedEvent {
+            name: symbol_short!("adm_prop"),
+            invoice_id: invoice_id.clone(),
+            current_admin: admin,
+            pending_admin: Address::generate(env),
+        }
+        .to_xdr(env, contract_id),
+        FundingTargetUpdated {
+            name: symbol_short!("fund_tgt"),
+            invoice_id: invoice_id.clone(),
+            old_target: 1_000,
+            new_target: 2_000,
+        }
+        .to_xdr(env, contract_id),
+        LegalHoldChanged {
+            name: symbol_short!("legalhld"),
+            invoice_id: invoice_id.clone(),
+            active: 1,
+        }
+        .to_xdr(env, contract_id),
+        LegalHoldClearRequested {
+            name: symbol_short!("lh_req"),
+            invoice_id: invoice_id.clone(),
+            clearable_at: 77,
+        }
+        .to_xdr(env, contract_id),
+        CollateralRecordedEvt {
+            name: symbol_short!("coll_rec"),
+            invoice_id: invoice_id.clone(),
+            amount: 700,
+            prior_amount: 0,
+        }
+        .to_xdr(env, contract_id),
+        SmeWithdrew {
+            name: symbol_short!("sme_wd"),
+            invoice_id: invoice_id.clone(),
+            amount: 900,
+            recipient: sme,
+        }
+        .to_xdr(env, contract_id),
+        InvestorPayoutClaimed {
+            name: symbol_short!("inv_claim"),
+            investor: investor.clone(),
+            invoice_id: invoice_id.clone(),
+        }
+        .to_xdr(env, contract_id),
+        FundingCancelled {
+            name: symbol_short!("fund_can"),
+            invoice_id: invoice_id.clone(),
+            funded_amount: 100,
+        }
+        .to_xdr(env, contract_id),
+        InvestorRefundedEvt {
+            name: symbol_short!("refunded"),
+            investor: investor.clone(),
+            invoice_id: invoice_id.clone(),
+            amount: 100,
+        }
+        .to_xdr(env, contract_id),
+        TreasuryDustSwept {
+            name: symbol_short!("dust_sw"),
+            invoice_id: invoice_id.clone(),
+            token,
+            amount: 1,
+        }
+        .to_xdr(env, contract_id),
+        PrimaryAttestationBound {
+            name: symbol_short!("att_bind"),
+            invoice_id: invoice_id.clone(),
+            digest: digest.clone(),
+        }
+        .to_xdr(env, contract_id),
+        AttestationDigestAppended {
+            name: symbol_short!("att_app"),
+            invoice_id: invoice_id.clone(),
+            index: 0,
+            digest: digest.clone(),
+        }
+        .to_xdr(env, contract_id),
+        AttestationDigestRevoked {
+            name: symbol_short!("att_rev"),
+            invoice_id: invoice_id.clone(),
+            index: 0,
+        }
+        .to_xdr(env, contract_id),
+        AllowlistEnabledChanged {
+            name: symbol_short!("al_ena"),
+            invoice_id: invoice_id.clone(),
+            active: 1,
+        }
+        .to_xdr(env, contract_id),
+        InvestorAllowlistChanged {
+            name: symbol_short!("al_set"),
+            invoice_id: invoice_id.clone(),
+            investor,
+            allowed: 1,
+        }
+        .to_xdr(env, contract_id),
+        ContractUpgraded {
+            name: symbol_short!("upgrade"),
+            invoice_id,
+            new_wasm_hash: wasm_hash,
+        }
+        .to_xdr(env, contract_id),
+    ];
+
+    expected.len()
+}
+
+#[test]
+fn contract_event_short_symbols_are_collision_free() {
+    let cases = event_symbol_cases();
+    assert_eq!(
+        cases.len(),
+        24,
+        "update the event symbol map when events change"
+    );
+
+    for (idx, current) in cases.iter().enumerate() {
+        for other in cases.iter().skip(idx + 1) {
+            assert_ne!(
+                &current.symbol,
+                &other.symbol,
+                "{} ({}) and {} ({}) share short event symbol {:?}",
+                current.event_struct,
+                current.entrypoint,
+                other.event_struct,
+                other.entrypoint,
+                current.symbol
+            );
+        }
+    }
+}
+
+#[test]
+fn allowlist_writers_document_intentional_symbol_reuse() {
+    let single_writer = EventSymbolCase {
+        event_struct: "InvestorAllowlistChanged",
+        entrypoint: "set_investor_allowlisted",
+        symbol: symbol_short!("al_set"),
+    };
+    let batch_writer = EventSymbolCase {
+        event_struct: "InvestorAllowlistChanged",
+        entrypoint: "set_investors_allowlisted",
+        symbol: symbol_short!("al_set"),
+    };
+
+    assert_eq!(single_writer.event_struct, batch_writer.event_struct);
+    assert_eq!(&single_writer.symbol, &batch_writer.symbol);
+}
+
+#[test]
+fn contract_event_xdr_matches_documented_short_symbols() {
+    let env = Env::default();
+    let contract_id = super::deploy_id(&env);
+    let expected_count = expected_event_xdr_count(&env, &contract_id);
+
+    assert_eq!(expected_count, event_symbol_cases().len());
+}
 
 #[test]
 fn typed_error_codes_cover_init_and_state_guards() {

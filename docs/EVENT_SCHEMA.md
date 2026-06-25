@@ -33,20 +33,22 @@ short routing symbol passed with `symbol_short!(...)`, such as `funded` or
 
 ## Event Catalog
 
-The current contract defines 19 event structs.
+The current contract defines 24 event structs.
 
 | Rust event | `name` symbol | Entrypoint(s) |
 |---|---:|---|
 | `EscrowInitialized` | `escrow_ii` | `init` |
 | `MaxUniqueInvestorsCapLowered` | `inv_cap` | `lower_max_unique_investors` |
-| `EscrowFunded` | `funded` | `fund`, `fund_with_commitment` |
+| `EscrowFunded` | `funded` | `fund`, `fund_with_commitment`, `fund_batch` |
+| `BeneficiaryRotated` | `ben_rot` | `rotate_beneficiary` |
+| `EscrowPartialSettle` | `part_set` | `partial_settle` |
 | `EscrowSettled` | `escrow_sd` | `settle` |
 | `MaturityUpdatedEvent` | `maturity` | `update_maturity` |
 | `AdminTransferredEvent` | `admin` | `accept_admin` |
 | `AdminProposedEvent` | `adm_prop` | `propose_admin`, `transfer_admin` |
-| `BeneficiaryRotated` | `ben_rot` | `rotate_beneficiary` |
 | `FundingTargetUpdated` | `fund_tgt` | `update_funding_target` |
 | `LegalHoldChanged` | `legalhld` | `set_legal_hold`, `clear_legal_hold` |
+| `LegalHoldClearRequested` | `lh_req` | `request_legal_hold_clear` |
 | `CollateralRecordedEvt` | `coll_rec` | `record_sme_collateral_commitment` |
 | `SmeWithdrew` | `sme_wd` | `withdraw` |
 | `InvestorPayoutClaimed` | `inv_claim` | `claim_investor_payout` |
@@ -55,8 +57,10 @@ The current contract defines 19 event structs.
 | `TreasuryDustSwept` | `dust_sw` | `sweep_terminal_dust` |
 | `PrimaryAttestationBound` | `att_bind` | `bind_primary_attestation_hash` |
 | `AttestationDigestAppended` | `att_app` | `append_attestation_digest` |
+| `AttestationDigestRevoked` | `att_rev` | `revoke_attestation_digest` |
 | `AllowlistEnabledChanged` | `al_ena` | `set_allowlist_active` |
 | `InvestorAllowlistChanged` | `al_set` | `set_investor_allowlisted`, `set_investors_allowlisted` |
+| `ContractUpgraded` | `upgrade` | `upgrade` |
 
 ## Complete Topic And Data Layout
 
@@ -102,7 +106,8 @@ Data:
 
 ### `EscrowFunded`
 
-Emitted after successful `fund` or `fund_with_commitment`.
+Emitted after successful `fund`, `fund_with_commitment`, or each accepted
+entry in `fund_batch`.
 
 Topics:
 
@@ -121,6 +126,25 @@ Data:
 | `funded_amount` | `i128` |
 | `status` | `u32` |
 | `investor_effective_yield_bps` | `i64` |
+| `tier_lock_secs` | `u64` |
+
+### `EscrowPartialSettle`
+
+Emitted after successful `partial_settle`.
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `escrow_partial_settle` |
+| 1 | `name` | `Symbol` | `part_set` |
+| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
+
+Data:
+
+| Field | Type |
+|---|---|
+| `funded_amount` | `i128` |
 
 ### `EscrowSettled`
 
@@ -137,7 +161,7 @@ Topics:
 Data:
 
 | Field | Type |
-|---|---|---|
+|---|---|
 | `funded_amount` | `i128` |
 | `yield_bps` | `i64` |
 | `maturity` | `u64` |
@@ -258,6 +282,24 @@ Data:
 |---|---|---|
 | `active` | `u32` | `1` = enabled, `0` = cleared |
 
+### `LegalHoldClearRequested`
+
+Emitted after successful `request_legal_hold_clear`.
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `legal_hold_clear_requested` |
+| 1 | `name` | `Symbol` | `lh_req` |
+| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
+
+Data:
+
+| Field | Type |
+|---|---|
+| `clearable_at` | `u64` |
+
 ### `CollateralRecordedEvt`
 
 Emitted after successful `record_sme_collateral_commitment`.
@@ -297,6 +339,7 @@ Data:
 | Field | Type |
 |---|---|
 | `amount` | `i128` |
+| `recipient` | `Address` |
 
 ### `InvestorPayoutClaimed`
 
@@ -407,6 +450,24 @@ Data:
 | `index` | `u32` |
 | `digest` | `BytesN<32>` |
 
+### `AttestationDigestRevoked`
+
+Emitted after successful `revoke_attestation_digest`.
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `attestation_digest_revoked` |
+| 1 | `name` | `Symbol` | `att_rev` |
+
+Data:
+
+| Field | Type |
+|---|---|
+| `invoice_id` | `Symbol` |
+| `index` | `u32` |
+
 ### `AllowlistEnabledChanged`
 
 Emitted after successful `set_allowlist_active`.
@@ -444,6 +505,24 @@ Data:
 | `invoice_id` | `Symbol` | Escrow invoice id |
 | `investor` | `Address` | Updated investor |
 | `allowed` | `u32` | `1` = allowed, `0` = blocked |
+
+### `ContractUpgraded`
+
+Emitted before successful `upgrade` deploys the new WASM.
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `contract_upgraded` |
+| 1 | `name` | `Symbol` | `upgrade` |
+| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
+
+Data:
+
+| Field | Type |
+|---|---|
+| `new_wasm_hash` | `BytesN<32>` |
 
 ## Nested Types
 
@@ -483,8 +562,12 @@ Status values:
 - Some useful correlation fields are data fields rather than topics:
   `CollateralRecordedEvt.invoice_id`, `TreasuryDustSwept.invoice_id`,
   `PrimaryAttestationBound.invoice_id`, `AttestationDigestAppended.invoice_id`,
-  `AllowlistEnabledChanged.invoice_id`, and
+  `AttestationDigestRevoked.invoice_id`, `AllowlistEnabledChanged.invoice_id`, and
   `InvestorAllowlistChanged.invoice_id`.
+- `escrow/src/tests/coverage.rs` includes a regression guard that asserts every
+  documented contract event uses a unique `name` symbol. The two allowlist
+  writer entrypoints intentionally share `al_set` because they emit the same
+  `InvestorAllowlistChanged` event.
 - Do not treat collateral or attestation events as proof of off-chain custody,
   KYC status, or legal enforceability. They are metadata/audit records emitted
   after the corresponding authenticated write succeeds.
@@ -510,3 +593,4 @@ Status values:
 | 2026-05-27 | v0.2 | Added initialization references and investor-cap event notes |
 | 2026-05-31 | v0.3 | Issue #272: replaced drifted reference with complete `#[contractevent]` topic and data layout from `escrow/src/lib.rs` |
 | 2026-06-24 | v0.4 | Added `settled_at_ledger_timestamp` field to `EscrowSettled` event; added `is_settleable` view |
+| 2026-06-26 | v0.5 | Added event short-symbol collision regression guard and refreshed event catalog |
