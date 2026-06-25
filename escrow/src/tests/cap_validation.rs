@@ -510,6 +510,7 @@ fn test_lower_cap_rejects_unlimited_escrow() {
         &None,
         &None,
         &None,
+        &None,
     );
 
     client.lower_max_unique_investors(&10u32);

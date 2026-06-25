@@ -55,6 +55,7 @@ fn test_legal_hold_midflow_blocks_and_resumes_with_ordered_events() {
         &None,
         &None,
         &None,
+        &None,
     );
 
     // We will not fund or settle — just exercise legal hold at multiple points.
@@ -512,6 +513,7 @@ fn test_collateral_record_is_metadata_only_and_does_not_invoke_token_contract() 
         &None,
         &None,
         &None,
+        &None,
     );
 
     let commitment = client.record_sme_collateral_commitment(&symbol_short!("USDC"), &5_000i128);
@@ -737,6 +739,7 @@ fn test_legal_hold_midflow_blocks_then_resumes_with_ordered_events() {
         &funding_token,
         &None,
         &treasury,
+        &None,
         &None,
         &None,
         &None,

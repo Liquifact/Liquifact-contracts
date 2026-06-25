@@ -50,6 +50,7 @@ fn init_open(
         &None,
         &None,
         &None,
+        &None,
     );
     (token, treasury)
 }
@@ -80,6 +81,7 @@ fn init_open_with_clear_delay(
         &None,
         &None,
         &legal_hold_clear_delay,
+        &None,
     );
     (token, treasury)
 }
@@ -121,6 +123,7 @@ fn init_settled<'a>(
         &token,
         &None,
         &treasury,
+        &None,
         &None,
         &None,
         &None,
