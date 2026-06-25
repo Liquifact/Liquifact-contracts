@@ -159,6 +159,9 @@ cargo clippy --all-targets -- -D warnings
 | `sweep_terminal_dust` | Treasury sweeps rounding residue from a terminal escrow. |
 | `migrate` | Schema version gate — **typed errors on all paths** in the current release (codes 90–92). |
 | `set_legal_hold` | Admin activates/clears compliance hold. |
+| `set_allowlist_active` | Admin enables or disables the investor funding gate. |
+| `set_investor_allowlisted` | Admin writes one investor allowlist entry. |
+| `set_investors_allowlisted` | Admin writes a bounded batch of investor allowlist entries. |
 | `bind_primary_attestation_hash` | Admin sets a single-write 32-byte digest. |
 | `append_attestation_digest` | Admin appends to bounded audit log. |
 | `record_sme_collateral_commitment` | SME records collateral pledge (metadata only). |
@@ -169,12 +172,20 @@ cargo clippy --all-targets -- -D warnings
 
 ## Storage guardrails
 
-The escrow stores per-investor contribution entries inside the contract
-instance. That map is intentionally bounded.
+The escrow stores scalar state in contract instance storage and per-investor
+accounting or allowlist entries in persistent storage. Each persistent investor
+key has its own TTL, so operators should use `bump_ttl` for long-dated escrows
+that need contribution, claim, or allowlist state to remain live.
 
 - Supported investor cardinality: configured via `max_unique_investors` at
   `init` (optional cap); no hard-coded global max since investor cardinality
   is escrow-specific.
+- Investor allowlist membership: stored as per-address persistent keys. Missing,
+  archived, or explicit `false` entries all read as not allowlisted, but the
+  allowlist is enforced only while `AllowlistActive` is true. See
+  [`docs/escrow-allowlist.md`](docs/escrow-allowlist.md).
+- Allowlist batch mutation: capped at `MAX_INVESTOR_ALLOWLIST_BATCH = 32`; each
+  address is equivalent to one `set_investor_allowlisted` write.
 - Attestation append log: bounded at `MAX_ATTESTATION_APPEND_ENTRIES = 32`.
 - Dust sweep: capped at `MAX_DUST_SWEEP_AMOUNT = 100_000_000` base units per
   call.

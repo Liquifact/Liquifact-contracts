@@ -419,6 +419,61 @@ fn test_batch_add_and_remove_from_allowlist() {
 }
 
 #[test]
+fn test_batch_allowlist_matches_single_writes() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let batch_client = deploy(&env);
+    let single_client = deploy(&env);
+    init(&env, &batch_client);
+    init(&env, &single_client);
+
+    let a = Address::generate(&env);
+    let b = Address::generate(&env);
+    let c = Address::generate(&env);
+
+    let mut investors: SorobanVec<Address> = SorobanVec::new(&env);
+    investors.push_back(a.clone());
+    investors.push_back(b.clone());
+    investors.push_back(c.clone());
+
+    batch_client.set_investors_allowlisted(&investors, &true);
+    single_client.set_investor_allowlisted(&a, &true);
+    single_client.set_investor_allowlisted(&b, &true);
+    single_client.set_investor_allowlisted(&c, &true);
+
+    assert_eq!(
+        batch_client.is_investor_allowlisted(&a),
+        single_client.is_investor_allowlisted(&a)
+    );
+    assert_eq!(
+        batch_client.is_investor_allowlisted(&b),
+        single_client.is_investor_allowlisted(&b)
+    );
+    assert_eq!(
+        batch_client.is_investor_allowlisted(&c),
+        single_client.is_investor_allowlisted(&c)
+    );
+
+    batch_client.set_investors_allowlisted(&investors, &false);
+    single_client.set_investor_allowlisted(&a, &false);
+    single_client.set_investor_allowlisted(&b, &false);
+    single_client.set_investor_allowlisted(&c, &false);
+
+    assert_eq!(
+        batch_client.is_investor_allowlisted(&a),
+        single_client.is_investor_allowlisted(&a)
+    );
+    assert_eq!(
+        batch_client.is_investor_allowlisted(&b),
+        single_client.is_investor_allowlisted(&b)
+    );
+    assert_eq!(
+        batch_client.is_investor_allowlisted(&c),
+        single_client.is_investor_allowlisted(&c)
+    );
+}
+
+#[test]
 #[should_panic]
 fn test_batch_rejects_empty_vector() {
     let env = Env::default();

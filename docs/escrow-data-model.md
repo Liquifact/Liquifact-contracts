@@ -16,6 +16,8 @@ The contract uses `env.storage().persistent()` for per-address entries:
 `DataKey::InvestorClaimNotBefore(Address)`, `DataKey::InvestorClaimed(Address)`, and
 `DataKey::InvestorAllowlisted(Address)`. These are naturally modeled as independent persistent keys
 with per-address TTLs (see Stellar/Soroban storage guidance on instance vs persistent storage).
+See [`escrow-allowlist.md`](escrow-allowlist.md) for the allowlist-specific funding gate,
+batch mutation, and TTL semantics.
 
 Consequence: the total serialised size of all instance entries must stay within Soroban's
 contract-data entry limit. Per-investor accounting no longer grows the instance footprint; investor
@@ -81,7 +83,9 @@ These entries also live in **persistent** storage (not instance storage).
 
 When `AllowlistActive` is enabled (instance storage flag), `fund_impl` gates `fund` and
 `fund_with_commitment` by asserting `InvestorAllowlisted(investor) == true`. Only the admin may
-mutate allowlist membership.
+mutate allowlist membership. When the flag is absent or `false`, funding remains open even if the
+investor has no allowlist entry. Missing, archived, or explicit `false` persistent entries all read
+as not allowlisted once the gate is active.
 
 ---
 

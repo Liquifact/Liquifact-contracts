@@ -143,6 +143,10 @@ pub const MAX_ATTESTATION_APPEND_ENTRIES: u32 = 32;
 
 /// Upper bound on batch allowlist mutation entries to keep storage/CPU bounded.
 /// Mirrors the spirit of `MAX_ATTESTATION_APPEND_ENTRIES` to limit per-call work.
+///
+/// Each batch element performs one persistent `InvestorAllowlisted(Address)` write
+/// and emits one `InvestorAllowlistChanged` event, matching repeated single-address
+/// allowlist mutations.
 pub const MAX_INVESTOR_ALLOWLIST_BATCH: u32 = 32;
 
 /// Upper bound on [`LiquifactEscrow::fund_batch`] entries to keep storage/CPU bounded.
@@ -1882,8 +1886,12 @@ impl LiquifactEscrow {
         .publish(&env);
     }
 
-    /// Enable or disable the investor allowlist. When enabled, only addresses with
-    /// [`DataKey::InvestorAllowlisted`] set to true may fund the escrow.
+    /// Enable or disable the investor allowlist.
+    ///
+    /// The flag lives in instance storage and defaults to `false` when absent. When
+    /// active, [`LiquifactEscrow::fund`] and [`LiquifactEscrow::fund_with_commitment`]
+    /// require the caller's persistent [`DataKey::InvestorAllowlisted`] entry to be
+    /// `true`. Disabling the flag does not delete persistent membership entries.
     pub fn set_allowlist_active(env: Env, active: bool) {
         let escrow = Self::load_escrow_require_admin(&env);
         env.storage()
@@ -1897,6 +1905,10 @@ impl LiquifactEscrow {
         .publish(&env);
     }
 
+    /// Return whether the investor allowlist funding gate is active.
+    ///
+    /// Missing instance storage reads as `false`, so newly initialized escrows are
+    /// permissive until the admin enables the gate.
     pub fn is_allowlist_active(env: Env) -> bool {
         env.storage()
             .instance()
@@ -1904,7 +1916,12 @@ impl LiquifactEscrow {
             .unwrap_or(false)
     }
 
-    /// Add or remove an investor from the allowlist.
+    /// Add or remove one investor from the allowlist.
+    ///
+    /// Membership is a per-address persistent-storage entry. Missing, archived, or
+    /// explicit `false` entries all make [`LiquifactEscrow::is_investor_allowlisted`]
+    /// return `false`. Operators should include active allowlist members when calling
+    /// [`LiquifactEscrow::bump_ttl`] for long-dated escrows.
     pub fn set_investor_allowlisted(env: Env, investor: Address, allowed: bool) {
         let escrow = Self::load_escrow_require_admin(&env);
         env.storage()
@@ -1928,6 +1945,8 @@ impl LiquifactEscrow {
     ///
     /// Invariant: the end state and emitted events are identical to calling
     /// `set_investor_allowlisted` individually for each element in `investors`.
+    /// Duplicate addresses are not de-duplicated; each occurrence emits an event and
+    /// the last write determines the final stored value.
     ///
     /// # Errors
     /// Emits typed [`EscrowError`] codes when the escrow is uninitialized, the batch is empty, or
@@ -1960,6 +1979,10 @@ impl LiquifactEscrow {
         }
     }
 
+    /// Return whether one investor currently has an allowlist membership entry.
+    ///
+    /// The public read API intentionally treats missing, archived, and explicit `false`
+    /// entries the same: all return `false`.
     pub fn is_investor_allowlisted(env: Env, investor: Address) -> bool {
         env.storage()
             .persistent()
@@ -2768,6 +2791,12 @@ impl LiquifactEscrow {
         escrow
     }
 
+    /// Extend instance and per-investor persistent TTLs without mutating values.
+    ///
+    /// Pass active allowlist members in `allowlisted` to keep their persistent
+    /// membership entries live for long-dated escrows. This entrypoint is
+    /// permissionless and only extends TTL; it never shortens TTL or writes policy
+    /// state.
     pub fn bump_ttl(env: Env, allowlisted: Vec<Address>) {
         // Permissionless TTL extension.
         //
