@@ -886,6 +886,14 @@ pub struct ContractUpgraded {
 #[contract]
 pub struct LiquifactEscrow;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FundingCloseMode {
+    /// Close and snapshot immediately when a single funding call reaches the target.
+    Immediate,
+    /// Let a batch accept all entries before writing the single close snapshot.
+    DeferBatchSnapshot,
+}
+
 /// Validates and converts a workspace-provided invoice identifier string into a Soroban [`Symbol`].
 ///
 /// ### Constraints
@@ -2156,7 +2164,7 @@ impl LiquifactEscrow {
     /// Emits typed [`EscrowError`] codes for invalid amount, legal hold, closed funding state,
     /// allowlist rejection, cap violations, and checked-arithmetic overflow.
     pub fn fund(env: Env, investor: Address, amount: i128) -> InvoiceEscrow {
-        Self::fund_impl(env, investor, amount, true, 0)
+        Self::fund_impl(env, investor, amount, true, 0, FundingCloseMode::Immediate)
     }
 
     /// First deposit only (per investor): optional longer lock and tier ladder from [`DataKey::YieldTierTable`].
@@ -2172,7 +2180,14 @@ impl LiquifactEscrow {
         amount: i128,
         committed_lock_secs: u64,
     ) -> InvoiceEscrow {
-        Self::fund_impl(env, investor, amount, false, committed_lock_secs)
+        Self::fund_impl(
+            env,
+            investor,
+            amount,
+            false,
+            committed_lock_secs,
+            FundingCloseMode::Immediate,
+        )
     }
 
     /// Batch funding entrypoint: record multiple investor principals in a single call.
@@ -2195,27 +2210,45 @@ impl LiquifactEscrow {
     ///
     /// # Funded-target snapshot
     /// If any entry causes the escrow to transition to **funded** (status 0 → 1),
-    /// [`DataKey::FundingCloseSnapshot`] is recorded exactly once. Remaining entries are
-    /// processed even after transition.
+    /// [`DataKey::FundingCloseSnapshot`] is recorded exactly once after the full closing
+    /// batch is accepted. Remaining entries are processed even after transition, and the
+    /// snapshot principal includes those accepted continuation entries.
     pub fn fund_batch(env: Env, entries: Vec<(Address, i128)>) -> InvoiceEscrow {
         let n = entries.len();
 
         ensure(&env, n > 0, EscrowError::FundingBatchEmpty);
-        ensure(
-            &env,
-            n <= MAX_FUND_BATCH,
-            EscrowError::FundingBatchTooLarge,
-        );
+        ensure(&env, n <= MAX_FUND_BATCH, EscrowError::FundingBatchTooLarge);
 
         let mut escrow = Self::get_escrow(env.clone());
+        ensure(
+            &env,
+            escrow.status == 0,
+            EscrowError::EscrowNotOpenForFunding,
+        );
 
         for i in 0..n {
             let (investor, amount) = entries.get(i).unwrap();
 
-            // Call fund_impl for each entry, but we need to reconstruct the escrow
-            // after each call. However, fund_impl returns the updated escrow,
-            // so we capture it for the next iteration.
-            escrow = Self::fund_impl(env.clone(), investor, amount, true, 0);
+            escrow = Self::fund_impl(
+                env.clone(),
+                investor,
+                amount,
+                true,
+                0,
+                FundingCloseMode::DeferBatchSnapshot,
+            );
+        }
+
+        if escrow.status == 1 && !env.storage().instance().has(&DataKey::FundingCloseSnapshot) {
+            let snap = FundingCloseSnapshot {
+                total_principal: escrow.funded_amount,
+                funding_target: escrow.funding_target,
+                closed_at_ledger_timestamp: env.ledger().timestamp(),
+                closed_at_ledger_sequence: env.ledger().sequence(),
+            };
+            env.storage()
+                .instance()
+                .set(&DataKey::FundingCloseSnapshot, &snap);
         }
 
         escrow
@@ -2227,6 +2260,7 @@ impl LiquifactEscrow {
         amount: i128,
         simple_fund: bool,
         committed_lock_secs: u64,
+        close_mode: FundingCloseMode,
     ) -> InvoiceEscrow {
         investor.require_auth();
 
@@ -2255,9 +2289,11 @@ impl LiquifactEscrow {
             !Self::legal_hold_active(&env),
             EscrowError::LegalHoldBlocksFunding,
         );
+        let batch_continuation =
+            matches!(close_mode, FundingCloseMode::DeferBatchSnapshot) && escrow.status == 1;
         ensure(
             &env,
-            escrow.status == 0,
+            escrow.status == 0 || batch_continuation,
             EscrowError::EscrowNotOpenForFunding,
         );
 
@@ -2377,7 +2413,9 @@ impl LiquifactEscrow {
 
         if escrow.status == 0 && escrow.funded_amount >= escrow.funding_target {
             escrow.status = 1;
-            if !env.storage().instance().has(&DataKey::FundingCloseSnapshot) {
+            if matches!(close_mode, FundingCloseMode::Immediate)
+                && !env.storage().instance().has(&DataKey::FundingCloseSnapshot)
+            {
                 let snap = FundingCloseSnapshot {
                     total_principal: escrow.funded_amount,
                     funding_target: escrow.funding_target,

@@ -68,8 +68,10 @@ reducing transaction overhead for primary issuance workflows.
 
 **Funded-target snapshot:**
 - If any entry causes the escrow to transition to **funded** (status `0 → 1`),
-  `FundingCloseSnapshot` is recorded exactly once
+  `FundingCloseSnapshot` is recorded exactly once after the full closing batch is accepted
 - Remaining entries are processed even after the transition
+- `FundingCloseSnapshot.total_principal` records the final accepted batch principal, so payout
+  denominators include every investor accepted by that closing batch
 
 **Example:**
 ```rust

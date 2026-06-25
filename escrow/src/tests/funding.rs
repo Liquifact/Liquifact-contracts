@@ -2983,6 +2983,11 @@ fn test_fund_batch_equals_n_single_funds() {
     // Assert identical final state
     assert_eq!(result_batch.funded_amount, result_single.funded_amount);
     assert_eq!(result_batch.status, result_single.status);
+    assert_eq!(
+        client_a.get_unique_funder_count(),
+        client_b.get_unique_funder_count()
+    );
+    assert_eq!(client_a.get_unique_funder_count(), 5);
 
     // Verify contributions match
     for i in 0..5 {
@@ -3034,6 +3039,46 @@ fn test_fund_batch_per_investor_cap_rejection() {
 }
 
 #[test]
+#[should_panic(expected = "FundingBelowMinContribution")]
+fn test_fund_batch_min_contribution_floor_rejection() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let inv1 = Address::generate(&env);
+    let inv2 = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
+    let target = 100_000i128;
+    let min_contribution = 10_000i128;
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "FLOOR01"),
+        &sme,
+        &target,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &Some(min_contribution),
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    let mut entries = SorobanVec::new(&env);
+    entries.push_back((inv1.clone(), min_contribution));
+    entries.push_back((inv2.clone(), min_contribution - 1));
+
+    client.fund_batch(&entries);
+}
+
+#[test]
 fn test_fund_batch_mid_batch_funded_transition() {
     let env = Env::default();
     env.mock_all_auths();
@@ -3041,7 +3086,6 @@ fn test_fund_batch_mid_batch_funded_transition() {
     let admin = Address::generate(&env);
     let sme = Address::generate(&env);
     let (tok, tre) = free_addresses(&env);
-    let investor = Address::generate(&env);
 
     let target = 100_000i128;
     client.init(
@@ -3069,26 +3113,68 @@ fn test_fund_batch_mid_batch_funded_transition() {
     let mut entries = SorobanVec::new(&env);
     // inv1 brings total to 40k (still open)
     entries.push_back((inv1.clone(), 40_000i128));
-    // inv2 brings total to 95k (still open)
-    entries.push_back((inv2.clone(), 55_000i128));
-    // inv3 brings total to 105k (crosses funded threshold)
-    entries.push_back((inv3.clone(), 10_000i128));
+    // inv2 brings total to 105k (crosses funded threshold mid-batch)
+    entries.push_back((inv2.clone(), 65_000i128));
+    // inv3 is still part of the same accepted closing batch.
+    entries.push_back((inv3.clone(), 15_000i128));
 
     let result = client.fund_batch(&entries);
 
     // Verify transition occurred
     assert_eq!(result.status, 1, "status should be funded (1) after batch");
-    assert_eq!(result.funded_amount, 105_000i128);
+    assert_eq!(result.funded_amount, 120_000i128);
 
     // Verify all entries were processed
     assert_eq!(client.get_contribution(&inv1), 40_000i128);
-    assert_eq!(client.get_contribution(&inv2), 55_000i128);
-    assert_eq!(client.get_contribution(&inv3), 10_000i128);
+    assert_eq!(client.get_contribution(&inv2), 65_000i128);
+    assert_eq!(client.get_contribution(&inv3), 15_000i128);
+    assert_eq!(client.get_unique_funder_count(), 3);
 
-    // Verify snapshot was captured
+    // Verify snapshot was captured once with the final accepted batch principal.
     let snap = client.get_funding_close_snapshot();
     assert!(snap.is_some());
-    assert_eq!(snap.unwrap().total_principal, 105_000i128);
+    let snap = snap.unwrap();
+    assert_eq!(snap.total_principal, 120_000i128);
+    assert_eq!(snap.funding_target, target);
+}
+
+#[test]
+#[should_panic(expected = "EscrowNotOpenForFunding")]
+fn test_fund_batch_rejects_new_batch_after_funded() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
+    let target = 100_000i128;
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "POSTB001"),
+        &sme,
+        &target,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    let closer = Address::generate(&env);
+    client.fund(&closer, &target);
+
+    let late_investor = Address::generate(&env);
+    let mut entries = SorobanVec::new(&env);
+    entries.push_back((late_investor, 1_000i128));
+
+    client.fund_batch(&entries);
 }
 
 #[test]
