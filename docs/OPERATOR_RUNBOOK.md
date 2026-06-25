@@ -424,6 +424,9 @@ expose that entrypoint, so operators should use redeploy for new WASM.
 - Admin rotation is two-step: `propose_admin` requires the current admin's
   authorization, and `accept_admin` requires the proposed successor's
   authorization. Test both steps on Testnet before executing on Mainnet.
+- Treat any `DeprecatedTransferAdminUsed` (`adm_shim`) event as a migration
+  signal: the caller is still using the deprecated `transfer_admin` shim, which
+  only proposes a pending admin and still requires a separate `accept_admin`.
 
 ### `migrate()` is not a no-op
 

@@ -727,6 +727,16 @@ pub struct AdminProposedEvent {
     pub pending_admin: Address,
 }
 
+/// Emitted when the deprecated `transfer_admin` shim is used.
+#[contractevent]
+pub struct DeprecatedTransferAdminUsed {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    pub proposed_admin: Address,
+}
+
 #[contractevent]
 pub struct FundingTargetUpdated {
     #[topic]
@@ -2886,10 +2896,22 @@ impl LiquifactEscrow {
     /// This function now only proposes `new_admin` by delegating to
     /// [`LiquifactEscrow::propose_admin`]. The proposed address must still call
     /// [`LiquifactEscrow::accept_admin`] before admin authority changes.
+    ///
+    /// Emits [`DeprecatedTransferAdminUsed`] in addition to [`AdminProposedEvent`]
+    /// so indexers can detect integrations that still call the legacy shim.
     #[deprecated(note = "use propose_admin followed by accept_admin")]
     pub fn transfer_admin(env: Env, new_admin: Address) -> InvoiceEscrow {
-        Self::propose_admin(env.clone(), new_admin);
-        Self::get_escrow(env)
+        let proposed_admin = Self::propose_admin(env.clone(), new_admin);
+        let escrow = Self::get_escrow(env.clone());
+
+        DeprecatedTransferAdminUsed {
+            name: symbol_short!("adm_shim"),
+            invoice_id: escrow.invoice_id.clone(),
+            proposed_admin,
+        }
+        .publish(&env);
+
+        escrow
     }
 
     /// Transition an **open** escrow (status 0) to **cancelled** (status 4).

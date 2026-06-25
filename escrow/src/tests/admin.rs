@@ -1,5 +1,7 @@
 use super::*;
-use crate::{AdminProposedEvent, EscrowCloseSnapshot, FundingTargetUpdated};
+use crate::{
+    AdminProposedEvent, DeprecatedTransferAdminUsed, EscrowCloseSnapshot, FundingTargetUpdated,
+};
 use soroban_sdk::Event;
 
 // Admin/governance operations: target changes, maturity changes, admin handover,
@@ -172,6 +174,43 @@ fn test_transfer_admin_deprecated_shim_only_proposes() {
     let unchanged = client.transfer_admin(&new_admin);
     assert_eq!(unchanged.admin, admin);
     assert_eq!(client.get_pending_admin(), Some(new_admin));
+}
+
+#[test]
+#[allow(deprecated)]
+fn test_transfer_admin_deprecated_shim_emits_proposal_and_deprecation_events() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let contract_id = client.address.clone();
+    let new_admin = Address::generate(&env);
+    default_init(&client, &env, &admin, &sme);
+    let invoice_id = client.get_escrow().invoice_id;
+
+    client.transfer_admin(&new_admin);
+
+    let events = env.events().all().events();
+    assert!(events.len() >= 2);
+    assert_eq!(
+        events[events.len() - 2].clone(),
+        AdminProposedEvent {
+            name: symbol_short!("adm_prop"),
+            invoice_id: invoice_id.clone(),
+            current_admin: admin,
+            pending_admin: new_admin.clone(),
+        }
+        .to_xdr(&env, &contract_id)
+    );
+    assert_eq!(
+        events[events.len() - 1].clone(),
+        DeprecatedTransferAdminUsed {
+            name: symbol_short!("adm_shim"),
+            invoice_id,
+            proposed_admin: new_admin,
+        }
+        .to_xdr(&env, &contract_id)
+    );
 }
 
 #[test]

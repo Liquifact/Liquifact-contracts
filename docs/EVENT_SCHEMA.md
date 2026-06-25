@@ -33,7 +33,7 @@ short routing symbol passed with `symbol_short!(...)`, such as `funded` or
 
 ## Event Catalog
 
-The current contract defines 19 event structs.
+The current contract defines 20 event structs.
 
 | Rust event | `name` symbol | Entrypoint(s) |
 |---|---:|---|
@@ -44,6 +44,7 @@ The current contract defines 19 event structs.
 | `MaturityUpdatedEvent` | `maturity` | `update_maturity` |
 | `AdminTransferredEvent` | `admin` | `accept_admin` |
 | `AdminProposedEvent` | `adm_prop` | `propose_admin`, `transfer_admin` |
+| `DeprecatedTransferAdminUsed` | `adm_shim` | `transfer_admin` |
 | `BeneficiaryRotated` | `ben_rot` | `rotate_beneficiary` |
 | `FundingTargetUpdated` | `fund_tgt` | `update_funding_target` |
 | `LegalHoldChanged` | `legalhld` | `set_legal_hold`, `clear_legal_hold` |
@@ -184,7 +185,8 @@ Data:
 
 Emitted after successful `propose_admin`. The deprecated `transfer_admin`
 shim delegates to `propose_admin`, so it emits this event rather than
-`AdminTransferredEvent`.
+`AdminTransferredEvent`; shim calls also emit `DeprecatedTransferAdminUsed`
+so operators can identify legacy integrations.
 
 Topics:
 
@@ -200,6 +202,26 @@ Data:
 |---|---|
 | `current_admin` | `Address` |
 | `pending_admin` | `Address` |
+
+### `DeprecatedTransferAdminUsed`
+
+Emitted after a successful call to the deprecated `transfer_admin` shim.
+The handover behavior is still the two-step `propose_admin` flow; this
+additional event is an observability signal for indexers and operators.
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `deprecated_transfer_admin_used` |
+| 1 | `name` | `Symbol` | `adm_shim` |
+| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
+
+Data:
+
+| Field | Type |
+|---|---|
+| `proposed_admin` | `Address` |
 
 ### `BeneficiaryRotated`
 

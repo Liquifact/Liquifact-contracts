@@ -32,6 +32,8 @@ Contract event names (`symbol_short`) emitted by `escrow/src/lib.rs`:
 - `inv_claim` - investor payout claimed
 - `dust_sw` - treasury dust sweep
 - `legalhld` - legal hold changed
+- `adm_prop` - pending admin proposed
+- `adm_shim` - deprecated `transfer_admin` shim used
 - `admin` - admin transferred
 - `maturity` - maturity updated
 - `fund_tgt` - funding target updated
