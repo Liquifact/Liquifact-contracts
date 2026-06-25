@@ -777,8 +777,7 @@ fn test_update_funding_target_fails_when_settled() {
 fn test_update_funding_target_fails_when_withdrawn() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, _escrow_id, _sme) =
-        init_and_fund_with_real_token(&env, 5_000i128, "WD001");
+    let (client, _escrow_id, _sme) = init_and_fund_with_real_token(&env, 5_000i128, "WD001");
     client.withdraw(); // status → 3 (withdrawn)
     client.update_funding_target(&6_000i128);
 }
@@ -984,8 +983,7 @@ fn test_update_maturity_fails_when_settled() {
 fn test_update_maturity_fails_when_withdrawn() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, _escrow_id, _sme) =
-        init_and_fund_with_real_token(&env, 5_000i128, "MAT004");
+    let (client, _escrow_id, _sme) = init_and_fund_with_real_token(&env, 5_000i128, "MAT004");
     client.withdraw(); // status → 3
     client.update_maturity(&2000u64);
 }

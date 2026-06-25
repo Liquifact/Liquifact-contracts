@@ -581,10 +581,7 @@ fn test_get_funding_token_before_init_fails_with_typed_error() {
 fn test_get_treasury_before_init_fails_with_typed_error() {
     let env = Env::default();
     let client = deploy(&env);
-    assert_contract_error(
-        client.try_get_treasury(),
-        EscrowError::TreasuryNotSet,
-    );
+    assert_contract_error(client.try_get_treasury(), EscrowError::TreasuryNotSet);
 }
 
 #[test]
