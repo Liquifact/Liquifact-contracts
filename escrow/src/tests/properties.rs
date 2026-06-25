@@ -1546,7 +1546,8 @@ fn fuzz_dust_sweep_liability_floor() {
             .iter()
             .cloned()
             .zip(amounts.iter().cloned())
-            .collect();        let client = cancelled_escrow(&env, "FUZZDUST", &pairs);
+            .collect();
+        let client = cancelled_escrow(&env, "FUZZDUST", &pairs);
         let escrow = client.get_escrow();
         assert_eq!(escrow.status, 4);
         let funded = escrow.funded_amount;
