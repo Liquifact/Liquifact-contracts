@@ -2208,15 +2208,12 @@ impl LiquifactEscrow {
         let mut seen: Vec<Address> = Vec::new(&env);
         for i in 0..n {
             let (investor, _) = entries.get(i).unwrap();
-            let mut duplicate = false;
-            for j in 0..seen.len() {
-                if seen.get(j).unwrap() == investor {
-                    duplicate = true;
-                    break;
-                }
-            }
-            ensure(&env, !duplicate, EscrowError::FundingBatchDuplicateInvestor);
-            seen.push_back(investor.clone());
+            ensure(
+                &env,
+                !seen.iter().any(|addr| addr == investor),
+                EscrowError::FundingBatchDuplicateInvestor,
+            );
+            seen.push_back(investor);
         }
 
         let mut escrow = Self::get_escrow(env.clone());
