@@ -1141,6 +1141,14 @@ fn test_update_maturity_twice_overwrites() {
 // (Soroban host aborts the transaction). Canonical ordering is documented in
 // `docs/escrow-security-checklist.md` §6 and ADR-002.
 
+/// Helper to initialize and fund the escrow for authorization audit tests.
+///
+/// Returns a tuple containing:
+/// - The `LiquifactEscrowClient` instance.
+/// - The admin `Address`.
+/// - The SME `Address`.
+/// - The funding investor `Address`.
+/// - A newly generated pending admin `Address`.
 fn auth_audit_init_funded(
     env: &Env,
 ) -> (
@@ -1310,6 +1318,229 @@ fn auth_audit_sweep_terminal_dust_requires_treasury() {
     token.stellar.mint(&escrow_id, &100i128);
     env.mock_auths(&[]);
     client.sweep_terminal_dust(&100i128);
+}
+
+// --- Additional Negative-Auth Audit Tests ---
+
+#[test]
+#[should_panic]
+fn auth_audit_init_requires_admin() {
+    let env = Env::default();
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let client = deploy(&env);
+    env.mock_auths(&[]);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "AUTHINT"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+}
+
+#[test]
+#[should_panic]
+fn auth_audit_cancel_funding_requires_admin() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    env.mock_all_auths();
+    default_init(&client, &env, &admin, &sme);
+    env.mock_auths(&[]);
+    client.cancel_funding();
+}
+
+#[test]
+#[should_panic]
+fn auth_audit_refund_requires_investor() {
+    let env = Env::default();
+    let (client, _, _, investor, _) = auth_audit_init_funded(&env);
+    env.mock_all_auths();
+    client.cancel_funding();
+    env.mock_auths(&[]);
+    client.refund(&investor);
+}
+
+#[test]
+#[should_panic]
+fn auth_audit_set_investors_allowlisted_requires_admin() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    env.mock_all_auths();
+    default_init(&client, &env, &admin, &sme);
+    env.mock_auths(&[]);
+    client.set_investors_allowlisted(&soroban_sdk::Vec::new(&env), &true);
+}
+
+#[test]
+#[should_panic]
+fn auth_audit_update_funding_target_requires_admin() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    env.mock_all_auths();
+    default_init(&client, &env, &admin, &sme);
+    env.mock_auths(&[]);
+    client.update_funding_target(&100_000i128);
+}
+
+#[test]
+#[should_panic]
+fn auth_audit_lower_max_unique_investors_requires_admin() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    env.mock_all_auths();
+    default_init(&client, &env, &admin, &sme);
+    env.mock_auths(&[]);
+    client.lower_max_unique_investors(&1u32);
+}
+
+#[test]
+#[should_panic]
+fn auth_audit_update_maturity_requires_admin() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    env.mock_all_auths();
+    default_init(&client, &env, &admin, &sme);
+    env.mock_auths(&[]);
+    client.update_maturity(&5000u64);
+}
+
+#[test]
+#[should_panic]
+fn auth_audit_rotate_beneficiary_requires_auth() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    env.mock_all_auths();
+    default_init(&client, &env, &admin, &sme);
+    env.mock_auths(&[]);
+    client.rotate_beneficiary(&Address::generate(&env));
+}
+
+#[test]
+#[should_panic]
+fn auth_audit_revoke_attestation_digest_requires_admin() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    env.mock_all_auths();
+    default_init(&client, &env, &admin, &sme);
+    env.mock_auths(&[]);
+    client.revoke_attestation_digest(&0u32);
+}
+
+#[test]
+#[should_panic]
+fn auth_audit_clear_legal_hold_requires_admin() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    env.mock_all_auths();
+    default_init(&client, &env, &admin, &sme);
+    client.set_legal_hold(&true);
+    env.mock_auths(&[]);
+    client.clear_legal_hold();
+}
+
+#[test]
+#[should_panic]
+fn auth_audit_request_clear_legal_hold_requires_admin() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    env.mock_all_auths();
+    default_init(&client, &env, &admin, &sme);
+    env.mock_auths(&[]);
+    client.request_clear_legal_hold();
+}
+
+#[test]
+#[should_panic]
+fn auth_audit_record_sme_collateral_commitment_requires_sme() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    env.mock_all_auths();
+    default_init(&client, &env, &admin, &sme);
+    env.mock_auths(&[]);
+    client.record_sme_collateral_commitment(&symbol_short!("USDC"), &1000i128);
+}
+
+#[test]
+#[should_panic]
+fn auth_audit_partial_settle_requires_auth() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    env.mock_all_auths();
+    default_init(&client, &env, &admin, &sme);
+    env.mock_auths(&[]);
+    client.partial_settle(&sme);
+}
+
+#[test]
+#[should_panic]
+fn auth_audit_fund_batch_requires_investor() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    env.mock_all_auths();
+    default_init(&client, &env, &admin, &sme);
+    let investor = Address::generate(&env);
+    env.mock_auths(&[]);
+    client.fund_batch(&soroban_sdk::vec![&env, (investor.clone(), TARGET)]);
+}
+
+#[test]
+#[should_panic]
+fn auth_audit_sweep_terminal_dust_wrong_signer() {
+    // Edge case: treasury vs admin on sweep
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let investor = Address::generate(&env);
+    let token = install_stellar_asset_token(&env);
+    let treasury = Address::generate(&env);
+    let escrow_id = deploy_id(&env);
+    let client = LiquifactEscrowClient::new(&env, &escrow_id);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "WRSW"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &token.id,
+        &None,
+        &treasury, // Valid treasury
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+    client.fund(&investor, &TARGET);
+    client.settle();
+
+    // Simulate admin trying to sweep instead of treasury
+    use soroban_sdk::testutils::MockAuth;
+    use soroban_sdk::{IntoVal, Vec as SorobanVec};
+    env.mock_auths(&[MockAuth {
+        address: &admin, // wrong signer (admin instead of treasury)
+        invoke: &soroban_sdk::testutils::MockAuthInvoke {
+            contract: &client.address,
+            fn_name: "sweep_terminal_dust",
+            args: SorobanVec::from_array(&env, [(100i128,).into_val(&env)]),
+            sub_invokes: &[],
+        },
+    }]);
+
+    client.sweep_terminal_dust(&100i128); // Panics because caller != treasury
 }
 
 // --- rotate_beneficiary tests ---
