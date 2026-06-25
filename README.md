@@ -159,6 +159,9 @@ cargo clippy --all-targets -- -D warnings
 | `sweep_terminal_dust` | Treasury sweeps rounding residue from a terminal escrow. |
 | `migrate` | Schema version gate — **typed errors on all paths** in the current release (codes 90–92). |
 | `set_legal_hold` | Admin activates/clears compliance hold. |
+| `set_allowlist_active` | Admin enables/disables the investor allowlist gate. |
+| `set_investor_allowlisted` | Admin sets per-address allowlist status. |
+| `set_investors_allowlisted` | Admin batch-sets allowlist status for multiple addresses. |
 | `bind_primary_attestation_hash` | Admin sets a single-write 32-byte digest. |
 | `append_attestation_digest` | Admin appends to bounded audit log. |
 | `record_sme_collateral_commitment` | SME records collateral pledge (metadata only). |
@@ -228,6 +231,16 @@ external token contracts.
 ## SME collateral metadata
 
 See [`docs/escrow-sme-collateral.md`](docs/escrow-sme-collateral.md) for the risk-team handling rules for `record_sme_collateral_commitment` and `CollateralRecordedEvt`. The record is SME-reported metadata only; it is not proof of custody, token movement, or an enforceable on-chain claim.
+
+## Investor allowlist
+
+The escrow supports an optional investor allowlist gate that controls which addresses may fund. See [`docs/escrow-allowlist.md`](docs/escrow-allowlist.md) for the complete allowlist model documentation, including:
+
+- Active/inactive toggle behavior and interaction with per-address entries
+- Persistent storage model and TTL/archival implications
+- Fund-gate enforcement rules and default-to-deny semantics
+- Batch operations and equivalence to single calls
+- Security considerations for TTL management and admin key security
 
 ## Security notes
 

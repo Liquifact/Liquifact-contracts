@@ -45,7 +45,11 @@ fn fund_to_target(client: &super::LiquifactEscrowClient<'_>, env: &Env) -> Addre
 /// actually transfer them.  Returns `(client, sme, sac_admin_client)`.
 fn setup_funded_with_token<'a>(
     env: &'a Env,
-) -> (super::LiquifactEscrowClient<'a>, Address, StellarAssetClient<'a>) {
+) -> (
+    super::LiquifactEscrowClient<'a>,
+    Address,
+    StellarAssetClient<'a>,
+) {
     let sac = env.register_stellar_asset_contract_v2(Address::generate(env));
     let token_id = sac.address();
     let sac_admin = StellarAssetClient::new(env, &token_id);

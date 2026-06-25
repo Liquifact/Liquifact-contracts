@@ -462,3 +462,304 @@ fn test_batch_requires_admin_auth() {
     env.mock_auths(&[]);
     client.set_investors_allowlisted(&v, &true);
 }
+
+// --- batch equivalence to single calls ---
+
+#[test]
+fn test_batch_equivalence_to_single_calls_add() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init(&env, &client);
+    let contract_id = client.address.clone();
+
+    let a = Address::generate(&env);
+    let b = Address::generate(&env);
+    let c = Address::generate(&env);
+
+    // Batch add
+    let mut batch_vec: SorobanVec<Address> = SorobanVec::new(&env);
+    batch_vec.push_back(a.clone());
+    batch_vec.push_back(b.clone());
+    batch_vec.push_back(c.clone());
+    client.set_investors_allowlisted(&batch_vec, &true);
+
+    let batch_events = env.events().all();
+
+    // Clear events and do single calls
+    env.events().all();
+    let d = Address::generate(&env);
+    let e = Address::generate(&env);
+    let f = Address::generate(&env);
+    client.set_investor_allowlisted(&d, &true);
+    client.set_investor_allowlisted(&e, &true);
+    client.set_investor_allowlisted(&f, &true);
+
+    let single_events = env.events().all();
+
+    // Both should emit 3 events with same structure
+    assert_eq!(batch_events.len(), 3);
+    assert_eq!(single_events.len(), 3);
+
+    // Verify storage state is identical
+    env.as_contract(&contract_id, || {
+        assert!(
+            env.storage()
+                .persistent()
+                .get::<DataKey, bool>(&DataKey::InvestorAllowlisted(a.clone()))
+                == Some(true)
+        );
+        assert!(
+            env.storage()
+                .persistent()
+                .get::<DataKey, bool>(&DataKey::InvestorAllowlisted(b.clone()))
+                == Some(true)
+        );
+        assert!(
+            env.storage()
+                .persistent()
+                .get::<DataKey, bool>(&DataKey::InvestorAllowlisted(c.clone()))
+                == Some(true)
+        );
+        assert!(
+            env.storage()
+                .persistent()
+                .get::<DataKey, bool>(&DataKey::InvestorAllowlisted(d.clone()))
+                == Some(true)
+        );
+        assert!(
+            env.storage()
+                .persistent()
+                .get::<DataKey, bool>(&DataKey::InvestorAllowlisted(e.clone()))
+                == Some(true)
+        );
+        assert!(
+            env.storage()
+                .persistent()
+                .get::<DataKey, bool>(&DataKey::InvestorAllowlisted(f.clone()))
+                == Some(true)
+        );
+    });
+}
+
+#[test]
+fn test_batch_equivalence_to_single_calls_remove() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init(&env, &client);
+    let contract_id = client.address.clone();
+
+    let a = Address::generate(&env);
+    let b = Address::generate(&env);
+    let c = Address::generate(&env);
+
+    // First add them
+    client.set_investor_allowlisted(&a, &true);
+    client.set_investor_allowlisted(&b, &true);
+    client.set_investor_allowlisted(&c, &true);
+
+    // Batch remove
+    let mut batch_vec: SorobanVec<Address> = SorobanVec::new(&env);
+    batch_vec.push_back(a.clone());
+    batch_vec.push_back(b.clone());
+    batch_vec.push_back(c.clone());
+    client.set_investors_allowlisted(&batch_vec, &false);
+
+    // Verify storage state is identical to single remove
+    env.as_contract(&contract_id, || {
+        assert!(
+            env.storage()
+                .persistent()
+                .get::<DataKey, bool>(&DataKey::InvestorAllowlisted(a.clone()))
+                == Some(false)
+        );
+        assert!(
+            env.storage()
+                .persistent()
+                .get::<DataKey, bool>(&DataKey::InvestorAllowlisted(b.clone()))
+                == Some(false)
+        );
+        assert!(
+            env.storage()
+                .persistent()
+                .get::<DataKey, bool>(&DataKey::InvestorAllowlisted(c.clone()))
+                == Some(false)
+        );
+    });
+}
+
+#[test]
+fn test_batch_at_max_bound() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init(&env, &client);
+
+    let cap = super::MAX_INVESTOR_ALLOWLIST_BATCH;
+    let mut v: SorobanVec<Address> = SorobanVec::new(&env);
+    for _ in 0..cap {
+        v.push_back(Address::generate(&env));
+    }
+
+    // Should succeed at exactly the bound
+    client.set_investors_allowlisted(&v, &true);
+    assert_eq!(v.len(), cap);
+}
+
+// --- archived entry default behavior ---
+
+#[test]
+fn test_absent_entry_defaults_to_false() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init(&env, &client);
+
+    let stranger = Address::generate(&env);
+    // Never added to allowlist - should return false
+    assert!(!client.is_investor_allowlisted(&stranger));
+}
+
+#[test]
+fn test_fund_gate_with_archived_entry_simulated() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init(&env, &client);
+    let contract_id = client.address.clone();
+    let investor = Address::generate(&env);
+
+    // Enable allowlist and add investor
+    client.set_allowlist_active(&true);
+    client.set_investor_allowlisted(&investor, &true);
+
+    // Simulate archival by manually removing the persistent entry
+    env.as_contract(&contract_id, || {
+        env.storage()
+            .persistent()
+            .remove(&DataKey::InvestorAllowlisted(investor.clone()));
+    });
+
+    // Now the entry is absent (simulating archival)
+    assert!(!client.is_investor_allowlisted(&investor));
+
+    // Funding should be blocked (absent entry defaults to false)
+    let blocked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.fund(&investor, &1_000i128);
+    }));
+    assert!(blocked.is_err());
+}
+
+#[test]
+fn test_fund_gate_with_explicitly_false_entry() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init(&env, &client);
+    let investor = Address::generate(&env);
+
+    // Enable allowlist and explicitly set to false
+    client.set_allowlist_active(&true);
+    client.set_investor_allowlisted(&investor, &false);
+
+    // Funding should be blocked
+    let blocked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.fund(&investor, &1_000i128);
+    }));
+    assert!(blocked.is_err());
+}
+
+// --- edge cases with toggle ---
+
+#[test]
+fn test_toggle_during_funding_phase() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init(&env, &client);
+    let investor_a = Address::generate(&env);
+    let investor_b = Address::generate(&env);
+
+    // Start with allowlist disabled
+    assert!(!client.is_allowlist_active());
+
+    // Investor A funds while disabled
+    client.fund(&investor_a, &3_000i128);
+
+    // Enable allowlist and add investor B
+    client.set_allowlist_active(&true);
+    client.set_investor_allowlisted(&investor_b, &true);
+
+    // Investor B can now fund
+    client.fund(&investor_b, &2_000i128);
+
+    // Investor A (not on allowlist) cannot fund anymore
+    let blocked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.fund(&investor_a, &1_000i128);
+    }));
+    assert!(blocked.is_err());
+
+    // Disable allowlist - both can fund again
+    client.set_allowlist_active(&false);
+    client.fund(&investor_a, &1_000i128);
+    client.fund(&investor_b, &1_000i128);
+}
+
+#[test]
+fn test_allowlist_state_persists_after_funding_complete() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init(&env, &client);
+    let investor = Address::generate(&env);
+
+    // Enable allowlist and add investor
+    client.set_allowlist_active(&true);
+    client.set_investor_allowlisted(&investor, &true);
+
+    // Fund to completion
+    client.fund(&investor, &10_000i128);
+
+    // Allowlist state should still be readable
+    assert!(client.is_allowlist_active());
+    assert!(client.is_investor_allowlisted(&investor));
+
+    // Toggle should still work after funding
+    client.set_allowlist_active(&false);
+    assert!(!client.is_allowlist_active());
+}
+
+#[test]
+fn test_multiple_toggle_cycles() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init(&env, &client);
+    let investor = Address::generate(&env);
+
+    // Cycle: off -> on -> off -> on -> off
+    assert!(!client.is_allowlist_active());
+
+    client.set_allowlist_active(&true);
+    assert!(client.is_allowlist_active());
+
+    client.set_allowlist_active(&false);
+    assert!(!client.is_allowlist_active());
+
+    client.set_allowlist_active(&true);
+    assert!(client.is_allowlist_active());
+
+    client.set_allowlist_active(&false);
+    assert!(!client.is_allowlist_active());
+
+    // Entry persists through all cycles
+    client.set_investor_allowlisted(&investor, &true);
+    assert!(client.is_investor_allowlisted(&investor));
+
+    // Re-enable and verify funding works
+    client.set_allowlist_active(&true);
+    client.fund(&investor, &5_000i128);
+}

@@ -83,6 +83,10 @@ When `AllowlistActive` is enabled (instance storage flag), `fund_impl` gates `fu
 `fund_with_commitment` by asserting `InvestorAllowlisted(investor) == true`. Only the admin may
 mutate allowlist membership.
 
+See [`escrow-allowlist.md`](escrow-allowlist.md) for the complete allowlist model documentation,
+including the active/inactive toggle interaction, TTL/archival behavior, batch operations, and
+fund-gate enforcement rules.
+
 ---
 
 ## Stored struct reference
