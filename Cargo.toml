@@ -1,3 +1,11 @@
 [workspace]
 members = ["escrow"]
 resolver = "2"
+
+[workspace.metadata.cargo-llvm-cov]
+# Exclude test scaffolding from coverage measurement — only production code is gated.
+exclude = [
+    "src/test/*",
+    "**/*_test.rs",
+    "tests/*"
+]

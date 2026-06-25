@@ -1,8 +1,22 @@
 # Build
-target/
+/target/
+target_local/
+**/*.rs.bk
+Cargo.lock
+.cargo/
+
+# Local command outputs (generated)
+build_output*.txt
+test_output*.txt
+
+# Local notes / PR scratch files
+PR_DESCRIPTION.md
+TODO.md
 
 # Test snapshots (generated)
 **/test_snapshots/
+
+node_modules/
 
 # IDE
 .idea/
@@ -12,3 +26,4 @@ target/
 
 # OS
 .DS_Store
+pr.md

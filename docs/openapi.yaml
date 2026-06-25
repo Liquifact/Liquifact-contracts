@@ -1,0 +1,576 @@
+openapi: "3.1.0"
+
+info:
+  title: LiquiFact API
+  version: "1.0.0"
+  description: |
+    REST API for the LiquiFact global invoice liquidity network on Stellar.
+    Exposes health, API info, invoice management, and escrow lifecycle endpoints.
+    All monetary amounts are in the smallest unit (stroops: 1 XLM = 10,000,000 stroops).
+  contact:
+    name: LiquiFact
+  license:
+    name: MIT
+
+servers:
+  - url: https://api.liquifact.io/v1
+    description: Production
+  - url: http://localhost:4000/v1
+    description: Local development
+
+# ---------------------------------------------------------------------------
+# Security
+# ---------------------------------------------------------------------------
+security:
+  - bearerAuth: []
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT issued after wallet-based authentication.
+
+  # -------------------------------------------------------------------------
+  # Reusable schemas
+  # -------------------------------------------------------------------------
+  schemas:
+
+    # -- Shared primitives ---------------------------------------------------
+
+    StellarAddress:
+      type: string
+      pattern: "^[A-Z2-7]{56}$"
+      description: Stellar public key (G… or C… address, 56 chars, base32).
+      example: "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5"
+
+    InvoiceId:
+      type: string
+      minLength: 1
+      maxLength: 12
+      pattern: "^[A-Za-z0-9_-]+$"
+      description: Short alphanumeric invoice identifier (Soroban Symbol, max 12 chars).
+      example: "INV-1023"
+
+    EscrowStatus:
+      type: integer
+      enum: [0, 1, 2]
+      description: |
+        Escrow lifecycle state:
+        - `0` — open (accepting funding)
+        - `1` — funded (target met; SME can receive liquidity)
+        - `2` — settled (buyer paid; investors receive principal + yield)
+
+    # -- Domain objects ------------------------------------------------------
+
+    InvoiceEscrow:
+      type: object
+      required:
+        - invoice_id
+        - sme_address
+        - buyer_address
+        - amount
+        - funding_target
+        - funded_amount
+        - yield_bps
+        - maturity
+        - status
+        - is_paid
+      properties:
+        invoice_id:
+          $ref: "#/components/schemas/InvoiceId"
+        sme_address:
+          $ref: "#/components/schemas/StellarAddress"
+        buyer_address:
+          $ref: "#/components/schemas/StellarAddress"
+        amount:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Total invoice amount in stroops.
+          example: 100000000000
+        funding_target:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Funding target in stroops (equals `amount` at init).
+          example: 100000000000
+        funded_amount:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Total investor contributions received so far, in stroops.
+          example: 50000000000
+        yield_bps:
+          type: integer
+          format: int32
+          minimum: 0
+          maximum: 10000
+          description: Investor yield in basis points (e.g. 800 = 8 %).
+          example: 800
+        maturity:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Maturity ledger timestamp (Unix seconds).
+          example: 1000
+        status:
+          $ref: "#/components/schemas/EscrowStatus"
+        is_paid:
+          type: boolean
+          description: Whether the buyer has confirmed payment (repayment of invoice).
+          example: false
+
+    InvoiceSummary:
+      type: object
+      required: [invoice_id, amount, status]
+      properties:
+        invoice_id:
+          $ref: "#/components/schemas/InvoiceId"
+        amount:
+          type: integer
+          format: int64
+          minimum: 1
+          example: 100000000000
+        status:
+          $ref: "#/components/schemas/EscrowStatus"
+
+    # -- Request bodies ------------------------------------------------------
+
+    InitEscrowRequest:
+      type: object
+      required:
+        - invoice_id
+        - sme_address
+        - buyer_address
+        - amount
+        - yield_bps
+        - maturity
+      properties:
+        invoice_id:
+          $ref: "#/components/schemas/InvoiceId"
+        sme_address:
+          $ref: "#/components/schemas/StellarAddress"
+        buyer_address:
+          $ref: "#/components/schemas/StellarAddress"
+        amount:
+          type: integer
+          format: int64
+          minimum: 1
+          example: 100000000000
+        yield_bps:
+          type: integer
+          format: int32
+          minimum: 0
+          maximum: 10000
+          example: 800
+        maturity:
+          type: integer
+          format: int64
+          minimum: 1
+          example: 1000
+
+    FundEscrowRequest:
+      type: object
+      required:
+        - investor_address
+        - amount
+      properties:
+        investor_address:
+          $ref: "#/components/schemas/StellarAddress"
+        amount:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Amount to contribute in stroops.
+          example: 50000000000
+
+    # -- Responses -----------------------------------------------------------
+
+    HealthResponse:
+      type: object
+      required: [status, timestamp]
+      properties:
+        status:
+          type: string
+          enum: [ok]
+          example: ok
+        timestamp:
+          type: string
+          format: date-time
+          example: "2026-03-23T21:46:03Z"
+
+    ApiInfoResponse:
+      type: object
+      required: [name, version, network]
+      properties:
+        name:
+          type: string
+          example: LiquiFact API
+        version:
+          type: string
+          example: "1.0.0"
+        network:
+          type: string
+          enum: [mainnet, testnet, futurenet]
+          example: mainnet
+        docs_url:
+          type: string
+          format: uri
+          example: "https://docs.liquifact.io"
+
+    ErrorResponse:
+      type: object
+      required: [error, message]
+      properties:
+        error:
+          type: string
+          example: NOT_FOUND
+        message:
+          type: string
+          example: "Invoice INV-1023 not found."
+
+  # -------------------------------------------------------------------------
+  # Reusable responses
+  # -------------------------------------------------------------------------
+  responses:
+    Unauthorized:
+      description: Missing or invalid JWT.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: UNAUTHORIZED
+            message: "Bearer token is missing or expired."
+
+    NotFound:
+      description: Resource not found.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: NOT_FOUND
+            message: "Invoice not found."
+
+    UnprocessableEntity:
+      description: Validation error or invalid state transition.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: INVALID_STATE
+            message: "Escrow is not open for funding."
+
+    InternalServerError:
+      description: Unexpected server error.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error: INTERNAL_ERROR
+            message: "An unexpected error occurred."
+
+# ---------------------------------------------------------------------------
+# Paths
+# ---------------------------------------------------------------------------
+paths:
+
+  # -- Health ----------------------------------------------------------------
+
+  /health:
+    get:
+      operationId: getHealth
+      summary: Health check
+      description: Returns `200 ok` when the service is running. No authentication required.
+      security: []
+      tags: [Health]
+      responses:
+        "200":
+          description: Service is healthy.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+              example:
+                status: ok
+                timestamp: "2026-03-23T21:46:03Z"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  # -- API Info --------------------------------------------------------------
+
+  /info:
+    get:
+      operationId: getApiInfo
+      summary: API metadata
+      description: Returns the API name, version, and target Stellar network. No authentication required.
+      security: []
+      tags: [Info]
+      responses:
+        "200":
+          description: API metadata.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiInfoResponse"
+              example:
+                name: LiquiFact API
+                version: "1.0.0"
+                network: mainnet
+                docs_url: "https://docs.liquifact.io"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  # -- Invoices --------------------------------------------------------------
+
+  /invoices:
+    get:
+      operationId: listInvoices
+      summary: List invoices
+      description: Returns a paginated list of invoice summaries visible to the authenticated caller.
+      tags: [Invoices]
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            $ref: "#/components/schemas/EscrowStatus"
+          description: Filter by escrow status.
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: offset
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        "200":
+          description: Paginated invoice list.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, total]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/InvoiceSummary"
+                  total:
+                    type: integer
+                    minimum: 0
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /invoices/{invoiceId}:
+    parameters:
+      - name: invoiceId
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/InvoiceId"
+
+    get:
+      operationId: getInvoice
+      summary: Get invoice escrow
+      description: Returns the full escrow state for a single invoice.
+      tags: [Invoices]
+      responses:
+        "200":
+          description: Invoice escrow detail.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvoiceEscrow"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  # -- Escrow lifecycle ------------------------------------------------------
+
+  /escrow:
+    post:
+      operationId: initEscrow
+      summary: Initialise invoice escrow
+      description: |
+        Creates a new on-chain escrow for an invoice via the `LiquifactEscrow.init` contract call.
+        The caller must be authenticated and authorised to act on behalf of the SME.
+      tags: [Escrow]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InitEscrowRequest"
+            example:
+              invoice_id: "INV-1023"
+              sme_address: "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5"
+              buyer_address: "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5"
+              amount: 100000000000
+              yield_bps: 800
+              maturity: 1000
+      responses:
+        "201":
+          description: Escrow created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvoiceEscrow"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /escrow/{invoiceId}/fund:
+    post:
+      operationId: fundEscrow
+      summary: Fund an escrow
+      description: |
+        Records an investor contribution via `LiquifactEscrow.fund`.
+        Status transitions to `1` (funded) when `funded_amount >= funding_target`.
+      tags: [Escrow]
+      parameters:
+        - name: invoiceId
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/InvoiceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FundEscrowRequest"
+            example:
+              investor_address: "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5"
+              amount: 50000000000
+      responses:
+        "200":
+          description: Updated escrow state after funding.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvoiceEscrow"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          description: Escrow is not open for funding (status ≠ 0).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: INVALID_STATE
+                message: "Escrow not open for funding."
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /escrow/{invoiceId}/confirm:
+    post:
+      operationId: confirmPayment
+      summary: Confirm buyer payment
+      description: |
+        Records the buyer's explicit confirmation of payment via `LiquifactEscrow.confirm_payment`.
+        Required before the SME can settle the escrow.
+      tags: [Escrow]
+      parameters:
+        - name: invoiceId
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/InvoiceId"
+      responses:
+        "200":
+          description: Updated escrow state after confirmation.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvoiceEscrow"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          description: Escrow is not in funded state or payment already confirmed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: INVALID_STATE
+                message: "Escrow must be funded before payment confirmation."
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /escrow/{invoiceId}/settle:
+    post:
+      operationId: settleEscrow
+      summary: Settle an escrow
+      description: |
+        Marks the escrow as settled via `LiquifactEscrow.settle`.
+        Requires status `1` (funded) AND explicit buyer confirmation (`is_paid` = true).
+        Transitions to status `2` (settled), releasing principal + yield to investors.
+      tags: [Escrow]
+      parameters:
+        - name: invoiceId
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/InvoiceId"
+      responses:
+        "200":
+          description: Updated escrow state after settlement.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvoiceEscrow"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          description: Escrow is not in funded state (status ≠ 1).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                error: INVALID_STATE
+                message: "Escrow must be funded before settlement."
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+# ---------------------------------------------------------------------------
+# Tags
+# ---------------------------------------------------------------------------
+tags:
+  - name: Health
+    description: Service liveness probe.
+  - name: Info
+    description: API metadata.
+  - name: Invoices
+    description: Read invoice escrow state.
+  - name: Escrow
+    description: Escrow lifecycle — init, fund, settle.
