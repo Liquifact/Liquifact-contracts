@@ -129,7 +129,7 @@ proptest! {
 /// Generate a positive i128 amount bounded by `max`.
 fn gen_positive_amount(max: i128) -> impl Strategy<Value = i128> {
     // NatSpec style: guarantees amount > 0 for escrow entrypoints.
-    (1i128..=max)
+    1i128..=max
 }
 
 /// Generate an investment call sequence.
@@ -143,7 +143,6 @@ struct FundingStep {
     lock_secs: u64,
 }
 
-/// Property tests for funding accounting invariants (issue #325).
 proptest! {
     #[test]
     fn prop_funding_accounting_invariants_issue_325(
@@ -210,12 +209,12 @@ proptest! {
         let mut expected_contribs: Vec<i128> = vec![0i128; investor_count];
         let mut expected_funded: i128 = 0;
 
-        let mut distinct_funders: BTreeSet<Address> = BTreeSet::new();
+        let mut distinct_funders: Vec<Address> = Vec::new();
 
         // Track when the funded status should flip (first step where funded >= target).
         let mut expected_flip_at: Option<usize> = None;
         let mut actual_transitions_to_funded = 0u32;
-        let mut prev_status = client.get_escrow().status;
+        let prev_status = client.get_escrow().status;
 
         for step in 0..seq_len {
             if client.get_escrow().status != 0 {
@@ -267,8 +266,8 @@ proptest! {
             expected_funded = expected_funded
                 .checked_add(amt)
                 .expect("expected_funded overflow");
-            if expected_contribs[ix] > 0 {
-                distinct_funders.insert(inv.clone());
+            if expected_contribs[ix] > 0 && !distinct_funders.iter().any(|existing| existing == &inv) {
+                distinct_funders.push(inv.clone());
             }
 
             // Invariant: conservation.
@@ -331,7 +330,6 @@ proptest! {
                 break;
             }
 
-            prev_status = after.status;
         }
 
         // If we ever reached funded state, it must have happened exactly once.
@@ -1177,8 +1175,6 @@ fn funded_and_settled_escrow<'a>(
     client
 }
 
-/// Property: sum of all computed payouts never exceeds settle_pool.
-/// Covers single investor, equal splits, and prime-denominator splits.
 proptest! {
     #[test]
     fn prop_payout_sum_le_settle_pool(

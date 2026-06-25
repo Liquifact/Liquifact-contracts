@@ -1088,7 +1088,7 @@ fn withdraw_event_includes_recipient() {
     .to_xdr(&env, &escrow_id);
 
     let filtered = all_events.filter_by_contract(&escrow_id);
-    let found = filtered.events().iter().any(|e| *e == expected_xdr);
+    let found = filtered.events().contains(&expected_xdr);
     assert!(
         found,
         "SmeWithdrew event with correct recipient and amount must be emitted"
