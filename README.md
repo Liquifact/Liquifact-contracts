@@ -286,6 +286,11 @@ The escrow supports an optional investor allowlist gate that controls which addr
   an investor's tier after their initial leg; claim timestamps are ledger-based.
 - **Funding snapshot:** single-write immutability avoids shifting pro-rata
   denominators after close.
+- **Target-lowering promotion:** `update_funding_target` re-evaluates the funded threshold after
+  every target change. If `funded_amount >= new_target > 0`, the escrow is immediately promoted to
+  funded (`status = 1`) and `FundingCloseSnapshot` is written exactly once — identical semantics
+  to the promotion that occurs inside `fund`/`fund_with_commitment`. The snapshot denominator is
+  captured atomically with the status transition and cannot be overwritten.
 - **Registry ref:** stored for discoverability only; must not be used as
   authority without verifying the registry contract independently.
 - **migrate:** emits typed errors on all paths in the current release — no silent

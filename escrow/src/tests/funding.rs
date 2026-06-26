@@ -3359,3 +3359,280 @@ fn test_get_investors_legacy_compatibility() {
     let investors = client.get_investors(&0, &10);
     assert_eq!(investors.len(), 0);
 }
+
+// ---------------------------------------------------------------------------
+// update_funding_target: rejection bounds and mid-update funded promotion
+// ---------------------------------------------------------------------------
+
+/// Helper: initialise an escrow and fund it partially, returning the client.
+fn setup_partially_funded(env: &Env, funded: i128, target: i128) -> super::LiquifactEscrowClient<'_> {
+    let client = super::deploy(env);
+    let admin = Address::generate(env);
+    let sme = Address::generate(env);
+    let (tok, tre) = super::free_addresses(env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(env, "UFT001"),
+        &sme,
+        &target,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+    if funded > 0 {
+        client.fund(&Address::generate(env), &funded);
+    }
+    client
+}
+
+/// `new_target = 0` must be rejected with `TargetNotPositive`.
+#[test]
+fn test_update_funding_target_zero_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = setup_partially_funded(&env, 0, 10_000i128);
+    assert_contract_error(
+        client.try_update_funding_target(&0i128),
+        EscrowError::TargetNotPositive,
+    );
+}
+
+/// Negative target must be rejected with `TargetNotPositive`.
+#[test]
+fn test_update_funding_target_negative_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = setup_partially_funded(&env, 0, 10_000i128);
+    assert_contract_error(
+        client.try_update_funding_target(&-1i128),
+        EscrowError::TargetNotPositive,
+    );
+}
+
+/// A target strictly below `funded_amount` must be rejected with `TargetBelowFundedAmount`.
+#[test]
+fn test_update_funding_target_below_funded_amount_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = setup_partially_funded(&env, 5_000i128, 10_000i128);
+    assert_contract_error(
+        client.try_update_funding_target(&4_999i128),
+        EscrowError::TargetBelowFundedAmount,
+    );
+}
+
+/// Calling `update_funding_target` on a funded (status=1) escrow must be rejected
+/// with `TargetUpdateNotOpen`.
+#[test]
+fn test_update_funding_target_not_open_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = setup_partially_funded(&env, 10_000i128, 10_000i128);
+    // escrow is now status=1 (funded)
+    assert_eq!(client.get_escrow().status, 1);
+    assert_contract_error(
+        client.try_update_funding_target(&10_000i128),
+        EscrowError::TargetUpdateNotOpen,
+    );
+}
+
+/// `update_funding_target` on a settled (status=2) escrow must be rejected with
+/// `TargetUpdateNotOpen`.
+#[test]
+fn test_update_funding_target_settled_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = setup_partially_funded(&env, 10_000i128, 10_000i128);
+    client.settle();
+    assert_contract_error(
+        client.try_update_funding_target(&10_000i128),
+        EscrowError::TargetUpdateNotOpen,
+    );
+}
+
+/// Raising the target on a partially-funded open escrow keeps status=0 and
+/// emits `fund_tgt` with the correct old/new values.
+#[test]
+fn test_update_funding_target_raise_stays_open_emits_event() {
+    use crate::FundingTargetUpdated;
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let (contract_id, client) = super::deploy_with_id(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = super::free_addresses(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "UFT002"),
+        &sme,
+        &10_000i128,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+    client.fund(&Address::generate(&env), &3_000i128);
+
+    let result = client.update_funding_target(&20_000i128);
+
+    assert_eq!(result.status, 0);
+    assert_eq!(result.funding_target, 20_000i128);
+    assert_eq!(client.get_funding_close_snapshot(), None);
+
+    assert_eq!(
+        env.events().all(),
+        std::vec![FundingTargetUpdated {
+            name: soroban_sdk::symbol_short!("fund_tgt"),
+            invoice_id: client.get_escrow().invoice_id,
+            old_target: 10_000i128,
+            new_target: 20_000i128,
+        }
+        .to_xdr(&env, &contract_id)]
+    );
+}
+
+/// Lowering the target to **exactly** `funded_amount` triggers the funded promotion:
+/// status becomes 1, `FundingCloseSnapshot` is written with correct fields, and
+/// `fund_tgt` event still fires.
+#[test]
+fn test_update_funding_target_exact_funded_amount_promotes_to_funded() {
+    use crate::FundingTargetUpdated;
+    use soroban_sdk::testutils::{Events as _, Ledger as _};
+
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| {
+        l.timestamp = 9_000;
+        l.sequence_number = 42;
+    });
+    let (contract_id, client) = super::deploy_with_id(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = super::free_addresses(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "UFT003"),
+        &sme,
+        &10_000i128,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+    client.fund(&Address::generate(&env), &7_000i128);
+
+    // Pre-condition: open, no snapshot yet.
+    assert_eq!(client.get_escrow().status, 0);
+    assert_eq!(client.get_funding_close_snapshot(), None);
+
+    // Lower target to exactly funded_amount.
+    let result = client.update_funding_target(&7_000i128);
+
+    // Status promoted.
+    assert_eq!(result.status, 1);
+    assert_eq!(result.funding_target, 7_000i128);
+    assert_eq!(result.funded_amount, 7_000i128);
+
+    // Snapshot written exactly once with correct fields.
+    let snap = client
+        .get_funding_close_snapshot()
+        .expect("snapshot must be present after funded promotion");
+    assert_eq!(snap.total_principal, 7_000i128);
+    assert_eq!(snap.funding_target, 7_000i128);
+    assert_eq!(snap.closed_at_ledger_timestamp, 9_000u64);
+    assert_eq!(snap.closed_at_ledger_sequence, 42u32);
+
+    // Event still carries old/new target values.
+    assert_eq!(
+        env.events().all(),
+        std::vec![FundingTargetUpdated {
+            name: soroban_sdk::symbol_short!("fund_tgt"),
+            invoice_id: client.get_escrow().invoice_id,
+            old_target: 10_000i128,
+            new_target: 7_000i128,
+        }
+        .to_xdr(&env, &contract_id)]
+    );
+}
+
+/// The `FundingCloseSnapshot` is immutable: a second `update_funding_target` call
+/// (which would be rejected since status=1) cannot overwrite it. Verify snapshot
+/// is unchanged after the promotion.
+#[test]
+fn test_update_funding_target_snapshot_written_only_once() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = setup_partially_funded(&env, 5_000i128, 10_000i128);
+
+    // Promote to funded via target lowering.
+    client.update_funding_target(&5_000i128);
+    let snap1 = client.get_funding_close_snapshot().unwrap();
+
+    // Any further attempt on the now-funded escrow must be rejected.
+    assert_contract_error(
+        client.try_update_funding_target(&5_000i128),
+        EscrowError::TargetUpdateNotOpen,
+    );
+
+    // Snapshot unchanged.
+    let snap2 = client.get_funding_close_snapshot().unwrap();
+    assert_eq!(snap1.total_principal, snap2.total_principal);
+    assert_eq!(snap1.funding_target, snap2.funding_target);
+    assert_eq!(snap1.closed_at_ledger_timestamp, snap2.closed_at_ledger_timestamp);
+    assert_eq!(snap1.closed_at_ledger_sequence, snap2.closed_at_ledger_sequence);
+}
+
+/// After promotion via `update_funding_target`, a subsequent `fund` call must
+/// be rejected with `EscrowNotOpenForFunding` — confirming the status transition
+/// is durable.
+#[test]
+fn test_fund_rejected_after_promotion_via_update_funding_target() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = setup_partially_funded(&env, 6_000i128, 10_000i128);
+
+    client.update_funding_target(&6_000i128);
+    assert_eq!(client.get_escrow().status, 1);
+
+    assert_contract_error(
+        client.try_fund(&Address::generate(&env), &1i128),
+        EscrowError::EscrowNotOpenForFunding,
+    );
+}
+
+/// Target update with zero funded amount (no investors yet) must NOT promote
+/// even when `new_target` is positive — there is nothing to promote.
+#[test]
+fn test_update_funding_target_no_funds_no_promotion() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = setup_partially_funded(&env, 0, 10_000i128);
+
+    let result = client.update_funding_target(&1i128);
+    assert_eq!(result.status, 0);
+    assert_eq!(client.get_funding_close_snapshot(), None);
+}

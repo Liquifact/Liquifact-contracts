@@ -2219,6 +2219,25 @@ impl LiquifactEscrow {
         let old_target = escrow.funding_target;
         escrow.funding_target = new_target;
 
+        // If lowering the target causes it to equal (or fall to) the already-funded
+        // amount, promote the escrow to funded and capture the immutable close snapshot
+        // exactly once — mirroring the promotion logic in `fund`/`fund_with_commitment`.
+        if escrow.funded_amount > 0
+            && escrow.funded_amount >= new_target
+            && !env.storage().instance().has(&DataKey::FundingCloseSnapshot)
+        {
+            escrow.status = 1;
+            env.storage().instance().set(
+                &DataKey::FundingCloseSnapshot,
+                &FundingCloseSnapshot {
+                    total_principal: escrow.funded_amount,
+                    funding_target: new_target,
+                    closed_at_ledger_timestamp: env.ledger().timestamp(),
+                    closed_at_ledger_sequence: env.ledger().sequence(),
+                },
+            );
+        }
+
         env.storage().instance().set(&DataKey::Escrow, &escrow);
 
         FundingTargetUpdated {
