@@ -278,3 +278,301 @@ fn test_sender_ends_at_zero_balance() {
     assert_eq!(token.token.balance(&holder), 0i128);
     assert_eq!(token.token.balance(&treasury), amount);
 }
+
+// ---------------------------------------------------------------------------
+// Mock: rebasing token that mints extra tokens to sender after transfer
+// Simulates an elastic-supply token that changes balances unexpectedly.
+// ---------------------------------------------------------------------------
+
+#[contract]
+pub struct RebasingToken;
+
+#[contractimpl]
+impl TokenInterface for RebasingToken {
+    fn balance(env: Env, id: Address) -> i128 {
+        env.storage().persistent().get(&id).unwrap_or(0)
+    }
+
+    fn transfer(env: Env, from: Address, to: MuxedAddress, amount: i128) {
+        from.require_auth();
+        let to_addr = to.address();
+
+        // Standard transfer first
+        let from_bal = Self::balance(env.clone(), from.clone());
+        let to_bal = Self::balance(env.clone(), to_addr.clone());
+        env.storage().persistent().set(&from, &(from_bal - amount));
+        env.storage().persistent().set(&to_addr, &(to_bal + amount));
+
+        // Rebasing effect: mint 10% extra to sender after transfer (simulates supply expansion)
+        // This causes sender post-balance to be higher than expected, triggering underflow guard
+        let malicious_mint = amount / 10;
+        env.storage()
+            .persistent()
+            .set(&from, &(from_bal - amount + malicious_mint));
+    }
+
+    fn allowance(_env: Env, _from: Address, _spender: Address) -> i128 {
+        0
+    }
+    fn approve(_env: Env, _from: Address, _spender: Address, _amount: i128, _exp: u32) {}
+    fn transfer_from(_env: Env, _spender: Address, _from: Address, _to: Address, _amount: i128) {
+        unimplemented!()
+    }
+    fn burn(_env: Env, _from: Address, _amount: i128) {
+        unimplemented!()
+    }
+    fn burn_from(_env: Env, _spender: Address, _from: Address, _amount: i128) {
+        unimplemented!()
+    }
+    fn decimals(_env: Env) -> u32 {
+        7
+    }
+    fn name(env: Env) -> soroban_sdk::String {
+        soroban_sdk::String::from_str(&env, "RebaseToken")
+    }
+    fn symbol(env: Env) -> soroban_sdk::String {
+        soroban_sdk::String::from_str(&env, "REBASE")
+    }
+}
+
+/// Mint tokens directly into the rebasing token's storage (bypasses transfer).
+fn mint_rebasing_token(env: &Env, contract_id: &Address, to: &Address, amount: i128) {
+    env.as_contract(contract_id, || {
+        let current: i128 = env.storage().persistent().get(to).unwrap_or(0);
+        env.storage().persistent().set(to, &(current + amount));
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Tests: rebasing token detection (sender balance increases after transfer)
+// ---------------------------------------------------------------------------
+
+#[test]
+#[should_panic]
+fn test_rebasing_token_sender_increases_rejected() {
+    // Rebasing token mints extra tokens to sender after transfer.
+    // Sender post-balance > sender pre-balance - amount, which triggers underflow.
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let rebase_token_id = env.register(RebasingToken, ());
+    let holder = Address::generate(&env);
+    let treasury = Address::generate(&env);
+
+    mint_rebasing_token(&env, &rebase_token_id, &holder, 1000i128);
+
+    // Panics: sender ends with 100 (1000 - 1000 + 100 rebasing) instead of 0
+    // This triggers SenderBalanceUnderflow because from_before - from_after underflows
+    transfer_funding_token_with_balance_checks(
+        &env,
+        &rebase_token_id,
+        &holder,
+        &treasury,
+        1000i128,
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Mock: hook token that steals from recipient after transfer
+// Simulates a token with transfer hooks that modify recipient balance.
+// ---------------------------------------------------------------------------
+
+#[contract]
+pub struct HookStealingToken;
+
+#[contractimpl]
+impl TokenInterface for HookStealingToken {
+    fn balance(env: Env, id: Address) -> i128 {
+        env.storage().persistent().get(&id).unwrap_or(0)
+    }
+
+    fn transfer(env: Env, from: Address, to: MuxedAddress, amount: i128) {
+        from.require_auth();
+        let to_addr = to.address();
+
+        // Standard transfer
+        let from_bal = Self::balance(env.clone(), from.clone());
+        let to_bal = Self::balance(env.clone(), to_addr.clone());
+        env.storage().persistent().set(&from, &(from_bal - amount));
+        env.storage().persistent().set(&to_addr, &(to_bal + amount));
+
+        // Hook effect: burn 10% of recipient's balance after transfer
+        let burn_amount = amount / 10;
+        let new_to_bal = to_bal + amount - burn_amount;
+        env.storage().persistent().set(&to_addr, &new_to_bal);
+    }
+
+    fn allowance(_env: Env, _from: Address, _spender: Address) -> i128 {
+        0
+    }
+    fn approve(_env: Env, _from: Address, _spender: Address, _amount: i128, _exp: u32) {}
+    fn transfer_from(_env: Env, _spender: Address, _from: Address, _to: Address, _amount: i128) {
+        unimplemented!()
+    }
+    fn burn(_env: Env, _from: Address, _amount: i128) {
+        unimplemented!()
+    }
+    fn burn_from(_env: Env, _spender: Address, _from: Address, _amount: i128) {
+        unimplemented!()
+    }
+    fn decimals(_env: Env) -> u32 {
+        7
+    }
+    fn name(env: Env) -> soroban_sdk::String {
+        soroban_sdk::String::from_str(&env, "HookToken")
+    }
+    fn symbol(env: Env) -> soroban_sdk::String {
+        soroban_sdk::String::from_str(&env, "HOOK")
+    }
+}
+
+fn mint_hook_token(env: &Env, contract_id: &Address, to: &Address, amount: i128) {
+    env.as_contract(contract_id, || {
+        let current: i128 = env.storage().persistent().get(to).unwrap_or(0);
+        env.storage().persistent().set(to, &(current + amount));
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Tests: hook token detection (recipient balance decreases after transfer)
+// ---------------------------------------------------------------------------
+
+#[test]
+#[should_panic]
+fn test_hook_token_recipient_decreases_rejected() {
+    // Hook steals 10% after transfer.
+    // Treasury post-balance < treasury pre-balance + amount, triggering RecipientBalanceDeltaMismatch.
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let hook_token_id = env.register(HookStealingToken, ());
+    let holder = Address::generate(&env);
+    let treasury = Address::generate(&env);
+
+    mint_hook_token(&env, &hook_token_id, &holder, 1000i128);
+
+    // Panics: recipient ends with 900 (1000 - 100 hook steal) instead of 1000
+    transfer_funding_token_with_balance_checks(&env, &hook_token_id, &holder, &treasury, 1000i128);
+}
+
+// ---------------------------------------------------------------------------
+// Mock: malicious token that credits sender instead of debiting
+// Simulates a "lying" token that reports incorrect balance changes.
+// ---------------------------------------------------------------------------
+
+#[contract]
+pub struct LyingToken;
+
+#[contractimpl]
+impl TokenInterface for LyingToken {
+    fn balance(env: Env, id: Address) -> i128 {
+        env.storage().persistent().get(&id).unwrap_or(0)
+    }
+
+    fn transfer(_env: Env, from: Address, _to: MuxedAddress, amount: i128) {
+        from.require_auth();
+        // Intentionally does nothing - no debit, no credit
+        // This simulates a token that lies about transfer execution
+        _env.storage()
+            .persistent()
+            .get::<Address, i128>(&_to.address())
+            .unwrap_or(0);
+        let _ = amount;
+    }
+
+    fn allowance(_env: Env, _from: Address, _spender: Address) -> i128 {
+        0
+    }
+    fn approve(_env: Env, _from: Address, _spender: Address, _amount: i128, _exp: u32) {}
+    fn transfer_from(_env: Env, _spender: Address, _from: Address, _to: Address, _amount: i128) {
+        unimplemented!()
+    }
+    fn burn(_env: Env, _from: Address, _amount: i128) {
+        unimplemented!()
+    }
+    fn burn_from(_env: Env, _spender: Address, _from: Address, _amount: i128) {
+        unimplemented!()
+    }
+    fn decimals(_env: Env) -> u32 {
+        7
+    }
+    fn name(env: Env) -> soroban_sdk::String {
+        soroban_sdk::String::from_str(&env, "LyingToken")
+    }
+    fn symbol(env: Env) -> soroban_sdk::String {
+        soroban_sdk::String::from_str(&env, "LYE")
+    }
+}
+
+fn mint_lying_token(env: &Env, contract_id: &Address, to: &Address, amount: i128) {
+    env.as_contract(contract_id, || {
+        let current: i128 = env.storage().persistent().get(to).unwrap_or(0);
+        env.storage().persistent().set(to, &(current + amount));
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Tests: lying token detection (no balance change at all)
+// ---------------------------------------------------------------------------
+
+#[test]
+#[should_panic]
+fn test_lying_token_no_change_rejected() {
+    // Token that does nothing on transfer - no debit, no credit.
+    // Both sender and recipient deltas are 0, neither equals amount.
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let lying_token_id = env.register(LyingToken, ());
+    let holder = Address::generate(&env);
+    let treasury = Address::generate(&env);
+
+    mint_lying_token(&env, &lying_token_id, &holder, 1000i128);
+
+    // Panics with SenderBalanceDeltaMismatch (sender didn't lose anything)
+    transfer_funding_token_with_balance_checks(&env, &lying_token_id, &holder, &treasury, 1000i128);
+}
+
+// ---------------------------------------------------------------------------
+// Tests: error code assertions (validate specific panic reasons)
+// ---------------------------------------------------------------------------
+
+#[test]
+#[should_panic]
+fn test_amount_zero_panics_with_transfer_amount_not_positive() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let token = install_stellar_asset_token(&env);
+    let holder = deploy_id(&env);
+    let treasury = Address::generate(&env);
+
+    // Error code 36: TransferAmountNotPositive
+    transfer_funding_token_with_balance_checks(&env, &token.id, &holder, &treasury, 0);
+}
+
+#[test]
+#[should_panic]
+fn test_amount_negative_panics_with_transfer_amount_not_positive() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let token = install_stellar_asset_token(&env);
+    let holder = deploy_id(&env);
+    let treasury = Address::generate(&env);
+
+    // Error code 36: TransferAmountNotPositive (negative is still not positive)
+    transfer_funding_token_with_balance_checks(&env, &token.id, &holder, &treasury, -50);
+}
+
+#[test]
+#[should_panic]
+fn test_insufficient_balance_panics_with_insufficient_token_balance() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let token = install_stellar_asset_token(&env);
+    let holder = deploy_id(&env);
+    let treasury = Address::generate(&env);
+
+    // Mint nothing - balance is 0
+    // Error code 37: InsufficientTokenBalanceBeforeTransfer
+    transfer_funding_token_with_balance_checks(&env, &token.id, &holder, &treasury, 1);
+}

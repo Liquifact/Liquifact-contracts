@@ -2,6 +2,32 @@
 
 Soroban escrow for invoice funding, settlement, and investor claims. This README adds **formal invariant stubs** (machine-readable IDs plus math-style properties), **test traceability**, **attestation hashing**, **minimum contribution floors**, and **unique investor caps** (issues #102–#105).
 
+## Remaining Funding Capacity
+
+The contract exposes `get_remaining_funding_capacity(env)` to report how much principal can still be accepted before the funding target is met:
+
+- **Formula**: `capacity = max(0, funding_target - funded_amount)`
+- **Monotonic Decrease**: As deposits accumulate via `fund` and `fund_batch`, capacity shrinks monotonically
+- **Zero at Target**: When `funded_amount ≥ funding_target`, capacity is exactly zero and the escrow transitions to funded state (status=1)
+- **Target Updates**: If `update_funding_target` changes the target while open, capacity recomputes immediately based on the new target
+- **Never Negative**: Uses `saturating_sub` and `max(0)` to ensure capacity never reports negative values, even when overfunded
+
+### Usage Example
+
+```rust
+// Before any funding: capacity = target
+assert_eq!(client.get_remaining_funding_capacity(), 100_000i128);
+
+// After partial funding: capacity = target - funded_amount
+client.fund(&investor, &30_000i128);
+assert_eq!(client.get_remaining_funding_capacity(), 70_000i128);
+
+// After reaching target: capacity = 0
+client.fund(&investor, &70_000i128);
+assert_eq!(client.get_remaining_funding_capacity(), 0);
+assert_eq!(client.get_escrow().status, 1); // funded
+```
+
 ## Deterministic Yield Calculation
 
 The contract provides a dedicated helper function `calculate_principal_plus_yield(principal, yield_bps)` for computing payout amounts:
@@ -47,6 +73,19 @@ invariants:
     tests:
       - test::test_contributions_sum_equals_funded_amount
       - test::test_multiple_investors_tracked_independently
+
+  - id: ESC-FUND-003
+    name: remaining_capacity_formula
+    math: "get_remaining_funding_capacity() = max(0, funding_target - funded_amount) ∧ capacity decreases monotonically across deposits"
+    tests:
+      - test::test_remaining_capacity_equals_target_before_any_funding
+      - test::test_remaining_capacity_decreases_after_single_deposit
+      - test::test_remaining_capacity_tracks_across_multiple_deposits
+      - test::test_remaining_capacity_reaches_zero_at_exact_target
+      - test::test_remaining_capacity_never_negative_when_overfunded
+      - test::test_remaining_capacity_recomputes_after_target_raised
+      - test::test_remaining_capacity_recomputes_after_target_lowered
+      - test::test_remaining_capacity_across_deposits_and_target_update
 
   - id: ESC-STA-001
     name: status_monotone

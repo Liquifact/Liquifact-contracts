@@ -173,14 +173,14 @@ pub fn transfer_funding_token_inbound_with_balance_checks(
     to: &Address,
     amount: i128,
 ) {
-    ensure(env, amount > 0, EscrowError::InboundTransferAmountNotPositive);
+    ensure(env, amount > 0, EscrowError::TransferAmountNotPositive);
     let token = TokenClient::new(env, token_addr);
     let investor_before = token.balance(investor);
     let contract_before = token.balance(to);
     ensure(
         env,
         investor_before >= amount,
-        EscrowError::InboundInsufficientTokenBalanceBeforeTransfer,
+        EscrowError::InsufficientTokenBalanceBeforeTransfer,
     );
 
     token.transfer(investor, MuxedAddress::from(to.clone()), &amount);
@@ -190,20 +190,19 @@ pub fn transfer_funding_token_inbound_with_balance_checks(
 
     let spent = investor_before
         .checked_sub(investor_after)
-        .unwrap_or_else(|| fail(env, EscrowError::InboundSenderBalanceUnderflow));
+        .unwrap_or_else(|| fail(env, EscrowError::SenderBalanceUnderflow));
     let received = contract_after
         .checked_sub(contract_before)
-        .unwrap_or_else(|| fail(env, EscrowError::InboundRecipientBalanceUnderflow));
+        .unwrap_or_else(|| fail(env, EscrowError::RecipientBalanceUnderflow));
 
     ensure(
         env,
         spent == amount,
-        EscrowError::InboundSenderBalanceDeltaMismatch,
+        EscrowError::SenderBalanceDeltaMismatch,
     );
     ensure(
         env,
         received == amount,
-        EscrowError::InboundRecipientBalanceDeltaMismatch,
+        EscrowError::RecipientBalanceDeltaMismatch,
     );
 }
-

@@ -32,6 +32,7 @@ re-implementing storage reads to guarantee identical semantics.
 - [is_funding_expired](#is_funding_expired--bool)
 - [get_min_contribution_floor](#get_min_contribution_floor--i128)
 - [get_max_unique_investors_cap](#get_max_unique_investors_cap--optionu32)
+- [get_remaining_investor_slots](#get_remaining_investor_slots--optionu32)
 - [get_max_per_investor_cap](#get_max_per_investor_cap--optioni128)
 
 **Maturity & Settlement:**
@@ -49,6 +50,7 @@ re-implementing storage reads to guarantee identical semantics.
 - [is_investor_claimed](#is_investor_claimedinvestor-address--bool)
 - [is_investor_refunded](#is_investor_refundedinvestor-address--bool)
 - [compute_investor_payout](#compute_investor_payoutinvestor-address--i128)
+- [get_claimable_payout](#get_claimable_payoutinvestor-address--i128)
 
 **Attestations:**
 - [get_primary_attestation_hash](#get_primary_attestation_hash--optionbytesn32)
@@ -364,6 +366,21 @@ Returns the optional cap on distinct investor addresses. Reflects the current st
 
 ---
 
+### `get_remaining_investor_slots() -> Option<u32>`
+
+**Signature:** `pub fn get_remaining_investor_slots(env: Env) -> Option<u32>`
+
+Returns the number of remaining investor slots before the `MaxUniqueInvestorsCap` is reached. This safely resolves the gap between the cap and the `get_unique_funder_count`. 
+
+**Requires initialization:** No  
+**Default when absent:** `None` (unlimited investors)
+
+**Return value:**
+- `None` when no cap is configured (i.e., the escrow accepts unlimited distinct investors).
+- `Some(u32)` indicating the exact remaining capacity of new distinct investors. Calculated as `cap - unique_funder_count`. Floored at zero (saturating subtraction) ensuring it stays completely consistent and safe even if the cap is reduced via `lower_max_unique_investors`.
+
+---
+
 ### `get_max_per_investor_cap() → Option<i128>`
 
 **Storage key:** `DataKey::MaxPerInvestorCap`  
@@ -609,10 +626,34 @@ Returns `true` when an investor's principal has been returned via `refund` in a 
 
 ### `compute_investor_payout(investor: Address) → i128`
 
-**Signature:** `pub fn compute_investor_payout(env: Env, investor: Address) -> i128`
+**Signature:** `pub fn compute_investor_payout(env: Env, investor: Address) → i128`
 
 - `None` — Escrow is not yet funded; no close snapshot exists.
 - `Some(FundingCloseSnapshot)` — The pro-rata denominator snapshot captured when the escrow first transitioned to **funded**.
+
+---
+
+### `get_claimable_payout(investor: Address) → i128`
+
+**Signature:** `pub fn get_claimable_payout(env: Env, investor: Address) → i128`
+
+On-chain read-only view that returns the **claimable payout** for an investor, applying all gating rules that `claim_investor_payout` uses.
+
+#### Comparison with `compute_investor_payout`
+- `compute_investor_payout` returns the **gross theoretical payout** (no gating applied).
+- This function returns the **net claimable amount** (0 if any gate blocks a claim).
+
+#### Return values
+| Condition | Returns |
+|-----------|---------|
+| Escrow is not yet settled (status != 2) | `0` |
+| Legal hold blocks investor claims | `0` |
+| Investor has already claimed their payout | `0` |
+| Current ledger timestamp is before the investor's claim-not-before time | `0` |
+| All gates passed | Gross payout from `compute_investor_payout` |
+
+#### Authorization
+None — pure read; no auth required, no state mutation.
 
 ---
 
@@ -656,3 +697,19 @@ subsequent `fund()` call).
 - **No `require_auth`** — the investor address is not required to sign.
 - **No storage writes** — returns the first failing code without mutating state.
 - **Advisory only** — callers must still handle `fund()` reverting on race conditions.
+
+---
+
+## Admin handover views
+
+### `get_pending_admin() → Option<Address>`
+
+**Storage key:** `DataKey::PendingAdmin`
+
+Returns the proposed successor admin waiting for `accept_admin`, or `None` when no handover is in progress.
+
+### `get_pending_admin_expiry() → Option<u64>`
+
+**Storage key:** `DataKey::PendingAdminExpiry`
+
+Returns the ledger timestamp after which `accept_admin` rejects with `AdminProposalExpired` (code 85). Acceptance is allowed while `ledger.timestamp() <= expiry` (inclusive). Absent when no proposal is active.

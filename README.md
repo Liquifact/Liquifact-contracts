@@ -43,6 +43,7 @@ WASM.
 | 6 | Moved per-investor keys to persistent storage to bound instance footprint and decouple per-address TTL | **Redeploy required** — prior instances must be redeployed to pick up new storage locations |
 
 > **Current:** `SCHEMA_VERSION = 6`
+> See the detailed schema version contract in [Escrow schema versioning](docs/escrow-schema-versioning.md).
 
 ---
 
@@ -168,23 +169,24 @@ liquifact-contracts/
 | `fund_with_commitment` | First deposit with optional lock period (atomically pulling the funding token); selects tiered yield. |
 | `settle` | Mark a funded escrow as settled (SME auth required; maturity enforced). |
 | `withdraw` | SME pulls funded liquidity (accounting record). |
+| `refund` | Investor pulls contributed liquidity from a cancelled escrow. Increments `DistributedPrincipal` liability. |
 | `claim_investor_payout` | Investor records a payout claim after settlement. |
+| `claim_payouts_batch` | Batch-record payout claims for up to `MAX_CLAIM_BATCH` investors in one transaction. |
 | `sweep_terminal_dust` | Treasury sweeps rounding residue from a terminal escrow. |
 | `migrate` | Schema version gate — **typed errors on all paths** in the current release (codes 90–92). |
 | `set_legal_hold` | Admin activates/clears compliance hold. |
 | `set_allowlist_active` | Admin enables/disables the investor allowlist gate. |
 | `set_investor_allowlisted` | Admin sets per-address allowlist status. |
 | `set_investors_allowlisted` | Admin batch-sets allowlist status for multiple addresses. |
-| `bind_primary_attestation_hash` | Admin sets a single-write 32-byte digest. |
+| `bind_primary_attestation_hash` | Admin sets a single-write 32-byte digest (single-set guarantee). |
 | `append_attestation_digest` | Admin appends to bounded audit log. |
 | `record_sme_collateral_commitment` | SME records collateral pledge (metadata only). |
-| `propose_admin` | Step 1 of admin handover — sets `DataKey::PendingAdmin` (admin auth). |
-| `accept_admin` | Step 2 of admin handover — pending address accepts and becomes admin. |
-| `cancel_pending_admin` | Admin withdraws an unaccepted proposal; clears `DataKey::PendingAdmin`. |
+| `propose_admin` | Step 1 of admin handover — sets `DataKey::PendingAdmin` and `DataKey::PendingAdminExpiry` (admin auth). Optional validity window; defaults to 7 days. |
+| `accept_admin` | Step 2 of admin handover — pending address accepts before expiry and becomes admin. |
+| `cancel_pending_admin` | Admin withdraws an unaccepted proposal; clears `DataKey::PendingAdmin` and `DataKey::PendingAdminExpiry`. |
 | `get_escrow` | Read current escrow state. |
 | `get_version` | Read stored `DataKey::Version`. |
-| `preview_yield_tier` | Pure read: returns `(yield_bps, matched_lock_secs)` a first deposit with `amount` and `lock` seconds would receive, using the exact on-chain tier-selection rule. Safe for simulation; no auth required. |
-
+| `get_remaining_investor_slots` | Read remaining unique investor capacity before reaching the cap. |
 
 ---
 
@@ -213,7 +215,7 @@ Escrow tests are organized by feature area under
 | `funding.rs` | Funding, contribution accounting, snapshots, tier selection |
 | `settlement.rs` | Settlement, withdrawal, investor claims, maturity boundaries, dust sweep |
 | `admin.rs` | Admin-governed state changes, legal hold, migration guards, collateral metadata |
-| `integration.rs` | External token-wrapper assumptions, metadata-only integration checks |
+| `integration.rs` | External token-wrapper assumptions, metadata-only integration checks, `cancel_funding` transition matrix |
 | `properties.rs` | Proptest-based invariants |
 
 Shared helpers live in [`escrow/src/test.rs`](escrow/src/test.rs). Each test
@@ -243,6 +245,15 @@ See [`docs/ESCROW_TOKEN_INTEGRATION_CHECKLIST.md`](docs/ESCROW_TOKEN_INTEGRATION
 for supported token assumptions, explicit unsupported token warnings, and the
 integration-layer responsibilities required when this contract interacts with
 external token contracts.
+
+---
+
+## SEP-41 token-safety wrappers
+
+See [`docs/escrow-token-safety.md`](docs/escrow-token-safety.md) for the threat model,
+invariants, and error codes (`EscrowError` codes 36–41) for the funding-token
+transfer wrapper `transfer_funding_token_with_balance_checks`. The wrapper detects
+fee-on-transfer, rebasing, hook, and lying token behaviors at the host-call boundary.
 
 ---
 
@@ -285,6 +296,11 @@ The escrow supports an optional investor allowlist gate that controls which addr
   an investor's tier after their initial leg; claim timestamps are ledger-based.
 - **Funding snapshot:** single-write immutability avoids shifting pro-rata
   denominators after close.
+- **Target-lowering promotion:** `update_funding_target` re-evaluates the funded threshold after
+  every target change. If `funded_amount >= new_target > 0`, the escrow is immediately promoted to
+  funded (`status = 1`) and `FundingCloseSnapshot` is written exactly once — identical semantics
+  to the promotion that occurs inside `fund`/`fund_with_commitment`. The snapshot denominator is
+  captured atomically with the status transition and cannot be overwritten.
 - **Registry ref:** stored for discoverability only; must not be used as
   authority without verifying the registry contract independently.
 - **migrate:** emits typed errors on all paths in the current release — no silent

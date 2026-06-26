@@ -2,40 +2,6 @@ use super::*;
 use proptest::prelude::*;
 use std::collections::BTreeSet;
 
-fn init_funded_escrow_with_real_token<'a>(
-    env: &'a Env,
-    client: &LiquifactEscrowClient<'a>,
-    admin: &Address,
-    sme: &Address,
-    investor: &Address,
-    target: i128,
-    invoice_id: &str,
-) -> Address {
-    let token = install_stellar_asset_token(env);
-    client.init(
-        admin,
-        &soroban_sdk::String::from_str(env, invoice_id),
-        sme,
-        &target,
-        &800i64,
-        &0u64,
-        &token.id,
-        &None,
-        &Address::generate(env),
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-    );
-
-    client.fund(investor, &target);
-    let escrow_id = client.address.clone();
-    token.stellar.mint(&escrow_id, &target);
-    escrow_id
-}
-
 proptest! {
     #[test]
     fn prop_funded_amount_non_decreasing(
@@ -129,7 +95,7 @@ proptest! {
 /// Generate a positive i128 amount bounded by `max`.
 fn gen_positive_amount(max: i128) -> impl Strategy<Value = i128> {
     // NatSpec style: guarantees amount > 0 for escrow entrypoints.
-    1i128..=max
+    (1i128..=max)
 }
 
 /// Generate an investment call sequence.
@@ -143,7 +109,7 @@ struct FundingStep {
     lock_secs: u64,
 }
 
-// Property tests for funding accounting invariants (issue #325).
+/// Property tests for funding accounting invariants (issue #325).
 proptest! {
     #[test]
     fn prop_funding_accounting_invariants_issue_325(
@@ -175,7 +141,7 @@ proptest! {
         let (token, treasury) = free_addresses(&env);
 
         let max_per_investor = if caps_present { Some(per_inv_cap.min(funding_target)) } else { None };
-        let max_unique_investors: Option<u64> = if caps_present { Some(uniq_cap.min(6) as u64) } else { None };
+        let max_unique_investors: Option<u32> = if caps_present { Some(uniq_cap.min(6) as u32) } else { None };
 
         // Optional tiered yield is not required for these invariants; keep it off.
         client.init(
@@ -193,6 +159,7 @@ proptest! {
             &max_unique_investors,
             &max_per_investor,
             &None,
+            &None,
         );
 
         let investors: Vec<Address> = (0..investor_count)
@@ -209,12 +176,12 @@ proptest! {
         let mut expected_contribs: Vec<i128> = vec![0i128; investor_count];
         let mut expected_funded: i128 = 0;
 
-        let mut distinct_funders: Vec<Address> = Vec::new();
+        let mut distinct_funders: BTreeSet<Address> = BTreeSet::new();
 
         // Track when the funded status should flip (first step where funded >= target).
         let mut expected_flip_at: Option<usize> = None;
         let mut actual_transitions_to_funded = 0u32;
-        let prev_status = client.get_escrow().status;
+        let mut prev_status = client.get_escrow().status;
 
         for step in 0..seq_len {
             if client.get_escrow().status != 0 {
@@ -238,7 +205,7 @@ proptest! {
             }
             if expected_contribs[ix] == 0 {
                 if let Some(uc) = max_unique_investors {
-                    if distinct_funders.len() as u64 >= uc {
+                    if distinct_funders.len() as u32 >= uc {
                         break;
                     }
                 }
@@ -251,12 +218,8 @@ proptest! {
             let before_status = client.get_escrow().status;
 
             let after = if use_commitment {
-                // First deposit may use commitment semantics; later deposits must use plain fund().
-                if expected_contribs[ix] == 0 {
-                    client.fund_with_commitment(&inv, &amt, &lock)
-                } else {
-                    client.fund(&inv, &amt)
-                }
+                // For first-deposit commitment invariants, lock can be 0.
+                client.fund_with_commitment(&inv, &amt, &lock)
             } else {
                 client.fund(&inv, &amt)
             };
@@ -266,8 +229,8 @@ proptest! {
             expected_funded = expected_funded
                 .checked_add(amt)
                 .expect("expected_funded overflow");
-            if expected_contribs[ix] > 0 && !distinct_funders.iter().any(|existing| existing == &inv) {
-                distinct_funders.push(inv.clone());
+            if expected_contribs[ix] > 0 {
+                distinct_funders.insert(inv.clone());
             }
 
             // Invariant: conservation.
@@ -285,7 +248,7 @@ proptest! {
                 prop_assert!(expected_contribs[ix] <= cap);
             }
             if let Some(uc) = max_unique_investors {
-                prop_assert!(distinct_funders.len() as u64 <= uc);
+                prop_assert!(distinct_funders.len() as u32 <= uc);
             }
 
             // Invariant: status flip correctness.
@@ -330,6 +293,7 @@ proptest! {
                 break;
             }
 
+            prev_status = after.status;
         }
 
         // If we ever reached funded state, it must have happened exactly once.
@@ -429,7 +393,6 @@ fn prop_status_withdraw_transition() {
     let client = deploy(&env);
 
     let target: i128 = 100_000_000_000i128;
-    let token = install_stellar_asset_token(&env);
     client.init(
         &admin,
         &soroban_sdk::String::from_str(&env, "STW1"),
@@ -437,7 +400,7 @@ fn prop_status_withdraw_transition() {
         &target,
         &800i64,
         &0u64,
-        &token.id,
+        &Address::generate(&env),
         &None,
         &Address::generate(&env),
         &None,
@@ -448,8 +411,8 @@ fn prop_status_withdraw_transition() {
         &None,
     );
 
+    token.stellar.mint(&investor, &target);
     client.fund(&investor, &target);
-    token.stellar.mint(&client.address.clone(), &target);
 
     let before_withdraw = client.get_escrow();
     assert_eq!(
@@ -511,7 +474,6 @@ fn prop_no_regression_after_withdraw() {
     let client = deploy(&env);
 
     let target: i128 = 100_000_000_000i128;
-    let token = install_stellar_asset_token(&env);
     client.init(
         &admin,
         &soroban_sdk::String::from_str(&env, "NREG2"),
@@ -519,7 +481,7 @@ fn prop_no_regression_after_withdraw() {
         &target,
         &800i64,
         &0u64,
-        &token.id,
+        &Address::generate(&env),
         &None,
         &Address::generate(&env),
         &None,
@@ -530,8 +492,8 @@ fn prop_no_regression_after_withdraw() {
         &None,
     );
 
+    token.stellar.mint(&investor, &target);
     client.fund(&investor, &target);
-    token.stellar.mint(&client.address.clone(), &target);
     let withdrawn = client.withdraw();
 
     assert_eq!(withdrawn.status, 3, "withdraw must set status to 3");
@@ -585,7 +547,6 @@ fn prop_withdrawn_is_terminal_for_withdraw() {
     let client = deploy(&env);
 
     let target: i128 = 100_000_000_000i128;
-    let token = install_stellar_asset_token(&env);
     client.init(
         &admin,
         &soroban_sdk::String::from_str(&env, "TERM2"),
@@ -593,7 +554,7 @@ fn prop_withdrawn_is_terminal_for_withdraw() {
         &target,
         &800i64,
         &0u64,
-        &token.id,
+        &Address::generate(&env),
         &None,
         &Address::generate(&env),
         &None,
@@ -604,8 +565,8 @@ fn prop_withdrawn_is_terminal_for_withdraw() {
         &None,
     );
 
+    token.stellar.mint(&investor, &target);
     client.fund(&investor, &target);
-    token.stellar.mint(&client.address.clone(), &target);
     client.withdraw();
 
     let withdrawn = client.get_escrow();
@@ -1175,8 +1136,8 @@ fn funded_and_settled_escrow<'a>(
     client
 }
 
-// Property: sum of all computed payouts never exceeds settle_pool.
-// Covers single investor, equal splits, and prime-denominator splits.
+/// Property: sum of all computed payouts never exceeds settle_pool.
+/// Covers single investor, equal splits, and prime-denominator splits.
 proptest! {
     #[test]
     fn prop_payout_sum_le_settle_pool(
@@ -1522,17 +1483,19 @@ fn cancelled_escrow<'a>(
     let sme = Address::generate(env);
     let (token, treasury) = free_addresses(env);
     let total: i128 = contributions.iter().map(|(_, a)| a).sum();
+    // Target must exceed total so fund() leaves status at 0 (open), allowing cancel_funding.
+    let target = total + 1_000_000_000;
     client.init(
         &admin,
         &soroban_sdk::String::from_str(env, invoice_id),
-        &sme, &total, &800i64, &0u64,
+        &sme, &target, &800i64, &0u64,
         &token, &None, &treasury, &None,
         &None, &None, &None, &None, &None,
     );
     for (investor, amount) in contributions {
         client.fund(investor, amount);
     }
-    client.cancel();
+    client.cancel_funding();
     client
 }
 
@@ -1552,7 +1515,7 @@ fn dust_sweep_after_full_refund_allows_sweep_to_zero() {
     let investor = Address::generate(&env);
     let amount = 50_000i128;
     let client = cancelled_escrow(&env, "DUST02", &[(investor.clone(), amount)]);
-    client.refund(&investor, &amount);
+    client.refund(&investor);
     assert_eq!(client.get_escrow().status, 4);
 }
 
@@ -1562,7 +1525,7 @@ fn fuzz_dust_sweep_liability_floor() {
         .ok().and_then(|v| v.parse().ok()).unwrap_or(32);
     let base_seed = read_fuzz_seed_u64();
     for case_idx in 0..cases {
-        let case_seed = base_seed ^ (case_idx as u64).wrapping_mul(0xD0575W33P0001u64);
+        let case_seed = base_seed ^ (case_idx as u64).wrapping_mul(0xD0575_0000_0001u64);
         let mut rng = SplitMix64::new(case_seed);
         let env = Env::default();
         env.mock_all_auths();
@@ -1586,7 +1549,7 @@ fn fuzz_dust_sweep_liability_floor() {
             let idx = order[i];
             let ra = rng.gen_i128_inclusive(0, amounts[idx]);
             if ra > 0 {
-                client.refund(&investors[idx], &ra);
+                client.refund(&investors[idx]);
                 distributed = distributed.checked_add(ra).expect("overflow");
             }
         }
