@@ -31,7 +31,7 @@ Codes are grouped by domain so SDKs can map coarse categories without parsing va
 | Init / pricing | 1–13 | Initialization, invoice id, yield tiers, optional caps | 1, 13 |
 | Uninitialized metadata | 20–22 | Escrow or required addresses not configured | 20, 22 |
 | Dust sweep + SEP-41 safety | 30–42 | Terminal dust sweep and token transfer invariants | 30, 42 |
-| Attestation | 50–53 | Primary hash binding, append-only digest log, and revocation | 50, 53 |
+| Attestation | 50–56 | Primary hash binding, append-only digest log, single/batch revocation and unrevoke | 50, 56 |
 | SME collateral | 60–62 | Off-chain collateral metadata record | 60, 62 |
 | Admin validation | 70–81 | Allowlist batch, funding target, investor cap, maturity, admin handover | 70, 81 |
 | Schema migration | 90–92 | `migrate` version checks | 90, 92 |
@@ -84,6 +84,9 @@ See also [`docs/escrow-legal-hold.md`](escrow-legal-hold.md),
 | 51 | `AttestationAppendLogCapacityReached` | `append_attestation_digest` | log length `>= MAX_ATTESTATION_APPEND_ENTRIES` | Archive off-chain; log is bounded | typed |
 | 52 | `AttestationIndexOutOfRange` | `revoke_attestation_digest` | `index >= log.len()` | Verify index is within the current log length | typed |
 | 53 | `AttestationAlreadyRevoked` | `revoke_attestation_digest` | index already has a revocation tombstone | Each index can only be revoked once | typed |
+| 54 | `AttestationBatchEmpty` | `revoke_attestation_digests` | `indices.len() == 0` | Pass at least one index | typed |
+| 55 | `AttestationBatchTooLarge` | `revoke_attestation_digests` | `indices.len() > MAX_ATTESTATION_REVOKE_BATCH` | Split into smaller batches | typed |
+| 56 | `AttestationNotRevoked` | `unrevoke_attestation_digest` | index is not currently revoked | Only unrevoke previously revoked entries | typed |
 | 60 | `CollateralAmountNotPositive` | `record_sme_collateral_commitment` | `amount <= 0` | Provide positive metadata amount | typed |
 | 61 | `CollateralAssetEmpty` | `record_sme_collateral_commitment` | asset symbol empty | Provide non-empty asset label | typed |
 | 62 | `CollateralTimestampBackwards` | `record_sme_collateral_commitment` | new timestamp `<` stored timestamp | Use monotonic timestamps | typed |
@@ -175,6 +178,11 @@ See also [`docs/escrow-legal-hold.md`](escrow-legal-hold.md),
 | 42 | `sweep would exceed liability floor` |
 | 50 | `primary attestation already bound` |
 | 51 | `attestation append log capacity reached` |
+| 52 | `attestation index out of range` |
+| 53 | `attestation already revoked` |
+| 54 | `attestation batch indices must be non-empty` |
+| 55 | `attestation batch indices length exceeds MAX_ATTESTATION_REVOKE_BATCH` |
+| 56 | `attestation not revoked` |
 | 60 | `Collateral amount must be positive` |
 | 61 | `Collateral asset symbol must not be empty` |
 | 62 | `Collateral commitment timestamp must not go backward` |
@@ -242,7 +250,7 @@ Recommended SDK category mappings:
 | 1–13 | Invalid initialization or pricing configuration |
 | 20–22 | Missing initialized escrow metadata |
 | 30–42 | Dust sweep or token integration failure |
-| 50–53 | Attestation failure |
+| 50–56 | Attestation failure |
 | 60–62 | Collateral metadata failure |
 | 70–83 | Administrative validation or batch-funding bounds failure |
 | 90–92 | Migration failure |

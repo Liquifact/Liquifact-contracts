@@ -141,6 +141,10 @@ pub const SCHEMA_VERSION: u32 = 6;
 /// Revocation via [`LiquifactEscrow::revoke_attestation_digest`] does not consume a slot.
 pub const MAX_ATTESTATION_APPEND_ENTRIES: u32 = 32;
 
+/// Upper bound on [`LiquifactEscrow::revoke_attestation_digests`] entries per call.
+/// Matches [`MAX_ATTESTATION_APPEND_ENTRIES`] to keep storage/CPU bounded.
+pub const MAX_ATTESTATION_REVOKE_BATCH: u32 = 32;
+
 use soroban_sdk::{
     contract, contracterror, contractevent, contractimpl, contracttype, Address, Env, Symbol,
 };
@@ -313,6 +317,14 @@ pub enum EscrowError {
     AttestationIndexOutOfRange = 52,
     /// [`LiquifactEscrow::revoke_attestation_digest`] called on an already-revoked index.
     AttestationAlreadyRevoked = 53,
+
+    /// [`LiquifactEscrow::revoke_attestation_digests`] received an empty indices list.
+    AttestationBatchEmpty = 54,
+    /// [`LiquifactEscrow::revoke_attestation_digests`] exceeded [`MAX_ATTESTATION_REVOKE_BATCH`].
+    AttestationBatchTooLarge = 55,
+
+    /// [`LiquifactEscrow::unrevoke_attestation_digest`] called on an index that is not revoked.
+    AttestationNotRevoked = 56,
 
     /// [`LiquifactEscrow::record_sme_collateral_commitment`] received a non-positive amount.
     CollateralAmountNotPositive = 60,
@@ -2262,6 +2274,79 @@ impl LiquifactEscrow {
             index,
         }
         .publish(&env);
+    }
+
+    /// Atomically revoke multiple attestation-digest indices in a single call.
+    ///
+    /// Each index is validated identically to the single-index
+    /// [`LiquifactEscrow::revoke_attestation_digest`].
+    ///
+    /// # Authorization
+    /// Requires `InvoiceEscrow::admin` auth.
+    ///
+    /// # Batch bounds
+    /// - `indices` must be non-empty (panics with [`EscrowError::AttestationBatchEmpty`]).
+    /// - `indices.len()` must not exceed [`MAX_ATTESTATION_REVOKE_BATCH`] (panics with
+    ///   [`EscrowError::AttestationBatchTooLarge`]).
+    ///
+    /// # Per-index validation (in order)
+    /// - [`EscrowError::AttestationIndexOutOfRange`] if `index >= log.len()`.
+    /// - [`EscrowError::AttestationAlreadyRevoked`] if the entry at `index` is already revoked.
+    ///
+    /// # Atomicity
+    /// If **any** per-index validation fails, the entire batch is rolled back (no partial
+    /// revocation). Duplicate indices in the batch are **not** pre-deduplicated — the second
+    /// occurrence will fail with [`EscrowError::AttestationAlreadyRevoked`].
+    ///
+    /// # Events
+    /// One [`AttestationDigestRevoked`] event per newly revoked index, preserving the same event
+    /// shape as the single-index entrypoint.
+    pub fn revoke_attestation_digests(env: Env, indices: Vec<u32>) {
+        let n = indices.len();
+
+        ensure(&env, n > 0, EscrowError::AttestationBatchEmpty);
+        ensure(
+            &env,
+            n <= MAX_ATTESTATION_REVOKE_BATCH,
+            EscrowError::AttestationBatchTooLarge,
+        );
+
+        let escrow = Self::get_escrow(env.clone());
+        escrow.admin.require_auth();
+
+        let log: Vec<BytesN<32>> = env
+            .storage()
+            .instance()
+            .get(&DataKey::AttestationAppendLog)
+            .unwrap_or_else(|| Vec::new(&env));
+
+        for i in 0..n {
+            let index = indices.get(i).unwrap();
+
+            ensure(
+                &env,
+                index < log.len(),
+                EscrowError::AttestationIndexOutOfRange,
+            );
+            ensure(
+                &env,
+                !env.storage()
+                    .instance()
+                    .has(&DataKey::AttestationRevoked(index)),
+                EscrowError::AttestationAlreadyRevoked,
+            );
+
+            env.storage()
+                .instance()
+                .set(&DataKey::AttestationRevoked(index), &true);
+
+            AttestationDigestRevoked {
+                name: symbol_short!("att_rev"),
+                invoice_id: escrow.invoice_id.clone(),
+                index,
+            }
+            .publish(&env);
+        }
     }
 
     /// Returns `true` when the append-log entry at `index` has been revoked via
