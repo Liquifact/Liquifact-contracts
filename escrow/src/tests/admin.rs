@@ -11,7 +11,6 @@ use soroban_sdk::Event;
 
 #[test]
 fn test_update_maturity_emits_event() {
-
     use soroban_sdk::testutils::Events as _;
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
@@ -1688,7 +1687,6 @@ fn test_rotate_beneficiary_then_withdraw_goes_to_new_sme() {
 /// admin is unchanged.
 #[test]
 fn test_rebind_registry_ref_sets_and_clears() {
-
     use soroban_sdk::testutils::Events as _;
 
     let env = Env::default();
@@ -1777,7 +1775,6 @@ fn test_rebind_registry_ref_requires_admin_auth() {
 }
 
 fn test_error_code_uniqueness() {
-
     let mut discriminants = std::collections::HashSet::new();
     let codes = [
         EscrowError::AmountMustBePositive as u32,

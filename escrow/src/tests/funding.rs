@@ -3993,7 +3993,11 @@ fn test_get_investors_legacy_compatibility() {
 // ---------------------------------------------------------------------------
 
 /// Helper: initialise an escrow and fund it partially, returning the client.
-fn setup_partially_funded(env: &Env, funded: i128, target: i128) -> super::LiquifactEscrowClient<'_> {
+fn setup_partially_funded(
+    env: &Env,
+    funded: i128,
+    target: i128,
+) -> super::LiquifactEscrowClient<'_> {
     let client = super::deploy(env);
     let admin = Address::generate(env);
     let sme = Address::generate(env);
@@ -4230,8 +4234,14 @@ fn test_update_funding_target_snapshot_written_only_once() {
     let snap2 = client.get_funding_close_snapshot().unwrap();
     assert_eq!(snap1.total_principal, snap2.total_principal);
     assert_eq!(snap1.funding_target, snap2.funding_target);
-    assert_eq!(snap1.closed_at_ledger_timestamp, snap2.closed_at_ledger_timestamp);
-    assert_eq!(snap1.closed_at_ledger_sequence, snap2.closed_at_ledger_sequence);
+    assert_eq!(
+        snap1.closed_at_ledger_timestamp,
+        snap2.closed_at_ledger_timestamp
+    );
+    assert_eq!(
+        snap1.closed_at_ledger_sequence,
+        snap2.closed_at_ledger_sequence
+    );
 }
 
 /// After promotion via `update_funding_target`, a subsequent `fund` call must
