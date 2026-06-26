@@ -449,6 +449,61 @@ fn clear_legal_hold_by_non_admin_panics() {
     client.clear_legal_hold();
 }
 
+// ── 9. Admin-only: cancel_clear_legal_hold ─────────────────────────────────────
+
+#[test]
+fn cancel_clear_legal_hold_with_pending_request_succeeds() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    init_open(&client, &env, &admin, &sme, "LHB001");
+    client.set_legal_hold(&true);
+    assert!(client.get_legal_hold());
+    client.request_clear_legal_hold();
+    assert!(client.get_legal_hold_clearable_at().is_some());
+    client.cancel_clear_legal_hold();
+    assert!(client.get_legal_hold());
+    assert!(client.get_legal_hold_clearable_at().is_none());
+    // event emitted -> captured by env.auths()
+}
+
+#[test]
+#[should_panic(expected = "No pending clear request to cancel")]
+fn cancel_clear_legal_hold_without_pending_request_panics() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    init_open(&client, &env, &admin, &sme, "LHB002");
+    client.set_legal_hold(&true);
+    env.mock_auths(&[]);
+    client.cancel_clear_legal_hold();
+}
+
+#[test]
+#[should_panic]
+fn cancel_clear_legal_hold_by_non_admin_panics() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    init_open(&client, &env, &admin, &sme, "LHB003");
+    client.set_legal_hold(&true);
+    client.request_clear_legal_hold();
+    env.mock_auths(&[]);
+    client.cancel_clear_legal_hold();
+}
+
+#[test]
+fn cancel_clear_legal_hold_allows_new_request_after_cancellation() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    init_open(&client, &env, &admin, &sme, "LHB004");
+    client.set_legal_hold(&true);
+    client.request_clear_legal_hold();
+    let before_cancel = client.get_legal_hold_clearable_at().unwrap();
+    client.cancel_clear_legal_hold();
+    client.request_clear_legal_hold();
+    let after_request = client.get_legal_hold_clearable_at().unwrap();
+    assert_ne!(after_request, before_cancel);
+    // after clearable_at - delay expected
+}
+
 // ── 9. Default state ─────────────────────────────────────────────────────────
 
 #[test]
