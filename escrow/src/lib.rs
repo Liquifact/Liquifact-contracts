@@ -134,7 +134,8 @@ pub mod external_calls;
 /// | 5 | Added `YieldTierTable`, `RegistryRef`, `Treasury`; `fund_with_commitment` | **Redeploy required** if `InvoiceEscrow` XDR changed |
 /// | 6 | Per-investor keys moved to **persistent** storage (see ADR-007) | **Redeploy required** — no `migrate` path (addresses not enumerable) |
 ///
-/// See `docs/OPERATOR_RUNBOOK.md` for the full redeploy-vs-upgrade decision tree.
+/// See `docs/escrow-schema-versioning.md` and `docs/OPERATOR_RUNBOOK.md` for the full
+/// redeploy-vs-upgrade decision tree.
 pub const SCHEMA_VERSION: u32 = 6;
 
 /// Upper bound on [`LiquifactEscrow::append_attestation_digest`] entries to keep storage bounded.
@@ -2855,8 +2856,8 @@ impl LiquifactEscrow {
     /// | `from_version >= SCHEMA_VERSION` | [`EscrowError::AlreadyCurrentSchemaVersion`] |
     /// | Any `from_version < SCHEMA_VERSION` (all paths) | [`EscrowError::NoMigrationPath`] |
     ///
-    /// See `docs/OPERATOR_RUNBOOK.md` §2 for step-by-step instructions on implementing
-    /// a concrete migration path.
+    /// See `docs/escrow-schema-versioning.md` and `docs/OPERATOR_RUNBOOK.md` §2 for
+    /// step-by-step instructions on implementing a concrete migration path.
     pub fn migrate(env: Env, from_version: u32) -> u32 {
         Self::load_escrow_require_admin(&env);
 
@@ -2899,7 +2900,8 @@ impl LiquifactEscrow {
     ///
     /// # Risks
     /// Deploying an incompatible WASM will corrupt stored state. Test thoroughly on
-    /// testnet before upgrading production contracts.
+    /// testnet before upgrading production contracts. See `docs/escrow-schema-versioning.md`
+    /// for the additive-key vs migration vs redeploy compatibility contract.
     pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
         // Auth first — matches migrate() ordering
         let escrow = Self::load_escrow_require_admin(&env);

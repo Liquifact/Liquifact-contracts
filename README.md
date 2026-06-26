@@ -100,6 +100,9 @@ typed error and update `DataKey::Version`.
 See [`docs/OPERATOR_RUNBOOK.md`](docs/OPERATOR_RUNBOOK.md) for the full
 redeploy-vs-upgrade decision tree and Stellar/Soroban CLI examples.
 
+For the contributor-facing storage compatibility contract, see
+[`docs/escrow-schema-versioning.md`](docs/escrow-schema-versioning.md).
+
 ---
 
 ## Release runbook: build, deploy, verify
