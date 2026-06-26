@@ -43,6 +43,7 @@ WASM.
 | 6 | Moved per-investor keys to persistent storage to bound instance footprint and decouple per-address TTL | **Redeploy required** — prior instances must be redeployed to pick up new storage locations |
 
 > **Current:** `SCHEMA_VERSION = 6`
+> See the detailed schema version contract in [Escrow schema versioning](docs/escrow-schema-versioning.md).
 
 ---
 
