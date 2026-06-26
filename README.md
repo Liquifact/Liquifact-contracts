@@ -249,6 +249,11 @@ external token contracts.
 
 See [`docs/escrow-sme-collateral.md`](docs/escrow-sme-collateral.md) for the risk-team handling rules for `record_sme_collateral_commitment` and `CollateralRecordedEvt`. The record is SME-reported metadata only; it is not proof of custody, token movement, or an enforceable on-chain claim.
 
+## Cancelled escrow refunds
+
+See [`docs/escrow-cancellation-refunds.md`](docs/escrow-cancellation-refunds.md) for the cancellation, investor refund,
+and terminal dust-sweep lifecycle, including the liability floor that protects un-refunded investor principal.
+
 ## Investor allowlist
 
 The escrow supports an optional investor allowlist gate that controls which addresses may fund. See [`docs/escrow-allowlist.md`](docs/escrow-allowlist.md) for the complete allowlist model documentation, including:

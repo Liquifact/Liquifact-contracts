@@ -1546,6 +1546,9 @@ impl LiquifactEscrow {
     /// Emits typed [`EscrowError`] codes for legal hold, invalid sweep amount, non-terminal state,
     /// missing initialized addresses, empty balances, liability floor violation, and token
     /// transfer invariant failures.
+    ///
+    /// See `docs/escrow-cancellation-refunds.md` for the cancelled-escrow liability floor and
+    /// operator refund-to-dust-sweep sequence.
     pub fn sweep_terminal_dust(env: Env, amount: i128) -> i128 {
         Self::guard_not_legal_hold(&env, EscrowError::LegalHoldBlocksTreasuryDustSweep);
         ensure(&env, amount > 0, EscrowError::SweepAmountNotPositive);
@@ -3867,6 +3870,9 @@ impl LiquifactEscrow {
     /// # Errors
     /// Emits typed [`EscrowError`] codes when legal hold is active, the escrow is uninitialized,
     /// or the escrow is not in status 0 (open).
+    ///
+    /// See `docs/escrow-cancellation-refunds.md` for the end-to-end cancellation, investor refund,
+    /// and residual dust-sweep lifecycle.
     pub fn cancel_funding(env: Env) -> InvoiceEscrow {
         Self::guard_not_legal_hold(&env, EscrowError::LegalHoldBlocksCancelFunding);
 
@@ -3896,6 +3902,9 @@ impl LiquifactEscrow {
     /// Emits typed [`EscrowError`] codes when the escrow is not cancelled, the investor has no
     /// refundable contribution, initialized token data is missing, or the refund transfer fails
     /// token-balance invariants.
+    ///
+    /// See `docs/escrow-cancellation-refunds.md` for the refund idempotency model and how
+    /// `DistributedPrincipal` protects un-refunded investors during dust sweeps.
     pub fn refund(env: Env, investor: Address) {
         investor.require_auth();
 
