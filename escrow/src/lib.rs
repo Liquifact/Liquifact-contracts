@@ -3544,6 +3544,54 @@ impl LiquifactEscrow {
             .unwrap_or_else(|| fail(env, EscrowError::ComputePayoutArithmeticOverflow))
     }
 
+    /// On-chain read-only view that returns the **claimable payout** for an investor, applying
+    /// all gating rules that [`LiquifactEscrow::claim_investor_payout`] uses.
+    ///
+    /// # Comparison with [`LiquifactEscrow::compute_investor_payout`]
+    ///
+    /// - [`LiquifactEscrow::compute_investor_payout`] returns the **gross theoretical payout**
+    ///   (no gating applied).
+    /// - This function returns the **net claimable amount** (0 if any gate blocks a claim).
+    ///
+    /// # Returns
+    ///
+    /// - `0` when escrow is not yet settled (status != 2)
+    /// - `0` when a legal hold blocks investor claims
+    /// - `0` when the investor has already claimed their payout
+    /// - `0` when the current ledger timestamp is before the investor's claim-not-before time
+    /// - Otherwise, the gross payout from [`LiquifactEscrow::compute_investor_payout`]
+    ///
+    /// # Authorization
+    ///
+    /// None — pure read; no auth required and no state mutation.
+    pub fn get_claimable_payout(env: Env, investor: Address) -> i128 {
+        // Check 1: Escrow must be settled
+        let escrow = Self::get_escrow(env.clone());
+        if escrow.status != 2 {
+            return 0;
+        }
+
+        // Check 2: Legal hold must not be active
+        if Self::legal_hold_active(&env) {
+            return 0;
+        }
+
+        // Check 3: Investor must not have claimed yet
+        if Self::get_persistent_investor_claimed(&env, investor.clone()) {
+            return 0;
+        }
+
+        // Check 4: Current time must be >= investor's claim-not-before
+        let not_before = Self::get_persistent_investor_claim_not_before(&env, investor.clone());
+        let now = env.ledger().timestamp();
+        if now < not_before {
+            return 0;
+        }
+
+        // All gates passed: return the gross payout
+        Self::compute_investor_payout(env, investor)
+    }
+
     /// On-chain read-only pro-rata gross payout for `investor`.
     ///
     /// Derives the **gross payout** (principal share plus `InvestorEffectiveYield`-adjusted

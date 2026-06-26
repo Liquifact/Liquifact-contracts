@@ -46,6 +46,7 @@ re-implementing storage reads to guarantee identical semantics.
 - [is_investor_claimed](#is_investor_claimedinvestor-address--bool)
 - [is_investor_refunded](#is_investor_refundedinvestor-address--bool)
 - [compute_investor_payout](#compute_investor_payoutinvestor-address--i128)
+- [get_claimable_payout](#get_claimable_payoutinvestor-address--i128)
 
 **Attestations:**
 - [get_primary_attestation_hash](#get_primary_attestation_hash--optionbytesn32)
@@ -573,10 +574,34 @@ Returns `true` when an investor's principal has been returned via `refund` in a 
 
 ### `compute_investor_payout(investor: Address) → i128`
 
-**Signature:** `pub fn compute_investor_payout(env: Env, investor: Address) -> i128`
+**Signature:** `pub fn compute_investor_payout(env: Env, investor: Address) → i128`
 
 - `None` — Escrow is not yet funded; no close snapshot exists.
 - `Some(FundingCloseSnapshot)` — The pro-rata denominator snapshot captured when the escrow first transitioned to **funded**.
+
+---
+
+### `get_claimable_payout(investor: Address) → i128`
+
+**Signature:** `pub fn get_claimable_payout(env: Env, investor: Address) → i128`
+
+On-chain read-only view that returns the **claimable payout** for an investor, applying all gating rules that `claim_investor_payout` uses.
+
+#### Comparison with `compute_investor_payout`
+- `compute_investor_payout` returns the **gross theoretical payout** (no gating applied).
+- This function returns the **net claimable amount** (0 if any gate blocks a claim).
+
+#### Return values
+| Condition | Returns |
+|-----------|---------|
+| Escrow is not yet settled (status != 2) | `0` |
+| Legal hold blocks investor claims | `0` |
+| Investor has already claimed their payout | `0` |
+| Current ledger timestamp is before the investor's claim-not-before time | `0` |
+| All gates passed | Gross payout from `compute_investor_payout` |
+
+#### Authorization
+None — pure read; no auth required, no state mutation.
 
 ---
 
