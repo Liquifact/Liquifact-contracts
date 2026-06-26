@@ -28,7 +28,7 @@ Codes are grouped by domain so SDKs can map coarse categories without parsing va
 | Init / pricing | 1–13 | Initialization, invoice id, yield tiers, optional caps | 1, 13 |
 | Uninitialized metadata | 20–22 | Escrow or required addresses not configured | 20, 22 |
 | Dust sweep + SEP-41 safety | 30–42 | Terminal dust sweep and token transfer invariants | 30, 42 |
-| Attestation | 50–51 | Primary hash binding and append-only digest log | 50, 51 |
+| Attestation | 50–53 | Primary hash binding, append-only digest log, and revocation | 50, 53 |
 | SME collateral | 60–62 | Off-chain collateral metadata record | 60, 62 |
 | Admin validation | 70–80 | Allowlist batch, funding target, investor cap, maturity, admin handover | 70, 80 |
 | Schema migration | 90–92 | `migrate` version checks | 90, 92 |
@@ -79,6 +79,8 @@ See also [`docs/escrow-legal-hold.md`](escrow-legal-hold.md),
 | 42 | `SweepExceedsLiabilityFloor` | `sweep_terminal_dust` | `balance - sweep_amt < funded_amount - distributed_principal` | Reduce sweep; wait until liabilities refunded | typed |
 | 50 | `PrimaryAttestationAlreadyBound` | `bind_primary_attestation_hash` | primary hash already stored | Use `append_attestation_digest` for updates | typed |
 | 51 | `AttestationAppendLogCapacityReached` | `append_attestation_digest` | log length `>= MAX_ATTESTATION_APPEND_ENTRIES` | Archive off-chain; log is bounded | typed |
+| 52 | `AttestationIndexOutOfRange` | `revoke_attestation_digest` | `index >= log.len()` | Verify index is within the current log length | typed |
+| 53 | `AttestationAlreadyRevoked` | `revoke_attestation_digest` | index already has a revocation tombstone | Each index can only be revoked once | typed |
 | 60 | `CollateralAmountNotPositive` | `record_sme_collateral_commitment` | `amount <= 0` | Provide positive metadata amount | typed |
 | 61 | `CollateralAssetEmpty` | `record_sme_collateral_commitment` | asset symbol empty | Provide non-empty asset label | typed |
 | 62 | `CollateralTimestampBackwards` | `record_sme_collateral_commitment` | new timestamp `<` stored timestamp | Use monotonic timestamps | typed |
