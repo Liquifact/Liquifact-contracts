@@ -680,3 +680,69 @@ fn test_unrevoke_non_admin_returns_error() {
     env.mock_auths(&[]);
     assert!(client.try_unrevoke_attestation_digest(&0).is_err());
 }
+
+// ---------------------------------------------------------------------------
+// get_attestation_digest_at
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_get_attestation_digest_at_none_when_empty() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    assert_eq!(client.get_attestation_digest_at(&0), None);
+    assert_eq!(client.get_attestation_digest_at(&1), None);
+}
+
+#[test]
+fn test_get_attestation_digest_at_none_out_of_bounds() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    client.append_attestation_digest(&digest(&env, 0x01));
+    client.append_attestation_digest(&digest(&env, 0x02));
+
+    assert_eq!(client.get_attestation_digest_at(&2), None);
+    assert_eq!(client.get_attestation_digest_at(&100), None);
+}
+
+#[test]
+fn test_get_attestation_digest_at_retrieves_unrevoked() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    let d0 = digest(&env, 0x10);
+    let d1 = digest(&env, 0x20);
+    client.append_attestation_digest(&d0);
+    client.append_attestation_digest(&d1);
+
+    let info0 = client.get_attestation_digest_at(&0).unwrap();
+    assert_eq!(info0.digest, d0);
+    assert!(!info0.revoked);
+
+    let info1 = client.get_attestation_digest_at(&1).unwrap();
+    assert_eq!(info1.digest, d1);
+    assert!(!info1.revoked);
+}
+
+#[test]
+fn test_get_attestation_digest_at_reflects_revocation_cycle() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    let d = digest(&env, 0xAB);
+    client.append_attestation_digest(&d);
+
+    // Initial state: unrevoked
+    let info = client.get_attestation_digest_at(&0).unwrap();
+    assert_eq!(info.digest, d);
+    assert!(!info.revoked);
+
+    // Revoked state
+    client.revoke_attestation_digest(&0);
+    let info = client.get_attestation_digest_at(&0).unwrap();
+    assert_eq!(info.digest, d);
+    assert!(info.revoked);
+
+    // Unrevoked state again
+    client.unrevoke_attestation_digest(&0);
+    let info = client.get_attestation_digest_at(&0).unwrap();
+    assert_eq!(info.digest, d);
+    assert!(!info.revoked);
+}

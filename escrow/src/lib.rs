@@ -968,7 +968,6 @@ pub struct RegistryRefRebound {
 
 #[contractevent]
 pub struct TreasuryDustSwept {
-
     #[topic]
     pub name: Symbol,
     pub invoice_id: Symbol,
@@ -999,6 +998,16 @@ pub struct AttestationDigestRevoked {
     pub name: Symbol,
     pub invoice_id: Symbol,
     pub index: u32,
+}
+
+/// Digest entry with revocation status returned by `get_attestation_digest_at`.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AttestationDigestInfo {
+    /// The 32‑byte digest stored at the requested index.
+    pub digest: BytesN<32>,
+    /// `true` if the entry has been revoked via `revoke_attestation_digest`.
+    pub revoked: bool,
 }
 
 #[contractevent]
@@ -1202,9 +1211,21 @@ impl LiquifactEscrow {
         admin.require_auth();
 
         ensure(&env, amount > 0, EscrowError::AmountMustBePositive);
-        ensure(&env, amount <= MAX_INVOICE_AMOUNT, EscrowError::AmountExceedsMax);
-        ensure(&env, (0..=10_000).contains(&yield_bps), EscrowError::YieldBpsOutOfRange);
-        ensure(&env, !env.storage().instance().has(&DataKey::Escrow), EscrowError::EscrowAlreadyInitialized);
+        ensure(
+            &env,
+            amount <= MAX_INVOICE_AMOUNT,
+            EscrowError::AmountExceedsMax,
+        );
+        ensure(
+            &env,
+            (0..=10_000).contains(&yield_bps),
+            EscrowError::YieldBpsOutOfRange,
+        );
+        ensure(
+            &env,
+            !env.storage().instance().has(&DataKey::Escrow),
+            EscrowError::EscrowAlreadyInitialized,
+        );
 
         ensure(
             &env,
@@ -1216,40 +1237,58 @@ impl LiquifactEscrow {
 
         let max_horizon = maturity_max_horizon.unwrap_or(DEFAULT_MATURITY_MAX_HORIZON_SECS);
         validate_maturity_bounds(&env, maturity, max_horizon);
-        env.storage().instance().set(&DataKey::MaturityMaxHorizon, &max_horizon);
+        env.storage()
+            .instance()
+            .set(&DataKey::MaturityMaxHorizon, &max_horizon);
 
-        env.storage().instance().set(&DataKey::FundingToken, &funding_token);
+        env.storage()
+            .instance()
+            .set(&DataKey::FundingToken, &funding_token);
         env.storage().instance().set(&DataKey::Treasury, &treasury);
-        
+
         if let Some(reg) = registry.clone() {
             env.storage().instance().set(&DataKey::RegistryRef, &reg);
         }
-        
+
         if let Some(tiers) = yield_tiers {
-            env.storage().instance().set(&DataKey::YieldTierTable, &tiers);
+            env.storage()
+                .instance()
+                .set(&DataKey::YieldTierTable, &tiers);
         }
 
         let floor = min_contribution.unwrap_or(0);
-        env.storage().instance().set(&DataKey::MinContributionFloor, &floor);
-        env.storage().instance().set(&DataKey::UniqueFunderCount, &0u32);
+        env.storage()
+            .instance()
+            .set(&DataKey::MinContributionFloor, &floor);
+        env.storage()
+            .instance()
+            .set(&DataKey::UniqueFunderCount, &0u32);
 
         if let Some(cap) = max_per_investor {
             ensure(&env, cap > 0, EscrowError::MaxPerInvestorNotPositive);
-            env.storage().instance().set(&DataKey::MaxPerInvestorCap, &cap);
+            env.storage()
+                .instance()
+                .set(&DataKey::MaxPerInvestorCap, &cap);
         }
 
         if let Some(cap) = max_unique_investors {
             ensure(&env, cap > 0, EscrowError::MaxUniqueInvestorsNotPositive);
-            env.storage().instance().set(&DataKey::MaxUniqueInvestorsCap, &cap);
+            env.storage()
+                .instance()
+                .set(&DataKey::MaxUniqueInvestorsCap, &cap);
         }
 
         let delay = legal_hold_clear_delay.unwrap_or(0);
         if delay > 0 {
-            env.storage().instance().set(&DataKey::LegalHoldClearDelay, &delay);
+            env.storage()
+                .instance()
+                .set(&DataKey::LegalHoldClearDelay, &delay);
         }
 
         if let Some(active) = allowlist_active {
-            env.storage().instance().set(&DataKey::AllowlistActive, &active);
+            env.storage()
+                .instance()
+                .set(&DataKey::AllowlistActive, &active);
         }
 
         let invoice_sym = validate_invoice_id_string(&env, &invoice_id);
@@ -1265,39 +1304,49 @@ impl LiquifactEscrow {
             maturity,
             status: 0,
         };
-        
+
         env.storage().instance().set(&DataKey::Escrow, &escrow);
-        env.storage().instance().set(&DataKey::FundingToken, &funding_token);
+        env.storage()
+            .instance()
+            .set(&DataKey::FundingToken, &funding_token);
         env.storage().instance().set(&DataKey::Treasury, &treasury);
-        env.storage().instance().set(&DataKey::Version, &SCHEMA_VERSION);
+        env.storage()
+            .instance()
+            .set(&DataKey::Version, &SCHEMA_VERSION);
 
         if let Some(reg) = &registry {
             env.storage().instance().set(&DataKey::RegistryRef, reg);
         }
         if let Some(tiers) = &yield_tiers {
-            env.storage().instance().set(&DataKey::YieldTierTable, tiers);
+            env.storage()
+                .instance()
+                .set(&DataKey::YieldTierTable, tiers);
         }
         if let Some(floor) = min_contribution {
-            env.storage().instance().set(&DataKey::MinContributionFloor, &floor);
+            env.storage()
+                .instance()
+                .set(&DataKey::MinContributionFloor, &floor);
         }
         if let Some(cap) = max_unique_investors {
-            env.storage().instance().set(&DataKey::MaxUniqueInvestorsCap, &cap);
+            env.storage()
+                .instance()
+                .set(&DataKey::MaxUniqueInvestorsCap, &cap);
         }
         if let Some(cap) = max_per_investor {
-            env.storage().instance().set(&DataKey::MaxPerInvestorCap, &cap);
+            env.storage()
+                .instance()
+                .set(&DataKey::MaxPerInvestorCap, &cap);
         }
         if let Some(delay) = legal_hold_clear_delay {
-            env.storage().instance().set(&DataKey::LegalHoldClearDelay, &delay);
+            env.storage()
+                .instance()
+                .set(&DataKey::LegalHoldClearDelay, &delay);
         }
 
         let has_maturity_lock = maturity != 0;
         EscrowInitialized {
             name: symbol_short!("escrow"),
-            escrow: env
-                .storage()
-                .instance()
-                .get(&DataKey::Escrow)
-                .unwrap(),
+            escrow: env.storage().instance().get(&DataKey::Escrow).unwrap(),
             funding_token,
             treasury,
             registry,
@@ -1371,7 +1420,9 @@ impl LiquifactEscrow {
 
         match registry.clone() {
             Some(_) => {
-                env.storage().instance().set(&DataKey::RegistryRef, &registry);
+                env.storage()
+                    .instance()
+                    .set(&DataKey::RegistryRef, &registry);
             }
             None => {
                 env.storage().instance().remove(&DataKey::RegistryRef);
@@ -1385,7 +1436,6 @@ impl LiquifactEscrow {
         }
         .publish(&env);
     }
-
 
     /// Returns the optional pending admin address waiting for [`LiquifactEscrow::accept_admin`],
     /// or [`None`] when no admin handover is in progress.
@@ -1805,6 +1855,22 @@ impl LiquifactEscrow {
             .instance()
             .get(&DataKey::AttestationAppendLog)
             .unwrap_or_else(|| Vec::new(&env))
+    }
+
+    /// Returns the digest and revocation flag at `index`.
+    /// Returns `None` when `index >= log.len()`.
+    pub fn get_attestation_digest_at(env: Env, index: u32) -> Option<AttestationDigestInfo> {
+        let log = Self::get_attestation_append_log(env.clone());
+        if (index as usize) >= log.len() {
+            return None;
+        }
+        let digest = log.get(index as usize).unwrap();
+        let revoked = env
+            .storage()
+            .instance()
+            .get(&DataKey::AttestationRevoked(index))
+            .unwrap_or(false);
+        Some(AttestationDigestInfo { digest, revoked })
     }
 
     // --- Persistent per-investor storage helpers ---
@@ -2611,9 +2677,7 @@ impl LiquifactEscrow {
 
     /// Get the pending clear timestamp, if any.
     pub fn get_legal_hold_clearable_at(env: Env) -> Option<u64> {
-        env.storage()
-            .instance()
-            .get(&DataKey::LegalHoldClearableAt)
+        env.storage().instance().get(&DataKey::LegalHoldClearableAt)
     }
 
     pub fn update_funding_target(env: Env, new_target: i128) -> InvoiceEscrow {
