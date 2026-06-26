@@ -940,3 +940,66 @@ fn recovery_new_admin_clears_hold_and_operations_resume() {
     client.claim_investor_payout(&investor);
     assert!(client.is_investor_claimed(&investor));
 }
+
+// ── update_legal_hold_clear_delay ─────────────────────────────────────────────
+
+#[test]
+fn update_legal_hold_clear_delay_by_admin_succeeds() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    init_open(&client, &env, &admin, &sme, "LHUPD001");
+    assert_eq!(client.get_legal_hold_clear_delay(), 0u64);
+    client.update_legal_hold_clear_delay(&86_400u64);
+    assert_eq!(client.get_legal_hold_clear_delay(), 86_400u64);
+}
+
+#[test]
+#[should_panic]
+fn update_legal_hold_clear_delay_by_non_admin_panics() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    init_open(&client, &env, &admin, &sme, "LHUPD002");
+    env.mock_auths(&[]);
+    client.update_legal_hold_clear_delay(&86_400u64);
+}
+
+#[test]
+fn update_legal_hold_clear_delay_rejects_during_pending_clear() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    init_open_with_clear_delay(
+        &client,
+        &env,
+        &admin,
+        &sme,
+        "LHUPD003",
+        Some(86_400u64),
+    );
+    client.set_legal_hold(&true);
+    client.request_clear_legal_hold();
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.update_legal_hold_clear_delay(&3_600u64);
+    }));
+    assert!(
+        result.is_err(),
+        "update must be rejected while clear is pending"
+    );
+}
+
+#[test]
+fn update_legal_hold_clear_delay_before_request_allows_new_delay_to_take_effect() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    init_open(&client, &env, &admin, &sme, "LHUPD004");
+    client.update_legal_hold_clear_delay(&100u64);
+    assert_eq!(client.get_legal_hold_clear_delay(), 100u64);
+    client.set_legal_hold(&true);
+    client.request_clear_legal_hold();
+    let clearable_at = client.get_legal_hold_clearable_at().unwrap();
+    let now = env.ledger().timestamp();
+    assert!(
+        clearable_at >= now + 100,
+        "clearable_at must reflect the updated delay"
+    );
+}
+

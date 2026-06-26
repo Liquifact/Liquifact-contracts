@@ -438,12 +438,10 @@ pub enum EscrowError {
     NoPendingAdmin = 81,
     /// The contract's funding-token balance is less than `funded_amount` at withdraw time.
     /// Funds must be custodied in this contract before the SME can pull them.
-    InsufficientContractBalance = 164,
-
-    /// [`LiquifactEscrow::claim_payouts_batch`] received an empty batch.
-    ClaimBatchEmpty = 165,
-    /// [`LiquifactEscrow::claim_payouts_batch`] exceeded [`MAX_CLAIM_BATCH`].
-    ClaimBatchTooLarge = 166,
+    InsufficientContractBalance = 165,
+    /// [`LiquifactEscrow::update_legal_hold_clear_delay`] was called while a clear request
+    /// was pending ([`DataKey::LegalHoldClearableAt`] is set).
+    LegalHoldClearPendingUpdateRejected = 166,
 }
 
 #[inline(always)]
@@ -912,6 +910,16 @@ pub struct LegalHoldClearRequested {
     pub invoice_id: Symbol,
     /// Inclusive ledger timestamp when clearing may occur.
     pub clearable_at: u64,
+}
+
+#[contractevent]
+pub struct LegalHoldClearDelayUpdated {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    pub old_delay: u64,
+    pub new_delay: u64,
 }
 
 /// SME collateral commitment metadata recorded.
@@ -2498,6 +2506,43 @@ impl LiquifactEscrow {
         .publish(&env);
     }
 
+    /// Update the legal-hold clear delay after init. Rejects the update while a clear
+    /// request is pending ([`DataKey::LegalHoldClearableAt`] set) so an admin cannot
+    /// shorten the timelock to bypass an active waiting period.
+    ///
+    /// # Authorization
+    /// [`InvoiceEscrow::admin`].
+    ///
+    /// # Errors
+    ///
+    /// | Condition | Typed error |
+    /// |-----------|-------------|
+    /// | `LegalHoldClearableAt` is set (clear request pending) | [`EscrowError::LegalHoldClearPendingUpdateRejected`] |
+    pub fn update_legal_hold_clear_delay(env: Env, new_delay: u64) {
+        let escrow = Self::load_escrow_require_admin(&env);
+
+        ensure(
+            &env,
+            !env.storage()
+                .instance()
+                .has(&DataKey::LegalHoldClearableAt),
+            EscrowError::LegalHoldClearPendingUpdateRejected,
+        );
+
+        let old_delay = Self::get_legal_hold_clear_delay(env.clone());
+        env.storage()
+            .instance()
+            .set(&DataKey::LegalHoldClearDelay, &new_delay);
+
+        LegalHoldClearDelayUpdated {
+            name: symbol_short!("lh_del"),
+            invoice_id: escrow.invoice_id.clone(),
+            old_delay,
+            new_delay,
+        }
+        .publish(&env);
+    }
+
     /// Enable or disable the investor allowlist gate.
     ///
     /// When enabled (active = true), only addresses with [`DataKey::InvestorAllowlisted`] set to
@@ -3018,6 +3063,30 @@ impl LiquifactEscrow {
         escrow
     }
 
+    fn increment_unique_funder(env: &Env, prev: i128) -> u32 {
+        if prev == 0 {
+            let cur: u32 = env
+                .storage()
+                .instance()
+                .get(&DataKey::UniqueFunderCount)
+                .unwrap_or(0);
+            if let Some(cap) = env
+                .storage()
+                .instance()
+                .get::<DataKey, u32>(&DataKey::MaxUniqueInvestorsCap)
+            {
+                ensure(env, cur < cap, EscrowError::UniqueInvestorCapReached);
+            }
+            let new_count = cur + 1;
+            env.storage()
+                .instance()
+                .set(&DataKey::UniqueFunderCount, &new_count);
+            new_count
+        } else {
+            0
+        }
+    }
+
     fn fund_impl(
         env: Env,
         investor: Address,
@@ -3081,28 +3150,7 @@ impl LiquifactEscrow {
             );
         }
 
-        let cur_funder_count: u32 = if prev == 0 {
-            env.storage()
-                .instance()
-                .get(&DataKey::UniqueFunderCount)
-                .unwrap_or(0)
-        } else {
-            0
-        };
-
-        if prev == 0 {
-            if let Some(cap) = env
-                .storage()
-                .instance()
-                .get::<DataKey, u32>(&DataKey::MaxUniqueInvestorsCap)
-            {
-                ensure(
-                    &env,
-                    cur_funder_count < cap,
-                    EscrowError::UniqueInvestorCapReached,
-                );
-            }
-        }
+        let _cur_funder_count = Self::increment_unique_funder(&env, prev);
 
         let investor_effective_yield_bps: i64;
         let tier_lock_secs: u64;
@@ -3192,11 +3240,6 @@ impl LiquifactEscrow {
             env.storage()
                 .instance()
                 .set(&DataKey::InvestorIndex, &index);
-
-            // Use the hoisted cur_funder_count; no second storage read needed.
-            env.storage()
-                .instance()
-                .set(&DataKey::UniqueFunderCount, &(cur_funder_count + 1));
         }
 
         escrow.status = next_status;
