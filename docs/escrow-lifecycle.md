@@ -170,6 +170,10 @@ When an escrow is cancelled before reaching its funding target, investors may re
 their principal:
 
 1. Admin calls `cancel_funding()` — transitions `status 0 → 4`. Blocked by legal hold.
+   **Only status 0 (open) is cancellable**; funded (1), settled (2), withdrawn (3), and
+   already-cancelled (4) escrows reject with `CancelFundingNotOpen` (code 141). See
+   `test_cancel_funding_transition_matrix_and_refund_unlock` in
+   [`escrow/src/tests/integration.rs`](../escrow/src/tests/integration.rs) for the full matrix.
 2. Each investor calls `refund(investor)` — transfers exactly `DataKey::InvestorContribution`
    back to the investor via `external_calls::transfer_funding_token_with_balance_checks`.
 3. `InvestorContribution` is zeroed after transfer (checks-effects-interactions pattern).

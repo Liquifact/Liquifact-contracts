@@ -280,7 +280,7 @@ See the canonical compliance test section in [`escrow/src/tests/admin.rs`](file:
 | `init`, `propose_admin`, `accept_admin` | `escrow/src/tests/admin.rs` § `auth_audit_*` |
 | `fund`, `fund_with_commitment`, `fund_batch` | `escrow/src/tests/admin.rs` § `auth_audit_*` |
 | `settle`, `partial_settle`, `withdraw`, `sweep_terminal_dust` | `escrow/src/tests/admin.rs` § `auth_audit_*` |
-| `claim_investor_payout`, `refund`, `cancel_funding` | `escrow/src/tests/admin.rs` § `auth_audit_*` |
+| `claim_investor_payout`, `refund`, `cancel_funding` | `escrow/src/tests/admin.rs` § `auth_audit_*`; `cancel_funding` state matrix in `escrow/src/tests/integration.rs` § `test_cancel_funding_*` |
 | `bind_primary_attestation_hash`, `append_attestation_digest`, `revoke_attestation_digest` | `escrow/src/tests/admin.rs` § `auth_audit_*` |
 | `set_allowlist_active`, `set_investor_allowlisted` | `escrow/src/tests/admin.rs` § `auth_audit_*` |
 | `set_legal_hold`, `clear_legal_hold`, `request_clear_legal_hold` | `escrow/src/tests/admin.rs` § `auth_audit_*` |

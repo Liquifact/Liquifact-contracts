@@ -213,7 +213,7 @@ Escrow tests are organized by feature area under
 | `funding.rs` | Funding, contribution accounting, snapshots, tier selection |
 | `settlement.rs` | Settlement, withdrawal, investor claims, maturity boundaries, dust sweep |
 | `admin.rs` | Admin-governed state changes, legal hold, migration guards, collateral metadata |
-| `integration.rs` | External token-wrapper assumptions, metadata-only integration checks |
+| `integration.rs` | External token-wrapper assumptions, metadata-only integration checks, `cancel_funding` transition matrix |
 | `properties.rs` | Proptest-based invariants |
 
 Shared helpers live in [`escrow/src/test.rs`](escrow/src/test.rs). Each test

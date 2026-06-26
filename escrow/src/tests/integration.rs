@@ -904,6 +904,228 @@ fn setup_withdraw_with_token<'a>(
     (client, escrow_id, token, sme)
 }
 
+// ── cancel_funding transition matrix (issue #478) ───────────────────────────
+
+/// Deploy and init an escrow backed by a real SAC token, optionally fund while
+/// remaining in the **open** state (status 0). Returns
+/// `(client, escrow_id, token, admin, investor)`.
+fn setup_open_escrow_with_token<'a>(
+    env: &'a Env,
+    target: i128,
+    fund_amount: i128,
+    invoice_id: &str,
+) -> (
+    LiquifactEscrowClient<'a>,
+    soroban_sdk::Address,
+    StellarTestToken<'a>,
+    soroban_sdk::Address,
+    soroban_sdk::Address,
+) {
+    use crate::LiquifactEscrow;
+
+    let token = install_stellar_asset_token(env);
+    let escrow_id = env.register(LiquifactEscrow, ());
+    let client = LiquifactEscrowClient::new(env, &escrow_id);
+    let admin = soroban_sdk::Address::generate(env);
+    let sme = soroban_sdk::Address::generate(env);
+    let treasury = soroban_sdk::Address::generate(env);
+    let investor = soroban_sdk::Address::generate(env);
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(env, invoice_id),
+        &sme,
+        &target,
+        &800i64,
+        &0u64,
+        &token.id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    if fund_amount > 0 {
+        client.fund(&investor, &fund_amount);
+        assert_eq!(
+            client.get_escrow().status,
+            0u32,
+            "partial funding must keep escrow open"
+        );
+    }
+
+    (client, escrow_id, token, admin, investor)
+}
+
+/// Assert `cancel_funding` succeeds from open (status 0) and emits `fund_can`.
+#[test]
+fn test_cancel_funding_from_open_emits_fund_can_event() {
+    use crate::FundingCancelled;
+    use soroban_sdk::{symbol_short, testutils::Events};
+
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let partial = 250_000i128;
+    let target = 1_000_000i128;
+    let (client, escrow_id, _token, _admin, _investor) =
+        setup_open_escrow_with_token(&env, target, partial, "CANOPEN01");
+
+    let cancelled = client.cancel_funding();
+    assert_eq!(cancelled.status, 4u32, "open escrow must transition to cancelled");
+
+    let expected_xdr = FundingCancelled {
+        name: symbol_short!("fund_can"),
+        invoice_id: cancelled.invoice_id.clone(),
+        funded_amount: partial,
+    }
+    .to_xdr(&env, &escrow_id);
+
+    let found = env
+        .events()
+        .all()
+        .filter_by_contract(&escrow_id)
+        .events()
+        .iter()
+        .any(|e| *e == expected_xdr);
+    assert!(found, "FundingCancelled (fund_can) event must be emitted");
+}
+
+/// Assert `cancel_funding` requires admin authorization.
+#[test]
+#[should_panic]
+fn test_cancel_funding_requires_admin_auth_integration() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _escrow_id, _token, _admin, _investor) =
+        setup_open_escrow_with_token(&env, 1_000_000i128, 0, "CANAUTH01");
+    env.mock_auths(&[]);
+    client.cancel_funding();
+}
+
+/// Assert `cancel_funding` is rejected from funded state (status 1).
+#[test]
+fn test_cancel_funding_rejected_from_funded_state() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let target = 500_000i128;
+    let (client, _escrow_id, _token, _sme) =
+        setup_withdraw_with_token(&env, target, "CANFUND01");
+    assert_eq!(client.get_escrow().status, 1u32);
+
+    assert_contract_error(
+        client.try_cancel_funding(),
+        EscrowError::CancelFundingNotOpen,
+    );
+}
+
+/// Assert `cancel_funding` is rejected from settled state (status 2).
+#[test]
+fn test_cancel_funding_rejected_from_settled_state() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let target = 500_000i128;
+    let (client, _escrow_id, _token, _sme) =
+        setup_withdraw_with_token(&env, target, "CANSET01");
+    client.settle();
+    assert_eq!(client.get_escrow().status, 2u32);
+
+    assert_contract_error(
+        client.try_cancel_funding(),
+        EscrowError::CancelFundingNotOpen,
+    );
+}
+
+/// Assert `cancel_funding` is rejected from withdrawn state (status 3).
+#[test]
+fn test_cancel_funding_rejected_from_withdrawn_state() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let target = 500_000i128;
+    let (client, _escrow_id, _token, _sme) =
+        setup_withdraw_with_token(&env, target, "CANWD01");
+    client.withdraw();
+    assert_eq!(client.get_escrow().status, 3u32);
+
+    assert_contract_error(
+        client.try_cancel_funding(),
+        EscrowError::CancelFundingNotOpen,
+    );
+}
+
+/// Assert a second `cancel_funding` on an already-cancelled escrow is rejected.
+#[test]
+fn test_cancel_funding_rejected_when_already_cancelled() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, _escrow_id, _token, _admin, _investor) =
+        setup_open_escrow_with_token(&env, 1_000_000i128, 0, "CANCAN01");
+    client.cancel_funding();
+    assert_eq!(client.get_escrow().status, 4u32);
+
+    assert_contract_error(
+        client.try_cancel_funding(),
+        EscrowError::CancelFundingNotOpen,
+    );
+}
+
+/// End-to-end: cancel from open unlocks `refund` and keeps `settle`/`withdraw` blocked.
+///
+/// Security note: a funded SME path (status 1+) must never be cancellable, or the SME
+/// could be deprived of liquidity it is owed.
+#[test]
+fn test_cancel_funding_transition_matrix_and_refund_unlock() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let target = 2_000_000i128;
+    let fund_amount = 400_000i128;
+    let (client, escrow_id, token, _admin, investor) =
+        setup_open_escrow_with_token(&env, target, fund_amount, "CANLIFE01");
+
+    // 1. Cancel from open succeeds.
+    let cancelled = client.cancel_funding();
+    assert_eq!(cancelled.status, 4u32);
+    assert_eq!(cancelled.funded_amount, fund_amount);
+
+    // 2. SME disbursement paths remain blocked in cancelled state.
+    assert_contract_error(
+        client.try_settle(),
+        EscrowError::SettlementNotFunded,
+    );
+    assert_contract_error(
+        client.try_withdraw(),
+        EscrowError::WithdrawalNotFunded,
+    );
+
+    // 3. Refund becomes available for the investor.
+    token.stellar.mint(&escrow_id, &fund_amount);
+    let before = token.token.balance(&investor);
+    client.refund(&investor);
+    assert_eq!(token.token.balance(&investor) - before, fund_amount);
+    assert!(client.is_investor_refunded(&investor));
+
+    // 4. Funded escrow on a separate instance cannot be cancelled (SME liquidity guard).
+    let (funded_client, _, _, _) =
+        setup_withdraw_with_token(&env, target, "CANLIFE02");
+    assert_eq!(funded_client.get_escrow().status, 1u32);
+    assert_contract_error(
+        funded_client.try_cancel_funding(),
+        EscrowError::CancelFundingNotOpen,
+    );
+}
+
 /// Cancel -> partial refund -> sweep liability-floor lifecycle.
 ///
 /// Steps:
