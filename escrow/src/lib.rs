@@ -245,6 +245,10 @@ pub enum EscrowError {
     PrimaryAttestationAlreadyBound = 50,
     /// [`LiquifactEscrow::append_attestation_digest`] exceeded [`MAX_ATTESTATION_APPEND_ENTRIES`].
     AttestationAppendLogCapacityReached = 51,
+    /// [`LiquifactEscrow::revoke_attestation_digest`] received an `index >= log.len()`.
+    AttestationIndexOutOfRange = 52,
+    /// [`LiquifactEscrow::revoke_attestation_digest`] called on an already-revoked index.
+    AttestationAlreadyRevoked = 53,
 
     /// [`LiquifactEscrow::record_sme_collateral_commitment`] received a non-positive amount.
     CollateralAmountNotPositive = 60,
@@ -365,7 +369,7 @@ pub enum EscrowError {
     NoPendingAdmin = 163,
     /// The contract's funding-token balance is less than `funded_amount` at withdraw time.
     /// Funds must be custodied in this contract before the SME can pull them.
-    InsufficientContractBalance = 164,
+    InsufficientContractBalance = 165,
 }
 
 #[inline(always)]
@@ -1708,12 +1712,17 @@ impl LiquifactEscrow {
             .instance()
             .get(&DataKey::AttestationAppendLog)
             .unwrap_or_else(|| Vec::new(&env));
-        assert!(index < log.len(), "attestation index out of range");
-        assert!(
+        ensure(
+            &env,
+            index < log.len(),
+            EscrowError::AttestationIndexOutOfRange,
+        );
+        ensure(
+            &env,
             !env.storage()
                 .instance()
                 .has(&DataKey::AttestationRevoked(index)),
-            "attestation already revoked at index"
+            EscrowError::AttestationAlreadyRevoked,
         );
 
         env.storage()
@@ -2209,11 +2218,7 @@ impl LiquifactEscrow {
         let n = entries.len();
 
         ensure(&env, n > 0, EscrowError::FundingBatchEmpty);
-        ensure(
-            &env,
-            n <= MAX_FUND_BATCH,
-            EscrowError::FundingBatchTooLarge,
-        );
+        ensure(&env, n <= MAX_FUND_BATCH, EscrowError::FundingBatchTooLarge);
 
         let mut escrow = Self::get_escrow(env.clone());
 

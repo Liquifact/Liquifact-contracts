@@ -63,7 +63,7 @@ the event stream.
 | Property | Value |
 |---|---|
 | Auth | `InvoiceEscrow::admin` |
-| Write policy | **Single-write per index** — panics if `index` is already revoked |
+| Write policy | **Single-write per index** — returns `AttestationAlreadyRevoked` (53) if index is already revoked |
 | Storage key | `DataKey::AttestationRevoked(u32)` |
 | Event | `AttestationDigestRevoked { invoice_id, index }` |
 
@@ -74,8 +74,34 @@ entry as replaced or invalidated.
 Intended for corrective compliance flows: a KYC/KYB bundle was updated and the old anchor must
 be flagged as superseded while the full history stays on-chain.
 
-**Panics** if `index >= log.len()` (out of range) or if the index has already been revoked
-(double-revocation guard).
+**Typed errors** (not panic strings) are returned in all error cases:
+
+| Condition | Error code | `EscrowError` variant |
+|---|---|---|
+| `index >= log.len()` | 52 | `AttestationIndexOutOfRange` |
+| index already revoked | 53 | `AttestationAlreadyRevoked` |
+
+#### SDK numeric error handling
+
+SDKs must branch on `ContractError(code)`, not on panic strings. Panic strings are unstable
+across contract versions; numeric codes are append-only and stable. Example:
+
+```typescript
+try {
+  await contract.revoke_attestation_digest({ index: 5 });
+} catch (e) {
+  if (e.code === 52) { /* index out of range */ }
+  if (e.code === 53) { /* already revoked */   }
+}
+```
+
+#### Why panic strings were removed
+
+Prior to this change, `revoke_attestation_digest` used `assert!` with human-readable strings.
+This was inconsistent with the rest of the attestation API (codes 50–51) and with the broader
+`EscrowError` contract. Raw panic strings cannot be caught by type in SDKs or indexers and may
+change without notice. Stable numeric codes allow SDK consumers to branch deterministically on
+`ContractError(52)` / `ContractError(53)` without parsing message text.
 
 ---
 
