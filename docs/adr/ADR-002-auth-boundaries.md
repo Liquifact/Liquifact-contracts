@@ -25,7 +25,7 @@ Multiple principals interact with the escrow (admin, SME, investors, treasury). 
 | `accept_admin` | pending admin stored in `DataKey::PendingAdmin` |
 | `record_sme_collateral_commitment` | `sme_address` |
 
-`admin` and `treasury` are stored at `init`; `treasury` is immutable, while `admin` rotates only through a two-step handover. The current admin calls `propose_admin(new_admin)`, which stores `DataKey::PendingAdmin` without changing authority. The pending address must then call `accept_admin()`, which requires its own authorization, promotes it into `InvoiceEscrow::admin`, and clears `DataKey::PendingAdmin`. The deprecated `transfer_admin` shim must not be treated as an immediate transfer; it only creates the pending proposal.
+`admin` and `treasury` are stored at `init`; `treasury` is immutable, while `admin` rotates only through a two-step handover. The current admin calls `propose_admin(new_admin, validity_window_secs)`, which stores `DataKey::PendingAdmin` and `DataKey::PendingAdminExpiry` (`ledger.timestamp() + window`, default 7 days) without changing authority. The pending address must then call `accept_admin()` before expiry; after the deadline the proposal is rejected with `AdminProposalExpired`. On success, `accept_admin()` requires its own authorization, promotes the successor into `InvoiceEscrow::admin`, and clears both pending keys. The deprecated `transfer_admin` shim must not be treated as an immediate transfer; it only creates the pending proposal with the default window.
 
 There is no superuser that can act as all roles simultaneously unless the same key is used for multiple roles — which is a deployment concern, not a contract concern.
 
@@ -36,7 +36,7 @@ There is no superuser that can act as all roles simultaneously unless the same k
 - Treasury auth on `sweep_terminal_dust` means the admin cannot drain the contract as "dust" unless it is also the treasury.
 - Legal hold can only be set/cleared by admin, so governance controls compliance freezes.
 - Admin authority changes only after both the current admin and successor have authorized. A typo in `new_admin` can be corrected by a new `propose_admin` call and does not lock admin-gated paths.
-- `DataKey::PendingAdmin` is cleared after successful acceptance so stale proposals cannot be reused.
+- `DataKey::PendingAdmin` and `DataKey::PendingAdminExpiry` are cleared after successful acceptance or cancellation so stale proposals cannot be reused.
 
 ## Rejected alternatives
 

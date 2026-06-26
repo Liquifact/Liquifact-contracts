@@ -1,5 +1,7 @@
 use super::*;
-use crate::{AdminProposalCancelled, AdminProposedEvent, EscrowCloseSnapshot, FundingTargetUpdated};
+use crate::{
+    AdminProposalCancelled, AdminProposedEvent, EscrowCloseSnapshot, FundingTargetUpdated,
+};
 use soroban_sdk::Event;
 
 // Admin/governance operations: target changes, maturity changes, admin handover,
@@ -109,7 +111,7 @@ fn test_propose_admin_sets_pending_without_changing_admin() {
         &None,
         &None,
     );
-    let pending = client.propose_admin(&new_admin);
+    let pending = client.propose_admin(&new_admin, &None);
     assert_eq!(pending, new_admin);
     assert_eq!(client.get_pending_admin(), Some(new_admin));
     assert_eq!(client.get_escrow().admin, admin);
@@ -138,7 +140,7 @@ fn test_accept_admin_promotes_pending_and_clears_pending() {
         &None,
     );
 
-    client.propose_admin(&new_admin);
+    client.propose_admin(&new_admin, &None);
     let updated = client.accept_admin();
     assert_eq!(updated.admin, new_admin);
     assert_eq!(client.get_escrow().admin, new_admin);
@@ -196,7 +198,7 @@ fn test_transfer_admin_same_address_panics() {
         &None,
         &None,
     );
-    client.propose_admin(&admin);
+    client.propose_admin(&admin, &None);
 }
 
 #[test]
@@ -206,7 +208,7 @@ fn test_transfer_admin_uninitialized_panics() {
     env.mock_all_auths();
     let client = deploy(&env);
     let new_admin = Address::generate(&env);
-    client.propose_admin(&new_admin);
+    client.propose_admin(&new_admin, &None);
 }
 
 #[test]
@@ -226,7 +228,7 @@ fn test_accept_admin_requires_pending_admin_auth() {
     let (client, admin, sme) = setup(&env);
     let new_admin = Address::generate(&env);
     default_init(&client, &env, &admin, &sme);
-    client.propose_admin(&new_admin);
+    client.propose_admin(&new_admin, &None);
     env.mock_auths(&[]);
     client.accept_admin();
 }
@@ -239,8 +241,8 @@ fn test_propose_admin_overwrites_prior_pending() {
     let second = Address::generate(&env);
     default_init(&client, &env, &admin, &sme);
 
-    client.propose_admin(&first);
-    client.propose_admin(&second);
+    client.propose_admin(&first, &None);
+    client.propose_admin(&second, &None);
 
     assert_eq!(client.get_pending_admin(), Some(second.clone()));
     let updated = client.accept_admin();
@@ -257,7 +259,7 @@ fn test_propose_admin_emits_event() {
     let new_admin = Address::generate(&env);
     default_init(&client, &env, &admin, &sme);
 
-    client.propose_admin(&new_admin);
+    client.propose_admin(&new_admin, &None);
 
     assert_eq!(
         env.events().all().events().last().unwrap().clone(),
@@ -1169,7 +1171,7 @@ fn auth_audit_propose_admin_requires_current_admin() {
     let (client, _, _, _, _) = auth_audit_init_funded(&env);
     let new_admin = Address::generate(&env);
     env.mock_auths(&[]);
-    client.propose_admin(&new_admin);
+    client.propose_admin(&new_admin, &None);
 }
 
 #[test]
@@ -1177,7 +1179,7 @@ fn auth_audit_propose_admin_requires_current_admin() {
 fn auth_audit_accept_admin_requires_pending_admin() {
     let env = Env::default();
     let (client, _, _, _, pending_admin) = auth_audit_init_funded(&env);
-    client.propose_admin(&pending_admin);
+    client.propose_admin(&pending_admin, &None);
     env.mock_auths(&[]);
     client.accept_admin();
 }
@@ -1529,12 +1531,14 @@ fn test_cancel_pending_admin_clears_pending() {
     let new_admin = Address::generate(&env);
     default_init(&client, &env, &admin, &sme);
 
-    client.propose_admin(&new_admin);
+    client.propose_admin(&new_admin, &None);
     assert_eq!(client.get_pending_admin(), Some(new_admin.clone()));
+    assert!(client.get_pending_admin_expiry().is_some());
 
     let cancelled = client.cancel_pending_admin();
     assert_eq!(cancelled, new_admin);
     assert_eq!(client.get_pending_admin(), None);
+    assert_eq!(client.get_pending_admin_expiry(), None);
     // Existing admin must remain unchanged.
     assert_eq!(client.get_escrow().admin, admin);
 }
@@ -1548,7 +1552,7 @@ fn test_accept_after_cancel_panics() {
     let new_admin = Address::generate(&env);
     default_init(&client, &env, &admin, &sme);
 
-    client.propose_admin(&new_admin);
+    client.propose_admin(&new_admin, &None);
     client.cancel_pending_admin();
     // DataKey::PendingAdmin no longer exists — accept_admin must panic.
     client.accept_admin();
@@ -1575,7 +1579,7 @@ fn test_cancel_non_admin_panics() {
     let new_admin = Address::generate(&env);
     default_init(&client, &env, &admin, &sme);
 
-    client.propose_admin(&new_admin);
+    client.propose_admin(&new_admin, &None);
     // Strip all authorizations — cancel requires admin auth.
     env.mock_auths(&[]);
     client.cancel_pending_admin();
@@ -1593,7 +1597,7 @@ fn test_cancel_pending_admin_emits_event() {
     let new_admin = Address::generate(&env);
     default_init(&client, &env, &admin, &sme);
 
-    client.propose_admin(&new_admin);
+    client.propose_admin(&new_admin, &None);
     client.cancel_pending_admin();
 
     assert_eq!(
@@ -1616,16 +1620,137 @@ fn test_cancel_then_repropose_succeeds() {
     let second = Address::generate(&env);
     default_init(&client, &env, &admin, &sme);
 
-    client.propose_admin(&first);
+    client.propose_admin(&first, &None);
     client.cancel_pending_admin();
     assert_eq!(client.get_pending_admin(), None);
 
     // Re-propose with a different address — must succeed.
-    client.propose_admin(&second);
+    client.propose_admin(&second, &None);
     assert_eq!(client.get_pending_admin(), Some(second.clone()));
 
     // Full handover should still work after re-propose.
     let updated = client.accept_admin();
     assert_eq!(updated.admin, second);
     assert_eq!(client.get_pending_admin(), None);
+}
+
+// ── admin proposal expiry (issue #462) ────────────────────────────────────────
+
+/// `propose_admin` must persist `PendingAdminExpiry` using the default window.
+#[test]
+fn test_propose_admin_stores_default_expiry() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let new_admin = Address::generate(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    let now = env.ledger().timestamp();
+    client.propose_admin(&new_admin, &None);
+
+    assert_eq!(
+        client.get_pending_admin_expiry(),
+        Some(now + crate::DEFAULT_ADMIN_PROPOSAL_VALIDITY_SECS)
+    );
+}
+
+/// A custom validity window must be honored when computing expiry.
+#[test]
+fn test_propose_admin_stores_custom_expiry_window() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let new_admin = Address::generate(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    let now = env.ledger().timestamp();
+    client.propose_admin(&new_admin, &Some(3600u64));
+
+    assert_eq!(client.get_pending_admin_expiry(), Some(now + 3600));
+}
+
+/// Acceptance before expiry must succeed.
+#[test]
+fn test_accept_admin_before_expiry_succeeds() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let new_admin = Address::generate(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    client.propose_admin(&new_admin, &Some(100u64));
+    let expiry = client.get_pending_admin_expiry().unwrap();
+    env.ledger().with_mut(|l| l.timestamp = expiry - 1);
+
+    let updated = client.accept_admin();
+    assert_eq!(updated.admin, new_admin);
+    assert_eq!(client.get_pending_admin_expiry(), None);
+}
+
+/// Acceptance exactly at expiry (inclusive boundary) must succeed.
+#[test]
+fn test_accept_admin_exactly_at_expiry_succeeds() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let new_admin = Address::generate(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    client.propose_admin(&new_admin, &Some(100u64));
+    let expiry = client.get_pending_admin_expiry().unwrap();
+    env.ledger().with_mut(|l| l.timestamp = expiry);
+
+    let updated = client.accept_admin();
+    assert_eq!(updated.admin, new_admin);
+}
+
+/// Acceptance one second past expiry must return `AdminProposalExpired`.
+#[test]
+fn test_accept_admin_one_second_past_expiry_fails() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let new_admin = Address::generate(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    client.propose_admin(&new_admin, &Some(100u64));
+    let expiry = client.get_pending_admin_expiry().unwrap();
+    env.ledger().with_mut(|l| l.timestamp = expiry + 1);
+
+    assert_contract_error(client.try_accept_admin(), EscrowError::AdminProposalExpired);
+    assert_eq!(client.get_pending_admin(), Some(new_admin));
+    assert_eq!(client.get_escrow().admin, admin);
+}
+
+/// An expired proposal does not block a fresh `propose_admin` + `accept_admin`.
+#[test]
+fn test_repropose_after_expiry_succeeds() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let stale = Address::generate(&env);
+    let fresh = Address::generate(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    client.propose_admin(&stale, &Some(50u64));
+    let expiry = client.get_pending_admin_expiry().unwrap();
+    env.ledger().with_mut(|l| l.timestamp = expiry + 1);
+    assert_contract_error(client.try_accept_admin(), EscrowError::AdminProposalExpired);
+
+    client.propose_admin(&fresh, &Some(200u64));
+    assert_eq!(client.get_pending_admin(), Some(fresh.clone()));
+
+    let updated = client.accept_admin();
+    assert_eq!(updated.admin, fresh);
+    assert_eq!(client.get_pending_admin_expiry(), None);
+}
+
+/// `cancel_pending_admin` before expiry must clear both pending address and expiry.
+#[test]
+fn test_cancel_before_expiry_clears_expiry() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let new_admin = Address::generate(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    client.propose_admin(&new_admin, &Some(500u64));
+    assert!(client.get_pending_admin_expiry().is_some());
+
+    client.cancel_pending_admin();
+    assert_eq!(client.get_pending_admin(), None);
+    assert_eq!(client.get_pending_admin_expiry(), None);
 }

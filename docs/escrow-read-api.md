@@ -227,3 +227,18 @@ Returns a paginated list of investor addresses who have contributed to the escro
 - **Bounded limit** — the `limit` parameter is capped internally (at 50) to prevent CPU/memory resource exhaustion.
 - **Legacy Compatibility (ADR-007)** — returns an empty vector for legacy contracts deployed before the introduction of the investor index, ensuring backward compatibility.
 
+---
+
+## Admin handover views
+
+### `get_pending_admin() → Option<Address>`
+
+**Storage key:** `DataKey::PendingAdmin`
+
+Returns the proposed successor admin waiting for `accept_admin`, or `None` when no handover is in progress.
+
+### `get_pending_admin_expiry() → Option<u64>`
+
+**Storage key:** `DataKey::PendingAdminExpiry`
+
+Returns the ledger timestamp after which `accept_admin` rejects with `AdminProposalExpired` (code 85). Acceptance is allowed while `ledger.timestamp() <= expiry` (inclusive). Absent when no proposal is active.

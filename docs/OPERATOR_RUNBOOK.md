@@ -429,8 +429,9 @@ expose that entrypoint, so operators should use redeploy for new WASM.
 
 If you proposed the wrong successor, or the handover is being abandoned before
 `accept_admin` is called, use `cancel_pending_admin` to retract the nomination.
-Until cancelled, the proposed address can call `accept_admin` at any future
-ledger — leaving the pending key live is a standing key-rotation risk.
+Until cancelled or expired, the proposed address can call `accept_admin` while
+`ledger.timestamp() <= PendingAdminExpiry`. After expiry, `accept_admin` returns
+`AdminProposalExpired` (code 85); call `propose_admin` again to nominate a fresh successor.
 
 ```bash
 # Cancel an unaccepted handover — requires current admin authorization.
@@ -443,7 +444,7 @@ stellar contract invoke \
 
 | State | Effect |
 |-------|--------|
-| `DataKey::PendingAdmin` present | Removed; `accept_admin` will now fail with `NoPendingAdmin` (code 163). |
+| `DataKey::PendingAdmin` present | Removed along with `PendingAdminExpiry`; `accept_admin` will now fail with `NoPendingAdmin` (code 163). |
 | `DataKey::PendingAdmin` absent | Panics with `NoPendingAdmin` (code 163) — nothing to cancel. |
 
 The current `InvoiceEscrow::admin` is **unchanged**. The operator may call

@@ -13,8 +13,8 @@ Every state-mutating entrypoint and the identity required to authorize it.
 | Entrypoint | Required signer | Auth call site | Notes |
 |---|---|---|---|
 | `init` | `admin` (caller-supplied) | `admin.require_auth()` | One-time; panics if escrow exists |
-| `propose_admin` | current `escrow.admin` | `escrow.admin.require_auth()` | `new_admin` must differ; writes `DataKey::PendingAdmin` only |
-| `accept_admin` | `DataKey::PendingAdmin` | `pending.require_auth()` | Promotes pending address into `escrow.admin`; clears pending key |
+| `propose_admin` | current `escrow.admin` | `escrow.admin.require_auth()` | `new_admin` must differ; writes `DataKey::PendingAdmin` and `DataKey::PendingAdminExpiry` |
+| `accept_admin` | `DataKey::PendingAdmin` | `pending.require_auth()` | Promotes pending address into `escrow.admin`; rejects when past `PendingAdminExpiry`; clears both pending keys |
 | `update_maturity` | `escrow.admin` | `escrow.admin.require_auth()` | Only in `status == 0` |
 | `update_funding_target` | `escrow.admin` | `escrow.admin.require_auth()` | Only in `status == 0`; `new_target >= funded_amount` |
 | `set_legal_hold` / `clear_legal_hold` | `escrow.admin` | `escrow.admin.require_auth()` | No timelock; no multisig enforced on-chain |

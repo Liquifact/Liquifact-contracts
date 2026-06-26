@@ -751,6 +751,8 @@ stellar contract invoke \
 
 **Auth required:** current `admin`.
 
+Optional `validity_window_secs` sets how long the proposal remains acceptable. When omitted, the contract uses `DEFAULT_ADMIN_PROPOSAL_VALIDITY_SECS` (7 days). Expiry is stored at `DataKey::PendingAdminExpiry` as `ledger.timestamp() + window`.
+
 ```bash
 NEW_ADMIN="GNEWADMIN..."
 
@@ -759,12 +761,13 @@ stellar contract invoke \
   --source admin \
   --network local \
   -- propose_admin \
-  --new_admin "$NEW_ADMIN"
+  --new_admin "$NEW_ADMIN" \
+  --validity_window_secs 604800
 ```
 
 ### `accept_admin`
 
-**Auth required:** pending admin from `propose_admin`.
+**Auth required:** pending admin from `propose_admin`. Must be called while `ledger.timestamp() <= PendingAdminExpiry`; otherwise `AdminProposalExpired` (code 85).
 
 ```bash
 stellar contract invoke \

@@ -157,6 +157,12 @@ pub const MAX_DUST_SWEEP_AMOUNT: i128 = 100_000_000;
 /// Maximum UTF-8 byte length for the invoice `String` at init (matches Soroban [`Symbol`] max).
 pub const MAX_INVOICE_ID_STRING_LEN: u32 = 32;
 
+/// Default validity window for [`LiquifactEscrow::propose_admin`] when no explicit window is supplied.
+///
+/// After `ledger.timestamp() + DEFAULT_ADMIN_PROPOSAL_VALIDITY_SECS`, [`LiquifactEscrow::accept_admin`]
+/// rejects the stale proposal with [`EscrowError::AdminProposalExpired`].
+pub const DEFAULT_ADMIN_PROPOSAL_VALIDITY_SECS: u64 = 604_800; // 7 days
+
 /// Minimum instance storage TTL extension horizon for time-sensitive escrow entries.
 ///
 /// `bump_ttl` extends instance-storage entries to avoid rent/archival edge cases when
@@ -279,6 +285,9 @@ pub enum EscrowError {
     MaturityUpdateNotOpen = 79,
     /// [`LiquifactEscrow::propose_admin`] nominated the current admin address.
     NewAdminSameAsCurrent = 80,
+    /// [`LiquifactEscrow::accept_admin`] called after the proposal expiry recorded at
+    /// [`DataKey::PendingAdminExpiry`]. Re-propose to nominate a fresh successor.
+    AdminProposalExpired = 85,
 
     /// [`LiquifactEscrow::migrate`] `from_version` does not match stored version.
     MigrationVersionMismatch = 90,
@@ -465,6 +474,10 @@ pub enum DataKey {
     /// Proposed successor admin waiting for [`LiquifactEscrow::accept_admin`].
     /// Absent ⇒ no pending handover. Cleared after successful acceptance.
     PendingAdmin,
+    /// Ledger timestamp (seconds) after which [`LiquifactEscrow::accept_admin`] rejects the
+    /// pending proposal. Written alongside [`DataKey::PendingAdmin`] on every
+    /// [`LiquifactEscrow::propose_admin`] call; cleared on acceptance or cancellation.
+    PendingAdminExpiry,
     /// Count of distinct investor addresses that have a non-zero [`DataKey::InvestorContribution`].
     /// Written as `0` at init; incremented once per new investor in `fund_impl`.
     UniqueFunderCount,
@@ -1210,6 +1223,12 @@ impl LiquifactEscrow {
     /// or [`None`] when no admin handover is in progress.
     pub fn get_pending_admin(env: Env) -> Option<Address> {
         env.storage().instance().get(&DataKey::PendingAdmin)
+    }
+
+    /// Returns the ledger timestamp after which [`LiquifactEscrow::accept_admin`] rejects the
+    /// current proposal, or [`None`] when no expiry is recorded (no handover in progress).
+    pub fn get_pending_admin_expiry(env: Env) -> Option<u64> {
+        env.storage().instance().get(&DataKey::PendingAdminExpiry)
     }
 
     /// Return whether this escrow has a configured maturity time lock.
@@ -2914,10 +2933,19 @@ impl LiquifactEscrow {
     ///
     /// Requires current admin authorization. The destination must differ from the current admin.
     ///
+    /// Persists [`DataKey::PendingAdminExpiry`] as `ledger.timestamp() + window`, where `window`
+    /// is `validity_window_secs` when supplied or [`DEFAULT_ADMIN_PROPOSAL_VALIDITY_SECS`] when
+    /// `None`. After that timestamp, [`LiquifactEscrow::accept_admin`] returns
+    /// [`EscrowError::AdminProposalExpired`].
+    ///
     /// # Errors
     /// Emits typed [`EscrowError`] codes when the escrow is uninitialized or `new_admin` is the
     /// current admin.
-    pub fn propose_admin(env: Env, new_admin: Address) -> Address {
+    pub fn propose_admin(
+        env: Env,
+        new_admin: Address,
+        validity_window_secs: Option<u64>,
+    ) -> Address {
         let escrow = Self::load_escrow_require_admin(&env);
 
         ensure(
@@ -2926,9 +2954,15 @@ impl LiquifactEscrow {
             EscrowError::NewAdminSameAsCurrent,
         );
 
+        let window = validity_window_secs.unwrap_or(DEFAULT_ADMIN_PROPOSAL_VALIDITY_SECS);
+        let expiry = env.ledger().timestamp().saturating_add(window);
+
         env.storage()
             .instance()
             .set(&DataKey::PendingAdmin, &new_admin);
+        env.storage()
+            .instance()
+            .set(&DataKey::PendingAdminExpiry, &expiry);
 
         AdminProposedEvent {
             name: symbol_short!("adm_prop"),
@@ -2944,12 +2978,25 @@ impl LiquifactEscrow {
     /// Accept a pending admin handover.
     ///
     /// The address stored in [`DataKey::PendingAdmin`] must authorize this call. On success it is
-    /// promoted into [`InvoiceEscrow::admin`] and the pending key is cleared, so admin authority
+    /// promoted into [`InvoiceEscrow::admin`] and the pending keys are cleared, so admin authority
     /// changes only after both the current admin and successor have explicitly authorized.
+    ///
+    /// When [`DataKey::PendingAdminExpiry`] is present, `ledger.timestamp()` must be `<=` the
+    /// stored expiry (inclusive). Otherwise [`EscrowError::AdminProposalExpired`] is returned.
     pub fn accept_admin(env: Env) -> InvoiceEscrow {
         let pending: Option<Address> = env.storage().instance().get(&DataKey::PendingAdmin);
         ensure(&env, pending.is_some(), EscrowError::NoPendingAdmin);
         let pending = pending.unwrap();
+
+        if let Some(expiry) = env
+            .storage()
+            .instance()
+            .get::<DataKey, u64>(&DataKey::PendingAdminExpiry)
+        {
+            let now = env.ledger().timestamp();
+            ensure(&env, now <= expiry, EscrowError::AdminProposalExpired);
+        }
+
         pending.require_auth();
 
         let mut escrow = Self::get_escrow(env.clone());
@@ -2957,6 +3004,9 @@ impl LiquifactEscrow {
 
         env.storage().instance().set(&DataKey::Escrow, &escrow);
         env.storage().instance().remove(&DataKey::PendingAdmin);
+        env.storage()
+            .instance()
+            .remove(&DataKey::PendingAdminExpiry);
 
         AdminTransferredEvent {
             name: symbol_short!("admin"),
@@ -2975,15 +3025,15 @@ impl LiquifactEscrow {
     /// [`LiquifactEscrow::accept_admin`] before admin authority changes.
     #[deprecated(note = "use propose_admin followed by accept_admin")]
     pub fn transfer_admin(env: Env, new_admin: Address) -> InvoiceEscrow {
-        Self::propose_admin(env.clone(), new_admin);
+        Self::propose_admin(env.clone(), new_admin, None);
         Self::get_escrow(env)
     }
 
     /// Cancel a pending admin handover proposal.
     ///
-    /// Removes [`DataKey::PendingAdmin`] so the previously nominated address can no longer
-    /// call [`LiquifactEscrow::accept_admin`]. The current admin address and all other escrow
-    /// state remain unchanged.
+    /// Removes [`DataKey::PendingAdmin`] and [`DataKey::PendingAdminExpiry`] so the previously
+    /// nominated address can no longer call [`LiquifactEscrow::accept_admin`]. The current admin
+    /// address and all other escrow state remain unchanged.
     ///
     /// # Authorization
     ///
@@ -3010,6 +3060,9 @@ impl LiquifactEscrow {
         let cancelled = pending.unwrap();
 
         env.storage().instance().remove(&DataKey::PendingAdmin);
+        env.storage()
+            .instance()
+            .remove(&DataKey::PendingAdminExpiry);
 
         AdminProposalCancelled {
             name: symbol_short!("adm_can"),
