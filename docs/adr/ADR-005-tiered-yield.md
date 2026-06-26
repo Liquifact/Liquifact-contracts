@@ -56,3 +56,11 @@ The state-machine rules above are verified in `escrow/src/tests/funding.rs`:
 | `test_commitment_zero_lock_follow_on_fund_no_claim_gate` | Follow-on `fund()` after zero-lock preserves both zero guards |
 | `test_fund_first_deposit_sets_base_yield_and_no_claim_gate` | Plain `fund()` first deposit → base yield, no claim gate |
 
+## Read API
+
+The tier table is readable after `init` via `get_yield_tiers() -> Vec<YieldTier>`.
+
+- Returns an empty `Vec` when no tiers were configured.
+- Returned order matches the validated non-decreasing ordering enforced at `init`.
+- Pure read — no auth required, no state mutation.
+- See `docs/escrow-read-api.md` for the full getter reference.

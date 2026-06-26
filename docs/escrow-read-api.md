@@ -213,3 +213,23 @@ A `#[contracttype]` enum representing the optional `FundingCloseSnapshot`:
 
 - `None` — Escrow is not yet funded; no close snapshot exists.
 - `Some(FundingCloseSnapshot)` — The pro-rata denominator snapshot captured when the escrow first transitioned to **funded**.
+
+---
+
+## `get_yield_tiers() → Vec<YieldTier>`
+
+**Storage key:** `DataKey::YieldTierTable`
+
+Returns the yield-tier ladder configured at `init`, or an empty `Vec` when no tiers were configured (base yield applies to all investors).
+
+- **Immutable** — set once at `init`; the contract never mutates this key after initialization.
+- **Order** — returned order matches the validated non-decreasing ordering enforced at `init`: `min_lock_secs` strictly increasing, `yield_bps` non-decreasing.
+- **Empty vec** — returned for both "no tiers passed at init" and "legacy instance predating tier support"; callers must not treat an empty result as an error.
+- **Pure read** — no auth required, no state mutation.
+
+### `YieldTier` fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `min_lock_secs` | `u64` | Minimum `committed_lock_secs` an investor must pass to qualify for this tier |
+| `yield_bps` | `i64` | Effective annualized yield in basis points for qualifying investors |

@@ -943,7 +943,35 @@ impl LiquifactEscrow {
             .get(&DataKey::Treasury)
             .unwrap_or_else(|| fail(env, EscrowError::TreasuryNotSet))
     }
-
+/// Validates the optional yield-tier table supplied at `init`.
+    ///
+    /// # Rules
+    ///
+    /// | Rule | Error |
+    /// |------|-------|
+    /// | Each `yield_bps` in `0..=10_000` | `TierYieldOutOfRange` |
+    /// | Each `yield_bps >= base_yield` | `TierYieldBelowBase` |
+    /// | `min_lock_secs` strictly increasing across tiers | `TierLockNotIncreasing` |
+    /// | `yield_bps` non-decreasing across tiers | `TierYieldNotNonDecreasing` |
+    ///
+    /// # Accepted example
+    /// ```text
+    /// base_yield = 800 bps
+    /// tiers = [(min_lock=100, yield=900), (min_lock=200, yield=1000)]
+    /// valid: locks increase (100 < 200), yields non-decrease (900 <= 1000), both >= 800
+    /// ```
+    ///
+    /// # Rejected examples
+    /// ```text
+    /// tiers = [(min_lock=200, yield=900), (min_lock=100, yield=1000)]
+    /// TierLockNotIncreasing: 200 > 100
+    ///
+    /// tiers = [(min_lock=100, yield=700)]
+    /// TierYieldBelowBase: 700 < 800
+    ///
+    /// tiers = [(min_lock=100, yield=1000), (min_lock=200, yield=900)]
+    /// TierYieldNotNonDecreasing: 1000 > 900
+    /// ```
     fn validate_yield_tiers_table(env: &Env, tiers: &Option<Vec<YieldTier>>, base_yield: i64) {
         let Some(tiers) = tiers else {
             return;
@@ -980,10 +1008,22 @@ impl LiquifactEscrow {
         }
     }
 
-    /// Returns `(effective_yield_bps, matched_lock_secs)` for a given commitment.
-    /// `matched_lock_secs` is the [`YieldTier::min_lock_secs`] of the best matching tier,
-    /// or `0` when no tier was matched (base yield applies).
+   /// Returns `(effective_yield_bps, matched_lock_secs)` for a given commitment.
+    ///
+    /// Scans [`DataKey::YieldTierTable`] and picks the tier with the highest `yield_bps`
+    /// where `committed_lock_secs >= tier.min_lock_secs`. Returns base yield when:
+    /// `committed_lock_secs == 0`, no tier table exists, or table is empty.
+    ///
+    /// Example with `base=800, tiers=[(100,900),(200,1000),(300,1200)]`:
+    /// - lock=50  -> (800, 0)    no tier matched
+    /// - lock=100 -> (900, 100)  tier 0
+    /// - lock=250 -> (1000, 200) tier 1
+    /// - lock=300 -> (1200, 300) tier 2 (highest)
+    ///
+    /// `matched_lock_secs` is the `min_lock_secs` of the matched tier, or `0` for base yield.
     fn effective_yield_for_commitment(
+    
+    
         env: &Env,
         base_yield: i64,
         committed_lock_secs: u64,
@@ -1683,6 +1723,16 @@ impl LiquifactEscrow {
     /// Earliest ledger timestamp for [`LiquifactEscrow::claim_investor_payout`]; `0` if not gated.
     pub fn get_investor_claim_not_before(env: Env, investor: Address) -> u64 {
         Self::get_persistent_investor_claim_not_before(&env, investor)
+    }
+    /// Returns the yield-tier table configured at `init`.
+    /// Returns an empty `Vec` when no tiers were configured.
+    /// Order matches the validated non-decreasing ordering enforced at `init`.
+    /// Pure read — no auth required, no state mutation.
+    pub fn get_yield_tiers(env: Env) -> Vec<YieldTier> {
+        env.storage()
+            .instance()
+            .get::<DataKey, Vec<YieldTier>>(&DataKey::YieldTierTable)
+            .unwrap_or_else(|| Vec::new(&env))
     }
 
     /// Retrieve the currently recorded SME collateral commitment metadata from storage.
@@ -2614,6 +2664,13 @@ impl LiquifactEscrow {
     /// 5. `not_before` ledger-time gate (see `docs/escrow-ledger-time.md`).
     /// 6. Idempotent early-return on `InvestorClaimed`.
     /// 7. Storage write + event emit.
+    ///
+   /// # Claim-lock enforcement
+    /// `InvestorClaimNotBefore = deposit_timestamp + committed_lock_secs`.
+    /// Enforces `now >= not_before` (inclusive boundary):
+    /// - deposit at t=1000, lock=500 -> not_before=1500
+    /// - claim at t=1499 -> InvestorCommitmentLockNotExpired
+    /// - claim at t=1500 -> succeeds
     ///
     /// # Errors
     /// Emits typed [`EscrowError`] codes for legal hold, missing contribution, unsettled escrow,
