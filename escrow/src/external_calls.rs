@@ -166,6 +166,9 @@ pub fn transfer_funding_token_with_balance_checks(
 ///
 /// Emits typed [`EscrowError`] codes if `amount` is not positive, investor balance is insufficient,
 /// balance deltas do not equal `amount`, or balance delta calculation underflows.
+///
+/// See `docs/escrow-token-safety.md` for the threat model, residual assumptions, and the
+/// complete outbound/inbound wrapper error mapping used by integrators and auditors.
 pub fn transfer_funding_token_inbound_with_balance_checks(
     env: &Env,
     token_addr: &Address,

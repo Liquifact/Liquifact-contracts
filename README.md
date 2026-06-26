@@ -243,6 +243,9 @@ for supported token assumptions, explicit unsupported token warnings, and the
 integration-layer responsibilities required when this contract interacts with
 external token contracts.
 
+For the wrapper-level threat model and typed error mapping, see
+[`docs/escrow-token-safety.md`](docs/escrow-token-safety.md).
+
 ---
 
 ## SME collateral metadata
