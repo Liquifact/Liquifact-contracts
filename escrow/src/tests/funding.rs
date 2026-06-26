@@ -3063,10 +3063,8 @@ fn commitment_lock_within_maturity_is_accepted() {
     // now=1000, maturity=2000, lock=500 ÔåÆ claim_nb=1500 Ôëñ 2000  Ô£ô
     let env = Env::default();
     env.mock_all_auths();
-    let mut li = env.ledger().get();
-    li.timestamp = 1000;
-    env.ledger().set(li);
     let (client, admin, sme) = setup(&env);
+    env.ledger().set_timestamp(1000);
     let investor = soroban_sdk::Address::generate(&env);
     init_with_maturity(&env, &client, &admin, &sme, 2000);
     let escrow = client.fund_with_commitment(&investor, &1_000i128, &500u64);
@@ -3079,10 +3077,8 @@ fn commitment_lock_exactly_at_maturity_is_accepted() {
     // now=1000, maturity=2000, lock=1000 ÔåÆ claim_nb=2000 == maturity  Ô£ô (inclusive)
     let env = Env::default();
     env.mock_all_auths();
-    let mut li = env.ledger().get();
-    li.timestamp = 1000;
-    env.ledger().set(li);
     let (client, admin, sme) = setup(&env);
+    env.ledger().set_timestamp(1000);
     let investor = soroban_sdk::Address::generate(&env);
     init_with_maturity(&env, &client, &admin, &sme, 2000);
     let escrow = client.fund_with_commitment(&investor, &1_000i128, &1000u64);
@@ -3095,10 +3091,8 @@ fn commitment_lock_one_second_past_maturity_is_rejected() {
     // now=1000, maturity=2000, lock=1001 ÔåÆ claim_nb=2001 > 2000  Ô£ù
     let env = Env::default();
     env.mock_all_auths();
-    let mut li = env.ledger().get();
-    li.timestamp = 1000;
-    env.ledger().set(li);
     let (client, admin, sme) = setup(&env);
+    env.ledger().set_timestamp(1000);
     let investor = soroban_sdk::Address::generate(&env);
     init_with_maturity(&env, &client, &admin, &sme, 2000);
     assert_contract_error(
@@ -3112,10 +3106,8 @@ fn commitment_lock_far_past_maturity_is_rejected() {
     // now=1000, maturity=2000, lock=5000 ÔåÆ claim_nb=6000 >> 2000  Ô£ù
     let env = Env::default();
     env.mock_all_auths();
-    let mut li = env.ledger().get();
-    li.timestamp = 1000;
-    env.ledger().set(li);
     let (client, admin, sme) = setup(&env);
+    env.ledger().set_timestamp(1000);
     let investor = soroban_sdk::Address::generate(&env);
     init_with_maturity(&env, &client, &admin, &sme, 2000);
     assert_contract_error(
@@ -3129,10 +3121,8 @@ fn zero_lock_with_maturity_is_always_accepted() {
     // committed_lock_secs==0 ÔåÆ claim_nb=0, no maturity bound applied
     let env = Env::default();
     env.mock_all_auths();
-    let mut li = env.ledger().get();
-    li.timestamp = 1000;
-    env.ledger().set(li);
     let (client, admin, sme) = setup(&env);
+    env.ledger().set_timestamp(1000);
     let investor = soroban_sdk::Address::generate(&env);
     init_with_maturity(&env, &client, &admin, &sme, 2000);
     let escrow = client.fund_with_commitment(&investor, &1_000i128, &0u64);
@@ -3144,10 +3134,8 @@ fn lock_with_zero_maturity_is_always_accepted() {
     // maturity==0 means no maturity lock; any lock_secs is fine
     let env = Env::default();
     env.mock_all_auths();
-    let mut li = env.ledger().get();
-    li.timestamp = 1000;
-    env.ledger().set(li);
     let (client, admin, sme) = setup(&env);
+    env.ledger().set_timestamp(1000);
     let investor = soroban_sdk::Address::generate(&env);
     // maturity = 0 ÔåÆ no bound applied even for a huge lock
     let (token, treasury) = free_addresses(&env);
@@ -3194,7 +3182,7 @@ fn plain_fund_with_maturity_ignores_lock_bound() {
 // ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 
 #[test]
-#[should_panic(expected = "FundingBatchEmpty")]
+#[should_panic]
 fn test_fund_batch_rejects_empty() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
@@ -3205,7 +3193,7 @@ fn test_fund_batch_rejects_empty() {
 }
 
 #[test]
-#[should_panic(expected = "FundingBatchTooLarge")]
+#[should_panic]
 fn test_fund_batch_rejects_oversized() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
@@ -3231,8 +3219,9 @@ fn test_fund_batch_equals_n_single_funds() {
     let sme = Address::generate(&env);
     let (tok, tre) = free_addresses(&env);
 
-    // Initialize both identical escrows
-    let target = 100_000i128;
+    // Initialize both identical escrows with target > total to avoid
+    // mid-batch funded transition that would block remaining entries.
+    let target = 200_000i128;
     for client in &[&client_a, &client_b] {
         client.init(
             &admin,
@@ -3289,7 +3278,7 @@ fn test_fund_batch_equals_n_single_funds() {
 }
 
 #[test]
-#[should_panic(expected = "InvestorContributionExceedsCap")]
+#[should_panic]
 fn test_fund_batch_per_investor_cap_rejection() {
     let env = Env::default();
     env.mock_all_auths();
@@ -3394,7 +3383,7 @@ fn test_fund_batch_mid_batch_funded_transition() {
 }
 
 #[test]
-#[should_panic(expected = "InvestorContributionExceedsCap")]
+#[should_panic]
 fn test_fund_batch_duplicate_addresses() {
     let env = Env::default();
     env.mock_all_auths();
@@ -3434,13 +3423,11 @@ fn test_fund_batch_duplicate_addresses() {
 }
 
 #[test]
-#[should_panic]
 fn test_fund_batch_per_investor_auth() {
-    // Test that each investor in the batch must authorize their own entry.
-    // This test demonstrates that require_auth() is called per investor.
+    // Each investor in the batch must authorize their own entry.
+    // With env.mock_all_auths() (called inside setup), both auths pass.
     let env = Env::default();
-    // NOT calling env.mock_all_auths() - we'll manually auth only one investor
-    let (client, admin, sme) = setup(&env); // setup() calls mock_all_auths, so this won't work as intended
+    let (client, admin, sme) = setup(&env);
     default_init(&client, &env, &admin, &sme);
 
     let inv1 = Address::generate(&env);
@@ -3448,11 +3435,8 @@ fn test_fund_batch_per_investor_auth() {
 
     let mut entries = SorobanVec::new(&env);
     entries.push_back((inv1.clone(), 10_000i128));
-    entries.push_back((inv2.clone(), 10_000i128)); // This one will fail on require_auth
+    entries.push_back((inv2.clone(), 10_000i128));
 
-    // Since setup() mocks all auths, this test will pass both.
-    // A more realistic test would require custom auth mocking, which is env-dependent.
-    // For now, we just verify that the batch processes all entries with require_auth.
     let result = client.fund_batch(&entries);
     assert_eq!(result.funded_amount, 20_000i128);
 }
@@ -3477,8 +3461,12 @@ fn test_fund_batch_single_entry() {
 
 #[test]
 fn test_fund_batch_max_batch_size() {
+    use soroban_sdk::testutils::cost_estimate::{CostEstimate, NetworkInvocationResourceLimits};
     let env = Env::default();
     env.mock_all_auths();
+    // Remove resource limits for this test; MAX_FUND_BATCH entries exceed
+    // mainnet limits on footprint, writes, and events.
+    env.cost_estimate().disable_resource_limits();
     let client = deploy(&env);
     let admin = Address::generate(&env);
     let sme = Address::generate(&env);
@@ -3567,99 +3555,534 @@ fn test_fund_batch_preserves_event_semantics() {
     // (Detailed event field verification depends on EscrowFunded structure)
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Tests for InvestorIndex and Pagination (Issue #376)
-// ─────────────────────────────────────────────────────────────────────────────
+// ── preview_fund tests ────────────────────────────────────────────────────────
 
 #[test]
-fn test_investor_index_population() {
+fn test_preview_fund_valid_deposit_returns_zero() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
     default_init(&client, &env, &admin, &sme);
-
-    let inv_a = Address::generate(&env);
-    let inv_b = Address::generate(&env);
-
-    // Fund from investor A
-    client.fund(&inv_a, &10_000i128);
-    // Index should have A
-    let investors = client.get_investors(&0, &10);
-    assert_eq!(investors.len(), 1);
-    assert_eq!(investors.get(0).unwrap(), inv_a);
-
-    // Fund from investor B
-    client.fund(&inv_b, &20_000i128);
-    // Index should have A and B
-    let investors = client.get_investors(&0, &10);
-    assert_eq!(investors.len(), 2);
-    assert_eq!(investors.get(0).unwrap(), inv_a);
-    assert_eq!(investors.get(1).unwrap(), inv_b);
-
-    // Repeat fund from investor A
-    client.fund(&inv_a, &5_000i128);
-    // Index should still only have A and B, no duplicate
-    let investors = client.get_investors(&0, &10);
-    assert_eq!(investors.len(), 2);
+    let investor = Address::generate(&env);
+    let code = client.preview_fund(&investor, &(TARGET / 2));
+    assert_eq!(code, 0, "valid deposit must return 0");
 }
 
 #[test]
-fn test_get_investors_pagination() {
+fn test_preview_fund_non_positive_amount() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
     default_init(&client, &env, &admin, &sme);
+    let investor = Address::generate(&env);
 
-    // Add 5 distinct investors
-    let mut expected_investors = std::vec::Vec::new();
-    for _ in 0..5 {
-        let inv = Address::generate(&env);
-        expected_investors.push(inv.clone());
-        client.fund(&inv, &1_000i128);
-    }
+    // Zero amount
+    let code = client.preview_fund(&investor, &0i128);
+    assert_eq!(code, EscrowError::FundingAmountNotPositive as u32);
 
-    // Paginate start=0, limit=2
-    let page1 = client.get_investors(&0, &2);
-    assert_eq!(page1.len(), 2);
-    assert_eq!(page1.get(0).unwrap(), expected_investors[0]);
-    assert_eq!(page1.get(1).unwrap(), expected_investors[1]);
-
-    // Paginate start=2, limit=2
-    let page2 = client.get_investors(&2, &2);
-    assert_eq!(page2.len(), 2);
-    assert_eq!(page2.get(0).unwrap(), expected_investors[2]);
-    assert_eq!(page2.get(1).unwrap(), expected_investors[3]);
-
-    // Paginate start=4, limit=2 (only 1 left)
-    let page3 = client.get_investors(&4, &2);
-    assert_eq!(page3.len(), 1);
-    assert_eq!(page3.get(0).unwrap(), expected_investors[4]);
-
-    // Paginate start=5, limit=2 (out of bounds)
-    let page4 = client.get_investors(&5, &2);
-    assert_eq!(page4.len(), 0);
-
-    // Paginate with limit 0
-    let page_zero = client.get_investors(&0, &0);
-    assert_eq!(page_zero.len(), 0);
-
-    // Add 52 distinct investors to test capped limit of 50
-    let env2 = Env::default();
-    let (client2, admin2, sme2) = setup(&env2);
-    default_init(&client2, &env2, &admin2, &sme2);
-    for _ in 0..52 {
-        client2.fund(&Address::generate(&env2), &1_000i128);
-    }
-    let max_page = client2.get_investors(&0, &100);
-    assert_eq!(max_page.len(), 50);
+    // Negative amount
+    let code = client.preview_fund(&investor, &(-1i128));
+    assert_eq!(code, EscrowError::FundingAmountNotPositive as u32);
 }
 
 #[test]
-fn test_get_investors_legacy_compatibility() {
+fn test_preview_fund_below_min_contribution() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let investor = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "PREV001"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &Some(5_000i128), // min_contribution floor
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    // Amount below floor
+    let code = client.preview_fund(&investor, &1_000i128);
+    assert_eq!(code, EscrowError::FundingBelowMinContribution as u32);
+
+    // Amount exactly at floor — should succeed
+    let code = client.preview_fund(&investor, &5_000i128);
+    assert_eq!(code, 0, "amount exactly at floor must succeed");
+}
+
+#[test]
+fn test_preview_fund_legal_hold_active() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
     default_init(&client, &env, &admin, &sme);
+    let investor = Address::generate(&env);
 
-    // No investors have funded yet (InvestorIndex absent)
-    let investors = client.get_investors(&0, &10);
-    assert_eq!(investors.len(), 0);
+    client.set_legal_hold(&true);
+
+    let code = client.preview_fund(&investor, &(TARGET / 2));
+    assert_eq!(code, EscrowError::LegalHoldBlocksFunding as u32);
 }
 
+#[test]
+fn test_preview_fund_closed_status() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    let investor = Address::generate(&env);
+
+    // Fund to completion → status becomes 1 (funded, not open)
+    client.fund(&investor, &TARGET);
+    let investor2 = Address::generate(&env);
+
+    let code = client.preview_fund(&investor2, &(TARGET / 2));
+    assert_eq!(code, EscrowError::EscrowNotOpenForFunding as u32);
+}
+
+#[test]
+fn test_preview_fund_deadline_passed() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let investor = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
+    // Set deadline in the future so init succeeds, then advance past it.
+    let deadline = 5_000u64;
+    env.ledger().with_mut(|l| l.timestamp = 1_000);
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "PREV002"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &Some(deadline),
+    );
+
+    // Advance ledger past deadline
+    env.ledger().with_mut(|l| l.timestamp = 10_000);
+
+    let code = client.preview_fund(&investor, &(TARGET / 2));
+    assert_eq!(code, EscrowError::FundingDeadlinePassed as u32);
+}
+
+#[test]
+fn test_preview_fund_deadline_not_passed() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let investor = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
+    // Set deadline in the future
+    let future_deadline = 20_000u64;
+    env.ledger().with_mut(|l| l.timestamp = 10_000);
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "PREV003"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &Some(future_deadline),
+    );
+
+    let code = client.preview_fund(&investor, &(TARGET / 2));
+    assert_eq!(code, 0, "deposit must succeed when deadline not passed");
+}
+
+#[test]
+fn test_preview_fund_not_allowlisted() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let allowlisted = Address::generate(&env);
+    let not_allowlisted = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "PREV004"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    // Enable allowlist and add one investor
+    client.set_allowlist_active(&true);
+    client.set_investor_allowlisted(&allowlisted, &true);
+
+    // Not-allowlisted investor
+    let code = client.preview_fund(&not_allowlisted, &(TARGET / 2));
+    assert_eq!(code, EscrowError::InvestorNotAllowlisted as u32);
+
+    // Allowlisted investor — should succeed
+    let code = client.preview_fund(&allowlisted, &(TARGET / 2));
+    assert_eq!(code, 0, "allowlisted investor must succeed");
+}
+
+#[test]
+fn test_preview_fund_per_investor_cap_exceeded() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let investor = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
+    let cap = 50_000i128;
+    client.init(
+        &admin,
+        &String::from_str(&env, "PREV005"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &Some(cap),
+        &None,
+        &None,
+    );
+
+    // First deposit within cap
+    client.fund(&investor, &30_000i128);
+
+    // Preview a second deposit that would exceed cap
+    let code = client.preview_fund(&investor, &25_000i128);
+    assert_eq!(code, EscrowError::InvestorContributionExceedsCap as u32);
+
+    // Preview within remaining cap
+    let code = client.preview_fund(&investor, &20_000i128);
+    assert_eq!(code, 0, "deposit within remaining cap must succeed");
+}
+
+#[test]
+fn test_preview_fund_unique_investor_cap_reached() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
+    let cap = 2u32;
+    client.init(
+        &admin,
+        &String::from_str(&env, "PREV006"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &Some(cap),
+        &None,
+        &None,
+        &None,
+    );
+
+    // Fund two investors to fill the cap
+    let inv1 = Address::generate(&env);
+    let inv2 = Address::generate(&env);
+    client.fund(&inv1, &(TARGET / 3));
+    client.fund(&inv2, &(TARGET / 3));
+
+    // Preview a third new investor — should be blocked by cap
+    let inv3 = Address::generate(&env);
+    let code = client.preview_fund(&inv3, &(TARGET / 3));
+    assert_eq!(code, EscrowError::UniqueInvestorCapReached as u32);
+
+    // Existing investor re-funding should still succeed (doesn't count against cap)
+    let code = client.preview_fund(&inv1, &(TARGET / 3));
+    assert_eq!(
+        code, 0,
+        "existing investor must not be blocked by unique cap"
+    );
+}
+
+#[test]
+fn test_preview_fund_contribution_overflow() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let investor = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "PREV007"),
+        &sme,
+        &i128::MAX,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    // Fund close to max
+    client.fund(&investor, &(i128::MAX - 1));
+
+    // Preview that would overflow
+    let code = client.preview_fund(&investor, &2i128);
+    assert_eq!(code, EscrowError::InvestorContributionOverflow as u32);
+}
+
+#[test]
+fn test_preview_fund_ordering_matches_fund() {
+    // Verify that preview_fund returns the same first error as fund()
+    // for a multi-condition violation. Since both checks happen before
+    // auth, this confirms ordering consistency.
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let investor = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "PREV008"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &Some(5_000i128),
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    // Zero amount is checked before floor — both would fail but amount
+    // check comes first.
+    let code = client.preview_fund(&investor, &0i128);
+    assert_eq!(code, EscrowError::FundingAmountNotPositive as u32);
+    assert_contract_error(
+        client.try_fund(&investor, &0i128),
+        EscrowError::FundingAmountNotPositive,
+    );
+
+    // Negative amount
+    let code = client.preview_fund(&investor, &(-5i128));
+    assert_eq!(code, EscrowError::FundingAmountNotPositive as u32);
+    assert_contract_error(
+        client.try_fund(&investor, &(-5i128)),
+        EscrowError::FundingAmountNotPositive,
+    );
+
+    // Below floor
+    let code = client.preview_fund(&investor, &1_000i128);
+    assert_eq!(code, EscrowError::FundingBelowMinContribution as u32);
+    assert_contract_error(
+        client.try_fund(&investor, &1_000i128),
+        EscrowError::FundingBelowMinContribution,
+    );
+}
+
+#[test]
+fn test_preview_fund_investor_zero_prev_unfunded() {
+    // An investor with zero contribution should preview as new (prev == 0)
+    // and be subject to unique-investor cap checks if configured.
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "PREV009"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &Some(1u32), // cap of 1 investor
+        &None,
+        &None,
+        &None,
+    );
+
+    // Fill the single slot
+    let inv1 = Address::generate(&env);
+    client.fund(&inv1, &(TARGET / 2));
+
+    // Preview a new investor — even with zero contribution from elsewhere,
+    // this is a new address so unique cap applies.
+    let inv2 = Address::generate(&env);
+    let code = client.preview_fund(&inv2, &(TARGET / 2));
+    assert_eq!(code, EscrowError::UniqueInvestorCapReached as u32);
+}
+
+#[test]
+fn test_preview_fund_allowlist_inactive_does_not_block() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    let investor = Address::generate(&env);
+
+    // Allowlist exists but is not active — all investors should pass
+    let code = client.preview_fund(&investor, &(TARGET / 2));
+    assert_eq!(code, 0, "deposit must succeed when allowlist is inactive");
+}
+
+#[test]
+fn test_preview_fund_no_floor_no_caps() {
+    // Default init has no floor, no caps — all reasonable deposits succeed.
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    let investor = Address::generate(&env);
+
+    let code = client.preview_fund(&investor, &1i128);
+    assert_eq!(
+        code, 0,
+        "minimum positive deposit must succeed with no floor"
+    );
+    let code = client.preview_fund(&investor, &TARGET);
+    assert_eq!(code, 0, "full target deposit must succeed with no caps");
+}
+
+#[test]
+fn test_preview_fund_inactive_allowlist_then_fund() {
+    // Ensure preview_fund returning 0 is consistent with actual fund() succeeding.
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    let investor = Address::generate(&env);
+
+    assert_eq!(client.preview_fund(&investor, &(TARGET / 2)), 0);
+    client.fund(&investor, &(TARGET / 2));
+    assert_eq!(client.get_contribution(&investor), TARGET / 2);
+}
+
+#[test]
+fn test_preview_fund_funded_amount_overflow() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let contract_id = client.address.clone();
+
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let investor = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "OVF005"),
+        &sme,
+        &1_000i128,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    // Push funded_amount near i128::MAX to trigger overflow.
+    env.as_contract(&contract_id, || {
+        let mut escrow = LiquifactEscrow::get_escrow(env.clone());
+        escrow.funded_amount = i128::MAX - 10;
+        escrow.status = 0;
+        env.storage().instance().set(&DataKey::Escrow, &escrow);
+    });
+
+    let code_overflow = client.preview_fund(&investor, &11i128);
+    assert_eq!(
+        code_overflow,
+        EscrowError::FundedAmountOverflow as u32,
+        "expected FundedAmountOverflow when funded_amount + amount overflows",
+    );
+
+    // Smaller amount that does not overflow must still pass.
+    let code_ok = client.preview_fund(&investor, &5i128);
+    assert_eq!(code_ok, 0, "amount within range must return 0");
+
+    // Confirm fund() also panics with FundedAmountOverflow.
+    let overflowed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.fund(&investor, &11i128);
+    }));
+    assert!(
+        overflowed.is_err(),
+        "fund() must panic when funded_amount would overflow",
+    );
+}

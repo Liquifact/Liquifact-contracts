@@ -65,12 +65,19 @@ fn test_legal_hold_midflow_blocks_and_resumes_with_ordered_events() {
     // The contract id is derived from the deploy_and_init sequence, so we
     // capture it for auth mock setup.
 
+    // --- Event verification ---
+    // Each contract invocation clears the host event buffer, so we must
+    // capture events right after set_legal_hold (before any follow-up read).
+    let mut total_events = 0usize;
+
     // --- Phase 1: enable hold, see it reflected ---
     client.set_legal_hold(&true);
+    total_events += env.events().all().events().len();
     assert!(client.get_legal_hold());
 
     // --- Phase 2: clear hold ---
     client.set_legal_hold(&false);
+    total_events += env.events().all().events().len();
     assert!(!client.get_legal_hold());
 
     // --- Phase 3: fund (hold is off) ---
@@ -79,10 +86,12 @@ fn test_legal_hold_midflow_blocks_and_resumes_with_ordered_events() {
 
     // --- Phase 4: enable hold mid-stream (post-fund, pre-settle) ---
     client.set_legal_hold(&true);
+    total_events += env.events().all().events().len();
     assert!(client.get_legal_hold());
 
     // --- Phase 5: clear hold, settle ---
     client.set_legal_hold(&false);
+    total_events += env.events().all().events().len();
     assert!(!client.get_legal_hold());
 
     // --- Phase 6: settle ---
@@ -91,19 +100,17 @@ fn test_legal_hold_midflow_blocks_and_resumes_with_ordered_events() {
 
     // --- Phase 7: enable hold again after settlement ---
     client.set_legal_hold(&true);
+    total_events += env.events().all().events().len();
     assert!(client.get_legal_hold());
 
     // --- Phase 8: clear hold for cleanup ---
     client.set_legal_hold(&false);
+    total_events += env.events().all().events().len();
     assert!(!client.get_legal_hold());
 
-    // --- Event verification ---
-    // Ensure at least 6 LegalHoldChanged events were emitted.
-    let event_count = env.events().all().events().len();
     assert!(
-        event_count >= 6,
-        "expected at least 6 LegalHoldChanged events, got {event_count}, all events: {:?}",
-        env.events().all().events()
+        total_events >= 6,
+        "expected at least 6 LegalHoldChanged events, got {total_events}",
     );
 }
 
@@ -1087,6 +1094,9 @@ fn withdraw_event_includes_recipient() {
 
     client.withdraw();
 
+    // Collect events BEFORE making any further contract calls — each new
+    // invocation clears the host event buffer.
+    let all_events = env.events().all();
     let escrow = client.get_escrow();
 
     let expected_xdr = SmeWithdrew {
@@ -1097,8 +1107,8 @@ fn withdraw_event_includes_recipient() {
     }
     .to_xdr(&env, &escrow_id);
 
-    let all_events = env.events().all().filter_by_contract(&escrow_id);
-    let found = all_events.events().iter().any(|e| *e == expected_xdr);
+    let filtered = all_events.filter_by_contract(&escrow_id);
+    let found = filtered.events().contains(&expected_xdr);
     assert!(
         found,
         "SmeWithdrew event with correct recipient and amount must be emitted"

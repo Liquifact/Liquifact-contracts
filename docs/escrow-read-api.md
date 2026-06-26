@@ -497,14 +497,43 @@ Returns `true` when an investor's principal has been returned via `refund` in a 
 
 ---
 
-## `get_investors(start: u32, limit: u32) → Vec<Address>`
+## `preview_fund(investor: Address, amount: i128) → u32`
 
-**Storage key:** `DataKey::InvestorIndex`
+**Pure read-only preview** of a deposit call. Runs the same precondition checks as
+`fund()` in the exact same order, without requiring authorization or mutating state.
 
-Returns a paginated list of investor addresses who have contributed to the escrow.
+### Return values
 
-- **Pure Read** — no authorization required.
-- **Pagination** — uses `start` (0-based) and `limit` to support paging.
-- **Bounded limit** — the `limit` parameter is capped internally (at 50) to prevent CPU/memory resource exhaustion.
-- **Legacy Compatibility (ADR-007)** — returns an empty vector for legacy contracts deployed before the introduction of the investor index, ensuring backward compatibility.
+| Code | Meaning |
+|------|---------|
+| `0`  | Deposit would be accepted by `fund()` |
+| `>0` | The numeric [`EscrowError`](escrow-error-messages.md) code that `fund()` would raise first |
 
+### Guard order (matches `fund_impl`)
+
+| Order | Check | Error code |
+|-------|-------|------------|
+| 1 | Amount is positive | `FundingAmountNotPositive` (100) |
+| 2 | Meets `min_contribution` floor (if configured) | `FundingBelowMinContribution` (101) |
+| 3 | Escrow is initialized (reads `DataKey::Escrow`) | — (panics if uninitialized, matching `fund`) |
+| 4 | No active legal hold | `LegalHoldBlocksFunding` (102) |
+| 5 | Escrow status is open (0) | `EscrowNotOpenForFunding` (103) |
+| 6 | Funding deadline not passed | `FundingDeadlinePassed` (164) |
+| 7 | Allowlist gate (if active): investor is allowlisted | `InvestorNotAllowlisted` (104) |
+| 8 | Investor contribution does not overflow | `InvestorContributionOverflow` (105) |
+| 9 | Per-investor cap not exceeded (if configured) | `InvestorContributionExceedsCap` (106) |
+| 10 | Unique-investor cap not reached (if configured, new investors only) | `UniqueInvestorCapReached` (107) |
+| 11 | Total funded-amount does not overflow | `FundedAmountOverflow` (110) |
+
+### Advisory
+
+This is a **read-only preview**. The actual `fund()` call is the source of truth
+and may still revert due to racing state changes (e.g. another transaction fills
+the unique-investor cap or the admin closes funding between the preview and the
+subsequent `fund()` call).
+
+### Security
+
+- **No `require_auth`** — the investor address is not required to sign.
+- **No storage writes** — returns the first failing code without mutating state.
+- **Advisory only** — callers must still handle `fund()` reverting on race conditions.

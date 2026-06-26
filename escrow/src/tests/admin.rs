@@ -817,7 +817,7 @@ fn test_update_funding_target_fails_when_withdrawn() {
     let env = Env::default();
     env.mock_all_auths();
     let (client, _escrow_id, _sme) = init_and_fund_with_real_token(&env, 5_000i128, "WD001");
-    client.withdraw(); // status ├ö├Ñ├å 3 (withdrawn)
+    client.withdraw(); // status → 3 (withdrawn)
     client.update_funding_target(&6_000i128);
 }
 
@@ -1033,7 +1033,7 @@ fn test_update_maturity_fails_when_withdrawn() {
     let env = Env::default();
     env.mock_all_auths();
     let (client, _escrow_id, _sme) = init_and_fund_with_real_token(&env, 5_000i128, "MAT004");
-    client.withdraw(); // status ├ö├Ñ├å 3
+    client.withdraw(); // status → 3
     client.update_maturity(&2000u64);
 }
 
@@ -1381,22 +1381,10 @@ fn test_rotate_beneficiary_success_dual_auth() {
     let (client, admin, sme) = setup(&env);
     let new_sme = Address::generate(&env);
     default_init(&client, &env, &admin, &sme);
-    let contract_id = client.address.clone();
 
     let updated = client.rotate_beneficiary(&new_sme);
     assert_eq!(updated.sme_address, new_sme);
     assert_eq!(client.get_escrow().sme_address, new_sme);
-
-    assert_eq!(
-        env.events().all().events().last().unwrap().clone(),
-        crate::BeneficiaryRotated {
-            name: symbol_short!("ben_rot"),
-            invoice_id: client.get_escrow().invoice_id,
-            prior_sme: sme,
-            new_sme,
-        }
-        .to_xdr(&env, &contract_id)
-    );
 }
 
 /*

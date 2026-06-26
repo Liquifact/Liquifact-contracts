@@ -1253,9 +1253,7 @@ fn claim_investor_payout_succeeds_after_settle() {
 fn funding_snapshot_survives_withdraw() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, admin, sme) = setup(&env);
-    default_init(&client, &env, &admin, &sme);
-    fund_to_target(&client, &env);
+    let (client, _sme, _sac) = setup_funded_with_token(&env);
 
     let snapshot_before = client
         .get_funding_close_snapshot()
@@ -1574,12 +1572,38 @@ fn test_claim_marker_all_investors_independent() {
 #[test]
 fn investor_contribution_readable_after_withdraw() {
     let env = Env::default();
-    let (client, admin, sme) = setup(&env);
-    default_init(&client, &env, &admin, &sme);
+    env.mock_all_auths();
+    let sac = env.register_stellar_asset_contract_v2(Address::generate(&env));
+    let token_id = sac.address();
+    let sac_admin = StellarAssetClient::new(&env, &token_id);
+    let escrow_id = env.register(LiquifactEscrow, ());
+    let client = super::LiquifactEscrowClient::new(&env, &escrow_id);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let treasury = Address::generate(&env);
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "INV_READ"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &token_id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
 
     let investor = Address::generate(&env);
     let contribution: i128 = TARGET;
     client.fund(&investor, &contribution);
+    sac_admin.mint(&escrow_id, &TARGET);
     client.withdraw();
 
     let recorded = client.get_contribution(&investor);
@@ -1593,8 +1617,33 @@ fn investor_contribution_readable_after_withdraw() {
 #[test]
 fn multi_investor_contributions_preserved_after_withdraw() {
     let env = Env::default();
-    let (client, admin, sme) = setup(&env);
-    default_init(&client, &env, &admin, &sme);
+    env.mock_all_auths();
+    let sac = env.register_stellar_asset_contract_v2(Address::generate(&env));
+    let token_id = sac.address();
+    let sac_admin = StellarAssetClient::new(&env, &token_id);
+    let escrow_id = env.register(LiquifactEscrow, ());
+    let client = super::LiquifactEscrowClient::new(&env, &escrow_id);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let treasury = Address::generate(&env);
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "MULTI_WD"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &token_id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
 
     // Fund with two investors reaching target collectively.
     let inv_a = Address::generate(&env);
@@ -1603,6 +1652,7 @@ fn multi_investor_contributions_preserved_after_withdraw() {
     client.fund(&inv_a, &half);
     client.fund(&inv_b, &(TARGET - half));
 
+    sac_admin.mint(&escrow_id, &TARGET);
     client.withdraw();
 
     assert_eq!(client.get_contribution(&inv_a), half);
@@ -1623,9 +1673,8 @@ fn no_state_mutation_possible_after_withdraw() {
     // settle after withdraw
     {
         let env = Env::default();
-        let (client, admin, sme) = setup(&env);
-        default_init(&client, &env, &admin, &sme);
-        fund_to_target(&client, &env);
+        env.mock_all_auths();
+        let (client, _sme, _sac) = setup_funded_with_token(&env);
         client.withdraw();
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             client.settle();
@@ -1636,9 +1685,8 @@ fn no_state_mutation_possible_after_withdraw() {
     // withdraw after withdraw
     {
         let env = Env::default();
-        let (client, admin, sme) = setup(&env);
-        default_init(&client, &env, &admin, &sme);
-        fund_to_target(&client, &env);
+        env.mock_all_auths();
+        let (client, _sme, _sac) = setup_funded_with_token(&env);
         client.withdraw();
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             client.withdraw();
@@ -1649,9 +1697,8 @@ fn no_state_mutation_possible_after_withdraw() {
     // fund after withdraw
     {
         let env = Env::default();
-        let (client, admin, sme) = setup(&env);
-        default_init(&client, &env, &admin, &sme);
-        fund_to_target(&client, &env);
+        env.mock_all_auths();
+        let (client, _sme, _sac) = setup_funded_with_token(&env);
         client.withdraw();
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let late = Address::generate(&env);
