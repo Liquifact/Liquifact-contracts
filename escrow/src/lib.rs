@@ -1730,9 +1730,13 @@ impl LiquifactEscrow {
     }
 
     fn set_persistent_investor_contribution(env: &Env, investor: Address, amount: i128) {
-        env.storage()
-            .persistent()
-            .set(&DataKey::InvestorContribution(investor), &amount);
+        let key = DataKey::InvestorContribution(investor);
+        env.storage().persistent().set(&key, &amount);
+        env.storage().persistent().extend_ttl(
+            &key,
+            PERSISTENT_TTL_MIN_EXTENSION_LEDGERS,
+            PERSISTENT_TTL_MIN_EXTENSION_LEDGERS,
+        );
     }
 
     fn get_persistent_investor_effective_yield(env: &Env, investor: Address) -> Option<i64> {
@@ -1742,9 +1746,13 @@ impl LiquifactEscrow {
     }
 
     fn set_persistent_investor_effective_yield(env: &Env, investor: Address, value: i64) {
-        env.storage()
-            .persistent()
-            .set(&DataKey::InvestorEffectiveYield(investor), &value);
+        let key = DataKey::InvestorEffectiveYield(investor);
+        env.storage().persistent().set(&key, &value);
+        env.storage().persistent().extend_ttl(
+            &key,
+            PERSISTENT_TTL_MIN_EXTENSION_LEDGERS,
+            PERSISTENT_TTL_MIN_EXTENSION_LEDGERS,
+        );
     }
 
     fn get_persistent_investor_claim_not_before(env: &Env, investor: Address) -> u64 {
@@ -1755,9 +1763,13 @@ impl LiquifactEscrow {
     }
 
     fn set_persistent_investor_claim_not_before(env: &Env, investor: Address, value: u64) {
-        env.storage()
-            .persistent()
-            .set(&DataKey::InvestorClaimNotBefore(investor), &value);
+        let key = DataKey::InvestorClaimNotBefore(investor);
+        env.storage().persistent().set(&key, &value);
+        env.storage().persistent().extend_ttl(
+            &key,
+            PERSISTENT_TTL_MIN_EXTENSION_LEDGERS,
+            PERSISTENT_TTL_MIN_EXTENSION_LEDGERS,
+        );
     }
 
     fn get_persistent_investor_claimed(env: &Env, investor: Address) -> bool {
@@ -1768,9 +1780,13 @@ impl LiquifactEscrow {
     }
 
     fn set_persistent_investor_claimed(env: &Env, investor: Address, value: bool) {
-        env.storage()
-            .persistent()
-            .set(&DataKey::InvestorClaimed(investor), &value);
+        let key = DataKey::InvestorClaimed(investor);
+        env.storage().persistent().set(&key, &value);
+        env.storage().persistent().extend_ttl(
+            &key,
+            PERSISTENT_TTL_MIN_EXTENSION_LEDGERS,
+            PERSISTENT_TTL_MIN_EXTENSION_LEDGERS,
+        );
     }
 
     /// Public API: contribution recorded for `investor` (persistent storage).
