@@ -2,7 +2,7 @@
 
 **Status:** Accepted  
 **Date:** 2026-03-28  
-**Refs:** `escrow/src/lib.rs` — `validate_yield_tiers_table`, `effective_yield_for_commitment`, `fund_with_commitment`, `DataKey::YieldTierTable`, `DataKey::InvestorEffectiveYield`, `DataKey::InvestorClaimNotBefore`
+**Refs:** `escrow/src/lib.rs` — `validate_yield_tiers_table`, `effective_yield_for_commitment`, `fund_with_commitment`, `get_effective_yield_bps`, `compute_investor_payout`, `DataKey::YieldTierTable`, `DataKey::InvestorEffectiveYield`, `DataKey::InvestorClaimNotBefore`
 
 ---
 
@@ -26,6 +26,8 @@ Some invoice products offer higher yield to investors who commit to a longer loc
 - Panics if the investor already has a contribution (prevents re-selection).
 
 **Follow-on deposits** — investor must use `fund()`, which reads the already-stored effective yield and does not allow re-selection.
+
+**Reading the resolved rate** — `get_effective_yield_bps(investor)` exposes the resolved rate that `compute_investor_payout` applies: `InvestorEffectiveYield(investor)` when set (tiered first deposit), otherwise the escrow base `yield_bps`. This is a pure read with no auth and no mutation, and it uses the *exact* fallback expression in the payout math so integrators do not re-implement the `unwrap_or(base)` resolution. `get_investor_yield_bps` is a historical alias returning the same value; the distinction is documentation framing (stored per-investor slot vs. resolved tier-or-base rate), not behavior. See `docs/escrow-read-api.md`.
 
 ## Consequences
 
@@ -55,4 +57,9 @@ The state-machine rules above are verified in `escrow/src/tests/funding.rs`:
 | `test_fund_with_commitment_zero_lock_behaves_as_fund` | `committed_lock_secs == 0` → base yield, `InvestorClaimNotBefore == 0` |
 | `test_commitment_zero_lock_follow_on_fund_no_claim_gate` | Follow-on `fund()` after zero-lock preserves both zero guards |
 | `test_fund_first_deposit_sets_base_yield_and_no_claim_gate` | Plain `fund()` first deposit → base yield, no claim gate |
+| `test_effective_yield_bps_tiered_returns_tier_yield` | `get_effective_yield_bps` returns the selected tier yield for a tiered investor |
+| `test_effective_yield_bps_non_tiered_returns_base` | `get_effective_yield_bps` returns base yield for a plain `fund()` investor |
+| `test_effective_yield_bps_unknown_investor_returns_base` | `get_effective_yield_bps` returns base yield for an address that never funded |
+| `test_effective_yield_bps_zero_base_yield` | `get_effective_yield_bps` resolves to `0` when base yield is `0` |
+| `test_effective_yield_bps_matches_payout_resolution` | `get_effective_yield_bps` matches the yield `compute_investor_payout` applies |
 

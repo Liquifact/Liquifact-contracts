@@ -1,0 +1,265 @@
+﻿cargo :    Compiling 
+liquifact_escrow 
+v0.1.0 (C:\Users\ADMIN
+\Desktop\mide-drips\Li
+quifact-contracts\escr
+ow)
+At line:1 char:1
++ cargo test --color 
+never 2>&1 | Out-File 
+-Encoding utf8 
+test_out3.log
++ ~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~
+    + CategoryInfo    
+          : NotSpeci  
+  fied: (   Compili   
+ ng li...ntracts\e    
+scrow):String) []    
+, RemoteException
+    + FullyQualifiedE 
+   rrorId : NativeCo  
+  mmandError
+ 
+error: expected 
+expression, found `,`
+   --> escrow\src\test
+s\properties.rs:321:16
+    |
+321 |         &admin,,
+    |                
+^ expected expression
+
+error: expected 
+expression, found `,`
+   --> escrow\src\test
+s\properties.rs:360:16
+    |
+360 |         &admin,,
+    |                
+^ expected expression
+
+error: expected 
+expression, found `,`
+   --> escrow\src\test
+s\properties.rs:397:16
+    |
+397 |         &admin,,
+    |                
+^ expected expression
+
+error: expected 
+expression, found `,`
+   --> escrow\src\test
+s\properties.rs:438:16
+    |
+438 |         &admin,,
+    |                
+^ expected expression
+
+error: expected 
+expression, found `,`
+   --> escrow\src\test
+s\properties.rs:477:16
+    |
+477 |         &admin,,
+    |                
+^ expected expression
+
+error: expected 
+expression, found `,`
+   --> escrow\src\test
+s\properties.rs:514:16
+    |
+514 |         &admin,,
+    |                
+^ expected expression
+
+error: expected 
+expression, found `,`
+   --> escrow\src\test
+s\properties.rs:549:16
+    |
+549 |         &admin,,
+    |                
+^ expected expression
+
+error: expected 
+expression, found `,`
+   --> escrow\src\test
+s\properties.rs:584:16
+    |
+584 |         &admin,,
+    |                
+^ expected expression
+
+error: expected 
+expression, found `,`
+   --> escrow\src\test
+s\properties.rs:625:16
+    |
+625 |         &admin,,
+    |                
+^ expected expression
+
+error: expected 
+expression, found `,`
+   --> escrow\src\test
+s\properties.rs:676:16
+    |
+676 |         &admin,,
+    |                
+^ expected expression
+
+error: expected 
+expression, found `,`
+   --> escrow\src\test
+s\properties.rs:715:16
+    |
+715 |         &admin,,
+    |                
+^ expected expression
+
+error: expected 
+expression, found `,`
+   --> escrow\src\test
+s\properties.rs:768:16
+    |
+768 |         &admin,,
+    |                
+^ expected expression
+
+error: expected 
+expression, found `,`
+   --> escrow\src\test
+s\properties.rs:887:20
+    |
+887 |             
+&admin,,
+    |                 
+   ^ expected 
+expression
+
+error: expected 
+expression, found `,`
+    --> escrow\src\tes
+ts\properties.rs:1112:
+16
+     |
+1112 |         
+&admin,,
+     |                
+^ expected expression
+
+error: expected 
+expression, found `,`
+  --> escrow\src\tests
+\properties.rs:21:20
+   |
+21 |             
+&admin,,
+   |                  
+  ^ expected 
+expression
+
+error: expected 
+expression, found `,`
+  --> escrow\src\tests
+\properties.rs:63:20
+   |
+63 |             
+&admin,,
+   |                  
+  ^ expected 
+expression
+
+error: expected 
+expression, found `,`
+   --> escrow\src\test
+s\properties.rs:148:20
+    |
+148 |             
+&admin,,
+    |                 
+   ^ expected 
+expression
+
+warning: unnecessary 
+parentheses around 
+block return value
+  --> escrow\src\tests
+\properties.rs:98:5
+   |
+98 |     (1i128..=max)
+   |     ^           ^
+   |
+   = note: `#[warn(unu
+sed_parens)]` (part 
+of `#[warn(unused)]`) 
+on by default
+help: remove these 
+parentheses
+   |
+98 -     (1i128..=max)
+98 +     1i128..=max 
+   |
+
+error[E0425]: cannot 
+find function 
+`fund_to_target_stl` 
+in this scope
+    --> escrow\src\tes
+ts\coverage.rs:2445:5
+     |
+2445 |     fund_to_tar
+get_stl(&env, 
+&client);
+     |     
+^^^^^^^^^^^^^^^^^^ 
+not found in this 
+scope
+
+error[E0425]: cannot 
+find function 
+`fund_to_target_stl` 
+in this scope
+    --> escrow\src\tes
+ts\coverage.rs:2482:5
+     |
+2482 |     fund_to_tar
+get_stl(&env, 
+&client);
+     |     
+^^^^^^^^^^^^^^^^^^ 
+not found in this 
+scope
+
+error[E0425]: cannot 
+find function 
+`fund_to_target_stl` 
+in this scope
+    --> escrow\src\tes
+ts\coverage.rs:2520:5
+     |
+2520 |     fund_to_tar
+get_stl(&env, 
+&client);
+     |     
+^^^^^^^^^^^^^^^^^^ 
+not found in this 
+scope
+
+For more information 
+about this error, try 
+`rustc --explain 
+E0425`.
+warning: 
+`liquifact_escrow` 
+(lib test) generated 
+1 warning
+error: could not 
+compile 
+`liquifact_escrow` 
+(lib test) due to 20 
+previous errors; 1 
+warning emitted

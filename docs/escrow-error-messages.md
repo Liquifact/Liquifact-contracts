@@ -19,6 +19,9 @@ that domain without renumbering existing SDK mappings.
 Legacy panic strings listed in the reference table are **migration aids only** — they may differ
 from typed error text and must not be used for production branching logic.
 
+### Migration Note: `NoPendingAdmin` (163 → 81)
+Due to a historical collision, `NoPendingAdmin` previously shared the numeric discriminant `163` with `FundingDeadlinePassed`. To preserve strict append-only semantics and ensure unambiguous branching for SDK clients, `NoPendingAdmin` has been reassigned to `81` within the admin-handover range. `FundingDeadlinePassed` remains `163`. Clients matching on `163` will now exclusively match deadline-passed errors.
+
 ## Range-Group Convention
 
 Codes are grouped by domain so SDKs can map coarse categories without parsing variant names:
@@ -28,9 +31,9 @@ Codes are grouped by domain so SDKs can map coarse categories without parsing va
 | Init / pricing | 1–13 | Initialization, invoice id, yield tiers, optional caps | 1, 13 |
 | Uninitialized metadata | 20–22 | Escrow or required addresses not configured | 20, 22 |
 | Dust sweep + SEP-41 safety | 30–42 | Terminal dust sweep and token transfer invariants | 30, 42 |
-| Attestation | 50–51 | Primary hash binding and append-only digest log | 50, 51 |
+| Attestation | 50–53 | Primary hash binding, append-only digest log, and revocation | 50, 53 |
 | SME collateral | 60–62 | Off-chain collateral metadata record | 60, 62 |
-| Admin validation | 70–80 | Allowlist batch, funding target, investor cap, maturity, admin handover | 70, 80 |
+| Admin validation | 70–81 | Allowlist batch, funding target, investor cap, maturity, admin handover | 70, 81 |
 | Schema migration | 90–92 | `migrate` version checks | 90, 92 |
 | Funding | 100–111 | Investor deposits, batch funding, and contribution limits | 100, 111 |
 | Funding batch | 82–83 | [`fund_batch`] entry count bounds | 82, 83 |
@@ -38,7 +41,7 @@ Codes are grouped by domain so SDKs can map coarse categories without parsing va
 | Cancel / refund | 140–143 | Cancel funding and investor refunds | 140, 143 |
 | Legal-hold clear (two-phase) | 150–152 | Delayed compliance-hold lift workflow | 150, 152 |
 | Beneficiary rotation | 160–162 | Governed SME address rotation | 160, 162 |
-| Admin handover / funding deadline | 163–164 | `accept_admin` and post-deadline funding | 163, 164 |
+| Funding deadline / balance | 163–164 | Post-deadline funding and contract balance sufficiency | 163, 164 |
 
 See also [`docs/escrow-legal-hold.md`](escrow-legal-hold.md),
 [`docs/ESCROW_BENEFICIARY_ROTATION.md`](ESCROW_BENEFICIARY_ROTATION.md), and
@@ -79,6 +82,8 @@ See also [`docs/escrow-legal-hold.md`](escrow-legal-hold.md),
 | 42 | `SweepExceedsLiabilityFloor` | `sweep_terminal_dust` | `balance - sweep_amt < funded_amount - distributed_principal` | Reduce sweep; wait until liabilities refunded | typed |
 | 50 | `PrimaryAttestationAlreadyBound` | `bind_primary_attestation_hash` | primary hash already stored | Use `append_attestation_digest` for updates | typed |
 | 51 | `AttestationAppendLogCapacityReached` | `append_attestation_digest` | log length `>= MAX_ATTESTATION_APPEND_ENTRIES` | Archive off-chain; log is bounded | typed |
+| 52 | `AttestationIndexOutOfRange` | `revoke_attestation_digest` | `index >= log.len()` | Verify index is within the current log length | typed |
+| 53 | `AttestationAlreadyRevoked` | `revoke_attestation_digest` | index already has a revocation tombstone | Each index can only be revoked once | typed |
 | 60 | `CollateralAmountNotPositive` | `record_sme_collateral_commitment` | `amount <= 0` | Provide positive metadata amount | typed |
 | 61 | `CollateralAssetEmpty` | `record_sme_collateral_commitment` | asset symbol empty | Provide non-empty asset label | typed |
 | 62 | `CollateralTimestampBackwards` | `record_sme_collateral_commitment` | new timestamp `<` stored timestamp | Use monotonic timestamps | typed |
@@ -93,6 +98,7 @@ See also [`docs/escrow-legal-hold.md`](escrow-legal-hold.md),
 | 78 | `NewCapBelowCurrentFunderCount` | `lower_max_unique_investors` | `new_cap < unique funder count` | Cap cannot evict existing funders | typed |
 | 79 | `MaturityUpdateNotOpen` | `update_maturity` | escrow status `!= 0` | Only update maturity while open | typed |
 | 80 | `NewAdminSameAsCurrent` | `propose_admin` | proposed admin equals current admin | Nominate a different admin | typed |
+| 81 | `MaturityUnchanged` | `update_maturity` | `new_maturity == old_maturity` | Use a different maturity | typed |
 | 85 | `AdminProposalExpired` | `accept_admin` | `ledger.timestamp() > PendingAdminExpiry` | Call `propose_admin` again to nominate a fresh successor | typed |
 | 82 | `FundingBatchEmpty` | `fund_batch` | `entries.len() == 0` | Pass at least one `(investor, amount)` pair | typed |
 | 83 | `FundingBatchTooLarge` | `fund_batch` | `entries.len() > MAX_FUND_BATCH` | Split into smaller batches | typed |
@@ -128,11 +134,12 @@ See also [`docs/escrow-legal-hold.md`](escrow-legal-hold.md),
 | 150 | `LegalHoldClearRequestMissing` | `set_legal_hold(false)`, `clear_legal_hold` | clearing with non-zero delay but no prior `request_clear_legal_hold` | Call `request_clear_legal_hold` first | typed |
 | 151 | `LegalHoldClearNotReady` | `set_legal_hold(false)`, `clear_legal_hold` | `ledger.timestamp() < clearable_at` | Wait until clear delay elapses | typed |
 | 152 | `LegalHoldClearDelayOverflow` | `request_clear_legal_hold` | `timestamp + delay` overflows `u64` | Reduce delay or timestamp | typed |
+| 153 | `FundingDeadlinePassed` | `init`, `fund`, `fund_with_commitment`, `fund_batch` | `funding_deadline` configured and `ledger.timestamp()` past deadline | Funding window closed; do not retry deposits | typed |
 | 160 | `LegalHoldBlocksBeneficiaryRotation` | `rotate_beneficiary` | legal hold active | Clear hold before rotation | typed |
 | 161 | `RotationNotOpen` | `rotate_beneficiary` | status not `0` (open) or `1` (funded) | Rotation only before settlement | typed |
 | 162 | `NewSmeSameAsCurrent` | `rotate_beneficiary` | `new_sme == current sme_address` | Pass a different beneficiary | typed |
-| 163 | `NoPendingAdmin` | `accept_admin` | no pending admin nomination stored | Call `propose_admin` first | typed |
-| 164 | `FundingDeadlinePassed` | `init`, `fund`, `fund_with_commitment`, `fund_batch` | `funding_deadline` configured and `ledger.timestamp()` past deadline | Funding window closed; do not retry deposits | typed |
+| 163 | `FundingDeadlinePassed` | `fund`, `fund_with_commitment`, `fund_batch` | `funding_deadline` configured and `ledger.timestamp()` past deadline | Funding window closed; do not retry deposits | typed |
+| 164 | `InsufficientContractBalance` | `withdraw` | contract token balance `< funded_amount` at withdraw time | Ensure contract is funded before withdrawal | typed |
 
 ### Legacy panic strings (migration aid)
 
@@ -183,6 +190,7 @@ See also [`docs/escrow-legal-hold.md`](escrow-legal-hold.md),
 | 78 | `new cap cannot be below current unique funder count` |
 | 79 | `Maturity can only be updated in Open state` |
 | 80 | `New admin must differ from current admin` |
+| 81 | `New maturity must differ from current maturity` |
 | 82 | `fund_batch entries vector must be non-empty` |
 | 83 | `fund_batch entries vector length exceeds MAX_FUND_BATCH` |
 | 90 | `from_version does not match stored version` |
@@ -220,8 +228,8 @@ See also [`docs/escrow-legal-hold.md`](escrow-legal-hold.md),
 | 160 | `Legal hold blocks beneficiary rotation` |
 | 161 | `Beneficiary rotation not permitted in current escrow state` |
 | 162 | `New SME address must differ from current beneficiary` |
-| 163 | `No pending admin` |
-| 164 | `Funding deadline has passed` |
+| 163 | `Funding deadline has passed` |
+| 164 | `Contract balance below funded amount` |
 
 ## Client Guidance
 
@@ -235,13 +243,12 @@ Recommended SDK category mappings:
 | 1–13 | Invalid initialization or pricing configuration |
 | 20–22 | Missing initialized escrow metadata |
 | 30–42 | Dust sweep or token integration failure |
-| 50–51 | Attestation failure |
+| 50–53 | Attestation failure |
 | 60–62 | Collateral metadata failure |
-| 70–80, 82–83 | Administrative validation or batch-funding bounds failure |
+| 70–83 | Administrative validation or batch-funding bounds failure |
 | 90–92 | Migration failure |
 | 100–111 | Funding failure |
-| 163 | Admin handover not pending |
-| 164 | Funding deadline expired |
+| 163–164 | Funding deadline or contract balance failure |
 | 120–129 | Settlement, withdrawal, or investor payout failure |
 | 140–143 | Cancellation or refund failure |
 | 150–152 | Legal-hold clear workflow failure |

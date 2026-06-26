@@ -26,4 +26,6 @@ node_modules/
 
 # OS
 .DS_Store
-pr.md
+pr.mdescrow/proptest-regressions/
+
+escrow/proptest-regressions/

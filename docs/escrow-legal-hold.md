@@ -69,6 +69,46 @@ Key properties:
 
 ---
 
+## Timing window: delay semantics and typed errors
+
+When `legal_hold_clear_delay` is set to a non-zero value at `init`, the
+two-step clear sequence becomes mandatory:
+
+```
+Step 1  request_clear_legal_hold()
+            → writes DataKey::LegalHoldClearableAt = now + delay
+            → emits LegalHoldClearRequested { clearable_at }
+
+Step 2  set_legal_hold(false)   (or clear_legal_hold())
+            → requires now >= clearable_at
+            → clears DataKey::LegalHoldClearableAt on success
+```
+
+**Typed errors enforced at Step 2:**
+
+| Condition | Error code |
+|---|---|
+| `set_legal_hold(false)` without a prior `request_clear_legal_hold` | `LegalHoldClearRequestMissing` (150) |
+| `now < clearable_at` — delay has not elapsed | `LegalHoldClearNotReady` (151) |
+| `now + delay` overflows a `u64` in `request_clear_legal_hold` | `LegalHoldClearDelayOverflow` (152) |
+
+**Boundary condition:** the check is `now >= clearable_at` (inclusive). At
+exactly `clearable_at`, the clear is accepted. One ledger-second before it, the
+clear is rejected with `LegalHoldClearNotReady`.
+
+**Zero-delay shortcut:** when `legal_hold_clear_delay = 0`, calling
+`request_clear_legal_hold` writes `clearable_at = now`, so the two-step
+sequence succeeds immediately without any ledger advancement. This is useful
+for deployments that want the two-step audit trail but no mandatory waiting
+period.
+
+**If no delay is configured** (the default), `set_legal_hold(false)` skips the
+delay check entirely and clears the hold in one step. The
+`LegalHoldClearRequestMissing` and `LegalHoldClearNotReady` errors are never
+emitted in that case.
+
+---
+
 ## Governance expectations
 
 This contract does **not** embed a timelock, council multisig, or on-chain
@@ -178,7 +218,13 @@ The matrix in `escrow/src/tests/legal_hold.rs` covers:
 7. Hold can be toggled and re-blocks operations after re-set.
 8. Hold persists after two-step admin handover; new admin must explicitly clear it.
 9. `request_clear_legal_hold` requires admin auth and the configured delay is enforced before the hold can be cleared.
-10. Edge cases: hold check fires before amount / status / auth validation.
-10. Non-gated ops (`update_maturity`, `propose_admin`, `accept_admin`, getters) are not blocked.
-11. Claim idempotency survives a hold toggle.
-12. Single hold toggle blocks all gated entrypoints in separate escrows.
+10. **Timing window — typed errors:**
+    - Clearing without a prior request → `LegalHoldClearRequestMissing` (150).
+    - Clearing one ledger-second before `clearable_at` → `LegalHoldClearNotReady` (151).
+    - Clearing at exactly `clearable_at` (inclusive boundary) → succeeds.
+    - Zero-delay: `request_clear_legal_hold` + immediate `set_legal_hold(false)` succeeds without ledger advancement.
+11. **Recovery scenario:** hold active → `propose_admin` + `accept_admin` (not blocked by hold) → new admin clears hold → `settle` and `claim_investor_payout` resume.
+12. Edge cases: hold check fires before amount / status / auth validation.
+13. Non-gated ops (`update_maturity`, `propose_admin`, `accept_admin`, getters) are not blocked.
+14. Claim idempotency survives a hold toggle.
+15. Single hold toggle blocks all gated entrypoints in separate escrows.

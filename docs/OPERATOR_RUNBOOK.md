@@ -153,6 +153,29 @@ construction. See [ADR-007](adr/ADR-007-storage-key-evolution.md) for the
 storage-key evolution policy. Operators must redeploy if `InvoiceEscrow` layout
 changes.
 
+### Exhaustive test coverage for `migrate()`
+
+The unit test suite in `escrow/src/tests/admin.rs` exercises every documented
+error branch end-to-end:
+
+- **Auth-first ordering** — `test_migrate_rejects_non_admin_before_version_check`
+  asserts that a non-admin caller is rejected with an auth failure, never
+  reaching the version guards.
+- **`MigrationVersionMismatch`** — `test_migrate_version_mismatch_stored_neq_claimed`
+  and `test_migrate_far_below_stored_raises_mismatch` cover the exact-mismatch
+  guard and assert `DataKey::Version` is untouched.
+- **`AlreadyCurrentSchemaVersion`** — `test_migrate_at_schema_version_raises_already_current`
+  and `test_migrate_above_schema_version_raises_already_current` cover the
+  boundary (`from_version == SCHEMA_VERSION`) and the above-boundary case.
+- **`NoMigrationPath`** — `test_migrate_below_schema_version_matching_stored_raises_no_path`,
+  `test_migrate_all_historical_versions_raise_no_path` (v1–v5), and
+  `test_migrate_from_zero_uninitialized_raises_no_path` cover every
+  below-`SCHEMA_VERSION` path with a matching stored version, including the
+  absent-key default (`0`).
+- **Version immutability** — `test_migrate_version_immutable_across_all_error_branches`
+  sweep-covers representative values from each branch and asserts
+  `DataKey::Version` is unchanged on every failed call.
+
 ### Current `migrate()` panic policy
 
 This table must match the `migrate` rustdoc in `escrow/src/lib.rs`.
@@ -423,7 +446,34 @@ expose that entrypoint, so operators should use redeploy for new WASM.
 - Never use a single-signer hot wallet as `admin` in production.
 - Admin rotation is two-step: `propose_admin` requires the current admin's
   authorization, and `accept_admin` requires the proposed successor's
-  authorization. Test both steps on Testnet before executing on Mainnet.
+  authorization. Test both steps on Testnet before executing on Mainnet. (See `test_admin_handover_lifecycle` in `escrow/src/tests/admin.rs` for an end-to-end example).
+
+#### Cancelling a pending admin proposal
+
+If you proposed the wrong successor, or the handover is being abandoned before
+`accept_admin` is called, use `cancel_pending_admin` to retract the nomination.
+Until cancelled, the proposed address can call `accept_admin` at any future
+ledger — leaving the pending key live is a standing key-rotation risk.
+
+```bash
+# Cancel an unaccepted handover — requires current admin authorization.
+stellar contract invoke \
+  --id <CONTRACT_ID> \
+  --source $SOURCE_SECRET \
+  --network $STELLAR_NETWORK \
+  -- cancel_pending_admin
+```
+
+| State | Effect |
+|-------|--------|
+| `DataKey::PendingAdmin` present | Removed; `accept_admin` will now fail with `NoPendingAdmin` (code 163). |
+| `DataKey::PendingAdmin` absent | Panics with `NoPendingAdmin` (code 163) — nothing to cancel. |
+
+The current `InvoiceEscrow::admin` is **unchanged**. The operator may call
+`propose_admin` again after a cancel to nominate a different successor. The
+`AdminProposalCancelled` event (`adm_can`) carries `invoice_id` and the
+`cancelled_pending` address for indexer auditing.
+
 
 #### Cancelling a pending admin proposal
 
@@ -459,6 +509,38 @@ Calling `migrate()` with a mismatched `from_version` **panics and aborts the
 transaction**. This is intentional — it prevents operators from accidentally
 skipping version validation. Do not script automated `migrate()` calls without
 first implementing the migration path.
+
+### Deprecated-entrypoint observability (issue #386)
+
+`transfer_admin` is exposed solely as a `#[deprecated]` shim that delegates
+to `propose_admin`. Every successful call publishes two events in this
+order:
+
+1. `AdminProposedEvent` from the inner `propose_admin` delegation
+   (the existing canonical proposal signal).
+2. `DeprecatedTransferAdminUsed`, carrying the same proposed address, so
+   indexers and operators can flag callers still using the legacy one-step
+   path.
+
+Handover semantics are unchanged; the extra event is purely **observability**.
+Failed `transfer_admin` calls (for example, `new_admin == current_admin`
+rejected with `EscrowError::NewAdminSameAsCurrent`) do **not** publish either
+event, so failed calls cannot pollute the legacy-usage count.
+
+Operator playbook:
+
+- Query historical `DeprecatedTransferAdminUsed` events grouped by
+  `(contractId, invoice_id)` to enumerate integrations still on the legacy path.
+- Notify those callers and confirm they migrate to `propose_admin` followed
+  by `accept_admin`.
+- When the per-deployment count of `DeprecatedTransferAdminUsed` has stayed at
+  zero for a full release window, schedule removal of the `transfer_admin`
+  shim in a follow-up PR. Until then, the shim provides forward-compatibility
+  for un-migrated integrations while emitting the observability signal needed
+  to discover them.
+
+See `docs/EVENT_SCHEMA.md` (`DeprecatedTransferAdminUsed`) for the full
+event topic/data layout.
 
 ---
 

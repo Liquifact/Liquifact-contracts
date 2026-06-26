@@ -83,3 +83,26 @@ formula to guarantee identical rounding.
 
 See `docs/escrow-read-api.md` → `compute_investor_payout` for the full parameter, return-value,
 and authorization documentation.
+
+## 🔗 On-Chain Payout Transfer: `claim_investor_payout`
+
+When a settled investor calls `claim_investor_payout`, the contract:
+
+1. Computes the gross payout via `compute_investor_payout`.
+2. Guards against a zero payout (floor division edge case — `PayoutZero = 165`).
+3. Marks the investor as claimed (persistent storage write).
+4. Calls `external_calls::transfer_funding_token_with_balance_checks` to transfer the gross
+   payout from the contract to the investor.
+5. Emits `InvestorPayoutClaimed`.
+
+### Atomicity
+
+The claimed marker is written **before** the token transfer. If the transfer fails (e.g.,
+insufficient contract balance, token transfer error, host trap), the Soroban host rolls back
+all storage writes including the marker. The investor may retry.
+
+### Idempotency
+
+A second call from the same investor returns early (the marker is already set) and does **not**
+re-transfer. The balance check in `transfer_funding_token_with_balance_checks` would fail a
+second transfer anyway, but the early return avoids the call entirely.

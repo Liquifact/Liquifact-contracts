@@ -62,6 +62,44 @@ investor is never time-gated and may claim immediately after settlement.
 The `recorded_at` field is set to `env.ledger().timestamp()` for
 indexing only. It does not gate any operations.
 
+### 4. Settlement Timestamp — `SettledAt` and `get_settled_at`
+
+When `settle()` transitions an escrow from status 1 (funded) to status 2 (settled), 
+the contract captures the ledger timestamp for audit and accounting:
+
+```rust
+let now = env.ledger().timestamp();
+env.storage().instance().set(&DataKey::SettledAt, &now);
+```
+
+**Write-once policy:** this key is set exactly once per escrow, because `settle()` can only be 
+called from status 1. The stored timestamp never changes once settlement occurs.
+
+#### Reading the settlement timestamp
+
+The view function `get_settled_at(env: Env) -> Option<u64>` retrieves the settlement timestamp:
+
+```rust
+pub fn get_settled_at(env: Env) -> Option<u64> {
+    env.storage().instance().get(&DataKey::SettledAt)
+}
+```
+
+| Escrow state | Return value | Interpretation |
+|--------------|--------------|----------------|
+| Not yet settled (status 0 or 1) | `None` | Settlement has not occurred |
+| Settled (status 2, 3, or 4 after settlement) | `Some(timestamp)` | Ledger timestamp when `settle()` was called |
+| Legacy instance (deployed before this feature) | `None` | Additive-key policy — no migration required |
+
+**Use cases:**
+- Claim accounting: determine settlement timestamp for investor payouts
+- Dispute resolution: authoritative on-chain record of settlement moment
+- Reporting: calculate time-to-settlement, track settlement patterns
+- Event pruning safety: settlement timestamp persists even if `EscrowSettled` event is pruned
+
+**Note:** The `EscrowSettled` event also includes `settled_at_ledger_timestamp`, but the storage 
+key provides a permanent, query-friendly view that survives network event retention policies.
+
 ---
 
 ## `claim_investor_payout` — Idempotency
@@ -211,13 +249,33 @@ Maturity can only be changed while the escrow is **Open** (status == 0):
 
 | Status | `update_maturity` result |
 |--------|--------------------------|
-| 0 — Open | ✅ Allowed |
+| 0 — Open | ✅ Allowed (if `new_maturity != old_maturity`, else panics: `MaturityUnchanged`) |
 | 1 — Funded | ❌ Panics: "Maturity can only be updated in Open state" |
 | 2 — Settled | ❌ Panics: "Maturity can only be updated in Open state" |
 | 3 — Withdrawn | ❌ Panics: "Maturity can only be updated in Open state" |
 
 This prevents retroactive maturity changes after investors have
 committed funds.
+
+## `update_funding_deadline` — Open State Only
+
+The optional funding deadline can be set, extended, or cleared while the escrow is **Open** (status == 0):
+
+| Status | `update_funding_deadline` result |
+|--------|----------------------------------|
+| 0 — Open | ✅ Allowed |
+| 1 — Funded | ❌ Panics: "Funding deadline can only be updated in Open state" |
+| 2 — Settled | ❌ Panics: "Funding deadline can only be updated in Open state" |
+| 3 — Withdrawn | ❌ Panics: "Funding deadline can only be updated in Open state" |
+| 4 — Cancelled | ❌ Panics: "Funding deadline can only be updated in Open state" |
+
+**Validation:**
+- `Some(d)`: `d` must be strictly greater than `env.ledger().timestamp()` (same rule as `init`).
+- `None`: removes `DataKey::FundingDeadline`; `is_funding_expired()` returns `false`.
+
+**Event:** `FundingDeadlineUpdated` carries `invoice_id`, `prior_deadline`, and `new_deadline`.
+
+Indexers should listen for this event to track deadline changes per invoice.
 
 ---
 
@@ -268,5 +326,24 @@ ledger timestamp (seconds since Unix epoch, inclusive).
 - **Idempotency is not trustless skipping:** the early return in
   `claim_investor_payout` only fires after `investor.require_auth()`;
   it cannot be exploited to skip the auth check.
+- **Settlement timestamp write-once:** `DataKey::SettledAt` is only written inside `settle()` at
+  the status 1→2 transition. There is no path to overwrite or delete the key after it is set.
+  `get_settled_at` is a pure read — it performs no mutation and has no auth requirement.
 - **Token economics:** time-based yield calculations are out of scope.
-  See `escrow/src/external_calls.rs` for token transfer assumptions.
+   See `escrow/src/external_calls.rs` for token transfer assumptions.
+
+### Maturity bounds validation
+
+Both `init` and `update_maturity` enforce that non-zero maturity timestamps satisfy two constraints:
+
+1. **Maturity ≥ now** — a maturity in the past would make settlement immediately callable at
+   deployment time, which may be unintended. A past maturity is rejected with
+   `EscrowError::MaturityInPast`.
+2. **Maturity ≤ now + max_horizon** — a maturity far beyond any plausible ledger time could
+   lock settlement forever. The max horizon defaults to `DEFAULT_MATURITY_MAX_HORIZON_SECS`
+   (~5 years) and can be configured at init via the `maturity_max_horizon` parameter or
+   updated after deployment via `update_maturity_max_horizon` (admin only).
+
+A maturity of `0` always passes validation — it means "no maturity lock".
+
+See `EscrowError::MaturityInPast` and `EscrowError::MaturityExceedsMaxHorizon`.

@@ -45,6 +45,17 @@ forbidden regressions, and interaction rules between `withdraw` vs `settle` path
 (terminal)  (terminal)
 ```
 
+## Token Custody during Funding
+
+To ensure custody is real and on-chain token balances reconcile with `funded_amount`, the contract performs atomic token transfers during funding:
+
+1. **Atomic Transfer:** Every successful call to `fund()`, `fund_with_commitment()`, or `fund_batch()` atomically pulls the specified token amount from the investor's balance to the escrow contract (`env.current_contract_address()`).
+2. **Balance-Delta Verification:** The transfer utilizes `external_calls::transfer_funding_token_inbound_with_balance_checks` to read pre/post balances of the investor and the escrow contract. It asserts that:
+   - The investor's balance decreased by exactly `amount`.
+   - The contract's balance increased by exactly `amount`.
+   - Any mismatch or insufficient balance reverts the entire transaction, ensuring no double-credit or state mutation on failure.
+3. **Reconciliation Invariant:** The contract's token balance always matches or exceeds `funded_amount` (reclaimed using `refund()` or settled/withdrawn). This ensures that the terminal dust sweep math `balance - sweep_amt >= funded_amount - distributed_principal` remains sound and protected.
+
 ---
 
 ## Batch funding (`fund_batch`)
@@ -159,6 +170,7 @@ their principal:
 | `cancel_funding()` | Admin only |
 | `set_legal_hold()` | Admin only |
 | `update_maturity()` | Admin only |
+| `update_funding_deadline()` | Admin only |
 | `propose_admin()` | Admin only |
 | `accept_admin()` | Pending admin only |
 
@@ -191,6 +203,29 @@ When `maturity > 0`:
 - When `maturity == 0`: `settle()` succeeds immediately (no time gate)
 
 `withdraw()` does **not** check maturity; it is a pull model for SME liquidity.
+
+## Funding deadline update
+
+`update_funding_deadline(new_deadline: Option<u64>)` allows the admin to set, extend, or clear
+the optional funding deadline while the escrow is **open** (status == 0):
+
+| Status | `update_funding_deadline` result |
+|--------|----------------------------------|
+| 0 — Open | ✅ Allowed |
+| 1 — Funded | ❌ Panics: "Funding deadline can only be updated in Open state" |
+| 2 — Settled | ❌ Panics: "Funding deadline can only be updated in Open state" |
+| 3 — Withdrawn | ❌ Panics: "Funding deadline can only be updated in Open state" |
+| 4 — Cancelled | ❌ Panics: "Funding deadline can only be updated in Open state" |
+
+**Validation rules:**
+- `Some(d)`: `d` must be strictly greater than the current ledger timestamp (same rule as `init`).
+- `None`: removes the deadline entirely; funding becomes unrestricted by time.
+- `is_funding_expired()` returns `false` when no deadline is set (key absent from storage).
+
+**Events:** `FundingDeadlineUpdated` carries `invoice_id`, `prior_deadline`, and `new_deadline`.
+
+This is consistent with `update_funding_target` and `update_maturity`: all three are admin-gated,
+open-state-only setters that emit a typed event with the prior and new values.
 
 ---
 
