@@ -1728,7 +1728,6 @@ impl LiquifactEscrow {
         result
     }
 
-
     /// Pro-rata denominator captured when the escrow first became **funded**; [`None`] until then.
     ///
     /// The snapshot is write-once. It records the full `funded_amount` at the threshold-crossing
@@ -2271,11 +2270,7 @@ impl LiquifactEscrow {
         let n = entries.len();
 
         ensure(&env, n > 0, EscrowError::FundingBatchEmpty);
-        ensure(
-            &env,
-            n <= MAX_FUND_BATCH,
-            EscrowError::FundingBatchTooLarge,
-        );
+        ensure(&env, n <= MAX_FUND_BATCH, EscrowError::FundingBatchTooLarge);
 
         let mut escrow = Self::get_escrow(env.clone());
 

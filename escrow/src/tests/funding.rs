@@ -3359,4 +3359,3 @@ fn test_get_investors_legacy_compatibility() {
     let investors = client.get_investors(&0, &10);
     assert_eq!(investors.len(), 0);
 }
-
