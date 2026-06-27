@@ -63,7 +63,7 @@ the event stream.
 | Property | Value |
 |---|---|
 | Auth | `InvoiceEscrow::admin` |
-| Write policy | **Single-write per index** — panics if `index` is already revoked |
+| Write policy | **Single-write per index** — returns `AttestationAlreadyRevoked` (53) if index is already revoked |
 | Storage key | `DataKey::AttestationRevoked(u32)` |
 | Event | `AttestationDigestRevoked { invoice_id, index }` |
 
@@ -74,8 +74,89 @@ entry as replaced or invalidated.
 Intended for corrective compliance flows: a KYC/KYB bundle was updated and the old anchor must
 be flagged as superseded while the full history stays on-chain.
 
-**Panics** if `index >= log.len()` (out of range) or if the index has already been revoked
-(double-revocation guard).
+**Typed errors** (not panic strings) are returned in all error cases:
+
+| Condition | Error code | `EscrowError` variant |
+|---|---|---|
+| `index >= log.len()` | 52 | `AttestationIndexOutOfRange` |
+| index already revoked | 53 | `AttestationAlreadyRevoked` |
+
+#### SDK numeric error handling
+
+SDKs must branch on `ContractError(code)`, not on panic strings. Panic strings are unstable
+across contract versions; numeric codes are append-only and stable. Example:
+
+```typescript
+try {
+  await contract.revoke_attestation_digest({ index: 5 });
+} catch (e) {
+  if (e.code === 52) { /* index out of range */ }
+  if (e.code === 53) { /* already revoked */   }
+}
+```
+
+#### Why panic strings were removed
+
+Prior to this change, `revoke_attestation_digest` used `assert!` with human-readable strings.
+This was inconsistent with the rest of the attestation API (codes 50–51) and with the broader
+`EscrowError` contract. Raw panic strings cannot be caught by type in SDKs or indexers and may
+change without notice. Stable numeric codes allow SDK consumers to branch deterministically on
+`ContractError(52)` / `ContractError(53)` without parsing message text.
+
+### `revoke_attestation_digests(indices: Vec<u32>)`
+
+| Property | Value |
+|---|---|
+| Auth | `InvoiceEscrow::admin` |
+| Batch bounds | Non-empty; max [`MAX_ATTESTATION_REVOKE_BATCH`] (32) entries |
+| Per-index policy | Same as single-revoke: range check then revocation check |
+| Atomicity | Full batch rolls back on any per-index failure |
+| Duplicate policy | **Not pre-deduplicated** — second occurrence of the same index fails with `AttestationAlreadyRevoked` (53) |
+| Storage key | `DataKey::AttestationRevoked(u32)` per index |
+| Event | One `AttestationDigestRevoked { invoice_id, index }` per newly revoked index |
+
+Atomically revoke multiple attestation-digest indices in a single transaction. Each index
+undergoes the same validation as the single-index `revoke_attestation_digest`:
+
+| Condition | Error code | `EscrowError` variant |
+|---|---|---|
+| `indices.len() == 0` | 54 | `AttestationBatchEmpty` |
+| `indices.len() > MAX_ATTESTATION_REVOKE_BATCH` | 55 | `AttestationBatchTooLarge` |
+| `index >= log.len()` | 52 | `AttestationIndexOutOfRange` |
+| index already revoked | 53 | `AttestationAlreadyRevoked` |
+
+If **any** per-index validation fails, the entire batch is rolled back — no partial
+revocation occurs. Off-chain indexers can safely consume the `att_rev` event stream
+knowing that a successful batch emitted exactly one event per intended index.
+
+```typescript
+// Example: revoke indices 0, 2, and 4 in one call
+await contract.revoke_attestation_digests({ indices: [0, 2, 4] });
+```
+
+### `unrevoke_attestation_digest(index: u32)`
+
+| Property | Value |
+|---|---|
+| Auth | `InvoiceEscrow::admin` |
+| Write policy | Clears `DataKey::AttestationRevoked(index)` — errors if not currently revoked |
+| Storage key | `DataKey::AttestationRevoked(u32)` (removed) |
+| Event | `AttestationDigestUnrevoked { invoice_id, index }` |
+| Typed errors | `AttestationIndexOutOfRange` (52), `AttestationNotRevoked` (56) |
+
+Clears the revocation marker set by `revoke_attestation_digest`. Use this to correct a
+fat-finger revocation before indexers process the erroneous tombstone.
+
+**Guard ordering (ADR-002):** range check → revocation-state check → `require_auth` →
+storage mutation. This means range and state errors are surfaced even to unauthenticated
+callers, consistent with the existing revoke path.
+
+The append log entry and its digest are unaffected. After a successful unrevoke,
+`is_attestation_revoked(index)` returns `false` and the entry is once again treated as
+active by indexers.
+
+**Errors** with `AttestationIndexOutOfRange` (52) if `index >= log.len()`, or
+`AttestationNotRevoked` (53) if the index is not currently revoked.
 
 ---
 
@@ -229,9 +310,37 @@ Off-chain                              On-chain
 The original digest at index N remains in the append log for auditability. Indexers
 consume `AttestationDigestRevoked` events to compute the effective (non-revoked) chain.
 
+### Flow 6 — Correcting an erroneous revocation (unrevoke)
+
+If an admin fat-fingered the index on a `revoke_attestation_digest` call and revoked the
+wrong entry, `unrevoke_attestation_digest` clears the marker before indexers propagate the
+tombstone:
+
+```
+Off-chain                              On-chain
+─────────────────────────────────────────────────────────────────────
+1. Admin realises index N was revoked
+   by mistake (correct target was M).
+                                       2. Admin calls:
+                                          unrevoke_attestation_digest(N)
+                                          → AttestationDigestUnrevoked { index: N }
+
+                                       3. Admin calls (if still needed):
+                                          revoke_attestation_digest(M)
+                                          → AttestationDigestRevoked { index: M }
+
+4. Indexer sees AttestationDigestUnrevoked
+   for index N and removes the
+   superseded label. Entry N is active
+   again; entry M is now the tombstone.
+```
+
+The append log is never mutated. The unrevoke only removes the `DataKey::AttestationRevoked(N)`
+storage key; the digest at index N is unchanged.
+
 ## Security notes
 
-- **Admin key custody:** both entrypoints require `InvoiceEscrow::admin` auth. Production
+- **Admin key custody:** all attestation entrypoints require `InvoiceEscrow::admin` auth. Production
   deployments should use a multisig or governed contract as admin so no single key can bind
   an arbitrary digest. See [ADR-002](adr/ADR-002-auth-boundaries.md).
 
@@ -255,10 +364,19 @@ consume `AttestationDigestRevoked` events to compute the effective (non-revoked)
 
 - **Double-revocation guard:** each index may be revoked at most once. A second call for the
   same index panics with `"attestation already revoked at index"`. Off-chain indexers can
-  safely assume that once `AttestationDigestRevoked` is observed, it is final.
+  safely assume that once `AttestationDigestRevoked` is observed, it is final unless an
+  `AttestationDigestUnrevoked` event follows.
 
 - **Out-of-range rejection:** revoking a non-existent index panics with `"attestation index
   out of range"`. The admin must read `get_attestation_append_log` to determine valid indices.
+
+- **Unrevoke is admin-only:** `unrevoke_attestation_digest` is gated by `require_auth` on
+  `InvoiceEscrow::admin`. ADR-002 guard ordering is preserved: range and state checks run
+  before auth so typed errors (`AttestationIndexOutOfRange` = 52, `AttestationNotRevoked` = 53)
+  are surfaced cleanly.
+
+- **Unrevoke is idempotent in round-trips:** revoke → unrevoke → revoke is valid. Each
+  transition is guarded, so double-unrevoke is rejected with `AttestationNotRevoked`.
 
 - **Token economics:** attestation entrypoints do not interact with token balances, funding
   state, or settlement flows. They are metadata-only. See
@@ -271,7 +389,9 @@ consume `AttestationDigestRevoked` events to compute the effective (non-revoked)
 
 ## Test coverage
 
-Attestation behavior is covered in [`escrow/src/test/attestations.rs`](../escrow/src/test/attestations.rs):
+Attestation behavior is covered in [`escrow/src/tests/attestations.rs`](../escrow/src/tests/attestations.rs):
+
+### Write-once invariant (`bind_primary_attestation_hash`)
 
 | Test | What it proves |
 |---|---|
@@ -280,23 +400,67 @@ Attestation behavior is covered in [`escrow/src/test/attestations.rs`](../escrow
 | `test_bind_primary_hash_same_digest_panics` | Second bind (same digest) panics |
 | `test_bind_primary_hash_different_digest_panics` | Second bind (different digest) panics |
 | `test_bind_primary_hash_non_admin_panics` | Non-admin bind is rejected |
+| `test_bind_primary_hash_typed_error` | `try_bind_primary_attestation_hash` returns typed error code 50 (`PrimaryAttestationAlreadyBound`) on second call |
+| `test_bind_primary_hash_emits_event` | Emits `PrimaryAttestationBound` with correct `invoice_id` and `digest` |
+
+### Bounded append log (`append_attestation_digest`)
+
+| Test | What it proves |
+|---|---|
 | `test_append_log_empty_before_first_append` | Log is empty before first append |
 | `test_append_single_entry_stored` | Single append stored at index 0 |
 | `test_append_multiple_entries_ordered` | Insertion order preserved |
 | `test_append_exactly_max_entries_succeeds` | 32nd entry succeeds (boundary inclusive) |
 | `test_append_beyond_max_panics` | 33rd entry panics |
-| `test_append_duplicate_digest_allowed` | Duplicate digests accepted |
+| `test_append_beyond_max_typed_error` | `try_append_attestation_digest` returns typed error code 51 (`AttestationAppendLogCapacityReached`) on 33rd call |
+| `test_append_duplicate_digest_allowed` | Duplicate digests accepted (log is audit trail, not a set) |
 | `test_append_non_admin_panics` | Non-admin append is rejected |
+| `test_append_emits_event_with_correct_index` | Emits `AttestationDigestAppended` with correct `index` (0-based) and `digest` for each call |
+
+### Independence
+
+| Test | What it proves |
+|---|---|
 | `test_primary_bind_does_not_affect_append_log` | Primary bind leaves log empty |
 | `test_append_does_not_affect_primary_hash` | Append leaves primary hash `None` |
 | `test_primary_and_append_coexist` | Both can be set independently |
+
+### Revocation tombstone (`revoke_attestation_digest` / `revoke_attestation_digests`)
+
+| Test | What it proves |
+|---|---|
 | `test_revoke_single_entry` | Happy path: revoke index 0, `is_attestation_revoked` returns `true` |
 | `test_revoke_later_index_does_not_affect_earlier` | Revoke index 1 leaves index 0 unaffected |
 | `test_revoke_all_entries` | All entries can be revoked sequentially |
-| `test_double_revoke_panics` | Second revocation of the same index panics |
-| `test_revoke_out_of_range_panics` | Revoke on empty log panics |
-| `test_revoke_at_log_len_panics` | Revoke at index `log.len()` panics |
+| `test_double_revoke_panics` | Second revocation of same index panics with `"attestation already revoked at index"` |
+| `test_revoke_out_of_range_panics` | Revoke on empty log panics with `"attestation index out of range"` |
+| `test_revoke_at_log_len_panics` | Revoke at index `log.len()` panics (0-indexed boundary) |
 | `test_is_revoked_empty_log` | `is_attestation_revoked` returns `false` for any index on empty log |
 | `test_revoke_non_admin_panics` | Non-admin revoke is rejected |
 | `test_revoke_preserves_log_entry` | Append log contents unchanged after revocation |
 | `test_revoke_does_not_affect_primary_hash` | Revocation leaves primary hash intact |
+| `test_unrevoke_restores_state` | Revoke then unrevoke: `is_attestation_revoked` returns `false` |
+| `test_unrevoke_preserves_log_entry` | Append log entry unchanged after unrevoke |
+| `test_unrevoke_not_revoked_panics` | Unrevoke of non-revoked index is rejected |
+| `test_unrevoke_out_of_range_panics` | Unrevoke on empty log is rejected |
+| `test_double_unrevoke_panics` | Second unrevoke rejected after first succeeds |
+| `test_unrevoke_non_admin_panics` | Non-admin unrevoke is rejected |
+| `test_revoke_unrevoke_revoke_round_trip` | Round-trip revoke → unrevoke → revoke succeeds |
+| `test_unrevoke_does_not_affect_other_indices` | Unrevoke of index 0 leaves index 1 revoked |
+
+### Batch revocation (`revoke_attestation_digests`)
+
+| Test | What it proves |
+|---|---|
+| `test_batch_revoke_happy_path` | Happy path: revoke indices 0, 2, 4 atomically |
+| `test_batch_revoke_all_entries` | All entries can be revoked in one batch |
+| `test_batch_revoke_empty_panics` | Empty batch returns `AttestationBatchEmpty` (54) |
+| `test_batch_revoke_oversized_panics` | Batch > `MAX_ATTESTATION_REVOKE_BATCH` returns `AttestationBatchTooLarge` (55) |
+| `test_batch_revoke_max_size_succeeds` | Batch at boundary (`MAX_ATTESTATION_REVOKE_BATCH`) succeeds |
+| `test_batch_revoke_out_of_range_panics` | Out-of-range index in batch returns `AttestationIndexOutOfRange` (52) |
+| `test_batch_revoke_already_revoked_panics` | Already-revoked index in batch returns `AttestationAlreadyRevoked` (53) |
+| `test_batch_revoke_duplicate_index_panics` | Duplicate index in batch: second occurrence hits `AttestationAlreadyRevoked` (53), entire batch rolls back |
+| `test_batch_revoke_non_admin_panics` | Non-admin batch revoke is rejected |
+| `test_batch_revoke_preserves_log_entries` | Append log contents unchanged after batch revocation |
+| `test_batch_revoke_emits_events` | Exactly one `att_rev` event per revoked index |
+| `test_batch_revoke_atomic_rollback` | Mid-batch failure rolls back all prior revocations |

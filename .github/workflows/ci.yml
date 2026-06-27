@@ -23,7 +23,7 @@ jobs:
       - name: Check formatting
         run: cargo fmt -p liquifact_escrow -- --check
 
-      - name: Clippy 
+      - name: Clippy
         run: cargo clippy -p liquifact_escrow -- -D warnings
 
       - name: Build
@@ -35,8 +35,8 @@ jobs:
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
 
-       - name: Add WASM target
-       run: rustup target add wasm32-unknown-unknown
+      - name: Add WASM target
+        run: rustup target add wasm32-unknown-unknown
       - name: Build WASM
         run: cargo build --target wasm32-unknown-unknown --release -p liquifact_escrow
 

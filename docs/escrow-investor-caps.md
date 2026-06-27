@@ -200,6 +200,24 @@ Both validations are applied:
 - Amount ≥ min_contribution
 - unique_funder_count < max_unique_investors (for new investors)
 
+### 5. Exact boundary semantics
+
+For the funding floor:
+- Deposits below `min_contribution` are rejected per call.
+- Deposits exactly equal to `min_contribution` are accepted.
+- Follow-on deposits from an existing investor still must satisfy the same per-call floor.
+
+For the per-investor cap:
+- Cumulative funding for one investor may equal `max_per_investor`.
+- Any deposit that would raise the cumulative contribution above the cap is rejected.
+- The cap is enforced across multiple `fund` / `fund_with_commitment` calls for the same investor.
+
+For the unique investor cap:
+- Distinct first-time funders are counted until the configured `max_unique_investors` is reached.
+- Funding from the last allowed unique investor is accepted.
+- A new address attempting to fund after the cap is reached is rejected.
+- Follow-on funding by an already-counted investor continues to succeed even after the distinct-investor cap is reached.
+
 #### Tiered Yield System
 
 The cap applies to both `fund()` and `fund_with_commitment()`:

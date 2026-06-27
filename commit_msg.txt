@@ -1,0 +1,44 @@
+fix(escrow): resolve test-binary compile errors blocking CI / fmt-build-test
+
+Pre-existing blockers that prevented cargo build --tests from completing,
+addressed as a follow-up to the issue #386 / chores commits on this branch:
+
+- escrow/src/tests/admin.rs (E0716 x4): four sites binding a borrow through
+  `let events = env.events().all().events();` had the host events
+  temporary dropped at end-of-statement while the binding stayed. Restructured
+  each site as `let all_events = env.events().all(); let events =
+  all_events.events();` so the lifetime of the inner Events value covers the
+  binding. The four sites are inside the four issue #386
+  `test_transfer_admin_*` tests. Same pattern applied to the immediately
+  preceding `let events_before = ...len();` companions for stylistic
+  consistency. (`.len()` itself consumed the borrow chain into a `usize`
+  and did not strictly need to be rewritten, but the harmonized form reads
+  more uniformly.)
+
+- escrow/src/tests/coverage.rs (E0599 x2): two sites in the new
+  `test_settle_event_*` tests were calling `env.events().all()`. The
+  `.all()` method comes from the `Events` testutils trait. The file
+  already imported `Address as _` and `Ledger` from that family — added
+  `Events as _` to the same `use soroban_sdk::testutils::{...}` line so
+  the trait comes into scope without naming it.
+
+- escrow/src/tests/integration.rs (E0106 x1): `setup_withdraw_with_token`
+  returned `(LiquifactEscrowClient<'_>, ..., TokenClient<'_>, ...)` from
+  a function whose own references elided the lifetime. Named the lifetime
+  explicitly as `<'a>` and bound `env: &'a Env` so the clients can flow
+  through the return tuple. Returned Address fields stay owned. The
+  `invoice_id: &str` parameter stays `&str` because lifetime elision
+  applies on that reference.
+
+- escrow/src/tests/properties.rs (E0308 x2 then x4): proptest bound
+  `max_unique_investors` as `Option<u32>` but
+  `LiquifactEscrowClient::init` expects `Option<u64>`. Annotated the
+  binding with `: Option<u64>` and `as u64`-cast the inner value, then
+  changed both half-of-fix comparisons (`distinct_funders.len() as u32`
+  against the now-`u64` `uc`) to `as u64`. The `prop_assert_eq!(...
+  client.get_unique_funder_count(), distinct_funders.len() as u32)` site
+  stays `as u32` because the getter returns `u32`.
+
+Issue #386 feature work (DeprecatedTransferAdminUsed event, transfer_admin
+shim, tests, docs) is unchanged. Build now completes and the CI /
+fmt-build-test job should turn green.

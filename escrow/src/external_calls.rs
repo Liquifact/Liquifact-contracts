@@ -143,3 +143,80 @@ pub fn transfer_funding_token_with_balance_checks(
         EscrowError::RecipientBalanceDeltaMismatch,
     );
 }
+
+/// Transfer `amount` of `token` from `from` (external payer) to `to_contract` (this escrow contract),
+/// then verify SEP-41-style conservation: recipient increases by exactly `amount` and sender decreases
+/// (sender delta is non-positive).
+///
+/// This function performs strict balance-delta verification through atomic balance checks:
+/// 1. Records pre-transfer balances for both sender (external payer) and recipient (escrow contract)
+/// 2. Executes transfer using [`MuxedAddress::from`] for Stellar compatibility
+/// 3. Records post-transfer balances and calculates exact deltas
+/// 4. Asserts:
+///    - Recipient delta equals exactly `amount`
+///    - Sender delta is non-positive (sender spent at least some tokens)
+///
+/// The invariants enforced ensure mathematical conservation of value and detect:
+/// - Fee-on-transfer tokens (recipient delta < amount)
+/// - Rebasing/malicious tokens (recipient delta != amount or sender delta > 0)
+/// - Balance manipulation or integration bugs
+///
+/// # Arguments
+///
+/// * `env` - The Soroban environment
+/// * `token` - Address of the SEP-41 token contract
+/// * `from` - Address transferring from (external payer, e.g., investor)
+/// * `to_contract` - Address receiving the tokens (this escrow contract)
+/// * `amount` - Amount to transfer (must be positive)
+///
+/// # Errors
+///
+/// Emits typed [`EscrowError`] codes if `amount` is not positive, sender balance is insufficient,
+/// balance deltas do not match expectations, or balance delta calculation underflows.
+///
+/// # Security Considerations
+///
+/// This function assumes the token contract follows standard SEP-41 semantics without
+/// fee-on-transfer, rebasing, or hook behaviors. Non-compliant tokens will cause this
+/// function to fail with a typed error, serving as a safety boundary. Such tokens should be
+/// excluded through governance allowlists and integration review processes.
+pub fn transfer_into_escrow_with_balance_checks(
+    env: &Env,
+    token: &Address,
+    from: &Address,
+    to_contract: &Address,
+    amount: i128,
+) {
+    ensure(env, amount > 0, EscrowError::TransferAmountNotPositive);
+    let token_client = TokenClient::new(env, token);
+    let from_before = token_client.balance(from);
+    let contract_before = token_client.balance(to_contract);
+    ensure(
+        env,
+        from_before >= amount,
+        EscrowError::InsufficientTokenBalanceBeforeTransfer,
+    );
+
+    token_client.transfer(from, MuxedAddress::from(to_contract.clone()), &amount);
+
+    let from_after = token_client.balance(from);
+    let contract_after = token_client.balance(to_contract);
+
+    let spent = from_before
+        .checked_sub(from_after)
+        .unwrap_or_else(|| fail(env, EscrowError::SenderBalanceUnderflow));
+    let received = contract_after
+        .checked_sub(contract_before)
+        .unwrap_or_else(|| fail(env, EscrowError::RecipientBalanceUnderflow));
+
+    ensure(
+        env,
+        received == amount,
+        EscrowError::RecipientBalanceDeltaMismatch,
+    );
+    ensure(
+        env,
+        spent >= 0, // sender delta is non-positive (sender spent at least some tokens)
+        EscrowError::SenderBalanceDeltaMismatch,
+    );
+}

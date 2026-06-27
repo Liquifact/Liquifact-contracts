@@ -1,214 +1,138 @@
-# Beneficiary Rotation System
+# Beneficiary Rotation (SME) — dual authorization & downstream routing
 
-This document describes the timelocked beneficiary rotation system implemented in the LiquiFact Escrow contract.
+The LiquiFact escrow contract supports a governed on-chain rotation of the **SME beneficiary** (the address that receives the escrow’s funded principal on `withdraw`).
 
-## Overview
+This document is the authoritative, code-accurate reference for the `rotate_beneficiary` flow, including its **dual-authorization requirement**, its **exact guard ordering**, and its **operator-facing rejection codes**.
 
-The beneficiary rotation system allows the admin to propose a new SME (Small Medium Enterprise) beneficiary with a timelock, ensuring secure and transparent transitions of fund control rights.
+> **Downstream impact:** `rotate_beneficiary` changes the `sme_address` stored in contract state. Later SME-gated disbursement (`withdraw`) uses the *current* `sme_address`, so rotation determines where the funded principal is routed.
 
-## Key Features
+---
 
-- **Timelocked Proposals**: Admin can propose new beneficiaries with a minimum delay before acceptance
-- **Authorization Control**: Only the proposed address can accept the role after timelock expires
-- **Event Transparency**: All proposal, acceptance, and cancellation actions emit events
-- **State Management**: Current active SME address is tracked separately from original SME
-- **Admin Controls**: Admin can cancel proposals and manage the rotation process
+## Entry point
 
-## Data Structures
-
-### BeneficiaryProposal
+### `rotate_beneficiary`
 
 ```rust
-#[contracttype]
-#[derive(Clone, Debug, PartialEq)]
-pub struct BeneficiaryProposal {
-    /// Address that will become the new SME after acceptance and timelock expiry
-    pub proposed_address: Address,
-    /// Ledger timestamp when the proposal was created
-    pub proposed_at: u64,
-    /// Minimum delay in seconds before the proposal can be accepted
-    pub timelock_duration_secs: u64,
-}
+pub fn rotate_beneficiary(env: Env, new_sme_address: Address) -> InvoiceEscrow
 ```
 
-### CurrentSmeAddress
+#### What it updates
 
-```rust
-#[contracttype]
-#[derive(Clone, Debug, PartialEq)]
-pub struct CurrentSmeAddress {
-    /// The currently active SME address that can withdraw funds
-    pub address: Address,
-}
-```
+- `InvoiceEscrow::sme_address` is atomically updated from the current SME to `new_sme_address`.
 
-## Storage Keys
+#### Authorization model (why both signatures are required)
 
-- `DataKey::BeneficiaryProposal` - Stores the current proposal (if any)
-- `DataKey::CurrentSmeAddress` - Stores the currently active SME address
+This entrypoint enforces **dual authorization**:
 
-## Core Functions
+1. **Outgoing SME** (`escrow.sme_address.require_auth()`)
+2. **Current admin** (`escrow.admin.require_auth()`)
 
-### `propose_beneficiary`
+Both must sign in the same transaction. This prevents unilateral redirection of the withdrawal destination by:
 
-Proposes a new SME beneficiary with a timelock duration.
+- a compromised admin key alone (admin cannot rotate without the SME signing), and
+- a compromised SME key alone (SME cannot rotate without the admin signing).
 
-**Parameters:**
+#### Exact guard ordering (code-accurate)
 
-- `proposed_address`: The address that will become the new SME
-- `timelock_duration_secs`: Minimum delay before the proposal can be accepted
+`rotate_beneficiary` evaluates guards in this order:
 
-**Requirements:**
+1. **Legal-hold gate (read-only)**
+   - Condition: `!legal_hold_active`
+   - If `LegalHold` is active, the call aborts immediately.
 
-- Admin authorization required
-- Proposed address cannot be the same as current SME
-- Timelock duration must be greater than zero
-- No existing proposal can be active
+2. **State gate (allowed states only)**
+   - Condition: `escrow.status == 0 || escrow.status == 1`
+   - Meaning:
+     - `0` = **open** (pre-settlement)
+     - `1` = **funded** (still pre-settlement)
 
-**Events:**
+3. **No-op guard**
+   - Condition: `new_sme_address != escrow.sme_address`
+   - Rotating to the current address is rejected.
 
-- `BeneficiaryProposed` - Emitted when proposal is created
+4. **Dual authorization**
+   - `escrow.sme_address.require_auth()`
+   - `escrow.admin.require_auth()`
 
-### `accept_beneficiary`
+5. **Storage write + event emission**
+   - Persists the updated `sme_address` into `DataKey::Escrow`.
+   - Emits `BeneficiaryRotated`.
 
-Accepts a proposed beneficiary role after timelock expires.
+---
 
-**Parameters:**
+## Allowed states
 
-- `caller`: The proposed address (must match the proposal)
+Rotation is only permitted in **pre-settlement** states:
 
-**Requirements:**
+- `status = 0` (**open**)
+- `status = 1` (**funded**)
 
-- Caller must be the proposed address
-- Proposal must exist
-- Timelock must have expired
+Rotation is rejected in terminal/post-settlement states:
 
-**Effects:**
+- `status = 2` (**settled**)
+- `status = 3` (**withdrawn**)
+- `status = 4` (**cancelled**)
 
-- Updates the current SME address
-- Removes the proposal
-- Emits `BeneficiaryAccepted` event
+---
 
-### `cancel_beneficiary_proposal`
+## Operator-facing rejection codes
 
-Cancels an active beneficiary proposal.
+These are the typed `EscrowError` variants emitted by `rotate_beneficiary`:
 
-**Requirements:**
+- **`LegalHoldBlocksBeneficiaryRotation` (160)**
+  - Trigger: legal hold is active.
+  - Meaning: compliance/legal hold blocks beneficiary rotation.
 
-- Admin authorization required
-- Proposal must exist
+- **`RotationNotOpen` (161)**
+  - Trigger: escrow is not in a pre-settlement state.
+  - Meaning: `status` must be `0` (open) or `1` (funded).
 
-**Effects:**
+- **`NewSmeSameAsCurrent` (162)**
+  - Trigger: `new_sme_address == escrow.sme_address`.
+  - Meaning: no-op rotations are rejected.
 
-- Removes the proposal
-- Emits `BeneficiaryCancelled` event
+---
 
-### `get_current_sme_address`
+## Downstream effect on `withdraw`
 
-Returns the currently active SME address.
+`withdraw` is SME-gated and sends the funded principal to the **current** stored `sme_address`.
 
-**Logic:**
+So after a successful rotation:
 
-- If `CurrentSmeAddress` exists, returns that address
-- Otherwise, returns the original SME address from the escrow
+- `withdraw` will route disbursement to the **new** SME beneficiary.
+- the new SME becomes the authority for subsequent SME-gated flows.
 
-### `can_accept_beneficiary`
+### Eventing for indexers
 
-Checks if a beneficiary proposal is active and timelock has expired.
+- `rotate_beneficiary` emits **`BeneficiaryRotated`** (with `prior_sme` and `new_sme`).
+- After rotation, later SME disbursement emits **`SmeWithdrew`**.
 
-**Returns:**
+Indexers should:
 
-- `true` if proposal exists and timelock has expired
-- `false` otherwise
+1. update their internal “active SME” mapping on `BeneficiaryRotated`, then
+2. attribute a later `SmeWithdrew` to the SME that was current after the rotation.
 
-## Event Flow
+---
 
-### Successful Rotation
+## Event schema
 
-1. Admin calls `propose_beneficiary`
-2. `BeneficiaryProposed` event emitted
-3. Wait for timelock duration
-4. New SME calls `accept_beneficiary`
-5. `BeneficiaryAccepted` event emitted
-6. New SME can now call `withdraw` and `settle`
+### `BeneficiaryRotated`
 
-### Cancellation Flow
+Emitted after successful `rotate_beneficiary`.
 
-1. Admin calls `cancel_beneficiary_proposal`
-2. `BeneficiaryCancelled` event emitted
-3. Original SME retains control
+Fields:
 
-## Security Considerations
+- `name`: `ben_rot`
+- `invoice_id`: the escrow invoice id
+- `prior_sme`: previous SME address
+- `new_sme`: updated SME address
 
-### Timelock Security
+---
 
-- Minimum timelock duration of 1 second prevents immediate transfers
-- Timelock expiration is based on ledger timestamp, not wall-clock time
-- Prevents rushed or coerced transfers
+## Security notes (operator guidance)
 
-### Authorization Security
+- Rotation is intentionally **not** a proposal/accept flow. It is a single call requiring both the outgoing SME and admin signatures.
+- Legal hold blocks beneficiary rotation before any authorization checks run.
+- Rotation only affects the withdrawal destination (`sme_address`). It does not move tokens directly; token routing happens in `withdraw`.
+- If you operate with multisig governance, ensure the admin key used for `rotate_beneficiary` signing cannot be invoked unilaterally without SME consent (and vice-versa), matching the intended dual-control policy.
 
-- Only admin can propose new beneficiaries
-- Only proposed address can accept the role
-- Admin cannot force acceptance or bypass timelock
-
-### State Consistency
-
-- Current SME address is updated atomically with proposal acceptance
-- Original SME address remains unchanged in escrow storage
-- Clear separation between proposal state and active beneficiary state
-
-## Usage Examples
-
-### Proposing a New Beneficiary
-
-```rust
-// Admin proposes new SME with 24-hour timelock
-let proposal = client.propose_beneficiary(&new_sme_address, &86400u64);
-assert_eq!(proposal.timelock_duration_secs, 86400);
-```
-
-### Accepting Beneficiary Role
-
-```rust
-// After timelock expires, new SME accepts
-let updated_escrow = client.accept_beneficiary(&new_sme_address);
-assert_eq!(updated_escrow.sme_address, new_sme_address);
-```
-
-### Checking Rotation Status
-
-```rust
-// Check if rotation is possible
-let can_accept = client.can_accept_beneficiary();
-if can_accept {
-    // New SME can accept the role
-}
-```
-
-## Integration with Existing Functions
-
-### `withdraw` and `settle`
-
-These functions now use `get_current_sme_address()` instead of the original SME address, ensuring that the current active beneficiary can control funds.
-
-### Legal Hold Compatibility
-
-Beneficiary rotation is not blocked by legal holds, as it's an administrative function that doesn't move funds.
-
-## Testing
-
-The implementation includes comprehensive tests covering:
-
-- Successful proposal and acceptance
-- Timelock enforcement
-- Authorization requirements
-- State transitions
-- Event emission
-- Edge cases and error conditions
-
-## Migration Considerations
-
-- Existing escrow contracts will continue to work unchanged
-- New contracts will have the rotation functionality available
-- No migration is required for existing deployments

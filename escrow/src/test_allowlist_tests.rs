@@ -1,9 +1,10 @@
 use super::{
-    AllowlistEnabledChanged, DataKey, InvestorAllowlistChanged, LiquifactEscrow,
+    AllowlistEnabledChanged, DataKey, EscrowError, InvestorAllowlistChanged, LiquifactEscrow,
     LiquifactEscrowClient,
 };
 use soroban_sdk::Vec as SorobanVec;
-use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env, Event};
+use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env, Error, Event, InvokeError};
+use std::fmt::Debug;
 
 fn deploy(env: &Env) -> LiquifactEscrowClient<'_> {
     let id = env.register(LiquifactEscrow, ());
@@ -25,6 +26,9 @@ fn init(env: &Env, client: &LiquifactEscrowClient) -> (Address, Address) {
         &token,
         &None,
         &treasury,
+        &None,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -460,4 +464,456 @@ fn test_batch_requires_admin_auth() {
 
     env.mock_auths(&[]);
     client.set_investors_allowlisted(&v, &true);
+}
+
+// =============================================================================
+// Funding-gate enforcement matrix
+//
+// The tests above cover setter behaviour and basic should_panic guards.
+// This section adds **typed-error** assertions for every gate combination so
+// that:
+//   - Both `fund` and `fund_with_commitment` are verified to return the exact
+//     error code `InvestorNotAllowlisted` (104) when the gate blocks them.
+//   - Successful paths return the correct funded_amount.
+//   - Revocation mid-funding is validated: a prior contribution does not
+//     exempt an investor from the gate on their next deposit.
+//   - Disabling the allowlist after enabling it lets any address fund,
+//     regardless of whether they have an entry.
+// =============================================================================
+
+/// Assert that a `try_*` client call returns the expected typed contract error.
+///
+/// Works for both `Err(Ok(Error))` (normal SDK encoding) and
+/// `Err(Err(InvokeError::Contract(code)))` (raw host encoding) to stay
+/// resilient across Soroban SDK minor version differences.
+fn assert_contract_error_gate<T, E>(
+    result: Result<Result<T, E>, Result<Error, InvokeError>>,
+    expected: EscrowError,
+) where
+    T: Debug,
+    E: Debug,
+{
+    let code = expected as u32;
+    match result {
+        Err(Ok(err)) => assert_eq!(err, Error::from_contract_error(code)),
+        Err(Err(InvokeError::Contract(c))) => assert_eq!(c, code),
+        other => panic!("expected ContractError({code}), got {other:?}"),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Helper: initialise an escrow backed by a fresh address-stub token.
+// Returns (admin, sme).  The caller has already called `env.mock_all_auths()`.
+// ---------------------------------------------------------------------------
+fn init_gate(env: &Env, client: &LiquifactEscrowClient) -> (Address, Address) {
+    let admin = Address::generate(env);
+    let sme = Address::generate(env);
+    let token = Address::generate(env);
+    let treasury = Address::generate(env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(env, "GATEINV01"),
+        &sme,
+        &100_000i128,
+        &800i64,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+    (admin, sme)
+}
+
+// ---------------------------------------------------------------------------
+// Gate matrix: fund
+// ---------------------------------------------------------------------------
+
+/// Gate inactive, no entry → fund succeeds (gate bypassed).
+#[test]
+fn gate_fund_allowlist_inactive_no_entry_succeeds() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init_gate(&env, &client);
+
+    let investor = Address::generate(&env);
+    // Allowlist is off by default — no entry required.
+    let escrow = client.fund(&investor, &1_000i128);
+    assert_eq!(escrow.funded_amount, 1_000i128);
+}
+
+/// Gate inactive, entry explicitly set to false → fund still succeeds (gate bypassed).
+#[test]
+fn gate_fund_allowlist_inactive_entry_false_succeeds() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init_gate(&env, &client);
+
+    let investor = Address::generate(&env);
+    // Write an explicit `false` entry while gate is off — should have no effect.
+    client.set_investor_allowlisted(&investor, &false);
+    let escrow = client.fund(&investor, &2_000i128);
+    assert_eq!(escrow.funded_amount, 2_000i128);
+}
+
+/// Gate active, investor allowlisted → fund succeeds.
+#[test]
+fn gate_fund_allowlist_active_investor_allowed_succeeds() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init_gate(&env, &client);
+
+    let investor = Address::generate(&env);
+    client.set_allowlist_active(&true);
+    client.set_investor_allowlisted(&investor, &true);
+
+    let escrow = client.fund(&investor, &5_000i128);
+    assert_eq!(escrow.funded_amount, 5_000i128);
+}
+
+/// Gate active, investor NOT allowlisted (absent entry) → fund returns `InvestorNotAllowlisted`.
+#[test]
+fn gate_fund_allowlist_active_investor_absent_returns_typed_error() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init_gate(&env, &client);
+
+    let investor = Address::generate(&env);
+    client.set_allowlist_active(&true);
+    // No call to set_investor_allowlisted — entry is absent → default-to-deny.
+
+    assert_contract_error_gate(
+        client.try_fund(&investor, &1_000i128),
+        EscrowError::InvestorNotAllowlisted,
+    );
+}
+
+/// Gate active, investor explicitly set to false → fund returns `InvestorNotAllowlisted`.
+#[test]
+fn gate_fund_allowlist_active_investor_denied_returns_typed_error() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init_gate(&env, &client);
+
+    let investor = Address::generate(&env);
+    client.set_allowlist_active(&true);
+    client.set_investor_allowlisted(&investor, &false);
+
+    assert_contract_error_gate(
+        client.try_fund(&investor, &1_000i128),
+        EscrowError::InvestorNotAllowlisted,
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Gate matrix: fund_with_commitment
+// ---------------------------------------------------------------------------
+
+/// Gate inactive, no entry → fund_with_commitment succeeds.
+#[test]
+fn gate_fwc_allowlist_inactive_no_entry_succeeds() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init_gate(&env, &client);
+
+    let investor = Address::generate(&env);
+    let escrow = client.fund_with_commitment(&investor, &3_000i128, &0u64);
+    assert_eq!(escrow.funded_amount, 3_000i128);
+}
+
+/// Gate active, investor allowlisted → fund_with_commitment succeeds.
+#[test]
+fn gate_fwc_allowlist_active_investor_allowed_succeeds() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init_gate(&env, &client);
+
+    let investor = Address::generate(&env);
+    client.set_allowlist_active(&true);
+    client.set_investor_allowlisted(&investor, &true);
+
+    let escrow = client.fund_with_commitment(&investor, &4_000i128, &0u64);
+    assert_eq!(escrow.funded_amount, 4_000i128);
+}
+
+/// Gate active, investor NOT allowlisted (absent) → fund_with_commitment returns
+/// `InvestorNotAllowlisted`.
+#[test]
+fn gate_fwc_allowlist_active_investor_absent_returns_typed_error() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init_gate(&env, &client);
+
+    let investor = Address::generate(&env);
+    client.set_allowlist_active(&true);
+
+    assert_contract_error_gate(
+        client.try_fund_with_commitment(&investor, &1_000i128, &0u64),
+        EscrowError::InvestorNotAllowlisted,
+    );
+}
+
+/// Gate active, investor explicitly denied → fund_with_commitment returns
+/// `InvestorNotAllowlisted`.
+#[test]
+fn gate_fwc_allowlist_active_investor_denied_returns_typed_error() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init_gate(&env, &client);
+
+    let investor = Address::generate(&env);
+    client.set_allowlist_active(&true);
+    client.set_investor_allowlisted(&investor, &false);
+
+    assert_contract_error_gate(
+        client.try_fund_with_commitment(&investor, &1_000i128, &0u64),
+        EscrowError::InvestorNotAllowlisted,
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Toggle mid-funding
+// ---------------------------------------------------------------------------
+
+/// Disabling the gate after enabling it allows a previously-blocked investor
+/// to fund without any allowlist entry.
+#[test]
+fn gate_disable_mid_funding_unblocks_any_investor() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init_gate(&env, &client);
+
+    let investor = Address::generate(&env);
+
+    client.set_allowlist_active(&true);
+    // Confirm investor is blocked while gate is active.
+    assert_contract_error_gate(
+        client.try_fund(&investor, &500i128),
+        EscrowError::InvestorNotAllowlisted,
+    );
+
+    // Disable gate — investor should now succeed without an entry.
+    client.set_allowlist_active(&false);
+    let escrow = client.fund(&investor, &500i128);
+    assert_eq!(escrow.funded_amount, 500i128);
+}
+
+/// Re-enabling the gate after disabling it blocks investors without entries again.
+#[test]
+fn gate_reenable_after_disable_blocks_unenrolled_investor() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init_gate(&env, &client);
+
+    let investor = Address::generate(&env);
+
+    // Gate off → fund succeeds.
+    let escrow = client.fund(&investor, &1_000i128);
+    assert_eq!(escrow.funded_amount, 1_000i128);
+
+    // Enable gate without allowlisting this investor.
+    client.set_allowlist_active(&true);
+
+    // Second deposit blocked — prior contribution does not exempt the investor.
+    assert_contract_error_gate(
+        client.try_fund(&investor, &500i128),
+        EscrowError::InvestorNotAllowlisted,
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Revocation mid-funding
+// ---------------------------------------------------------------------------
+
+/// Security invariant: revoking an investor mid-funding prevents their next
+/// deposit even though they have an existing contribution.
+///
+/// A prior contribution does NOT grant a bypass — the gate checks the current
+/// allowlist status on every call, not historical access.
+#[test]
+fn gate_revoke_mid_funding_blocks_next_deposit_fund() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init_gate(&env, &client);
+
+    let investor = Address::generate(&env);
+
+    // Step 1: allowlist active, investor allowed — first deposit succeeds.
+    client.set_allowlist_active(&true);
+    client.set_investor_allowlisted(&investor, &true);
+    let after_first = client.fund(&investor, &3_000i128);
+    assert_eq!(after_first.funded_amount, 3_000i128);
+    assert_eq!(client.get_contribution(&investor), 3_000i128);
+
+    // Step 2: admin revokes the investor.
+    client.set_investor_allowlisted(&investor, &false);
+    assert!(!client.is_investor_allowlisted(&investor));
+
+    // Step 3: second deposit must be rejected with InvestorNotAllowlisted.
+    assert_contract_error_gate(
+        client.try_fund(&investor, &1_000i128),
+        EscrowError::InvestorNotAllowlisted,
+    );
+
+    // Contribution must not have changed.
+    assert_eq!(client.get_contribution(&investor), 3_000i128);
+}
+
+/// Same revocation invariant for `fund_with_commitment`.  Because
+/// `fund_with_commitment` is first-deposit-only, this test verifies that
+/// a revoked investor is blocked before they can make even their first tiered
+/// deposit after the gate is re-enabled.
+#[test]
+fn gate_revoke_before_first_fwc_deposit_blocks_it() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init_gate(&env, &client);
+
+    let investor = Address::generate(&env);
+
+    // Allowlist investor, then revoke before they deposit.
+    client.set_allowlist_active(&true);
+    client.set_investor_allowlisted(&investor, &true);
+    client.set_investor_allowlisted(&investor, &false);
+
+    assert_contract_error_gate(
+        client.try_fund_with_commitment(&investor, &5_000i128, &0u64),
+        EscrowError::InvestorNotAllowlisted,
+    );
+    assert_eq!(client.get_contribution(&investor), 0i128);
+}
+
+// ---------------------------------------------------------------------------
+// Multiple-investor independence
+// ---------------------------------------------------------------------------
+
+/// Allowlisting investor A does not affect investor B.  Both are independently
+/// gated, and investor C (never added) is rejected.
+#[test]
+fn gate_multiple_investors_independent_gating() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init_gate(&env, &client);
+
+    let a = Address::generate(&env);
+    let b = Address::generate(&env);
+    let c = Address::generate(&env);
+
+    client.set_allowlist_active(&true);
+    client.set_investor_allowlisted(&a, &true);
+    client.set_investor_allowlisted(&b, &true);
+    // c is never added.
+
+    // A and B succeed.
+    let after_a = client.fund(&a, &2_000i128);
+    assert_eq!(after_a.funded_amount, 2_000i128);
+    let after_b = client.fund(&b, &3_000i128);
+    assert_eq!(after_b.funded_amount, 5_000i128);
+
+    // C is rejected.
+    assert_contract_error_gate(
+        client.try_fund(&c, &1_000i128),
+        EscrowError::InvestorNotAllowlisted,
+    );
+
+    // Contributions of A and B are unchanged after C's rejection.
+    assert_eq!(client.get_contribution(&a), 2_000i128);
+    assert_eq!(client.get_contribution(&b), 3_000i128);
+    assert_eq!(client.get_contribution(&c), 0i128);
+}
+
+// ---------------------------------------------------------------------------
+// Batch allowlist + gate interaction
+// ---------------------------------------------------------------------------
+
+/// Batch-allowlisting investors and then enabling the gate lets every batch
+/// member fund; addresses outside the batch are rejected.
+#[test]
+fn gate_batch_allowlist_then_gate_active_correct_access() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init_gate(&env, &client);
+
+    let a = Address::generate(&env);
+    let b = Address::generate(&env);
+    let outsider = Address::generate(&env);
+
+    let mut batch: SorobanVec<Address> = SorobanVec::new(&env);
+    batch.push_back(a.clone());
+    batch.push_back(b.clone());
+
+    client.set_allowlist_active(&true);
+    client.set_investors_allowlisted(&batch, &true);
+
+    // Batch members succeed.
+    client.fund(&a, &1_000i128);
+    client.fund(&b, &1_000i128);
+
+    // Outsider is rejected.
+    assert_contract_error_gate(
+        client.try_fund(&outsider, &1_000i128),
+        EscrowError::InvestorNotAllowlisted,
+    );
+}
+
+/// Batch-revoking investors while the gate is active immediately blocks them.
+#[test]
+fn gate_batch_revoke_blocks_all_revoked_members() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init_gate(&env, &client);
+
+    let a = Address::generate(&env);
+    let b = Address::generate(&env);
+
+    let mut batch: SorobanVec<Address> = SorobanVec::new(&env);
+    batch.push_back(a.clone());
+    batch.push_back(b.clone());
+
+    client.set_allowlist_active(&true);
+    client.set_investors_allowlisted(&batch, &true);
+
+    // Fund once successfully.
+    client.fund(&a, &1_000i128);
+    client.fund(&b, &1_000i128);
+
+    // Batch-revoke both.
+    client.set_investors_allowlisted(&batch, &false);
+
+    // Both are now blocked.
+    assert_contract_error_gate(
+        client.try_fund(&a, &500i128),
+        EscrowError::InvestorNotAllowlisted,
+    );
+    assert_contract_error_gate(
+        client.try_fund(&b, &500i128),
+        EscrowError::InvestorNotAllowlisted,
+    );
+
+    // Contributions remain at the pre-revocation values.
+    assert_eq!(client.get_contribution(&a), 1_000i128);
+    assert_eq!(client.get_contribution(&b), 1_000i128);
 }

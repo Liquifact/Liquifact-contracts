@@ -43,6 +43,7 @@ WASM.
 | 6 | Moved per-investor keys to persistent storage to bound instance footprint and decouple per-address TTL | **Redeploy required** — prior instances must be redeployed to pick up new storage locations |
 
 > **Current:** `SCHEMA_VERSION = 6`
+> See the detailed schema version contract in [Escrow schema versioning](docs/escrow-schema-versioning.md).
 
 ---
 
@@ -63,21 +64,23 @@ WASM.
 - Rename or change the XDR shape of an existing `DataKey` variant used in
   production.
 
-### `migrate` entrypoint — explicit panic semantics
+### `migrate` entrypoint — typed error semantics
 
-`LiquifactEscrow::migrate(from_version)` **panics in all current cases**.
-There is **no silent migration path** from any prior version to version 6.
-Callers must not assume it will do bookkeeping work:
+`LiquifactEscrow::migrate(from_version)` emits typed [`EscrowError`](docs/escrow-error-messages.md)
+codes in all current cases. There is **no silent migration path** from any prior version to
+version 6. Callers must not assume it will do bookkeeping work:
 
-| Condition | Panic message |
-|-----------|---------------|
-| `stored != from_version` | `"from_version does not match stored version"` |
-| `from_version >= SCHEMA_VERSION` | `"Already at current schema version"` |
-| Any `from_version < SCHEMA_VERSION` | `"No migration path from version {N} — extend migrate or redeploy"` |
+| Condition | Typed error (code) |
+|-----------|-------------------|
+| `stored != from_version` | `MigrationVersionMismatch` (90) |
+| `from_version >= SCHEMA_VERSION` | `AlreadyCurrentSchemaVersion` (91) |
+| Any `from_version < SCHEMA_VERSION` | `NoMigrationPath` (92) |
+
+See [`docs/escrow-error-messages.md`](docs/escrow-error-messages.md) for the full reference.
 
 To add a real migration path (e.g. rewrite `DataKey::Escrow` after a struct
 field change), implement the transformation inside `migrate` before the final
-`panic!` and update `DataKey::Version`.
+typed error and update `DataKey::Version`.
 
 ### `DataKey` naming convention
 
@@ -131,37 +134,59 @@ cargo build --target wasm32v1-none --release -p liquifact_escrow
 # Artifact (typical):
 # target/wasm32v1-none/release/liquifact_escrow.wasm
 ```
-
-### Lint
-
-```bash
-# Escrow crate only (mirrors CI)
-cargo clippy -p liquifact_escrow -- -D warnings
-
-# Entire workspace
-cargo clippy --all-targets -- -D warnings
+liquifact-contracts/
+├── Cargo.toml           # Workspace definition
+├── docs/
+│   └── escrow-sme-collateral.md  # Collateral flow spec
+├── escrow/
+│   ├── Cargo.toml       # Escrow contract crate
+│   └── src/
+│       ├── lib.rs       # LiquiFact escrow contract
+│       ├── test.rs      # Legacy unit tests
+│       └── tests/
+│           ├── mod.rs
+│           └── coverage.rs  # Collateral flow coverage tests
+└── .github/workflows/
+    └── ci.yml           # CI: fmt, build, test
 ```
 
----
+### Escrow contract entrypoints
 
-## Escrow contract — public entrypoints
+| Entrypoint | Auth | Description |
+|---|---|---|
+| `init` | — | Create an invoice escrow (invoice id, SME, amount, yield bps, maturity). |
+| `get_escrow` | — | Read current escrow state. |
+| `fund` | — | Record investor funding; status → funded when target is met. |
+| `settle` | — | Mark escrow as settled; investors receive principal + yield. |
+| `record_sme_collateral_commitment` | SME | Record off-chain collateral pledge (metadata only, no token movement). |
+| `get_sme_collateral_commitment` | — | Return current pledge record, or `None`. |
+| `clear_sme_collateral_commitment` | SME | Retire a recorded pledge; emits `CollateralClearedEvt`. Returns `NoCollateralToClear` if none exists. |
 
 | Entrypoint | Description |
 |------------|-------------|
 | `init` | Create an invoice escrow; binds funding token, treasury, optional registry. |
-| `fund` | Record investor principal; marks escrow funded when target is met. |
-| `fund_with_commitment` | First deposit with optional lock period; selects tiered yield. |
+| `fund` | Record investor principal and atomically pull the funding token from the investor; marks escrow funded when target is met. |
+| `fund_with_commitment` | First deposit with optional lock period (atomically pulling the funding token); selects tiered yield. |
 | `settle` | Mark a funded escrow as settled (SME auth required; maturity enforced). |
 | `withdraw` | SME pulls funded liquidity (accounting record). |
+| `refund` | Investor pulls contributed liquidity from a cancelled escrow. Increments `DistributedPrincipal` liability. |
 | `claim_investor_payout` | Investor records a payout claim after settlement. |
+| `claim_payouts_batch` | Batch-record payout claims for up to `MAX_CLAIM_BATCH` investors in one transaction. |
 | `sweep_terminal_dust` | Treasury sweeps rounding residue from a terminal escrow. |
-| `migrate` | Schema version gate — **panics on all paths** in the current release. |
+| `migrate` | Schema version gate — **typed errors on all paths** in the current release (codes 90–92). |
 | `set_legal_hold` | Admin activates/clears compliance hold. |
-| `bind_primary_attestation_hash` | Admin sets a single-write 32-byte digest. |
+| `set_allowlist_active` | Admin enables/disables the investor allowlist gate. |
+| `set_investor_allowlisted` | Admin sets per-address allowlist status. |
+| `set_investors_allowlisted` | Admin batch-sets allowlist status for multiple addresses. |
+| `bind_primary_attestation_hash` | Admin sets a single-write 32-byte digest (single-set guarantee). |
 | `append_attestation_digest` | Admin appends to bounded audit log. |
 | `record_sme_collateral_commitment` | SME records collateral pledge (metadata only). |
+| `propose_admin` | Step 1 of admin handover — sets `DataKey::PendingAdmin` and `DataKey::PendingAdminExpiry` (admin auth). Optional validity window; defaults to 7 days. |
+| `accept_admin` | Step 2 of admin handover — pending address accepts before expiry and becomes admin. |
+| `cancel_pending_admin` | Admin withdraws an unaccepted proposal; clears `DataKey::PendingAdmin` and `DataKey::PendingAdminExpiry`. |
 | `get_escrow` | Read current escrow state. |
 | `get_version` | Read stored `DataKey::Version`. |
+| `get_remaining_investor_slots` | Read remaining unique investor capacity before reaching the cap. |
 
 ---
 
@@ -190,7 +215,7 @@ Escrow tests are organized by feature area under
 | `funding.rs` | Funding, contribution accounting, snapshots, tier selection |
 | `settlement.rs` | Settlement, withdrawal, investor claims, maturity boundaries, dust sweep |
 | `admin.rs` | Admin-governed state changes, legal hold, migration guards, collateral metadata |
-| `integration.rs` | External token-wrapper assumptions, metadata-only integration checks |
+| `integration.rs` | External token-wrapper assumptions, metadata-only integration checks, `cancel_funding` transition matrix |
 | `properties.rs` | Proptest-based invariants |
 
 Shared helpers live in [`escrow/src/test.rs`](escrow/src/test.rs). Each test
@@ -223,12 +248,43 @@ external token contracts.
 
 ---
 
+## SEP-41 token-safety wrappers
+
+See [`docs/escrow-token-safety.md`](docs/escrow-token-safety.md) for the threat model,
+invariants, and error codes (`EscrowError` codes 36–41) for the funding-token
+transfer wrapper `transfer_funding_token_with_balance_checks`. The wrapper detects
+fee-on-transfer, rebasing, hook, and lying token behaviors at the host-call boundary.
+
+---
+
 ## SME collateral metadata
 
 See [`docs/escrow-sme-collateral.md`](docs/escrow-sme-collateral.md) for the risk-team handling rules for `record_sme_collateral_commitment` and `CollateralRecordedEvt`. The record is SME-reported metadata only; it is not proof of custody, token movement, or an enforceable on-chain claim.
 
+## Investor allowlist
+
+The escrow supports an optional investor allowlist gate that controls which addresses may fund. See [`docs/escrow-allowlist.md`](docs/escrow-allowlist.md) for the complete allowlist model documentation, including:
+
+- Active/inactive toggle behavior and interaction with per-address entries
+- Persistent storage model and TTL/archival implications
+- Fund-gate enforcement rules and default-to-deny semantics
+- Batch operations and equivalence to single calls
+- Security considerations for TTL management and admin key security
+
+## Escrow cancellation and refund lifecycle
+
+The escrow supports cancellation by the admin under specific criteria, unlocking investor refunds and a residual dust sweep with liability-floor protection. See [`docs/escrow-cancellation-refunds.md`](docs/escrow-cancellation-refunds.md) for the end-to-end documentation, including:
+
+- Transitioning into status 4 via `cancel_funding`
+- Refund mechanisms (auth, idempotency, and `DistributedPrincipal` tracking)
+- Residual dust sweeping and the liability floor protecting un-refunded investors
+- A worked execution sequence with multiple investors
+
 ## Security notes
 
+- **Typed errors:** stable numeric [`EscrowError`](docs/escrow-error-messages.md) codes are
+  append-only; SDKs must branch on `ContractError(code)`, not panic strings. See
+  [`docs/escrow-error-messages.md`](docs/escrow-error-messages.md) for the full reference.
 - **Auth:** state-changing entrypoints use `require_auth()` for the
   appropriate role (admin, SME, investor, **treasury** for dust sweep).
 - **Legal hold:** governance-controlled; misuse risk is mitigated by using a
@@ -238,8 +294,8 @@ See [`docs/escrow-sme-collateral.md`](docs/escrow-sme-collateral.md) for the ris
   token movement, reserved balance, or an enforceable on-chain claim.
 - **Token integration:** fee-on-transfer, rebasing, and hook tokens are
   **explicitly out of scope**. Post-transfer balance-equality checks in
-  [`external_calls`](escrow/src/external_calls.rs) will `panic!` (safe
-  failure) on non-compliant tokens.
+  [`external_calls`](escrow/src/external_calls.rs) emit typed `EscrowError` codes
+  36–41 on non-compliant tokens.
 - **Overflow:** `fund` uses `checked_add` on `funded_amount`.
 - **Dust sweep:** gated on terminal escrow status, per-call cap
   (`MAX_DUST_SWEEP_AMOUNT`), actual balance, legal hold, and treasury auth;
@@ -249,10 +305,15 @@ See [`docs/escrow-sme-collateral.md`](docs/escrow-sme-collateral.md) for the ris
   an investor's tier after their initial leg; claim timestamps are ledger-based.
 - **Funding snapshot:** single-write immutability avoids shifting pro-rata
   denominators after close.
+- **Target-lowering promotion:** `update_funding_target` re-evaluates the funded threshold after
+  every target change. If `funded_amount >= new_target > 0`, the escrow is immediately promoted to
+  funded (`status = 1`) and `FundingCloseSnapshot` is written exactly once — identical semantics
+  to the promotion that occurs inside `fund`/`fund_with_commitment`. The snapshot denominator is
+  captured atomically with the status transition and cannot be overwritten.
 - **Registry ref:** stored for discoverability only; must not be used as
   authority without verifying the registry contract independently.
-- **migrate:** panics on all paths in the current release — no silent
-  migration work is performed.
+- **migrate:** emits typed errors on all paths in the current release — no silent
+  migration work is performed. See [`docs/escrow-error-messages.md`](docs/escrow-error-messages.md).
 
 ### Contract type clone/derive safety
 

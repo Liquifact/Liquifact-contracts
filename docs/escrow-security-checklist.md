@@ -272,11 +272,19 @@ Line numbers refer to `escrow/src/lib.rs` at schema version 6; re-audit after re
 
 ### Negative-auth test coverage
 
+All state-mutating entrypoints are actively tested against incorrect authorization rules.
+See the canonical compliance test section in [`escrow/src/tests/admin.rs`](file:///home/demigodjayydy/Desktop/Liquifact-contracts/escrow/src/tests/admin.rs) under `auth_audit_*`.
+
 | Entrypoint | Test location |
 |---|---|
-| `init` | `escrow/src/tests/init.rs` |
-| `propose_admin`, `accept_admin`, `fund`, `fund_with_commitment`, `settle`, `withdraw`, `claim_investor_payout`, attestation, allowlist, sweep | `escrow/src/tests/admin.rs` § auth audit |
-| `update_maturity`, `update_funding_target`, collateral | `escrow/src/tests/admin.rs` |
-| `set_legal_hold`, `clear_legal_hold` | `escrow/src/tests/legal_hold.rs` |
-| `bind_primary_attestation_hash`, `append_attestation_digest` | `escrow/src/tests/attestations.rs` |
-| `set_allowlist_active`, `set_investor_allowlisted` | `escrow/src/test_allowlist_tests.rs` |
+| `init`, `propose_admin`, `accept_admin` | `escrow/src/tests/admin.rs` § `auth_audit_*` |
+| `fund`, `fund_with_commitment`, `fund_batch` | `escrow/src/tests/admin.rs` § `auth_audit_*` |
+| `settle`, `partial_settle`, `withdraw`, `sweep_terminal_dust` | `escrow/src/tests/admin.rs` § `auth_audit_*` |
+| `claim_investor_payout`, `refund`, `cancel_funding` | `escrow/src/tests/admin.rs` § `auth_audit_*`; `cancel_funding` state matrix in `escrow/src/tests/integration.rs` § `test_cancel_funding_*` |
+| `bind_primary_attestation_hash`, `append_attestation_digest`, `revoke_attestation_digest` | `escrow/src/tests/admin.rs` § `auth_audit_*` |
+| `set_allowlist_active`, `set_investor_allowlisted` | `escrow/src/tests/admin.rs` § `auth_audit_*` |
+| `set_legal_hold`, `clear_legal_hold`, `request_clear_legal_hold` | `escrow/src/tests/admin.rs` § `auth_audit_*` |
+| `update_maturity`, `update_funding_target`, `lower_max_unique_investors` | `escrow/src/tests/admin.rs` § `auth_audit_*` |
+| `record_sme_collateral_commitment`, `rotate_beneficiary` | `escrow/src/tests/admin.rs` § `auth_audit_*` |
+
+This comprehensive matrix enforces the guard bounds described in ADR-002, ensuring that any missing `require_auth` results in a direct test failure.

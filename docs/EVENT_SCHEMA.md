@@ -33,7 +33,7 @@ short routing symbol passed with `symbol_short!(...)`, such as `funded` or
 
 ## Event Catalog
 
-The current contract defines 19 event structs.
+The current contract defines 20 event structs.
 
 | Rust event | `name` symbol | Entrypoint(s) |
 |---|---:|---|
@@ -44,6 +44,7 @@ The current contract defines 19 event structs.
 | `MaturityUpdatedEvent` | `maturity` | `update_maturity` |
 | `AdminTransferredEvent` | `admin` | `accept_admin` |
 | `AdminProposedEvent` | `adm_prop` | `propose_admin`, `transfer_admin` |
+| `BeneficiaryRotated` | `ben_rot` | `rotate_beneficiary` |
 | `FundingTargetUpdated` | `fund_tgt` | `update_funding_target` |
 | `LegalHoldChanged` | `legalhld` | `set_legal_hold`, `clear_legal_hold` |
 | `CollateralRecordedEvt` | `coll_rec` | `record_sme_collateral_commitment` |
@@ -56,6 +57,7 @@ The current contract defines 19 event structs.
 | `AttestationDigestAppended` | `att_app` | `append_attestation_digest` |
 | `AllowlistEnabledChanged` | `al_ena` | `set_allowlist_active` |
 | `InvestorAllowlistChanged` | `al_set` | `set_investor_allowlisted`, `set_investors_allowlisted` |
+| `InvestorAllowlistBatchApplied` | `al_batch` | `set_investors_allowlisted` |
 
 ## Complete Topic And Data Layout
 
@@ -136,10 +138,12 @@ Topics:
 Data:
 
 | Field | Type |
-|---|---|
+|---|---|---|
 | `funded_amount` | `i128` |
 | `yield_bps` | `i64` |
 | `maturity` | `u64` |
+| `settled_at_ledger_timestamp` | `u64` |
+| `settle_pool` | `i128` |
 
 ### `MaturityUpdatedEvent`
 
@@ -181,8 +185,11 @@ Data:
 ### `AdminProposedEvent`
 
 Emitted after successful `propose_admin`. The deprecated `transfer_admin`
-shim delegates to `propose_admin`, so it emits this event rather than
-`AdminTransferredEvent`.
+shim delegates to `propose_admin`, so it also emits this event. When
+issued from the deprecated shim, this event is paired with a follow-up
+[`DeprecatedTransferAdminUsed`](#deprecatedtransferadminused) event in
+the same transaction so indexers can distinguish legacy one-step callers
+from those using the canonical two-step flow.
 
 Topics:
 
@@ -198,6 +205,25 @@ Data:
 |---|---|
 | `current_admin` | `Address` |
 | `pending_admin` | `Address` |
+
+### `BeneficiaryRotated`
+
+Emitted after successful `rotate_beneficiary`.
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `beneficiary_rotated` |
+| 1 | `name` | `Symbol` | `ben_rot` |
+| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
+
+Data:
+
+| Field | Type |
+|---|---|
+| `prior_sme` | `Address` |
+| `new_sme` | `Address` |
 
 ### `FundingTargetUpdated`
 
@@ -424,6 +450,33 @@ Data:
 | `investor` | `Address` | Updated investor |
 | `allowed` | `u32` | `1` = allowed, `0` = blocked |
 
+### `InvestorAllowlistBatchApplied`
+
+Emitted once per `set_investors_allowlisted` call, after all per-investor
+`InvestorAllowlistChanged` (`al_set`) events have been emitted. Allows indexers
+to identify completed batch operations without counting individual `al_set`
+events. Supplements — does not replace — the per-investor events.
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `investor_allowlist_batch_applied` |
+| 1 | `name` | `Symbol` | `al_batch` |
+
+Data:
+
+| Field | Type | Values |
+|---|---|---|
+| `invoice_id` | `Symbol` | Escrow invoice id |
+| `batch_size` | `u32` | Number of investors processed (`1`–`MAX_INVESTOR_ALLOWLIST_BATCH`) |
+| `allowed` | `u32` | `1` = allowed, `0` = blocked |
+
+**Indexer guidance:** filter on `topic[1] == "al_batch"` to detect batch
+operations. `batch_size` equals the count of `al_set` events emitted in the
+same transaction. Existing indexers that only consume `al_set` remain fully
+compatible — `al_batch` is purely additive.
+
 ## Nested Types
 
 ### `InvoiceEscrow`
@@ -467,6 +520,14 @@ Status values:
 - Do not treat collateral or attestation events as proof of off-chain custody,
   KYC status, or legal enforceability. They are metadata/audit records emitted
   after the corresponding authenticated write succeeds.
+- For admin handover routing, treat `AdminProposedEvent` as the **canonical
+  two-step** signal (`propose_admin`). When an `AdminProposedEvent` is
+  immediately followed by a `DeprecatedTransferAdminUsed` in the same
+  transaction, the proposal originated from the legacy one-step `transfer_admin`
+  shim. Operators driving the deprecation should count occurrences of
+  `DeprecatedTransferAdminUsed` per `(contractId, invoice_id)` and notify
+  remaining callers until the count is zero for a full release window before
+  the shim entrypoint is removed.
 
 ## Security And State Invariants
 
@@ -479,7 +540,8 @@ Status values:
   contribution zeroing before emission.
 - Event emission is O(1) for all entrypoints except
   `set_investors_allowlisted`, which emits O(n) `InvestorAllowlistChanged`
-  events for `n <= MAX_INVESTOR_ALLOWLIST_BATCH`.
+  events for `n <= MAX_INVESTOR_ALLOWLIST_BATCH` followed by exactly one
+  `InvestorAllowlistBatchApplied` event.
 
 ## Changelog
 
@@ -488,3 +550,5 @@ Status values:
 | 2026-03-23 | v0.1 | Initial event schema reference |
 | 2026-05-27 | v0.2 | Added initialization references and investor-cap event notes |
 | 2026-05-31 | v0.3 | Issue #272: replaced drifted reference with complete `#[contractevent]` topic and data layout from `escrow/src/lib.rs` |
+| 2026-06-24 | v0.4 | Added `settled_at_ledger_timestamp` field to `EscrowSettled` event; added `is_settleable` view |
+| 2026-06-26 | v0.5 | Issue #379: Added `InvestorAllowlistBatchApplied` (`al_batch`) event emitted once per `set_investors_allowlisted` call for indexer disambiguation |

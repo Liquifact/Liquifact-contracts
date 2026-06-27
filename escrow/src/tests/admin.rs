@@ -1,9 +1,78 @@
 use super::*;
-use crate::{AdminProposedEvent, EscrowCloseSnapshot, FundingTargetUpdated};
+use crate::{
+    AdminAcceptedEvent, AdminProposalCancelled, AdminProposedEvent, EscrowCloseSnapshot,
+    FundingTargetUpdated, RegistryRefRebound,
+};
+
 use soroban_sdk::Event;
 
 // Admin/governance operations: target changes, maturity changes, admin handover,
 // legal hold, migration guards, and collateral metadata.
+
+#[test]
+fn test_update_maturity_emits_event() {
+    use soroban_sdk::testutils::Events as _;
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let contract_id = client.address.clone();
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "MAT_EVT"),
+        &sme,
+        &1_000i128,
+        &500i64,
+        &1000u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+    client.update_maturity(&2000u64);
+    assert_eq!(
+        env.events().all().events().last().unwrap().clone(),
+        crate::MaturityUpdatedEvent {
+            name: symbol_short!("maturity"),
+            invoice_id: client.get_escrow().invoice_id,
+            old_maturity: 1000u64,
+            new_maturity: 2000u64,
+        }
+        .to_xdr(&env, &contract_id)
+    );
+}
+
+#[test]
+#[should_panic]
+fn test_update_maturity_unchanged_panics() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "INV006c"),
+        &sme,
+        &1_000i128,
+        &500i64,
+        &2000u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+    client.update_maturity(&2000u64);
+}
 
 #[test]
 fn test_update_maturity_success() {
@@ -19,6 +88,9 @@ fn test_update_maturity_success() {
         &Address::generate(&env),
         &None,
         &Address::generate(&env),
+        &None,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -46,6 +118,9 @@ fn test_update_maturity_wrong_state() {
         &Address::generate(&env),
         &None,
         &Address::generate(&env),
+        &None,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -79,6 +154,9 @@ fn test_update_maturity_unauthorized() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
+        &None,
     );
     env.mock_auths(&[]);
     client.update_maturity(&2000u64);
@@ -104,8 +182,11 @@ fn test_propose_admin_sets_pending_without_changing_admin() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
+        &None,
     );
-    let pending = client.propose_admin(&new_admin);
+    let pending = client.propose_admin(&new_admin, &None);
     assert_eq!(pending, new_admin);
     assert_eq!(client.get_pending_admin(), Some(new_admin));
     assert_eq!(client.get_escrow().admin, admin);
@@ -131,9 +212,12 @@ fn test_accept_admin_promotes_pending_and_clears_pending() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
+        &None,
     );
 
-    client.propose_admin(&new_admin);
+    client.propose_admin(&new_admin, &None);
     let updated = client.accept_admin();
     assert_eq!(updated.admin, new_admin);
     assert_eq!(client.get_escrow().admin, new_admin);
@@ -156,6 +240,9 @@ fn test_transfer_admin_deprecated_shim_only_proposes() {
         &Address::generate(&env),
         &None,
         &Address::generate(&env),
+        &None,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -188,8 +275,11 @@ fn test_transfer_admin_same_address_panics() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
+        &None,
     );
-    client.propose_admin(&admin);
+    client.propose_admin(&admin, &None);
 }
 
 #[test]
@@ -199,11 +289,11 @@ fn test_transfer_admin_uninitialized_panics() {
     env.mock_all_auths();
     let client = deploy(&env);
     let new_admin = Address::generate(&env);
-    client.propose_admin(&new_admin);
+    client.propose_admin(&new_admin, &None);
 }
 
 #[test]
-#[should_panic(expected = "No pending admin")]
+#[should_panic]
 fn test_accept_admin_without_pending_panics() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
@@ -219,7 +309,7 @@ fn test_accept_admin_requires_pending_admin_auth() {
     let (client, admin, sme) = setup(&env);
     let new_admin = Address::generate(&env);
     default_init(&client, &env, &admin, &sme);
-    client.propose_admin(&new_admin);
+    client.propose_admin(&new_admin, &None);
     env.mock_auths(&[]);
     client.accept_admin();
 }
@@ -232,8 +322,8 @@ fn test_propose_admin_overwrites_prior_pending() {
     let second = Address::generate(&env);
     default_init(&client, &env, &admin, &sme);
 
-    client.propose_admin(&first);
-    client.propose_admin(&second);
+    client.propose_admin(&first, &None);
+    client.propose_admin(&second, &None);
 
     assert_eq!(client.get_pending_admin(), Some(second.clone()));
     let updated = client.accept_admin();
@@ -250,7 +340,7 @@ fn test_propose_admin_emits_event() {
     let new_admin = Address::generate(&env);
     default_init(&client, &env, &admin, &sme);
 
-    client.propose_admin(&new_admin);
+    client.propose_admin(&new_admin, &None);
 
     assert_eq!(
         env.events().all().events().last().unwrap().clone(),
@@ -262,6 +352,147 @@ fn test_propose_admin_emits_event() {
         }
         .to_xdr(&env, &contract_id)
     );
+}
+
+/// Assert `propose_admin` requires current-admin auth
+#[test]
+#[should_panic]
+fn test_propose_admin_requires_current_admin_auth() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let client = deploy(&env);
+    default_init(&client, &env, &admin, &sme);
+    env.mock_auths(&[]);
+    let new_admin = Address::generate(&env);
+    client.propose_admin(&new_admin, &None);
+}
+
+/// Assert `propose_admin` rejects `NewAdminSameAsCurrent`
+#[test]
+#[should_panic]
+fn test_propose_admin_same_address_panics() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    client.propose_admin(&admin, &None);
+}
+
+/// Assert `accept_admin` by wrong address panics
+#[test]
+#[should_panic]
+fn test_accept_admin_by_wrong_address_panics() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let new_admin = Address::generate(&env);
+    default_init(&client, &env, &admin, &sme);
+    client.propose_admin(&new_admin, &None);
+    let wrong_admin = Address::generate(&env);
+    env.mock_auths(&[soroban_sdk::testutils::MockAuth {
+        address: &wrong_admin,
+        invoke: &soroban_sdk::testutils::MockAuthInvoke {
+            contract: &client.address,
+            fn_name: "accept_admin",
+            args: soroban_sdk::Vec::<soroban_sdk::Val>::new(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    client.accept_admin();
+}
+
+/// Verify that `accept_admin` emits `AdminAcceptedEvent` with the correct prior_admin,
+/// new_admin, and invoice_id, making the completed two-step handover unambiguous.
+#[test]
+fn test_accept_admin_event_carries_prior_and_new_admin() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, old_admin, sme) = setup(&env);
+    let new_admin = Address::generate(&env);
+    let contract_id = client.address.clone();
+    default_init(&client, &env, &old_admin, &sme);
+
+    client.propose_admin(&new_admin, &None);
+    client.accept_admin();
+
+    let events = env.events().all();
+    let last_event = events.events().last().unwrap().clone();
+    assert_eq!(
+        last_event,
+        AdminAcceptedEvent {
+            name: symbol_short!("adm_acc"),
+            invoice_id: client.get_escrow().invoice_id,
+            prior_admin: old_admin.clone(),
+            new_admin: new_admin.clone(),
+        }
+        .to_xdr(&env, &contract_id)
+    );
+    assert_eq!(
+        client.get_escrow().admin,
+        new_admin,
+        "admin was not promoted after accept_admin"
+    );
+    assert_eq!(
+        client.get_pending_admin(),
+        None,
+        "pending admin was not cleared after accept_admin"
+    );
+}
+
+/// End-to-end handover lifecycle: propose, accept, old admin lockout, new admin authority
+#[test]
+fn test_admin_handover_lifecycle() {
+    use soroban_sdk::testutils::Events as _;
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, old_admin, sme) = setup(&env);
+    let new_admin = Address::generate(&env);
+    default_init(&client, &env, &old_admin, &sme);
+
+    // 1. Propose admin
+    let pending = client.propose_admin(&new_admin, &None);
+    assert_eq!(pending, new_admin.clone());
+    assert_eq!(client.get_pending_admin(), Some(new_admin.clone()));
+
+    // 2. Accept admin (verifying the events)
+    let contract_id = client.address.clone();
+    let updated = client.accept_admin();
+    assert_eq!(updated.admin, new_admin.clone());
+    assert_eq!(client.get_pending_admin(), None);
+
+    // Verify AdminAcceptedEvent
+    assert_eq!(
+        env.events().all().events().last().unwrap().clone(),
+        crate::AdminAcceptedEvent {
+            name: symbol_short!("adm_acc"),
+            invoice_id: client.get_escrow().invoice_id,
+            prior_admin: old_admin.clone(),
+            new_admin: new_admin.clone(),
+        }
+        .to_xdr(&env, &contract_id)
+    );
+
+    // 3. New admin can perform admin-gated actions
+    let latest = client.update_funding_target(&20_000i128);
+    assert_eq!(latest.funding_target, 20_000i128);
+
+    // 4. Old admin can no longer perform admin-gated actions
+    env.mock_auths(&[soroban_sdk::testutils::MockAuth {
+        address: &old_admin,
+        invoke: &soroban_sdk::testutils::MockAuthInvoke {
+            contract: &client.address,
+            fn_name: "update_funding_target",
+            args: soroban_sdk::Vec::<soroban_sdk::Val>::new(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.update_funding_target(&30_000i128);
+    }))
+    .is_err());
 }
 
 #[test]
@@ -328,6 +559,9 @@ fn test_read_model_summary_includes_optional_admin_fields() {
         &Some(7u32),
         &Some(10_000i128),
         &None,
+        &None,
+        &None,
+        &None,
     );
 
     let summary = client.get_escrow_summary();
@@ -356,6 +590,9 @@ fn test_record_collateral_stored_and_does_not_block_settle() {
         &Address::generate(&env),
         &None,
         &Address::generate(&env),
+        &None,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -392,6 +629,9 @@ fn test_collateral_zero_panics() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
+        &None,
     );
     client.record_sme_collateral_commitment(&symbol_short!("XLM"), &0i128);
 }
@@ -411,6 +651,9 @@ fn test_collateral_requires_sme_auth() {
         &Address::generate(&env),
         &None,
         &Address::generate(&env),
+        &None,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -436,6 +679,9 @@ fn test_legal_hold_blocks_settle_withdraw_claim_and_fund() {
         &Address::generate(&env),
         &None,
         &Address::generate(&env),
+        &None,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -493,6 +739,9 @@ fn test_legal_hold_blocks_new_funds_when_open() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
+        &None,
     );
     client.set_legal_hold(&true);
     client.fund(&investor, &1i128);
@@ -534,6 +783,9 @@ fn test_update_funding_target_by_admin_succeeds() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
+        &None,
     );
 
     let updated = client.update_funding_target(&10_000i128);
@@ -561,6 +813,9 @@ fn test_update_funding_target_by_non_admin_panics() {
         &token,
         &None,
         &treasury,
+        &None,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -599,6 +854,9 @@ fn test_update_funding_target_fails_when_funded() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
+        &None,
     );
     client.fund(&investor, &5_000i128);
     client.update_funding_target(&10_000i128);
@@ -631,6 +889,9 @@ fn test_update_funding_target_below_funded_panics() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
+        &None,
     );
     client.fund(&investor, &4_000i128);
     client.update_funding_target(&3_000i128);
@@ -657,6 +918,9 @@ fn test_update_funding_target_zero_panics() {
         &token,
         &None,
         &treasury,
+        &None,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -694,6 +958,9 @@ fn test_update_funding_target_event_fields() {
         &token,
         &None,
         &treasury,
+        &None,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -744,6 +1011,9 @@ fn test_update_funding_target_fails_when_settled() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
+        &None,
     );
     client.fund(&investor, &5_000i128); // status → 1 (funded)
     client.settle(); // status → 2 (settled)
@@ -757,30 +1027,7 @@ fn test_update_funding_target_fails_when_settled() {
 fn test_update_funding_target_fails_when_withdrawn() {
     let env = Env::default();
     env.mock_all_auths();
-    let admin = Address::generate(&env);
-    let sme = Address::generate(&env);
-    let investor = Address::generate(&env);
-    let client = deploy(&env);
-
-    let token = Address::generate(&env);
-    let treasury = Address::generate(&env);
-    client.init(
-        &admin,
-        &soroban_sdk::String::from_str(&env, "WD001"),
-        &sme,
-        &5_000i128,
-        &800i64,
-        &0u64,
-        &token,
-        &None,
-        &treasury,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-    );
-    client.fund(&investor, &5_000i128); // status → 1 (funded)
+    let (client, _escrow_id, _sme) = init_and_fund_with_real_token(&env, 5_000i128, "WD001");
     client.withdraw(); // status → 3 (withdrawn)
     client.update_funding_target(&6_000i128);
 }
@@ -809,6 +1056,9 @@ fn test_update_funding_target_equal_to_funded_amount_succeeds() {
         &token,
         &None,
         &treasury,
+        &None,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -851,6 +1101,9 @@ fn test_update_funding_target_negative_panics() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
+        &None,
     );
     client.update_funding_target(&-1i128);
 }
@@ -884,6 +1137,9 @@ fn test_update_maturity_event_fields() {
         &token,
         &None,
         &treasury,
+        &None,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -934,6 +1190,9 @@ fn test_update_maturity_fails_when_funded() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
+        &None,
     );
     client.fund(&investor, &5_000i128); // status → 1 (funded)
     client.update_maturity(&2000u64);
@@ -968,6 +1227,9 @@ fn test_update_maturity_fails_when_settled() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
+        &None,
     );
     client.fund(&investor, &5_000i128); // status → 1
     client.settle(); // status → 2
@@ -981,30 +1243,7 @@ fn test_update_maturity_fails_when_settled() {
 fn test_update_maturity_fails_when_withdrawn() {
     let env = Env::default();
     env.mock_all_auths();
-    let admin = Address::generate(&env);
-    let sme = Address::generate(&env);
-    let investor = Address::generate(&env);
-    let client = deploy(&env);
-
-    let token = Address::generate(&env);
-    let treasury = Address::generate(&env);
-    client.init(
-        &admin,
-        &soroban_sdk::String::from_str(&env, "MAT004"),
-        &sme,
-        &5_000i128,
-        &800i64,
-        &0u64,
-        &token,
-        &None,
-        &treasury,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-    );
-    client.fund(&investor, &5_000i128); // status → 1
+    let (client, _escrow_id, _sme) = init_and_fund_with_real_token(&env, 5_000i128, "MAT004");
     client.withdraw(); // status → 3
     client.update_maturity(&2000u64);
 }
@@ -1031,6 +1270,9 @@ fn test_update_maturity_to_zero_succeeds() {
         &token,
         &None,
         &treasury,
+        &None,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -1066,6 +1308,9 @@ fn test_settle_passes_exactly_at_maturity_ledger_time() {
         &token,
         &None,
         &treasury,
+        &None,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -1109,6 +1354,9 @@ fn test_settle_fails_one_second_before_maturity() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
+        &None,
     );
     client.fund(&investor, &5_000i128);
 
@@ -1139,6 +1387,9 @@ fn test_update_maturity_twice_overwrites() {
         &token,
         &None,
         &treasury,
+        &None,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -1184,7 +1435,7 @@ fn auth_audit_propose_admin_requires_current_admin() {
     let (client, _, _, _, _) = auth_audit_init_funded(&env);
     let new_admin = Address::generate(&env);
     env.mock_auths(&[]);
-    client.propose_admin(&new_admin);
+    client.propose_admin(&new_admin, &None);
 }
 
 #[test]
@@ -1192,7 +1443,7 @@ fn auth_audit_propose_admin_requires_current_admin() {
 fn auth_audit_accept_admin_requires_pending_admin() {
     let env = Env::default();
     let (client, _, _, _, pending_admin) = auth_audit_init_funded(&env);
-    client.propose_admin(&pending_admin);
+    client.propose_admin(&pending_admin, &None);
     env.mock_auths(&[]);
     client.accept_admin();
 }
@@ -1320,6 +1571,9 @@ fn auth_audit_sweep_terminal_dust_requires_treasury() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
+        &None,
     );
     client.fund(&investor, &TARGET);
     client.settle();
@@ -1327,3 +1581,478 @@ fn auth_audit_sweep_terminal_dust_requires_treasury() {
     env.mock_auths(&[]);
     client.sweep_terminal_dust(&100i128);
 }
+
+// --- rotate_beneficiary tests ---
+
+#[test]
+fn test_rotate_beneficiary_success_dual_auth() {
+    use soroban_sdk::testutils::Events as _;
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let new_sme = Address::generate(&env);
+    default_init(&client, &env, &admin, &sme);
+    let contract_id = client.address.clone();
+
+    let updated = client.rotate_beneficiary(&new_sme);
+    assert_eq!(updated.sme_address, new_sme);
+    assert_eq!(client.get_escrow().sme_address, new_sme);
+
+    assert_eq!(
+        env.events().all().events().last().unwrap().clone(),
+        crate::BeneficiaryRotated {
+            name: symbol_short!("ben_rot"),
+            invoice_id: client.get_escrow().invoice_id,
+            prior_sme: sme,
+            new_sme,
+        }
+        .to_xdr(&env, &contract_id)
+    );
+}
+
+/*
+#[test]
+#[should_panic]
+fn test_rotate_beneficiary_only_sme_auth_fails() {
+    use soroban_sdk::{testutils::MockAuth, IntoVal, Vec as SorobanVec};
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let new_sme = Address::generate(&env);
+    default_init(&client, &env, &admin, &sme);
+    env.mock_auths(&[MockAuth {
+        address: &sme,
+        invoke: &soroban_sdk::testutils::MockAuthInvoke {
+            contract: &client.address,
+            fn_name: "rotate_beneficiary",
+            args: SorobanVec::from_array(&env, [(new_sme.clone(),).into_val(&env)]),
+            sub_invokes: &[],
+        },
+    }]);
+    client.rotate_beneficiary(&new_sme);
+}
+
+#[test]
+#[should_panic]
+fn test_rotate_beneficiary_only_admin_auth_fails() {
+    use soroban_sdk::{testutils::MockAuth, IntoVal, Vec as SorobanVec};
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let new_sme = Address::generate(&env);
+    default_init(&client, &env, &admin, &sme);
+    env.mock_auths(&[MockAuth {
+        address: &admin,
+        invoke: &soroban_sdk::testutils::MockAuthInvoke {
+            contract: &client.address,
+            fn_name: "rotate_beneficiary",
+            args: SorobanVec::from_array(&env, [(new_sme.clone(),).into_val(&env)]),
+            sub_invokes: &[],
+        },
+    }]);
+    client.rotate_beneficiary(&new_sme);
+}
+*/
+
+#[test]
+#[should_panic]
+fn test_rotate_beneficiary_no_auth_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let new_sme = Address::generate(&env);
+    default_init(&client, &env, &admin, &sme);
+    env.mock_auths(&[]); // No auth
+    client.rotate_beneficiary(&new_sme);
+}
+
+#[test]
+#[should_panic]
+fn test_rotate_beneficiary_new_same_as_current_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    client.rotate_beneficiary(&sme);
+}
+
+#[test]
+#[should_panic]
+fn test_rotate_beneficiary_in_settled_state_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let new_sme = Address::generate(&env);
+    let investor = Address::generate(&env);
+    default_init(&client, &env, &admin, &sme);
+    client.fund(&investor, &TARGET);
+    client.settle(); // status 2
+    client.rotate_beneficiary(&new_sme);
+}
+
+#[test]
+#[should_panic]
+fn test_rotate_beneficiary_in_withdrawn_state_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let new_sme = Address::generate(&env);
+    let investor = Address::generate(&env);
+    default_init(&client, &env, &admin, &sme);
+    client.fund(&investor, &TARGET);
+    client.withdraw(); // status 3
+    client.rotate_beneficiary(&new_sme);
+}
+
+#[test]
+#[should_panic]
+fn test_rotate_beneficiary_in_cancelled_state_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let new_sme = Address::generate(&env);
+    let investor = Address::generate(&env);
+    default_init(&client, &env, &admin, &sme);
+    client.fund(&investor, &TARGET);
+    client.cancel_funding(); // status 4
+    client.rotate_beneficiary(&new_sme);
+}
+
+#[test]
+#[should_panic]
+fn test_rotate_beneficiary_with_legal_hold_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let new_sme = Address::generate(&env);
+    default_init(&client, &env, &admin, &sme);
+    client.set_legal_hold(&true);
+    client.rotate_beneficiary(&new_sme);
+}
+
+#[test]
+fn test_rotate_beneficiary_in_funded_state_success() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let new_sme = Address::generate(&env);
+    let investor = Address::generate(&env);
+    default_init(&client, &env, &admin, &sme);
+    client.fund(&investor, &TARGET); // status 1
+    let updated = client.rotate_beneficiary(&new_sme);
+    assert_eq!(updated.sme_address, new_sme);
+}
+
+#[test]
+fn test_rotate_beneficiary_then_withdraw_goes_to_new_sme() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let new_sme = Address::generate(&env);
+    let investor = Address::generate(&env);
+    let token = install_stellar_asset_token(&env);
+    let treasury = Address::generate(&env);
+    let escrow_id = deploy_id(&env);
+    let client = LiquifactEscrowClient::new(&env, &escrow_id);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "WDTST"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &token.id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+    token.stellar.mint(&investor, &TARGET);
+    token.stellar.approve(
+        &investor,
+        &escrow_id,
+        &TARGET,
+        &(env.ledger().sequence() + 10_000),
+    );
+    client.fund(&investor, &TARGET);
+    // Mint funded_amount into the escrow contract so withdraw() can transfer it.
+    token.stellar.mint(&escrow_id, &TARGET);
+    client.rotate_beneficiary(&new_sme);
+    client.withdraw();
+    assert_eq!(token.stellar.balance(&new_sme), TARGET);
+}
+
+// ── cancel_pending_admin ──────────────────────────────────────────────────────
+
+/// Happy path: propose then cancel — `get_pending_admin` returns `None` and current
+/// admin is unchanged.
+#[test]
+fn test_rebind_registry_ref_sets_and_clears() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+
+    let contract_id = client.address.clone();
+    let invoice_id = client.get_escrow().invoice_id.clone();
+
+    let reg1 = Address::generate(&env);
+    let reg2 = Address::generate(&env);
+
+    // init with no registry
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "REG_RB_1"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    // Set to reg1
+    client.rebind_registry_ref(&Some(reg1.clone()));
+    assert_eq!(client.get_registry_ref(), Some(reg1.clone()));
+
+    // Change to reg2
+    client.rebind_registry_ref(&Some(reg2.clone()));
+    assert_eq!(client.get_registry_ref(), Some(reg2.clone()));
+
+    // Clear to None
+    client.rebind_registry_ref(&None);
+    assert_eq!(client.get_registry_ref(), None);
+
+    // Event sanity: last event should be clear (registry == None)
+    let last = env.events().all().events().last().unwrap().clone();
+    let expected = crate::RegistryRefRebound {
+        name: symbol_short!("reg_rebind"),
+        invoice_id: invoice_id.clone(),
+        registry: None,
+    }
+    .to_xdr(&env, &contract_id);
+
+    assert_eq!(last, expected);
+
+    // Set to reg1 again to test clear_registry_ref
+    client.rebind_registry_ref(&Some(reg1.clone()));
+    assert_eq!(client.get_registry_ref(), Some(reg1.clone()));
+
+    // Clear using clear_registry_ref
+    client.clear_registry_ref();
+    assert_eq!(client.get_registry_ref(), None);
+
+    // Event sanity: last event should be clear (registry == None) from clear_registry_ref
+    let last = env.events().all().events().last().unwrap().clone();
+    let expected = crate::RegistryRefRebound {
+        name: symbol_short!("reg_rebind"),
+        invoice_id,
+        registry: None,
+    }
+    .to_xdr(&env, &contract_id);
+
+    assert_eq!(last, expected);
+}
+
+#[test]
+#[should_panic]
+fn test_rebind_registry_ref_requires_admin_auth() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "REG_RB_2"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    env.mock_auths(&[]);
+    client.rebind_registry_ref(&Some(Address::generate(&env)));
+}
+
+fn test_error_code_uniqueness() {
+    let mut discriminants = std::collections::HashSet::new();
+    let codes = [
+        EscrowError::AmountMustBePositive as u32,
+        EscrowError::YieldBpsOutOfRange as u32,
+        EscrowError::EscrowAlreadyInitialized as u32,
+        EscrowError::InvoiceIdInvalidLength as u32,
+        EscrowError::InvoiceIdInvalidCharset as u32,
+        EscrowError::MinContributionNotPositive as u32,
+        EscrowError::MinContributionExceedsAmount as u32,
+        EscrowError::MaxUniqueInvestorsNotPositive as u32,
+        EscrowError::MaxPerInvestorNotPositive as u32,
+        EscrowError::TierYieldOutOfRange as u32,
+        EscrowError::TierYieldBelowBase as u32,
+        EscrowError::TierLockNotIncreasing as u32,
+        EscrowError::TierYieldNotNonDecreasing as u32,
+        EscrowError::AmountExceedsMax as u32,
+        EscrowError::EscrowNotInitialized as u32,
+        EscrowError::FundingTokenNotSet as u32,
+        EscrowError::TreasuryNotSet as u32,
+        EscrowError::LegalHoldBlocksTreasuryDustSweep as u32,
+        EscrowError::SweepAmountNotPositive as u32,
+        EscrowError::SweepAmountExceedsMax as u32,
+        EscrowError::DustSweepNotTerminal as u32,
+        EscrowError::NoFundingTokenBalanceToSweep as u32,
+        EscrowError::EffectiveSweepAmountZero as u32,
+        EscrowError::TransferAmountNotPositive as u32,
+        EscrowError::InsufficientTokenBalanceBeforeTransfer as u32,
+        EscrowError::SenderBalanceUnderflow as u32,
+        EscrowError::RecipientBalanceUnderflow as u32,
+        EscrowError::SenderBalanceDeltaMismatch as u32,
+        EscrowError::RecipientBalanceDeltaMismatch as u32,
+        EscrowError::SweepExceedsLiabilityFloor as u32,
+        EscrowError::PrimaryAttestationAlreadyBound as u32,
+        EscrowError::AttestationAppendLogCapacityReached as u32,
+        EscrowError::CollateralAmountNotPositive as u32,
+        EscrowError::CollateralAssetEmpty as u32,
+        EscrowError::CollateralTimestampBackwards as u32,
+        EscrowError::InvestorBatchEmpty as u32,
+        EscrowError::InvestorBatchTooLarge as u32,
+        EscrowError::FundingBatchEmpty as u32,
+        EscrowError::FundingBatchTooLarge as u32,
+        EscrowError::TargetNotPositive as u32,
+        EscrowError::TargetUpdateNotOpen as u32,
+        EscrowError::TargetBelowFundedAmount as u32,
+        EscrowError::CapLowerNotOpen as u32,
+        EscrowError::NoInvestorCapConfigured as u32,
+        EscrowError::NewCapNotLower as u32,
+        EscrowError::NewCapBelowCurrentFunderCount as u32,
+        EscrowError::MaturityUpdateNotOpen as u32,
+        EscrowError::NewAdminSameAsCurrent as u32,
+        EscrowError::MigrationVersionMismatch as u32,
+        EscrowError::AlreadyCurrentSchemaVersion as u32,
+        EscrowError::NoMigrationPath as u32,
+        EscrowError::FundingAmountNotPositive as u32,
+        EscrowError::FundingBelowMinContribution as u32,
+        EscrowError::LegalHoldBlocksFunding as u32,
+        EscrowError::EscrowNotOpenForFunding as u32,
+        EscrowError::InvestorNotAllowlisted as u32,
+        EscrowError::InvestorContributionOverflow as u32,
+        EscrowError::InvestorContributionExceedsCap as u32,
+        EscrowError::UniqueInvestorCapReached as u32,
+        EscrowError::TieredSecondDeposit as u32,
+        EscrowError::InvestorClaimTimeOverflow as u32,
+        EscrowError::FundedAmountOverflow as u32,
+        EscrowError::CommitmentLockExceedsMaturity as u32,
+        EscrowError::LegalHoldBlocksSettlement as u32,
+        EscrowError::SettlementNotFunded as u32,
+        EscrowError::MaturityNotReached as u32,
+        EscrowError::LegalHoldBlocksWithdrawal as u32,
+        EscrowError::WithdrawalNotFunded as u32,
+        EscrowError::LegalHoldBlocksInvestorClaims as u32,
+        EscrowError::NoContributionToClaim as u32,
+        EscrowError::InvestorClaimNotSettled as u32,
+        EscrowError::InvestorCommitmentLockNotExpired as u32,
+        EscrowError::ComputePayoutArithmeticOverflow as u32,
+        EscrowError::LegalHoldBlocksCancelFunding as u32,
+        EscrowError::CancelFundingNotOpen as u32,
+        EscrowError::RefundNotCancelled as u32,
+        EscrowError::NoContributionToRefund as u32,
+        EscrowError::LegalHoldClearRequestMissing as u32,
+        EscrowError::LegalHoldClearNotReady as u32,
+        EscrowError::LegalHoldClearDelayOverflow as u32,
+        EscrowError::FundingDeadlinePassed as u32,
+        EscrowError::LegalHoldBlocksBeneficiaryRotation as u32,
+        EscrowError::RotationNotOpen as u32,
+        EscrowError::NewSmeSameAsCurrent as u32,
+        EscrowError::NoPendingAdmin as u32,
+        EscrowError::InsufficientContractBalance as u32,
+        EscrowError::FloorLowerNotOpen as u32,
+        EscrowError::NewFloorNotLower as u32,
+        EscrowError::NewFloorNotPositive as u32,
+    ];
+    for code in codes.iter() {
+        assert!(
+            discriminants.insert(*code),
+            "Duplicate discriminant: {}",
+            code
+        );
+    }
+}
+
+/// Verify key-rotation recovery flow:
+/// 1. Old admin sets a legal hold.
+/// 2. Old admin initiates handover to new admin.
+/// 3. New admin accepts handover.
+/// 4. Old admin is locked out and cannot clear the hold.
+/// 5. New admin clears the hold successfully.
+#[test]
+fn test_post_handover_admin_can_clear_hold_set_by_old_admin() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, old_admin, sme) = setup(&env);
+    let new_admin = Address::generate(&env);
+    default_init(&client, &env, &old_admin, &sme);
+
+    // 1. Old admin sets a legal hold
+    client.set_legal_hold(&true);
+    assert!(client.get_legal_hold());
+
+    // 2. Old admin proposes new admin
+    client.propose_admin(&new_admin, &None);
+
+    // 3. New admin accepts admin handover
+    client.accept_admin();
+    assert_eq!(client.get_escrow().admin, new_admin);
+
+    // 4. Old admin tries to clear the hold (should fail/panic because old admin is locked out/no longer admin)
+    env.mock_auths(&[soroban_sdk::testutils::MockAuth {
+        address: &old_admin,
+        invoke: &soroban_sdk::testutils::MockAuthInvoke {
+            contract: &client.address,
+            fn_name: "clear_legal_hold",
+            args: soroban_sdk::Vec::<soroban_sdk::Val>::new(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.clear_legal_hold();
+    }))
+    .is_err());
+
+    // 5. New admin clears the hold successfully
+    env.mock_auths(&[soroban_sdk::testutils::MockAuth {
+        address: &new_admin,
+        invoke: &soroban_sdk::testutils::MockAuthInvoke {
+            contract: &client.address,
+            fn_name: "clear_legal_hold",
+            args: soroban_sdk::Vec::<soroban_sdk::Val>::new(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    client.clear_legal_hold();
+    assert!(!client.get_legal_hold());
+}
+

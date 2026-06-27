@@ -42,3 +42,10 @@ There is no superuser that can act as all roles simultaneously unless the same k
 
 - **Admin can do everything:** creates a single point of failure; role separation limits blast radius.
 - **No treasury auth on sweep:** would let anyone trigger dust transfers once terminal; treasury auth is a cheap extra gate.
+
+## No-Op Guards
+
+Certain administrative entrypoints enforce a no-op guard to reject updates that do not change the existing state, preventing noisy events and wasted storage writes:
+- **`update_maturity`**: Rejects `new_maturity == old_maturity` (`MaturityUnchanged`).
+- **`propose_admin`**: Rejects `new_admin == current_admin` (`NewAdminSameAsCurrent`).
+- **`rotate_beneficiary`**: Rejects `new_sme == current_sme` (`NewSmeSameAsCurrent`).

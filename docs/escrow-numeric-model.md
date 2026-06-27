@@ -19,6 +19,20 @@ This contract uses Soroban host values and Rust integer types directly. It does 
 - A zero commitment stores `0`, meaning no additional investor claim-time gate.
 - Boundary values are inclusive: a timestamp plus commitment that equals `u64::MAX` is representable; only values above `u64::MAX` fail.
 
+## Funding invariants (property-based)
+
+This contract’s funding accounting and state transitions are intended to obey these invariants for all orderings of `fund` / `fund_with_commitment` calls.
+
+- **Conservation (principal accounting):** while the escrow is open, `escrow.funded_amount` must equal the sum of every investor’s stored `get_contribution(addr)`.
+- **Unique funder count:** `get_unique_funder_count()` must equal the number of distinct investor addresses whose `get_contribution(addr) > 0`.
+- **Cap enforcement (never exceeded):**
+  - When `max_per_investor` is configured, each investor’s running contribution must never exceed the configured cap.
+  - When `max_unique_investors` is configured, the contract must never allow more distinct funders than the configured cap.
+- **Status transition:** `escrow.status` must flip from `0` (open) to `1` (funded) **exactly at the first call** where `funded_amount >= funding_target` becomes true.
+- **FundingCloseSnapshot semantics:** on the funded transition, `FundingCloseSnapshot` is written once with `total_principal == escrow.funded_amount` (including over-funding), and it must remain immutable across later reads.
+
+These invariants are validated with randomized property tests in `escrow/src/tests/properties.rs`.
+
 ## Integration Guidance
 
 - Off-chain callers should validate amount and lock-duration inputs before submitting transactions, especially when simulating near integer limits.
