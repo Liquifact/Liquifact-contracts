@@ -50,7 +50,8 @@ fn setup_inited(
         &None,
         &None,
         &None,
-    );
+        &None,
+        &None);
     (client, admin, sme, treasury, token)
 }
 

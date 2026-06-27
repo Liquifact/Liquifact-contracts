@@ -51,6 +51,8 @@ fn init_open(
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
     (token, treasury)
 }
@@ -82,6 +84,8 @@ fn init_open_with_clear_delay(
         &None,
         &legal_hold_clear_delay,
         &None,
+        &None,
+        &None,
     );
     (token, treasury)
 }
@@ -111,6 +115,8 @@ fn init_funded_with_real_token<'a>(
         &token_id,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -160,6 +166,8 @@ fn init_settled<'a>(
         &token,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -948,6 +956,8 @@ fn recovery_new_admin_clears_hold_and_operations_resume() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
     sac_admin.mint(&investor, &TARGET);
     client.fund(&investor, &TARGET);
@@ -962,7 +972,7 @@ fn recovery_new_admin_clears_hold_and_operations_resume() {
 
     // --- Step 2: propose + accept new admin while hold is active. ---
     // propose_admin and accept_admin are NOT gated by the hold (by design).
-    client.propose_admin(&new_admin);
+    client.propose_admin(&new_admin, &None);
     assert_eq!(client.get_pending_admin(), Some(new_admin.clone()));
     client.accept_admin();
     // Hold persists after handover.

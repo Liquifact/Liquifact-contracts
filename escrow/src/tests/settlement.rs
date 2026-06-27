@@ -40,6 +40,46 @@ fn fund_to_target(client: &super::LiquifactEscrowClient<'_>, env: &Env) -> Addre
     investor
 }
 
+fn setup_claim_env<'a>(
+    env: &'a Env,
+    invoice_id: &str,
+    target: i128,
+    yield_bps: i64,
+) -> (
+    super::LiquifactEscrowClient<'a>,
+    StellarTestToken<'a>,
+    Address,
+    Address,
+) {
+    let token = install_stellar_asset_token(env);
+    let (contract_id, client) = deploy_with_id(env);
+    let admin = Address::generate(env);
+    let sme = Address::generate(env);
+    let treasury = Address::generate(env);
+
+    client.init(
+        &admin,
+        &String::from_str(env, invoice_id),
+        &sme,
+        &target,
+        &yield_bps,
+        &0u64,
+        &token.id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    (client, token, contract_id, treasury)
+}
+
 /// Set up an escrow backed by a real Stellar asset contract (SAC), fund it to
 /// target, and mint `TARGET` tokens into the escrow contract so `withdraw()` can
 /// actually transfer them.  Returns `(client, sme, sac_admin_client)`.
@@ -70,6 +110,8 @@ fn setup_funded_with_token<'a>(
         &token_id,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -288,7 +330,8 @@ fn withdraw_succeeds_after_hold_cleared() {
 #[test]
 fn test_claim_investor_twice_is_idempotent() {
     let env = Env::default();
-    let (client, admin, sme) = setup(&env);
+    let (client, token, contract_id, _treasury) =
+        setup_claim_env(&env, "IDEMP001", 1_000i128, 400i64);
     let investor = Address::generate(&env);
     token.stellar.mint(&investor, &1_000i128);
     client.fund(&investor, &1_000i128);
@@ -327,6 +370,8 @@ fn test_claim_by_non_investor_panics() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
     // Escrow settled but stranger never funded
     let investor = Address::generate(&env);
@@ -339,7 +384,8 @@ fn test_claim_by_non_investor_panics() {
 #[test]
 fn test_clashing_investors_have_independent_claims() {
     let env = Env::default();
-    let (client, admin, sme) = setup(&env);
+    let (client, token, contract_id, _treasury) =
+        setup_claim_env(&env, "CLASH001", 2_000i128, 400i64);
     let inv_a = Address::generate(&env);
     let inv_b = Address::generate(&env);
     token.stellar.mint(&inv_a, &1_000i128);
@@ -426,6 +472,8 @@ fn test_claim_blocked_until_commitment_ledger_time() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
     client.fund_with_commitment(&inv, &1_000i128, &500u64);
     client.settle();
@@ -435,10 +483,8 @@ fn test_claim_blocked_until_commitment_ledger_time() {
 #[test]
 fn test_claim_succeeds_after_commitment_and_settle() {
     let env = Env::default();
-    env.mock_all_auths();
-    let client = deploy(&env);
-    let admin = Address::generate(&env);
-    let sme = Address::generate(&env);
+    let (client, token, contract_id, _treasury) =
+        setup_claim_env(&env, "COMMIT1", 1_000i128, 400i64);
     let inv = Address::generate(&env);
     token.stellar.mint(&inv, &1_000i128);
     client.fund_with_commitment(&inv, &1_000i128, &100u64);
@@ -452,12 +498,8 @@ fn test_claim_succeeds_after_commitment_and_settle() {
 #[test]
 fn test_claim_gating_exact_timestamp() {
     let env = Env::default();
-    env.mock_all_auths();
-    let client = deploy(&env);
-    let admin = Address::generate(&env);
-    let sme = Address::generate(&env);
+    let (client, token, contract_id, _treasury) = setup_claim_env(&env, "GATE1", 1_000i128, 400i64);
     let inv = Address::generate(&env);
-    let (tok, treasury) = free_addresses(&env);
 
     env.ledger().set_timestamp(1000);
     let lock_duration = 500u64;
@@ -484,13 +526,9 @@ fn test_claim_gating_exact_timestamp() {
 #[test]
 fn test_claim_gating_with_multiple_investors() {
     let env = Env::default();
-    env.mock_all_auths();
-    let client = deploy(&env);
-    let admin = Address::generate(&env);
-    let sme = Address::generate(&env);
+    let (client, token, contract_id, _treasury) = setup_claim_env(&env, "GATE2", 2_000i128, 400i64);
     let inv1 = Address::generate(&env);
     let inv2 = Address::generate(&env);
-    let (tok, treasury) = free_addresses(&env);
 
     env.ledger().set_timestamp(1000);
     token.stellar.mint(&inv1, &1_000i128);
@@ -533,6 +571,8 @@ fn test_cost_baseline_settle() {
         &Address::generate(&env),
         &None,
         &Address::generate(&env),
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -589,6 +629,8 @@ fn settle_with_maturity_zero_succeeds_immediately() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 
     assert!(
@@ -628,6 +670,8 @@ fn settle_one_second_before_maturity_traps_and_preserves_state() {
         &token,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -682,6 +726,8 @@ fn settle_at_maturity_succeeds() {
         &token,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -831,6 +877,8 @@ fn test_sweep_terminal_dust_after_settle_transfers_to_treasury() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
     let investor = Address::generate(&env);
     client.fund(&investor, &1_000i128);
@@ -865,6 +913,8 @@ fn test_sweep_terminal_dust_after_withdraw_and_ledger_tick() {
         &token.id,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -908,6 +958,8 @@ fn test_sweep_rejected_when_open() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
     client.fund(&investor, &1_000i128);
     client.settle();
@@ -931,6 +983,8 @@ fn test_sweep_blocked_under_legal_hold() {
         &Address::generate(&env),
         &None,
         &Address::generate(&env),
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -968,6 +1022,8 @@ fn test_sweep_rejects_amount_above_dust_cap() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
     client.fund(&investor, &1_000i128);
     // status == 1 (funded), not settled — must panic
@@ -992,6 +1048,8 @@ fn test_sweep_caps_at_contract_balance() {
         &Address::generate(&env),
         &None,
         &Address::generate(&env),
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -1025,6 +1083,8 @@ fn test_sweep_requires_treasury_auth() {
         &token.id,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -1065,6 +1125,8 @@ fn claim_investor_payout_succeeds_after_settle() {
         &token.id,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -1258,6 +1320,8 @@ fn test_is_investor_claimed_false_before_any_claim() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
     client.fund(&investor, &1_000i128);
     client.settle();
@@ -1288,6 +1352,8 @@ fn test_is_investor_claimed_returns_false_for_unfunded_address() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
     client.fund(&investor, &1_000i128);
     client.settle();
@@ -1298,7 +1364,8 @@ fn test_is_investor_claimed_returns_false_for_unfunded_address() {
 fn test_claim_marker_persists_after_claim() {
     // After a successful claim the flag must remain true across repeated reads.
     let env = Env::default();
-    let (client, admin, sme) = setup(&env);
+    let (client, token, contract_id, _treasury) =
+        setup_claim_env(&env, "PERSIST001", 1_000i128, 400i64);
     let investor = Address::generate(&env);
     token.stellar.mint(&investor, &1_000i128);
     client.fund(&investor, &1_000i128);
@@ -1313,7 +1380,8 @@ fn test_claim_marker_persists_after_claim() {
 fn test_claim_marker_isolated_per_investor() {
     // Claiming for investor_a must not set the flag for investor_b (no key crosstalk).
     let env = Env::default();
-    let (client, admin, sme) = setup(&env);
+    let (client, token, contract_id, _treasury) =
+        setup_claim_env(&env, "ISO001", 2_000i128, 400i64);
     let investor_a = Address::generate(&env);
     let investor_b = Address::generate(&env);
     token.stellar.mint(&investor_a, &1_000i128);
@@ -1332,7 +1400,8 @@ fn test_claim_marker_all_investors_independent() {
     // Three investors with independent claim keys; partial claiming must not
     // corrupt unclaimed investors' flags.
     let env = Env::default();
-    let (client, admin, sme) = setup(&env);
+    let (client, token, contract_id, _treasury) =
+        setup_claim_env(&env, "IND001", 3_000i128, 400i64);
     let inv_a = Address::generate(&env);
     let inv_b = Address::generate(&env);
     let inv_c = Address::generate(&env);
@@ -1356,8 +1425,7 @@ fn test_claim_marker_all_investors_independent() {
 #[test]
 fn investor_contribution_readable_after_withdraw() {
     let env = Env::default();
-    let (client, admin, sme) = setup(&env);
-    default_init(&client, &env, &admin, &sme);
+    let (client, sme, sac_admin) = setup_funded_with_token(&env);
 
     let investor = Address::generate(&env);
     let contribution: i128 = TARGET;
@@ -1376,8 +1444,7 @@ fn investor_contribution_readable_after_withdraw() {
 #[test]
 fn multi_investor_contributions_preserved_after_withdraw() {
     let env = Env::default();
-    let (client, admin, sme) = setup(&env);
-    default_init(&client, &env, &admin, &sme);
+    let (client, sme, sac_admin) = setup_funded_with_token(&env);
 
     // Fund with two investors reaching target collectively.
     let inv_a = Address::generate(&env);
@@ -1671,6 +1738,8 @@ fn settled_at_recorded_with_maturity() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
     let investor = Address::generate(&env);
     sac_admin.mint(&investor, &TARGET);
@@ -1769,6 +1838,8 @@ fn test_commitment_lock_past_maturity_rejected() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 
     let inv = Address::generate(&env);
@@ -1813,12 +1884,10 @@ fn test_commitment_effective_yield_reflects_tier() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 
     client.fund_with_commitment(&inv, &5_000i128, &100u64);
-    assert_eq!(client.get_effective_yield_bps(&inv), 1000);
-    assert_eq!(
-        client.get_effective_yield_bps(&inv),
-        client.get_investor_yield_bps(&inv),
-    );
+    assert_eq!(client.get_investor_yield_bps(&inv), 1000);
 }

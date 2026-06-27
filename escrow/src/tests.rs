@@ -22,6 +22,8 @@ use soroban_sdk::{
 };
 use std::fmt::Debug;
 
+pub use soroban_sdk::Symbol;
+
 pub(crate) fn assert_contract_error<T, E>(
     result: Result<Result<T, E>, Result<Error, InvokeError>>,
     expected: EscrowError,
@@ -135,7 +137,9 @@ pub fn default_init(client: &LiquifactEscrowClient<'_>, env: &Env, admin: &Addre
         &None,
         &None,
         &None,
-        &None, // No funding deadline
+        &None, // No funding deadline,
+        &None,
+        &None,
     );
 }
 
@@ -175,6 +179,8 @@ pub fn init_and_fund_with_real_token<'a>(
         &token_id,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
         &None,
         &None,

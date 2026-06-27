@@ -60,12 +60,16 @@ fn test_bind_primary_hash_stores_and_reads() {
     // Assert the `att_bind` event was emitted
     let events = env.events().all().filter_by_contract(&client.address);
     let last_event = events.events().last().unwrap();
-    use soroban_sdk::{symbol_short, IntoVal, Val, Vec};
-    let expected_topics: Vec<Val> =
-        (symbol_short!("att_bind"), client.get_escrow().invoice_id).into_val(&env);
+    let contract_id = client.address.clone();
+    let invoice_id = client.get_escrow().invoice_id;
     assert_eq!(
-        last_event,
-        (client.address.clone(), expected_topics, d.into_val(&env))
+        last_event.clone(),
+        crate::PrimaryAttestationBound {
+            name: symbol_short!("att_bind"),
+            invoice_id,
+            digest: d.clone(),
+        }
+        .to_xdr(&env, &contract_id)
     );
 }
 

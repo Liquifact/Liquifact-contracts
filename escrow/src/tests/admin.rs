@@ -31,6 +31,8 @@ fn test_update_maturity_emits_event() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
     client.update_maturity(&2000u64);
     assert_eq!(
@@ -66,6 +68,8 @@ fn test_update_maturity_unchanged_panics() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
     client.update_maturity(&2000u64);
 }
@@ -84,6 +88,8 @@ fn test_update_maturity_success() {
         &Address::generate(&env),
         &None,
         &Address::generate(&env),
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -112,6 +118,8 @@ fn test_update_maturity_wrong_state() {
         &Address::generate(&env),
         &None,
         &Address::generate(&env),
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -147,6 +155,8 @@ fn test_update_maturity_unauthorized() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
     env.mock_auths(&[]);
     client.update_maturity(&2000u64);
@@ -167,6 +177,8 @@ fn test_propose_admin_sets_pending_without_changing_admin() {
         &Address::generate(&env),
         &None,
         &Address::generate(&env),
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -195,6 +207,8 @@ fn test_accept_admin_promotes_pending_and_clears_pending() {
         &Address::generate(&env),
         &None,
         &Address::generate(&env),
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -232,6 +246,8 @@ fn test_transfer_admin_deprecated_shim_only_proposes() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 
     let unchanged = client.transfer_admin(&new_admin);
@@ -254,6 +270,8 @@ fn test_transfer_admin_same_address_panics() {
         &Address::generate(&env),
         &None,
         &Address::generate(&env),
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -348,7 +366,7 @@ fn test_propose_admin_requires_current_admin_auth() {
     default_init(&client, &env, &admin, &sme);
     env.mock_auths(&[]);
     let new_admin = Address::generate(&env);
-    client.propose_admin(&new_admin);
+    client.propose_admin(&new_admin, &None);
 }
 
 /// Assert `propose_admin` rejects `NewAdminSameAsCurrent`
@@ -358,7 +376,7 @@ fn test_propose_admin_same_address_panics() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
     default_init(&client, &env, &admin, &sme);
-    client.propose_admin(&admin);
+    client.propose_admin(&admin, &None);
 }
 
 /// Assert `accept_admin` by wrong address panics
@@ -370,7 +388,7 @@ fn test_accept_admin_by_wrong_address_panics() {
     let (client, admin, sme) = setup(&env);
     let new_admin = Address::generate(&env);
     default_init(&client, &env, &admin, &sme);
-    client.propose_admin(&new_admin);
+    client.propose_admin(&new_admin, &None);
     let wrong_admin = Address::generate(&env);
     env.mock_auths(&[soroban_sdk::testutils::MockAuth {
         address: &wrong_admin,
@@ -395,7 +413,7 @@ fn test_admin_handover_lifecycle() {
     default_init(&client, &env, &old_admin, &sme);
 
     // 1. Propose admin
-    let pending = client.propose_admin(&new_admin);
+    let pending = client.propose_admin(&new_admin, &None);
     assert_eq!(pending, new_admin.clone());
     assert_eq!(client.get_pending_admin(), Some(new_admin.clone()));
 
@@ -501,6 +519,8 @@ fn test_read_model_summary_includes_optional_admin_fields() {
         &Some(10_000i128),
         &None,
         &None,
+        &None,
+        &None,
     );
 
     let summary = client.get_escrow_summary();
@@ -529,6 +549,8 @@ fn test_record_collateral_stored_and_does_not_block_settle() {
         &Address::generate(&env),
         &None,
         &Address::generate(&env),
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -567,6 +589,8 @@ fn test_collateral_zero_panics() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
     client.record_sme_collateral_commitment(&symbol_short!("XLM"), &0i128);
 }
@@ -586,6 +610,8 @@ fn test_collateral_requires_sme_auth() {
         &Address::generate(&env),
         &None,
         &Address::generate(&env),
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -612,6 +638,8 @@ fn test_legal_hold_blocks_settle_withdraw_claim_and_fund() {
         &Address::generate(&env),
         &None,
         &Address::generate(&env),
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -671,6 +699,8 @@ fn test_legal_hold_blocks_new_funds_when_open() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
     client.set_legal_hold(&true);
     client.fund(&investor, &1i128);
@@ -713,6 +743,8 @@ fn test_update_funding_target_by_admin_succeeds() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 
     let updated = client.update_funding_target(&10_000i128);
@@ -740,6 +772,8 @@ fn test_update_funding_target_by_non_admin_panics() {
         &token,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -780,6 +814,8 @@ fn test_update_funding_target_fails_when_funded() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
     client.fund(&investor, &5_000i128);
     client.update_funding_target(&10_000i128);
@@ -807,6 +843,8 @@ fn test_update_funding_target_below_funded_panics() {
         &token,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -845,6 +883,8 @@ fn test_update_funding_target_zero_panics() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
     client.update_funding_target(&0i128);
 }
@@ -877,6 +917,8 @@ fn test_update_funding_target_event_fields() {
         &token,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -923,6 +965,8 @@ fn test_update_funding_target_fails_when_settled() {
         &token,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -977,6 +1021,8 @@ fn test_update_funding_target_equal_to_funded_amount_succeeds() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
     client.fund(&investor, &4_000i128); // funded_amount == 4_000, status still 0
 
@@ -1009,6 +1055,8 @@ fn test_update_funding_target_negative_panics() {
         &token,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -1048,6 +1096,8 @@ fn test_update_maturity_event_fields() {
         &token,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -1100,6 +1150,8 @@ fn test_update_maturity_fails_when_funded() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
     client.fund(&investor, &5_000i128); // status → 1 (funded)
     client.update_maturity(&2000u64);
@@ -1129,6 +1181,8 @@ fn test_update_maturity_fails_when_settled() {
         &token,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -1181,6 +1235,8 @@ fn test_update_maturity_to_zero_succeeds() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
     let updated = client.update_maturity(&0u64);
     assert_eq!(updated.maturity, 0u64);
@@ -1211,6 +1267,8 @@ fn test_settle_passes_exactly_at_maturity_ledger_time() {
         &token,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -1256,6 +1314,8 @@ fn test_settle_fails_one_second_before_maturity() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
     client.fund(&investor, &5_000i128);
 
@@ -1286,6 +1346,8 @@ fn test_update_maturity_twice_overwrites() {
         &token,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -1463,6 +1525,8 @@ fn auth_audit_sweep_terminal_dust_requires_treasury() {
         &token.id,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -1665,6 +1729,8 @@ fn test_rotate_beneficiary_then_withdraw_goes_to_new_sme() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
     token.stellar.mint(&investor, &TARGET);
     token.stellar.approve(
@@ -1735,7 +1801,7 @@ fn test_rebind_registry_ref_sets_and_clears() {
     // Event sanity: last event should be clear (registry == None)
     let last = env.events().all().events().last().unwrap().clone();
     let expected = crate::RegistryRefRebound {
-        name: symbol_short!("reg_rebind"),
+        name: soroban_sdk::Symbol::new(&env, "reg_rebind"),
         invoice_id,
         registry: None,
     }
