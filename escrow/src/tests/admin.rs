@@ -1801,7 +1801,26 @@ fn test_rebind_registry_ref_sets_and_clears() {
     // Event sanity: last event should be clear (registry == None)
     let last = env.events().all().events().last().unwrap().clone();
     let expected = crate::RegistryRefRebound {
-        name: soroban_sdk::Symbol::new(&env, "reg_rebind"),
+        name: symbol_short!("reg_rebind"),
+        invoice_id: invoice_id.clone(),
+        registry: None,
+    }
+    .to_xdr(&env, &contract_id);
+
+    assert_eq!(last, expected);
+
+    // Set to reg1 again to test clear_registry_ref
+    client.rebind_registry_ref(&Some(reg1.clone()));
+    assert_eq!(client.get_registry_ref(), Some(reg1.clone()));
+
+    // Clear using clear_registry_ref
+    client.clear_registry_ref();
+    assert_eq!(client.get_registry_ref(), None);
+
+    // Event sanity: last event should be clear (registry == None) from clear_registry_ref
+    let last = env.events().all().events().last().unwrap().clone();
+    let expected = crate::RegistryRefRebound {
+        name: symbol_short!("reg_rebind"),
         invoice_id,
         registry: None,
     }
@@ -1838,6 +1857,36 @@ fn test_rebind_registry_ref_requires_admin_auth() {
 
     env.mock_auths(&[]);
     client.rebind_registry_ref(&Some(Address::generate(&env)));
+}
+
+#[test]
+#[should_panic]
+fn test_clear_registry_ref_requires_admin_auth() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "REG_RB_3"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    env.mock_auths(&[]);
+    client.clear_registry_ref();
 }
 
 fn test_error_code_uniqueness() {
