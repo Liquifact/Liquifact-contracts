@@ -576,9 +576,10 @@ in-place upgrade procedure.
 
 - Use a multisig wallet or a governed contract as `admin` at all times.
 - Never use a single-signer hot wallet as `admin` in production.
-- Admin rotation is two-step: `propose_admin` requires the current admin's
-  authorization, and `accept_admin` requires the proposed successor's
-  authorization. Test both steps on Testnet before executing on Mainnet. (See `test_admin_handover_lifecycle` in `escrow/src/tests/admin.rs` for an end-to-end example).
+- **Two-Step Rotation:** Admin rotation is strictly a two-step procedure to prevent locking out admin-gated functions due to typographical errors:
+  1. **`propose_admin(new_admin, validity_window_secs)`**: Requires authorization from the current admin. It validates that `new_admin` is not the current admin (reverts with `NewAdminSameAsCurrent` / code 80 if they are identical). On success, it writes the successor to `DataKey::PendingAdmin` and the expiry timestamp to `DataKey::PendingAdminExpiry` and emits `AdminProposedEvent` (`adm_prop`).
+  2. **`accept_admin()`**: Requires authorization from the proposed successor address. It verifies that a proposal exists (reverts with `NoPendingAdmin` / code 172 if `DataKey::PendingAdmin` is absent) and that the proposal has not expired (reverts with `AdminProposalExpired` / code 85 if `ledger.timestamp() > PendingAdminExpiry`). On success, it updates `InvoiceEscrow::admin` to the successor address, clears the pending keys from storage, and emits `AdminTransferredEvent` (`admin`).
+- Test both steps on Testnet before executing on Mainnet (see `test_admin_handover_lifecycle` and `test_post_handover_admin_can_clear_hold_set_by_old_admin` in `escrow/src/tests/admin.rs` for implementation reference).
 
 #### Cancelling a pending admin proposal
 
@@ -614,37 +615,28 @@ transaction**. This is intentional — it prevents operators from accidentally
 skipping version validation. Do not script automated `migrate()` calls without
 first implementing the migration path.
 
-### Deprecated-entrypoint observability (issue #386)
+### Deprecated transfer_admin shim and two-step handover
 
-`transfer_admin` is exposed solely as a `#[deprecated]` shim that delegates
-to `propose_admin`. Every successful call publishes two events in this
-order:
+The `transfer_admin` entrypoint is exposed solely as a `#[deprecated]` shim that delegates to [`propose_admin`](#admin-key-hygiene). 
 
-1. `AdminProposedEvent` from the inner `propose_admin` delegation
-   (the existing canonical proposal signal).
-2. `DeprecatedTransferAdminUsed`, carrying the same proposed address, so
-   indexers and operators can flag callers still using the legacy one-step
-   path.
+Calling `transfer_admin` **does not** perform an immediate or one-step handover of admin authority. It only initiates Step 1 of the rotation process by setting a pending proposal in contract storage. The proposed successor address must still explicitly call `accept_admin` to assume active admin authority.
 
-Handover semantics are unchanged; the extra event is purely **observability**.
-Failed `transfer_admin` calls (for example, `new_admin == current_admin`
-rejected with `EscrowError::NewAdminSameAsCurrent`) do **not** publish either
-event, so failed calls cannot pollute the legacy-usage count.
+#### Handover Observability
+Because the shim delegates to `propose_admin`, calling it emits exactly one event:
+- **`AdminProposedEvent`** (topic: `adm_prop`) carrying the `invoice_id`, `current_admin`, and `pending_admin`.
 
-Operator playbook:
+No other events (such as `DeprecatedTransferAdminUsed`) are defined or emitted by the contract code. Operators auditing or indexers parsing for deprecated shim usage should monitor `AdminProposedEvent` and check if the initiating transaction invoked `transfer_admin` instead of the canonical `propose_admin` entrypoint.
 
-- Query historical `DeprecatedTransferAdminUsed` events grouped by
-  `(contractId, invoice_id)` to enumerate integrations still on the legacy path.
-- Notify those callers and confirm they migrate to `propose_admin` followed
-  by `accept_admin`.
-- When the per-deployment count of `DeprecatedTransferAdminUsed` has stayed at
-  zero for a full release window, schedule removal of the `transfer_admin`
-  shim in a follow-up PR. Until then, the shim provides forward-compatibility
-  for un-migrated integrations while emitting the observability signal needed
-  to discover them.
+#### Recovery Path: Overriding Stuck Holds via Key Rotation
+The admin is the only role authorized to call `clear_legal_hold` or `request_clear_legal_hold`. If the active admin's private key is lost or compromised while a legal hold is active, funds will remain frozen on-chain because all risk-bearing operations (funding, settle, withdraw, claim) are blocked by the hold.
 
-See `docs/EVENT_SCHEMA.md` (`DeprecatedTransferAdminUsed`) for the full
-event topic/data layout.
+However, the admin rotation entrypoints (`propose_admin`, `accept_admin`, `cancel_pending_admin`) are **not** gated by the legal hold. This design ensures that operators can execute a recovery handover even while the contract is frozen:
+
+1. **Propose Successor:** The current admin (or the governance multisig/DAO) calls `propose_admin(new_admin, validity_window_secs)` to nominate the recovery key.
+2. **Accept Handover:** The nominated address calls `accept_admin()`. This immediately promotions the new address to `InvoiceEscrow::admin` and clears the pending proposal. The old admin key is immediately locked out.
+3. **Clear Hold:** The newly promoted admin calls `clear_legal_hold()` (or initiates the timelocked clear via `request_clear_legal_hold`), which successfully unfrezes the escrow contract.
+
+This recovery flow ensures that admin key rotation is always available as an emergency lever to restore operations under a compliance lock. See [ADR-002](adr/ADR-002-auth-boundaries.md) for the authorization boundary definitions.
 
 ---
 
