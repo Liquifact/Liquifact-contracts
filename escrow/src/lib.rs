@@ -455,6 +455,14 @@ pub(crate) fn ensure(env: &Env, condition: bool, error: EscrowError) {
     }
 }
 
+#[inline(always)]
+fn load_escrow(env: &Env) -> InvoiceEscrow {
+    env.storage()
+        .instance()
+        .get(&DataKey::Escrow)
+        .unwrap_or_else(|| fail(env, EscrowError::EscrowNotInitialized))
+}
+
 /// Validates that a non-zero maturity timestamp is not in the past and not beyond the
 /// configured maximum horizon from the current ledger time.
 ///
@@ -1372,10 +1380,7 @@ impl LiquifactEscrow {
 
     /// Get current escrow state.
     pub fn get_escrow(env: Env) -> InvoiceEscrow {
-        env.storage()
-            .instance()
-            .get(&DataKey::Escrow)
-            .unwrap_or_else(|| panic!("Escrow not initialized"))
+        load_escrow(&env)
     }
 
     /// Record investor funding. In production, this would be called with token transfer.
@@ -1618,15 +1623,7 @@ impl LiquifactEscrow {
     ///
     /// Emits [`EscrowError::EscrowNotInitialized`] (code 20) if called before [`LiquifactEscrow::init`].
     pub fn get_escrow(env: Env) -> InvoiceEscrow {
-        env.storage()
-            .instance()
-            .set(&DataKey::SmeCollateralPledge, &pledge);
-        CollateralRecordedEvt {
-            invoice_id: escrow.invoice_id,
-            amount,
-        }
-        .publish(&env);
-        Ok(())
+        load_escrow(&env)
     }
 
     /// Return the current collateral pledge, if any.
