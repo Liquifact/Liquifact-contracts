@@ -3950,10 +3950,27 @@ impl LiquifactEscrow {
         // - ADR-007: storage key evolution policy (additive changes / key semantics).
         // - docs/escrow-ledger-time.md: all gating uses `Env::ledger().timestamp()` with `>=`.
 
-        env.storage().instance().extend_ttl(
-            INSTANCE_TTL_MIN_EXTENSION_LEDGERS,
-            INSTANCE_TTL_MIN_EXTENSION_LEDGERS,
-        );
+        // Extend persistent TTL for allowlisted investor entries.
+        for addr in allowlisted.iter() {
+            // Persistent allowlist entry.
+            env.storage().persistent().extend_ttl(
+                &DataKey::InvestorAllowlisted(addr.clone()),
+                PERSISTENT_TTL_MIN_EXTENSION_LEDGERS,
+                PERSISTENT_TTL_MIN_EXTENSION_LEDGERS,
+            );
+            // Instance keys that may be per‑investor (contribution & claim lock).
+            env.storage().instance().extend_ttl(
+                &DataKey::InvestorContribution(addr.clone()),
+                INSTANCE_TTL_MIN_EXTENSION_LEDGERS,
+                INSTANCE_TTL_MIN_EXTENSION_LEDGERS,
+            );
+            env.storage().instance().extend_ttl(
+                &DataKey::InvestorClaimNotBefore(addr.clone()),
+                INSTANCE_TTL_MIN_EXTENSION_LEDGERS,
+                INSTANCE_TTL_MIN_EXTENSION_LEDGERS,
+            );
+        }
+
 
         // Instance storage TTL is contract-wide under Soroban SDK 25. The call above covers
         // Escrow, Version, LegalHold, snapshots, caps, and other instance keys.
