@@ -444,6 +444,8 @@ pub enum EscrowError {
     NewFloorNotPositive = 175,
     /// Caller is not authorized to perform partial settlement.
     PartialSettleUnauthorizedCaller = 200,
+    MaxPerInvestorCapNotConfigured = 24,  // new
+    MaxPerInvestorCapNotRaised = 25,      // new
 }
 
 #[inline(always)]
@@ -765,6 +767,16 @@ pub struct MinContributionFloorLowered {
     pub invoice_id: Symbol,
     pub old_floor: i128,
     pub new_floor: i128,
+}
+
+#[contractevent]
+pub struct MaxPerInvestorCapRaised {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    pub old_cap: i128,
+    pub new_cap: i128,
 }
 
 #[contractevent]
@@ -2912,6 +2924,64 @@ impl LiquifactEscrow {
         .publish(&env);
 
         new_floor
+    }
+
+    /// Raises the per-investor contribution cap.
+    ///
+    /// # Requirements
+    /// - Caller must be the admin.
+    /// - Escrow must be in Open state (status == 0).
+    /// - A per-investor cap must already be configured.
+    /// - `new_cap` must be strictly greater than the current cap.
+    ///
+    /// # Arguments
+    /// * `env` — The Soroban environment.
+    /// * `new_cap` — The new per-investor cap, must be > current cap.
+    ///
+    /// # Returns
+    /// The new cap value on success.
+    ///
+    /// # Errors
+    /// Emits typed [`EscrowError`] codes:
+    /// - [`EscrowError::Unauthorized`] if caller is not admin (via `load_escrow_require_admin`).
+    /// - [`EscrowError::CapLowerNotOpen`] if escrow is not in Open state.
+    /// - [`EscrowError::MaxPerInvestorCapNotConfigured`] if no cap was set at init.
+    /// - [`EscrowError::MaxPerInvestorCapNotRaised`] if `new_cap <= current_cap`.
+    pub fn raise_max_per_investor(env: Env, new_cap: i128) -> i128 {
+        let escrow = Self::load_escrow_require_admin(&env);
+
+        ensure(&env, escrow.status == 0, EscrowError::CapLowerNotOpen);
+
+        let old_cap: Option<i128> = env
+            .storage()
+            .instance()
+            .get(&DataKey::MaxPerInvestorCap);
+        ensure(
+            &env,
+            old_cap.is_some(),
+            EscrowError::MaxPerInvestorCapNotConfigured,
+        );
+        let old_cap = old_cap.unwrap();
+
+        ensure(
+            &env,
+            new_cap > old_cap,
+            EscrowError::MaxPerInvestorCapNotRaised,
+        );
+
+        env.storage()
+            .instance()
+            .set(&DataKey::MaxPerInvestorCap, &new_cap);
+
+        MaxPerInvestorCapRaised {
+            name: symbol_short!("inv_cap"),
+            invoice_id: escrow.invoice_id,
+            old_cap,
+            new_cap,
+        }
+        .publish(&env);
+
+        new_cap
     }
 
     /// Validate the stored schema version and apply a migration if one is implemented.

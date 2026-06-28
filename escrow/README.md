@@ -158,6 +158,44 @@ invariants:
       - test::test_init_sets_initialized_flag
 ```
 
+### `raise_max_per_investor(new_cap: i128)`
+
+Admin-only entrypoint to raise the per-investor contribution cap while the escrow is open.
+
+- **Requires**: escrow status is `Open` (0), caller is admin, cap was configured at init
+- **Enforces**: `new_cap` must be strictly greater than current cap (raise-only)
+- **Emits**: `MaxPerInvestorCapRaised` event with old and new values
+- **Effect**: Subsequent deposits are validated against the new higher cap; existing investors may add more principal up to the new limit
+
+This is the symmetric counterpart to `lower_max_unique_investors` — it allows an SME to admit a larger anchor investor mid-raise without deploying a new escrow. The cap can only increase, never decrease, and only while the escrow remains open.
+
+#### Security invariants
+
+| Invariant | Enforcement |
+|-----------|-------------|
+| Raise-only | `new_cap > old_cap` else `MaxPerInvestorCapNotRaised` |
+| Configured-only | Rejects when no cap was set at init (`MaxPerInvestorCapNotConfigured`) |
+| Open-only | Rejects when escrow status != 0 (`CapLowerNotOpen`) |
+| Admin-only | `load_escrow_require_admin` gates auth before any state change |
+  - id: ESC-CAP-002
+    name: per_investor_cap_raise_only
+    math: "if cap_0 = MaxPerInvestorCap at init then forall raise calls: new_cap > old_cap ∧ old_cap = Some(i128)"
+    tests:
+      - test::test_raise_max_per_investor_success
+      - test::test_raise_cap_rejects_lower
+      - test::test_raise_cap_rejects_equal
+      - test::test_raise_cap_rejects_unconfigured
+      - test::test_raise_cap_rejects_non_open_state
+      - test::test_raise_cap_requires_admin_auth
+      - test::test_raise_cap_unauthorized_panics
+      - test::test_raise_cap_emits_event
+      - test::test_raise_cap_enforced_on_new_deposits
+      - test::test_raise_cap_twice_successive
+      - test::test_raise_cap_existing_investor_above_old_cap_can_add_more
+      - test::test_raise_cap_rejects_negative
+
+
+
 ## New init parameters
 
 `init(..., yield_tiers, min_contribution, max_unique_investors)`:
