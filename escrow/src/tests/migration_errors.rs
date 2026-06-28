@@ -33,6 +33,8 @@ fn test_migration_version_mismatch() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 
     // stored = SCHEMA_VERSION (6), from_version = 5 → mismatch
@@ -68,6 +70,8 @@ fn test_already_current_schema_version() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 
     assert_contract_error(
@@ -96,6 +100,8 @@ fn test_no_migration_path() {
         &Address::generate(&env),
         &None,
         &Address::generate(&env),
+        &None,
+        &None,
         &None,
         &None,
         &None,

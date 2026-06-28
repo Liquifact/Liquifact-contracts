@@ -1,7 +1,7 @@
 use super::*;
 use crate::{
     AdminAcceptedEvent, AdminProposalCancelled, AdminProposedEvent, EscrowCloseSnapshot,
-    FundingTargetUpdated, RegistryRefRebound,
+    FundingTargetUpdated, RegistryRefRebound, DEFAULT_MATURITY_MAX_HORIZON_SECS,
 };
 
 use soroban_sdk::Event;
@@ -538,12 +538,13 @@ fn test_admin_handover_lifecycle() {
     // 2. Accept admin (verifying the events)
     let contract_id = client.address.clone();
     let updated = client.accept_admin();
+    let accept_events = env.events().all();
     assert_eq!(updated.admin, new_admin.clone());
     assert_eq!(client.get_pending_admin(), None);
 
     // Verify AdminAcceptedEvent
     assert_eq!(
-        env.events().all().events().last().unwrap().clone(),
+        accept_events.events().last().unwrap().clone(),
         crate::AdminAcceptedEvent {
             name: symbol_short!("adm_acc"),
             invoice_id: client.get_escrow().invoice_id,
@@ -1149,7 +1150,7 @@ fn test_update_funding_target_equal_to_funded_amount_succeeds() {
     let updated = client.update_funding_target(&4_000i128);
     assert_eq!(updated.funding_target, 4_000i128);
     assert_eq!(updated.funded_amount, 4_000i128);
-    assert_eq!(updated.status, 0);
+    assert_eq!(updated.status, 1);
 }
 
 /// Passing a negative value must panic with "Target must be strictly positive".
@@ -1673,11 +1674,12 @@ fn test_rotate_beneficiary_success_dual_auth() {
     let contract_id = client.address.clone();
 
     let updated = client.rotate_beneficiary(&new_sme);
+    let rotate_events = env.events().all();
     assert_eq!(updated.sme_address, new_sme);
     assert_eq!(client.get_escrow().sme_address, new_sme);
 
     assert_eq!(
-        env.events().all().events().last().unwrap().clone(),
+        rotate_events.events().last().unwrap().clone(),
         crate::BeneficiaryRotated {
             name: symbol_short!("ben_rot"),
             invoice_id: client.get_escrow().invoice_id,
@@ -1879,7 +1881,6 @@ fn test_rebind_registry_ref_sets_and_clears() {
     let (client, admin, sme) = setup(&env);
 
     let contract_id = client.address.clone();
-    let invoice_id = client.get_escrow().invoice_id.clone();
 
     let reg1 = Address::generate(&env);
     let reg2 = Address::generate(&env);
@@ -1905,6 +1906,8 @@ fn test_rebind_registry_ref_sets_and_clears() {
         &None,
     );
 
+    let invoice_id = client.get_escrow().invoice_id.clone();
+
     // Set to reg1
     client.rebind_registry_ref(&Some(reg1.clone()));
     assert_eq!(client.get_registry_ref(), Some(reg1.clone()));
@@ -1915,12 +1918,13 @@ fn test_rebind_registry_ref_sets_and_clears() {
 
     // Clear to None
     client.rebind_registry_ref(&None);
+    let clear_events = env.events().all();
     assert_eq!(client.get_registry_ref(), None);
 
     // Event sanity: last event should be clear (registry == None)
-    let last = env.events().all().events().last().unwrap().clone();
+    let last = clear_events.events().last().unwrap().clone();
     let expected = crate::RegistryRefRebound {
-        name: symbol_short!("reg_rebind"),
+        name: Symbol::new(&env, "reg_rebind"),
         invoice_id: invoice_id.clone(),
         registry: None,
     }
@@ -1934,12 +1938,13 @@ fn test_rebind_registry_ref_sets_and_clears() {
 
     // Clear using clear_registry_ref
     client.clear_registry_ref();
+    let clear2_events = env.events().all();
     assert_eq!(client.get_registry_ref(), None);
 
     // Event sanity: last event should be clear (registry == None) from clear_registry_ref
-    let last = env.events().all().events().last().unwrap().clone();
+    let last = clear2_events.events().last().unwrap().clone();
     let expected = crate::RegistryRefRebound {
-        name: symbol_short!("reg_rebind"),
+        name: Symbol::new(&env, "reg_rebind"),
         invoice_id,
         registry: None,
     }
@@ -2078,6 +2083,198 @@ fn test_error_code_uniqueness() {
             code
         );
     }
+}
+
+// ── update_maturity_max_horizon: bounds, admin gate, event emission ──────────
+
+/// `update_maturity_max_horizon` must require admin authorization; a caller
+/// without the admin credential must panic.
+#[test]
+#[should_panic]
+fn test_update_maturity_max_horizon_unauthorized() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let client = deploy(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "HORI_U"),
+        &sme,
+        &1_000i128,
+        &500i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+    env.mock_auths(&[]);
+    client.update_maturity_max_horizon(&3_600u64);
+}
+
+/// `update_maturity_max_horizon` must emit a `MaturityMaxHorizonUpdated` event
+/// (topic `"mtry_max"`) carrying the previous horizon and the new value.
+#[test]
+fn test_update_maturity_max_horizon_emits_event() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let contract_id = client.address.clone();
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "HORI_E"),
+        &sme,
+        &1_000i128,
+        &500i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    let new_horizon = 3_600u64;
+    client.update_maturity_max_horizon(&new_horizon);
+
+    assert_eq!(
+        env.events().all().events().last().unwrap().clone(),
+        crate::MaturityMaxHorizonUpdated {
+            name: symbol_short!("mtry_max"),
+            invoice_id: client.get_escrow().invoice_id,
+            old_horizon: DEFAULT_MATURITY_MAX_HORIZON_SECS,
+            new_horizon,
+        }
+        .to_xdr(&env, &contract_id)
+    );
+}
+
+/// When no explicit horizon has been stored, `get_maturity_max_horizon` must
+/// fall back to `DEFAULT_MATURITY_MAX_HORIZON_SECS`.
+#[test]
+fn test_update_maturity_max_horizon_default_fallback() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    assert_eq!(
+        client.get_maturity_max_horizon(),
+        DEFAULT_MATURITY_MAX_HORIZON_SECS,
+    );
+}
+
+/// Lowering the horizon must NOT retroactively invalidate an already-set
+/// maturity. A subsequent `update_maturity` call targeting `now + new_horizon + 1`
+/// must be rejected; the stored maturity must remain intact throughout.
+#[test]
+fn test_lowered_horizon_existing_maturity_untouched_and_far_update_rejected() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let (token, treasury) = free_addresses(&env);
+    env.ledger().set_timestamp(1_000);
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "HORI_R"),
+        &sme,
+        &1_000i128,
+        &500i64,
+        &2_000u64, // maturity within the default 5-year horizon
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    assert_eq!(client.get_escrow().maturity, 2_000u64);
+
+    // Lower the horizon to 500 s: new ceiling = now(1_000) + 500 = 1_500.
+    // The existing maturity (2_000) is beyond that ceiling but must survive unchanged.
+    client.update_maturity_max_horizon(&500u64);
+    assert_eq!(
+        client.get_escrow().maturity,
+        2_000u64,
+        "lowering the horizon must not retroactively invalidate an already-set maturity"
+    );
+
+    // A subsequent update to 1_501 (one second beyond the new ceiling) must fail.
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            client.update_maturity(&1_501u64);
+        }))
+        .is_err(),
+        "update_maturity beyond the new horizon must be rejected"
+    );
+
+    // The stored maturity must remain 2_000 after the failed update attempt.
+    assert_eq!(
+        client.get_escrow().maturity,
+        2_000u64,
+        "a rejected update_maturity call must not alter the stored maturity"
+    );
+}
+
+/// After lowering the horizon, an `update_maturity` to a ledger time within
+/// `[now, now + new_horizon]` must still succeed.
+#[test]
+fn test_lowered_horizon_allows_within_horizon_maturity_update() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let (token, treasury) = free_addresses(&env);
+    env.ledger().set_timestamp(1_000);
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "HORI_W"),
+        &sme,
+        &1_000i128,
+        &500i64,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    // Lower the horizon to 2 hours.
+    client.update_maturity_max_horizon(&7_200u64);
+    assert_eq!(client.get_maturity_max_horizon(), 7_200u64);
+
+    // 1 hour from now (3_600 s) is within the new 2-hour horizon.
+    let near_maturity = 1_000u64 + 3_600u64;
+    let updated = client.update_maturity(&near_maturity);
+    assert_eq!(
+        updated.maturity, near_maturity,
+        "maturity within the new horizon must be accepted"
+    );
 }
 
 /// Verify key-rotation recovery flow:

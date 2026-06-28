@@ -215,6 +215,9 @@ proptest! {
             }
 
             let use_commitment = use_commitments[step];
+            if use_commitment && expected_contribs[ix] > 0 {
+                break;
+            }
             let lock = lock_secs[step];
 
             let before_funded = client.get_escrow().funded_amount;

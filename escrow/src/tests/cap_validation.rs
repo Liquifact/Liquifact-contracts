@@ -1168,6 +1168,8 @@ fn test_lower_min_contribution_floor_success() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 
     assert_eq!(client.get_min_contribution_floor(), initial_floor);
@@ -1198,6 +1200,8 @@ fn test_lower_floor_enforces_new_floor() {
         &Address::generate(&env),
         &None,
         &Some(initial_floor),
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -1246,6 +1250,8 @@ fn test_lower_floor_rejects_raise() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 
     // Attempt to raise the floor
@@ -1273,6 +1279,8 @@ fn test_lower_floor_rejects_same_floor() {
         &Address::generate(&env),
         &None,
         &Some(10_000i128),
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -1308,6 +1316,8 @@ fn test_lower_floor_rejects_zero() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 
     // Non-positive floor must be rejected
@@ -1339,6 +1349,8 @@ fn test_lower_floor_rejects_negative() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 
     // Negative floor must be rejected
@@ -1366,6 +1378,8 @@ fn test_lower_floor_rejects_non_open_state() {
         &Address::generate(&env),
         &None,
         &Some(10_000i128),
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -1404,6 +1418,8 @@ fn test_lower_floor_requires_admin_auth() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 
     client.lower_min_contribution_floor(&5_000i128);
@@ -1438,6 +1454,8 @@ fn test_lower_floor_unauthorized_panics() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 
     env.mock_auths(&[]);
@@ -1468,6 +1486,8 @@ fn test_lower_floor_emits_event() {
         &Address::generate(&env),
         &None,
         &Some(initial_floor),
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -1512,6 +1532,8 @@ fn test_lower_floor_twice_successive() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 
     assert_eq!(client.get_min_contribution_floor(), 10_000i128);
@@ -1543,6 +1565,8 @@ fn test_lower_floor_fund_at_old_floor_still_enforced() {
         &Address::generate(&env),
         &None,
         &Some(10_000i128),
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -1586,6 +1610,8 @@ fn test_lower_floor_unconfigured_succeeds_if_positive() {
         &Address::generate(&env),
         &None,
         &Address::generate(&env),
+        &None,
+        &None,
         &None,
         &None,
         &None,

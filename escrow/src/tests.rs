@@ -81,7 +81,7 @@ pub fn deploy_with_id(env: &Env) -> (Address, LiquifactEscrowClient<'_>) {
 
 pub fn setup(env: &Env) -> (LiquifactEscrowClient<'_>, Address, Address) {
     let mut ledger_info = env.ledger().get();
-    ledger_info.timestamp = 12345;
+    ledger_info.timestamp = 0;
     ledger_info.sequence_number = 100;
     env.ledger().set(ledger_info);
     env.mock_all_auths();

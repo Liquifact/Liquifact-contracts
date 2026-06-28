@@ -4452,6 +4452,8 @@ fn test_get_yield_tiers_returns_empty_when_no_tiers_configured() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 
     let tiers = client.get_yield_tiers();
@@ -4488,6 +4490,8 @@ fn test_get_yield_tiers_returns_single_tier() {
         &None,
         &tre,
         &Some(tiers),
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -4541,6 +4545,8 @@ fn test_get_yield_tiers_preserves_order() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 
     let result = client.get_yield_tiers();
@@ -4585,6 +4591,8 @@ fn test_get_yield_tiers_is_pure_read_no_state_change() {
         &None,
         &tre,
         &Some(tiers),
+        &None,
+        &None,
         &None,
         &None,
         &None,

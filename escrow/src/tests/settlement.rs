@@ -51,6 +51,7 @@ fn setup_claim_env<'a>(
     Address,
     Address,
 ) {
+    env.mock_all_auths();
     let token = install_stellar_asset_token(env);
     let (contract_id, client) = deploy_with_id(env);
     let admin = Address::generate(env);
@@ -90,6 +91,7 @@ fn setup_funded_with_token<'a>(
     Address,
     StellarAssetClient<'a>,
 ) {
+    env.mock_all_auths();
     let sac = env.register_stellar_asset_contract_v2(Address::generate(env));
     let token_id = sac.address();
     let sac_admin = StellarAssetClient::new(env, &token_id);
@@ -1773,6 +1775,7 @@ fn test_commitment_claim_blocked_after_settle_before_lock() {
 
     env.ledger().set_timestamp(1000);
 
+    token.stellar.mint(&inv, &1_000i128);
     client.fund_with_commitment(&inv, &1_000i128, &500u64);
     token.stellar.mint(&contract_id, &1_040i128);
     client.settle();
@@ -1797,10 +1800,11 @@ fn test_commitment_claim_blocked_after_settle_before_lock() {
 #[test]
 fn test_commitment_second_deposit_rejected() {
     let env = Env::default();
-    let (client, _token, _contract_id, _treasury) =
+    let (client, token, _contract_id, _treasury) =
         setup_claim_env(&env, "CLT002", 2_000i128, 400i64);
     let inv = Address::generate(&env);
 
+    token.stellar.mint(&inv, &2_000i128);
     client.fund_with_commitment(&inv, &1_000i128, &100u64);
     assert_contract_error(
         client.try_fund_with_commitment(&inv, &1_000i128, &100u64),
@@ -1888,6 +1892,7 @@ fn test_commitment_effective_yield_reflects_tier() {
         &None,
     );
 
+    token.stellar.mint(&inv, &5_000i128);
     client.fund_with_commitment(&inv, &5_000i128, &100u64);
     assert_eq!(client.get_investor_yield_bps(&inv), 1000);
 }
