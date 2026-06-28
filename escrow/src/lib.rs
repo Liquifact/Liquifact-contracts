@@ -4258,6 +4258,9 @@ mod tests;
 pub struct DefaultMockToken;
 
 #[cfg(any(test, feature = "testutils"))]
+/// Starting balance the mock token assigns to any address before a test stores an explicit value.
+const MOCK_TOKEN_DEFAULT_BALANCE: i128 = 100_000_000_000_000i128;
+#[cfg(any(test, feature = "testutils"))]
 #[soroban_sdk::contractimpl]
 impl DefaultMockToken {
     pub fn balance(env: soroban_sdk::Env, addr: soroban_sdk::Address) -> i128 {
@@ -4267,7 +4270,7 @@ impl DefaultMockToken {
             .instance()
             .get(&key)
             .unwrap_or_else(|| soroban_sdk::Map::new(&env));
-        balances.get(addr).unwrap_or(100_000_000_000_000i128)
+        balances.get(addr).unwrap_or(MOCK_TOKEN_DEFAULT_BALANCE)
     }
 
     pub fn transfer(
@@ -4284,8 +4287,8 @@ impl DefaultMockToken {
             .unwrap_or_else(|| soroban_sdk::Map::new(&env));
         let from_bal = balances
             .get(from.clone())
-            .unwrap_or(100_000_000_000_000i128);
-        let to_bal = balances.get(to.clone()).unwrap_or(100_000_000_000_000i128);
+            .unwrap_or(MOCK_TOKEN_DEFAULT_BALANCE);
+        let to_bal = balances.get(to.clone()).unwrap_or(MOCK_TOKEN_DEFAULT_BALANCE);
         balances.set(from.clone(), from_bal - amount);
         balances.set(to.clone(), to_bal + amount);
         env.storage().instance().set(&key, &balances);
