@@ -107,6 +107,32 @@
 //! (including over-funding past target), the target, and ledger timestamp/sequence. **Immutable** once
 //! written; see `docs/escrow-pro-rata.md` for the authoritative pro-rata payout math and rounding rules.
 //! Off-chain share for an investor is `get_contribution(addr) / snapshot.total_principal`.
+//!
+//! ## Immutable protocol fee (SME disbursement split)
+//!
+//! [`LiquifactEscrow::init`] accepts an optional `protocol_fee_bps` (basis points, `0..=10_000`,
+//! default `0`) stored immutably under [`DataKey::ProtocolFeeBps`]. At
+//! [`LiquifactEscrow::withdraw`] the funded principal is split:
+//!
+//! ```text
+//! fee        = funded_amount * protocol_fee_bps / 10_000   (floor, checked)
+//! sme_payout = funded_amount - fee                          (checked)
+//! ```
+//!
+//! `fee` is routed to [`DataKey::Treasury`] and `sme_payout` to [`InvoiceEscrow::sme_address`].
+//! **Conservation invariant:** `sme_payout + fee == funded_amount` for every withdrawal, so no
+//! principal is created or destroyed by the split. Rounding is **floor**, so any sub-`10_000`
+//! residue stays with the SME (never over-charges the treasury). With `protocol_fee_bps == 0`
+//! the behavior is byte-for-byte identical to the pre-fee contract: the full `funded_amount`
+//! goes to the SME and no treasury transfer occurs.
+//!
+//! **Interaction with on-chain disbursement:** the fee is only realized when principal is
+//! custodied on-chain and the SME calls [`LiquifactEscrow::withdraw`] — this feature depends on
+//! the on-chain disbursement path. It does **not** apply to off-chain settlement
+//! ([`LiquifactEscrow::settle`]), investor refunds ([`LiquifactEscrow::refund`]), or investor
+//! claims ([`LiquifactEscrow::claim_investor_payout`]). The treasury here is the same immutable
+//! address used by [`LiquifactEscrow::sweep_terminal_dust`]; the fee transfer reuses the same
+//! SEP-41 balance-delta–checked path in [`external_calls`].
 
 #![allow(clippy::too_many_arguments)]
 
@@ -456,6 +482,17 @@ pub enum EscrowError {
     /// [`LiquifactEscrow::raise_maturity_max_horizon`] received a `new_horizon` that is
     /// not strictly greater than the current stored horizon.
     HorizonNotRaised = 201,
+
+    /// [`LiquifactEscrow::init`] rejected `protocol_fee_bps` outside `0..=10_000`.
+    ProtocolFeeBpsOutOfRange = 180,
+    /// [`LiquifactEscrow::withdraw`] overflowed while computing the protocol fee
+    /// `funded_amount * fee_bps / 10_000`. Indicates an over-funded escrow whose
+    /// `funded_amount` exceeds the overflow-safe envelope for the fee multiplication.
+    WithdrawFeeArithmeticOverflow = 181,
+    /// [`LiquifactEscrow::withdraw`] underflowed while computing the SME net payout
+    /// `funded_amount - fee`. Unreachable for in-range `fee_bps`; guards against future
+    /// changes that could let the fee exceed the funded principal.
+    WithdrawNetArithmeticUnderflow = 182,
 }
 
 #[inline(always)]
@@ -663,6 +700,13 @@ pub enum DataKey {
     /// **no** two-phase clear delay — it is a single-call admin switch for incidents such as a
     /// suspected token bug. Either flag independently blocks the gated entrypoints.
     Paused,
+    /// Immutable protocol fee in basis points (0..=10_000) applied to the SME disbursement
+    /// at [`LiquifactEscrow::withdraw`]; set once in [`LiquifactEscrow::init`].
+    /// Written as `0` even when unconfigured so reads always succeed (`.unwrap_or(0)`).
+    /// Stored as `i64` to match the [`InvoiceEscrow::yield_bps`] basis-point convention.
+    /// **Additive key (ADR-007):** absent on instances predating this key ⇒ read as `0`
+    /// (no fee), preserving legacy full-principal disbursement semantics.
+    ProtocolFeeBps,
 }
 
 // --- Data types ---
@@ -1086,14 +1130,25 @@ pub struct CollateralClearedEvt {
     pub amount: i128,
 }
 
+/// Emitted by [`LiquifactEscrow::withdraw`] when the SME pulls funded liquidity.
+///
+/// **Append-only schema:** the `fee` field was appended after the original
+/// `(name, invoice_id, amount, recipient)` layout. `amount` is the **net** principal
+/// routed to `recipient` (the SME); `fee` is the protocol fee routed to
+/// [`DataKey::Treasury`]. Conservation holds: `amount + fee == funded_amount`.
+/// Indexers reading the legacy layout still see the SME payout as `amount`; new
+/// indexers should add `fee` to reconstruct the gross disbursed `funded_amount`.
 #[contractevent]
 pub struct SmeWithdrew {
     #[topic]
     pub name: Symbol,
     #[topic]
     pub invoice_id: Symbol,
+    /// Net principal transferred to the SME `recipient` (`funded_amount - fee`).
     pub amount: i128,
     pub recipient: Address,
+    /// Protocol fee routed to [`DataKey::Treasury`] (`0` when `protocol_fee_bps == 0`).
+    pub fee: i128,
 }
 
 #[contractevent]
@@ -1475,6 +1530,7 @@ impl LiquifactEscrow {
         maturity_max_horizon: Option<u64>,
         _funding_deadline: Option<u64>,
         allowlist_active: Option<bool>,
+        protocol_fee_bps: Option<i64>,
     ) -> InvoiceEscrow {
         admin.require_auth();
 
@@ -1488,6 +1544,15 @@ impl LiquifactEscrow {
             &env,
             (0..=10_000).contains(&yield_bps),
             EscrowError::YieldBpsOutOfRange,
+        );
+        // Immutable protocol fee in basis points (default 0 = no fee). Validated to the same
+        // 0..=10_000 envelope as `yield_bps`; `10_000` routes the entire `funded_amount` to the
+        // treasury at withdrawal. See `docs/escrow-numeric-model.md` for the split math.
+        let protocol_fee_bps = protocol_fee_bps.unwrap_or(0);
+        ensure(
+            &env,
+            (0..=10_000).contains(&protocol_fee_bps),
+            EscrowError::ProtocolFeeBpsOutOfRange,
         );
         ensure(
             &env,
@@ -1525,6 +1590,10 @@ impl LiquifactEscrow {
         env.storage()
             .instance()
             .set(&DataKey::MinContributionFloor, &floor);
+        // Always persist the fee (even the `0` default) so `withdraw` reads never branch on absence.
+        env.storage()
+            .instance()
+            .set(&DataKey::ProtocolFeeBps, &protocol_fee_bps);
         env.storage()
             .instance()
             .set(&DataKey::UniqueFunderCount, &0u32);
@@ -1956,6 +2025,18 @@ impl LiquifactEscrow {
         env.storage()
             .instance()
             .get(&DataKey::MinContributionFloor)
+            .unwrap_or(0)
+    }
+
+    /// Immutable protocol fee in basis points (`0..=10_000`) applied to the SME disbursement at
+    /// [`LiquifactEscrow::withdraw`]; `0` means no fee (full `funded_amount` goes to the SME).
+    ///
+    /// Set once at [`LiquifactEscrow::init`] and never mutated. Reads `0` for instances predating
+    /// [`DataKey::ProtocolFeeBps`] (additive-key default), matching legacy disbursement behavior.
+    pub fn get_protocol_fee_bps(env: Env) -> i64 {
+        env.storage()
+            .instance()
+            .get(&DataKey::ProtocolFeeBps)
             .unwrap_or(0)
     }
 
@@ -3838,24 +3919,41 @@ impl LiquifactEscrow {
         escrow
     }
 
-    /// SME pulls funded liquidity. Transfers `funded_amount` of the bound funding token
-    /// from this contract to `sme_address`, then transitions status to 3 (withdrawn).
-    /// Blocked when a legal hold is active.
+    /// SME pulls funded liquidity, net of the immutable protocol fee.
+    ///
+    /// Splits `funded_amount` of the bound funding token into a treasury **fee** and an SME
+    /// **net payout**, then transitions status to 3 (withdrawn). Blocked when a legal hold or
+    /// operational pause is active.
+    ///
+    /// # Fee split
+    /// ```text
+    /// fee_bps    = DataKey::ProtocolFeeBps   (0..=10_000, default 0)
+    /// fee        = funded_amount * fee_bps / 10_000   (floor, checked)
+    /// sme_payout = funded_amount - fee                 (checked)
+    /// ```
+    /// `fee` is sent to [`DataKey::Treasury`] (only when `> 0`) and `sme_payout` to
+    /// [`InvoiceEscrow::sme_address`]. **Conservation:** `sme_payout + fee == funded_amount`.
+    /// Floor rounding means any residue below one `10_000`-th stays with the SME. With
+    /// `fee_bps == 0` no treasury transfer is made and the SME receives the full `funded_amount`.
     ///
     /// # Guard ordering
     ///
-    /// 1. Legal-hold gate (read-only).
+    /// 1. Operational pause + legal-hold gates (read-only).
     /// 2. `sme_address.require_auth()` (via `load_escrow_require_sme`).
     /// 3. Status == 1 (funded) check.
     /// 4. Contract balance sufficiency check ([`EscrowError::InsufficientContractBalance`]).
-    /// 5. Status transition to 3, `DistributedPrincipal` update, storage write.
-    /// 6. SEP-41 token transfer with balance-delta verification.
-    /// 7. Event emission.
+    /// 5. Checked fee/net computation.
+    /// 6. Status transition to 3, `DistributedPrincipal` update (by the full gross
+    ///    `funded_amount`), storage write.
+    /// 7. SEP-41 token transfers (fee → treasury, net → SME) with balance-delta verification.
+    /// 8. Event emission ([`SmeWithdrew`], carrying `amount = sme_payout` and `fee`).
     ///
     /// # Errors
     /// - [`EscrowError::LegalHoldBlocksWithdrawal`] — hold is active.
     /// - [`EscrowError::WithdrawalNotFunded`] — escrow not in funded state.
     /// - [`EscrowError::InsufficientContractBalance`] — contract holds less than `funded_amount`.
+    /// - [`EscrowError::WithdrawFeeArithmeticOverflow`] — `funded_amount * fee_bps` overflowed `i128`.
+    /// - [`EscrowError::WithdrawNetArithmeticUnderflow`] — `funded_amount - fee` underflowed (unreachable for in-range `fee_bps`).
     pub fn withdraw(env: Env) -> InvoiceEscrow {
         // Operational pause gate (read-only), before require_auth and orthogonal to legal hold.
         ensure(
@@ -3876,13 +3974,31 @@ impl LiquifactEscrow {
         let amount = escrow.funded_amount;
         let sme = escrow.sme_address.clone();
 
+        // Immutable protocol fee split. `fee = funded_amount * fee_bps / 10_000` (floor), with the
+        // remainder going to the SME. All arithmetic is checked: `funded_amount` may exceed the
+        // overflow-safe envelope when an escrow is over-funded, so the multiplication is the only
+        // place this can overflow. Conservation `net + fee == funded_amount` holds by construction.
+        let fee_bps: i64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::ProtocolFeeBps)
+            .unwrap_or(0);
+        let fee: i128 = amount
+            .checked_mul(fee_bps as i128)
+            .and_then(|scaled| scaled.checked_div(10_000))
+            .unwrap_or_else(|| fail(&env, EscrowError::WithdrawFeeArithmeticOverflow));
+        let net: i128 = amount
+            .checked_sub(fee)
+            .unwrap_or_else(|| fail(&env, EscrowError::WithdrawNetArithmeticUnderflow));
+
         let token_addr: Address = env
             .storage()
             .instance()
             .get(&DataKey::FundingToken)
             .unwrap_or_else(|| fail(&env, EscrowError::FundingTokenNotSet));
 
-        // Verify the contract holds enough before mutating state.
+        // Verify the contract holds enough before mutating state. The check uses the gross
+        // `funded_amount` because the contract must fund both the SME payout and the treasury fee.
         let this = env.current_contract_address();
         let contract_balance = TokenClient::new(&env, &token_addr).balance(&this);
         ensure(
@@ -3891,7 +4007,9 @@ impl LiquifactEscrow {
             EscrowError::InsufficientContractBalance,
         );
 
-        // State transition and accounting (checks-effects-interactions).
+        // State transition and accounting (checks-effects-interactions). `DistributedPrincipal`
+        // advances by the full gross `funded_amount` (net + fee), keeping the liability accounting
+        // consistent regardless of how principal is split.
         escrow.status = 3;
         env.storage().instance().set(&DataKey::Escrow, &escrow);
 
@@ -3905,20 +4023,36 @@ impl LiquifactEscrow {
             &prev_distributed.saturating_add(amount),
         );
 
-        // Token transfer with SEP-41 balance-delta verification.
-        external_calls::transfer_funding_token_with_balance_checks(
-            &env,
-            &token_addr,
-            &this,
-            &sme,
-            amount,
-        );
+        // Token transfers with SEP-41 balance-delta verification. The treasury transfer is skipped
+        // when `fee == 0` so the zero-fee path makes exactly one transfer (preserving legacy
+        // behavior and gas profile). `transfer_*` rejects non-positive amounts, so `net` could only
+        // be zero in the degenerate `fee_bps == 10_000` case — guard it the same way.
+        if fee > 0 {
+            let treasury = Self::treasury_or_fail(&env);
+            external_calls::transfer_funding_token_with_balance_checks(
+                &env,
+                &token_addr,
+                &this,
+                &treasury,
+                fee,
+            );
+        }
+        if net > 0 {
+            external_calls::transfer_funding_token_with_balance_checks(
+                &env,
+                &token_addr,
+                &this,
+                &sme,
+                net,
+            );
+        }
 
         SmeWithdrew {
             name: symbol_short!("sme_wd"),
             invoice_id: escrow.invoice_id.clone(),
-            amount,
+            amount: net,
             recipient: sme,
+            fee,
         }
         .publish(&env);
 
