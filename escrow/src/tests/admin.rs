@@ -1983,6 +1983,128 @@ fn test_rebind_registry_ref_requires_admin_auth() {
     client.rebind_registry_ref(&Some(Address::generate(&env)));
 }
 
+// ── clear_registry_ref dedicated lifecycle coverage (issue #561) ──────────────
+
+/// Helper: deploy + init an escrow with no registry hint, returning the client,
+/// admin, and the contract's `invoice_id` for event assertions.
+///
+/// Keeps each clear-path test focused on the behaviour under test instead of the
+/// repetitive 17-argument `init` boilerplate.
+fn init_for_registry_clear<'a>(
+    env: &'a Env,
+    label: &str,
+) -> (LiquifactEscrowClient<'a>, Address, soroban_sdk::String) {
+    let (client, admin, sme) = setup(env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(env, label),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &Address::generate(env),
+        &None,
+        &Address::generate(env),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+    let invoice_id = client.get_escrow().invoice_id.clone();
+    (client, admin, invoice_id)
+}
+
+/// After `rebind_registry_ref(Some(addr))`, `clear_registry_ref` must make
+/// `get_registry_ref` read back `None` — the post-clear state reset.
+#[test]
+fn test_clear_registry_ref_resets_to_none() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin, _invoice_id) = init_for_registry_clear(&env, "REG_CLR_1");
+
+    let reg = Address::generate(&env);
+    client.rebind_registry_ref(&Some(reg.clone()));
+    assert_eq!(client.get_registry_ref(), Some(reg));
+
+    client.clear_registry_ref();
+    assert_eq!(client.get_registry_ref(), None);
+}
+
+/// `clear_registry_ref` must emit the documented `RegistryRefRebound` event with the
+/// correct `invoice_id` and `registry == None`.
+#[test]
+fn test_clear_registry_ref_emits_rebind_event_with_none() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin, invoice_id) = init_for_registry_clear(&env, "REG_CLR_2");
+    let contract_id = client.address.clone();
+
+    client.rebind_registry_ref(&Some(Address::generate(&env)));
+    client.clear_registry_ref();
+
+    let last = env.events().all().events().last().unwrap().clone();
+    let expected = crate::RegistryRefRebound {
+        name: Symbol::new(&env, "reg_rebind"),
+        invoice_id,
+        registry: None,
+    }
+    .to_xdr(&env, &contract_id);
+
+    assert_eq!(last, expected);
+}
+
+/// `clear_registry_ref` is admin-gated: an unauthorized caller must fail.
+#[test]
+#[should_panic]
+fn test_clear_registry_ref_requires_admin_auth() {
+    let env = Env::default();
+    let (client, _admin, _invoice_id) = init_for_registry_clear(&env, "REG_CLR_3");
+
+    env.mock_auths(&[]);
+    client.clear_registry_ref();
+}
+
+/// Clearing an already-empty reference is a safe no-op: `get_registry_ref` stays
+/// `None`, the event still fires with `registry == None`, and no state is corrupted.
+/// A subsequent rebind to a real address must still succeed.
+#[test]
+fn test_clear_registry_ref_double_clear_is_noop() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin, invoice_id) = init_for_registry_clear(&env, "REG_CLR_4");
+    let contract_id = client.address.clone();
+
+    // First clear on a never-set reference.
+    client.clear_registry_ref();
+    assert_eq!(client.get_registry_ref(), None);
+
+    // Second clear: still a no-op, still emits the event with None.
+    client.clear_registry_ref();
+    assert_eq!(client.get_registry_ref(), None);
+
+    let last = env.events().all().events().last().unwrap().clone();
+    let expected = crate::RegistryRefRebound {
+        name: Symbol::new(&env, "reg_rebind"),
+        invoice_id: invoice_id.clone(),
+        registry: None,
+    }
+    .to_xdr(&env, &contract_id);
+    assert_eq!(last, expected);
+
+    // State is not corrupted: a real rebind after double-clear still works.
+    let reg = Address::generate(&env);
+    client.rebind_registry_ref(&Some(reg.clone()));
+    assert_eq!(client.get_registry_ref(), Some(reg));
+}
+
 fn test_error_code_uniqueness() {
     let mut discriminants = std::collections::HashSet::new();
     let codes = [
