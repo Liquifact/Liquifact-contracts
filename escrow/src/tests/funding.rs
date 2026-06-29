@@ -4610,3 +4610,189 @@ fn test_get_yield_tiers_is_pure_read_no_state_change() {
         "get_yield_tiers must not mutate state"
     );
 }
+
+// ── fund_batch atomic pre-validation coverage (issue #557) ────────────────────
+
+/// Deploy + init an open escrow with a generous target and no caps, returning the
+/// client and three fresh investor addresses for batch tests.
+fn init_for_fund_batch_prevalidate<'a>(
+    env: &'a Env,
+    label: &str,
+) -> (
+    super::LiquifactEscrowClient<'a>,
+    Address,
+    Address,
+    Address,
+) {
+    env.mock_all_auths();
+    let client = deploy(env);
+    let admin = Address::generate(env);
+    let sme = Address::generate(env);
+    let (tok, tre) = free_addresses(env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(env, label),
+        &sme,
+        &1_000_000i128,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+    (
+        client,
+        Address::generate(env),
+        Address::generate(env),
+        Address::generate(env),
+    )
+}
+
+/// Assert that a `fund_batch` call panics and leaves the escrow state completely
+/// unchanged: funded total, unique-funder count, and each investor's contribution.
+fn assert_fund_batch_atomic_noop(
+    client: &super::LiquifactEscrowClient<'_>,
+    entries: &SorobanVec<(Address, i128)>,
+    investors: &[&Address],
+) {
+    let funded_before = client.get_escrow().funded_amount;
+    let count_before = client.get_unique_funder_count();
+
+    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.fund_batch(entries);
+    }));
+    assert!(res.is_err(), "malformed batch must fail the entire call");
+
+    assert_eq!(
+        client.get_escrow().funded_amount,
+        funded_before,
+        "funded_amount must be unchanged after a rejected batch"
+    );
+    assert_eq!(
+        client.get_unique_funder_count(),
+        count_before,
+        "unique funder count must be unchanged after a rejected batch"
+    );
+    for inv in investors {
+        assert_eq!(
+            client.get_contribution(inv),
+            0i128,
+            "no contribution may be recorded after a rejected batch"
+        );
+    }
+}
+
+/// A zero-amount entry in the FIRST position must fail the whole batch with no
+/// partial mutation.
+#[test]
+fn test_fund_batch_zero_first_entry_is_atomic_noop() {
+    let env = Env::default();
+    let (client, a, b, c) = init_for_fund_batch_prevalidate(&env, "FB_Z_1");
+
+    let mut entries = SorobanVec::new(&env);
+    entries.push_back((a.clone(), 0i128)); // invalid, first
+    entries.push_back((b.clone(), 10_000i128));
+    entries.push_back((c.clone(), 20_000i128));
+
+    assert_fund_batch_atomic_noop(&client, &entries, &[&a, &b, &c]);
+}
+
+/// A zero-amount entry in the MIDDLE position must fail atomically; the valid
+/// first entry must NOT be partially applied.
+#[test]
+fn test_fund_batch_zero_middle_entry_is_atomic_noop() {
+    let env = Env::default();
+    let (client, a, b, c) = init_for_fund_batch_prevalidate(&env, "FB_Z_2");
+
+    let mut entries = SorobanVec::new(&env);
+    entries.push_back((a.clone(), 10_000i128)); // valid
+    entries.push_back((b.clone(), 0i128)); // invalid, middle
+    entries.push_back((c.clone(), 20_000i128));
+
+    assert_fund_batch_atomic_noop(&client, &entries, &[&a, &b, &c]);
+}
+
+/// A negative-amount entry in the LAST position must fail atomically; the valid
+/// earlier entries must NOT be partially applied.
+#[test]
+fn test_fund_batch_negative_last_entry_is_atomic_noop() {
+    let env = Env::default();
+    let (client, a, b, c) = init_for_fund_batch_prevalidate(&env, "FB_N_3");
+
+    let mut entries = SorobanVec::new(&env);
+    entries.push_back((a.clone(), 10_000i128)); // valid
+    entries.push_back((b.clone(), 20_000i128)); // valid
+    entries.push_back((c.clone(), -5i128)); // invalid, last
+
+    assert_fund_batch_atomic_noop(&client, &entries, &[&a, &b, &c]);
+}
+
+/// An all-valid batch is unaffected by the pre-validation pass: it records each
+/// contribution and advances the funded total exactly like sequential `fund` calls.
+#[test]
+fn test_fund_batch_all_valid_still_records_all_entries() {
+    let env = Env::default();
+    let (client, a, b, c) = init_for_fund_batch_prevalidate(&env, "FB_OK_4");
+
+    let mut entries = SorobanVec::new(&env);
+    entries.push_back((a.clone(), 10_000i128));
+    entries.push_back((b.clone(), 20_000i128));
+    entries.push_back((c.clone(), 30_000i128));
+
+    let result = client.fund_batch(&entries);
+
+    assert_eq!(result.funded_amount, 60_000i128);
+    assert_eq!(client.get_unique_funder_count(), 3);
+    assert_eq!(client.get_contribution(&a), 10_000i128);
+    assert_eq!(client.get_contribution(&b), 20_000i128);
+    assert_eq!(client.get_contribution(&c), 30_000i128);
+}
+
+/// A below-floor entry is rejected up front (same as the single-`fund` floor guard),
+/// leaving no partial mutation even though the other entries are valid.
+#[test]
+fn test_fund_batch_below_floor_entry_is_atomic_noop() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    let a = Address::generate(&env);
+    let b = Address::generate(&env);
+
+    let floor = 5_000i128;
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "FB_FLR_5"),
+        &sme,
+        &1_000_000i128,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &Some(floor),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    let mut entries = SorobanVec::new(&env);
+    entries.push_back((a.clone(), 10_000i128)); // valid
+    entries.push_back((b.clone(), 1_000i128)); // below floor → reject whole batch
+
+    assert_fund_batch_atomic_noop(&client, &entries, &[&a, &b]);
+}

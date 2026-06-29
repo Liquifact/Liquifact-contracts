@@ -3422,14 +3422,42 @@ impl LiquifactEscrow {
         ensure(&env, n > 0, EscrowError::FundingBatchEmpty);
         ensure(&env, n <= MAX_FUND_BATCH, EscrowError::FundingBatchTooLarge);
 
+        // ── Atomicity guarantee (issue #557) ──────────────────────────────────
+        // Validate the per-entry positivity and min-contribution-floor invariants for
+        // EVERY entry up front, before any `fund_impl` call performs a storage write
+        // or counter increment. A single malformed entry (zero/negative amount, or an
+        // amount below the configured floor) at any position must fail the entire call
+        // atomically, leaving contributions, the unique-funder count, and the funded
+        // total unchanged. These are the same typed errors `fund_impl` raises per entry
+        // (`FundingAmountNotPositive`, `FundingBelowMinContribution`); checking them here
+        // first turns a half-applied batch into an all-or-nothing rejection.
+        //
+        // Stateful per-entry guards (per-investor cap, unique-investor cap, overflow)
+        // remain enforced inside `fund_impl` against the running accumulated state.
+        let floor: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::MinContributionFloor)
+            .unwrap_or(0);
+        for i in 0..n {
+            let (_, amount) = entries.get(i).unwrap();
+            ensure(&env, amount > 0, EscrowError::FundingAmountNotPositive);
+            if floor > 0 {
+                ensure(
+                    &env,
+                    amount >= floor,
+                    EscrowError::FundingBelowMinContribution,
+                );
+            }
+        }
+
         let mut escrow = Self::get_escrow(env.clone());
 
         for i in 0..n {
             let (investor, amount) = entries.get(i).unwrap();
 
-            // Call fund_impl for each entry, but we need to reconstruct the escrow
-            // after each call. However, fund_impl returns the updated escrow,
-            // so we capture it for the next iteration.
+            // Each entry is now known to satisfy positivity and the floor; remaining
+            // per-entry invariants (auth, caps, overflow) are enforced inside fund_impl.
             escrow = Self::fund_impl(env.clone(), investor, amount, true, 0);
         }
 
