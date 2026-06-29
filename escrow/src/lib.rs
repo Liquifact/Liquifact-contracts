@@ -1355,7 +1355,7 @@ impl LiquifactEscrow {
         max_per_investor: Option<i128>,
         legal_hold_clear_delay: Option<u64>,
         maturity_max_horizon: Option<u64>,
-        funding_deadline: Option<u64>,
+        _funding_deadline: Option<u64>,
         allowlist_active: Option<bool>,
     ) -> InvoiceEscrow {
         admin.require_auth();
@@ -1635,7 +1635,7 @@ impl LiquifactEscrow {
             &env,
             escrow.status,
             &[2, 3, 4],
-            EscrowError::SweepNotTerminal,
+            EscrowError::DustSweepNotTerminal,
         );
 
         let treasury = Self::treasury_or_fail(&env);
@@ -4034,12 +4034,6 @@ impl LiquifactEscrow {
             );
             // Instance keys that may be per‑investor (contribution & claim lock).
             env.storage().instance().extend_ttl(
-                &DataKey::InvestorContribution(addr.clone()),
-                INSTANCE_TTL_MIN_EXTENSION_LEDGERS,
-                INSTANCE_TTL_MIN_EXTENSION_LEDGERS,
-            );
-            env.storage().instance().extend_ttl(
-                &DataKey::InvestorClaimNotBefore(addr.clone()),
                 INSTANCE_TTL_MIN_EXTENSION_LEDGERS,
                 INSTANCE_TTL_MIN_EXTENSION_LEDGERS,
             );
@@ -4417,6 +4411,23 @@ impl DefaultMockToken {
         balances.set(to.clone(), to_bal + amount);
         env.storage().instance().set(&key, &balances);
     }
+}
+
+#[inline(always)]
+pub fn guard_status_eq(env: &Env, actual: u32, expected: u32, err: EscrowError) {
+    ensure(env, actual == expected, err);
+}
+
+#[inline(always)]
+pub fn guard_status_in(env: &Env, actual: u32, expected: &[u32], err: EscrowError) {
+    let mut found = false;
+    for e in expected.iter() {
+        if actual == *e {
+            found = true;
+            break;
+        }
+    }
+    ensure(env, found, err);
 }
 
 #[cfg(any(test, feature = "testutils"))]
