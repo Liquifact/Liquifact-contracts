@@ -154,12 +154,13 @@ liquifact-contracts/
 
 | Entrypoint | Auth Role | Description |
 |---|---|---|
-| `init` | Admin (implicit) | Create an invoice escrow (invoice id, SME, amount, yield bps, maturity). |
+| `init` | Admin (implicit) | Create an invoice escrow (invoice id, SME, amount, yield bps, maturity). Optional immutable `protocol_fee_bps` (`0..=10_000`, default `0`) splits the SME disbursement at `withdraw`. |
 | `fund` | Investor | Record investor principal and atomically pull the funding token from the investor; marks escrow funded when target is met. |
 | `fund_with_commitment` | Investor | First deposit with optional lock period (atomically pulling the funding token); selects tiered yield. |
 | `settle` | SME | Mark a funded escrow as settled (SME auth required; maturity enforced). |
 | `partial_settle` | SME | SME marks a portion of the escrow as settled before full settlement. |
-| `withdraw` | SME | SME pulls funded liquidity (accounting record). |
+| `withdraw` | SME | SME pulls funded liquidity, **net of the immutable protocol fee**: `fee = funded_amount * protocol_fee_bps / 10_000` goes to the treasury, the remainder to the SME. |
+| `get_protocol_fee_bps` | — | Read the immutable protocol fee in basis points (defaults to `0`). |
 | `cancel_funding` | Admin | Admin cancels an open escrow (transitions status 0 → 4). |
 | `refund` | Investor | Investor pulls contributed liquidity from a cancelled escrow. Increments `DistributedPrincipal` liability. |
 | `claim_investor_payout` | Investor | Investor records a payout claim after settlement. |
@@ -324,11 +325,42 @@ The escrow supports cancellation by the admin under specific criteria, unlocking
 - Residual dust sweeping and the liability floor protecting un-refunded investors
 - A worked execution sequence with multiple investors
 
+## Protocol fee on SME withdrawal
+
+An **immutable** protocol fee can be configured at `init` via the optional
+`protocol_fee_bps: Option<i64>` parameter (basis points, validated to `0..=10_000`, default `0`)
+and stored under `DataKey::ProtocolFeeBps`. On `withdraw`, the funded principal is split:
+
+```text
+fee        = funded_amount * protocol_fee_bps / 10_000   (integer floor, checked)
+sme_payout = funded_amount - fee
+```
+
+`fee` is routed to the immutable `DataKey::Treasury`; `sme_payout` to `sme_address`. Key
+properties:
+
+- **Conservation:** `sme_payout + fee == funded_amount` (no principal created or destroyed).
+- **Floor rounding:** sub-`10_000` residue stays with the SME; the treasury is never over-credited.
+- **Backward compatible:** `protocol_fee_bps == 0` (or omitted) makes no treasury transfer and the
+  SME receives the full `funded_amount` — byte-for-byte the pre-fee behavior.
+- **Overflow-safe:** the fee multiplication/division and the net subtraction use checked
+  arithmetic, with typed errors `WithdrawFeeArithmeticOverflow` and
+  `WithdrawNetArithmeticUnderflow`; out-of-range `init` values fail with `ProtocolFeeBpsOutOfRange`.
+- **Depends on on-chain disbursement:** the fee is only taken on the on-chain `withdraw` path, not
+  on off-chain `settle`, investor `refund`, or `claim_investor_payout`.
+- **Event:** `SmeWithdrew` is extended append-only with `fee`; its `amount` is the net SME payout.
+
+See [`docs/escrow-numeric-model.md`](docs/escrow-numeric-model.md) for the authoritative math and
+[`docs/ESCROW_SME_WITHDRAWAL.MD`](docs/ESCROW_SME_WITHDRAWAL.MD) for the disbursement interaction.
+
 ## Security notes
 
 - **Typed errors:** stable numeric [`EscrowError`](docs/escrow-error-messages.md) codes are
   append-only; SDKs must branch on `ContractError(code)`, not panic strings. See
   [`docs/escrow-error-messages.md`](docs/escrow-error-messages.md) for the full reference.
+- **Protocol fee:** immutable `protocol_fee_bps` split at `withdraw` conserves principal
+  (`sme_payout + fee == funded_amount`), floors rounding toward the SME, and uses checked
+  arithmetic on the fee multiplication and net subtraction.
 - **Auth:** state-changing entrypoints use `require_auth()` for the
   appropriate role (admin, SME, investor, **treasury** for dust sweep).
 - **Legal hold:** governance-controlled; misuse risk is mitigated by using a

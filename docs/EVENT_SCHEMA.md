@@ -336,9 +336,15 @@ Topics:
 
 Data:
 
-| Field | Type |
-|---|---|
-| `amount` | `i128` |
+| Field | Type | Meaning |
+|---|---|---|
+| `amount` | `i128` | **Net** principal transferred to the SME (`funded_amount - fee`) |
+| `recipient` | `Address` | SME address that received `amount` |
+| `fee` | `i128` | Protocol fee routed to the treasury (`0` when `protocol_fee_bps == 0`) |
+
+> **Append-only:** `fee` was appended after the original `(amount, recipient)` data layout.
+> `amount + fee == funded_amount`. Legacy indexers reading only `amount` still observe the SME
+> payout; add `fee` to reconstruct the gross disbursed principal.
 
 ### `InvestorPayoutClaimed`
 

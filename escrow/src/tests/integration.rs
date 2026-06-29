@@ -59,6 +59,7 @@ fn test_legal_hold_midflow_blocks_and_resumes_with_ordered_events() {
         &None,
         &None,
         &None,
+        &None,
     );
 
     // We will not fund or settle — just exercise legal hold at multiple points.
@@ -162,6 +163,7 @@ fn test_escrow_gold_standard_happy_path_open_overfund_snapshot_settle_claim() {
         &None, // No yield tiers for simplicity
         &None, // No min contribution floor
         &None, // No max investors cap
+        &None,
         &None,
         &None,
         &None,
@@ -398,6 +400,7 @@ fn test_escrow_tiered_yield_with_commitment_locks() {
         &None,
         &None,
         &None,
+        &None,
     );
 
     let investor_base = Address::generate(&env);
@@ -518,6 +521,7 @@ fn test_collateral_record_is_metadata_only_and_does_not_invoke_token_contract() 
         &funding,
         &None,
         &treasury,
+        &None,
         &None,
         &None,
         &None,
@@ -759,6 +763,7 @@ fn test_legal_hold_midflow_blocks_then_resumes_with_ordered_events() {
         &None,
         &None,
         &None,
+        &None,
     );
 
     // Initial funding succeeds while hold is off.
@@ -876,6 +881,7 @@ fn setup_withdraw_with_token<'a>(
         &token_id,
         &None,
         &treasury,
+        &None,
         &None,
         &None,
         &None,
@@ -1002,6 +1008,7 @@ fn withdraw_rejected_wrong_status_open() {
         &None,
         &None,
         &None,
+        &None,
     );
     // No funding — status is 0.
     client.withdraw(); // must panic: WithdrawalNotFunded
@@ -1037,6 +1044,7 @@ fn withdraw_rejected_insufficient_contract_balance() {
         &token_id,
         &None,
         &soroban_sdk::Address::generate(&env),
+        &None,
         &None,
         &None,
         &None,
@@ -1091,6 +1099,8 @@ fn withdraw_event_includes_recipient() {
         invoice_id: escrow.invoice_id.clone(),
         amount: target,
         recipient: sme,
+        // Default escrow (no protocol_fee_bps): full funded_amount to the SME, zero fee.
+        fee: 0,
     }
     .to_xdr(&env, &escrow_id);
 
@@ -1133,6 +1143,7 @@ fn test_cancellation_refund_sweep_lifecycle() {
         &token_id,
         &None,
         &treasury,
+        &None,
         &None,
         &None,
         &None,
@@ -1204,4 +1215,366 @@ fn test_cancellation_refund_sweep_lifecycle() {
     assert_eq!(client.get_distributed_principal(), 70_000_000i128);
 
     // After all refunds, outstanding is 0.
+}
+
+// ---------------------------------------------------------------------------
+// Protocol fee split on SME withdrawal (issue #316)
+//
+// These tests exercise the immutable `protocol_fee_bps` configured at init and the
+// fee/net split performed by `withdraw`:
+//
+//     fee        = funded_amount * fee_bps / 10_000   (floor, checked)
+//     sme_payout = funded_amount - fee
+//
+// Invariants under test: conservation (sme_payout + fee == funded_amount), floor
+// rounding (residue stays with the SME), zero-fee backward compatibility, the
+// 10_000-bps boundary (entire principal to treasury), the configured getter, and
+// init range validation.
+// ---------------------------------------------------------------------------
+
+/// Set up a funded escrow with an explicit `protocol_fee_bps` and the full `target`
+/// principal minted into the contract, ready for `withdraw`.
+///
+/// Returns `(client, escrow_id, token, sme, treasury)`.
+fn setup_withdraw_with_fee<'a>(
+    env: &'a Env,
+    target: i128,
+    fee_bps: i64,
+    invoice_id: &'a str,
+) -> (
+    LiquifactEscrowClient<'a>,
+    soroban_sdk::Address,
+    soroban_sdk::token::TokenClient<'a>,
+    soroban_sdk::Address,
+    soroban_sdk::Address,
+) {
+    use crate::LiquifactEscrow;
+    use soroban_sdk::token::{StellarAssetClient, TokenClient};
+
+    let sac = env.register_stellar_asset_contract_v2(soroban_sdk::Address::generate(env));
+    let token_id = sac.address();
+    let sac_admin = StellarAssetClient::new(env, &token_id);
+    let token = TokenClient::new(env, &token_id);
+
+    let escrow_id = env.register(LiquifactEscrow, ());
+    let client = LiquifactEscrowClient::new(env, &escrow_id);
+    let admin = soroban_sdk::Address::generate(env);
+    let sme = soroban_sdk::Address::generate(env);
+    let treasury = soroban_sdk::Address::generate(env);
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(env, invoice_id),
+        &sme,
+        &target,
+        &0i64,
+        &0u64,
+        &token_id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &Some(fee_bps),
+    );
+
+    let investor = soroban_sdk::Address::generate(env);
+    // Mint to the investor; fund() pulls the principal into the escrow (on-chain custody),
+    // leaving the contract holding exactly `target` for withdraw() to disburse.
+    sac_admin.mint(&investor, &target);
+    client.fund(&investor, &target);
+
+    (client, escrow_id, token, sme, treasury)
+}
+
+/// A 250-bps (2.5%) fee splits the principal: treasury receives the fee, the SME the
+/// remainder, the contract is drained, and conservation holds exactly.
+#[test]
+fn withdraw_splits_principal_between_sme_and_treasury() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let target = 10_000_000i128;
+    let fee_bps = 250i64; // 2.5%
+    let (client, escrow_id, token, sme, treasury) =
+        setup_withdraw_with_fee(&env, target, fee_bps, "FEE_SPLIT1");
+
+    let expected_fee = target * fee_bps as i128 / 10_000; // 250_000
+    let expected_net = target - expected_fee; // 9_750_000
+
+    let sme_before = token.balance(&sme);
+    let treasury_before = token.balance(&treasury);
+
+    client.withdraw();
+
+    let sme_delta = token.balance(&sme) - sme_before;
+    let treasury_delta = token.balance(&treasury) - treasury_before;
+
+    assert_eq!(
+        treasury_delta, expected_fee,
+        "treasury must receive the fee"
+    );
+    assert_eq!(
+        sme_delta, expected_net,
+        "SME must receive funded_amount - fee"
+    );
+    assert_eq!(
+        sme_delta + treasury_delta,
+        target,
+        "conservation: net + fee == funded_amount"
+    );
+    assert_eq!(
+        token.balance(&escrow_id),
+        0,
+        "escrow contract must be fully drained"
+    );
+    assert_eq!(
+        client.get_escrow().status,
+        3u32,
+        "status must be 3 (withdrawn)"
+    );
+}
+
+/// The default escrow (no `protocol_fee_bps`) routes the entire `funded_amount` to the
+/// SME and makes no treasury transfer — byte-for-byte legacy behavior.
+#[test]
+fn withdraw_zero_fee_default_sends_all_to_sme() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let target = 7_000_000i128;
+    // fee_bps == 0 is the same as omitting the parameter.
+    let (client, escrow_id, token, sme, treasury) =
+        setup_withdraw_with_fee(&env, target, 0i64, "FEE_ZERO01");
+
+    let treasury_before = token.balance(&treasury);
+    let sme_before = token.balance(&sme);
+
+    client.withdraw();
+
+    assert_eq!(
+        token.balance(&sme) - sme_before,
+        target,
+        "SME must receive the full funded_amount when fee_bps == 0"
+    );
+    assert_eq!(
+        token.balance(&treasury),
+        treasury_before,
+        "treasury must be untouched when fee_bps == 0"
+    );
+    assert_eq!(token.balance(&escrow_id), 0);
+    assert_eq!(client.get_protocol_fee_bps(), 0);
+}
+
+/// A 10_000-bps (100%) fee routes the **entire** principal to the treasury, leaving the
+/// SME with zero, while conservation still holds.
+#[test]
+fn withdraw_max_bps_routes_all_to_treasury() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let target = 4_000_000i128;
+    let (client, escrow_id, token, sme, treasury) =
+        setup_withdraw_with_fee(&env, target, 10_000i64, "FEE_MAX001");
+
+    let treasury_before = token.balance(&treasury);
+    let sme_before = token.balance(&sme);
+
+    client.withdraw();
+
+    assert_eq!(
+        token.balance(&treasury) - treasury_before,
+        target,
+        "treasury must receive the entire principal at 10_000 bps"
+    );
+    assert_eq!(
+        token.balance(&sme) - sme_before,
+        0,
+        "SME must receive nothing at 10_000 bps"
+    );
+    assert_eq!(token.balance(&escrow_id), 0);
+}
+
+/// Floor rounding: when `funded_amount * fee_bps` is not divisible by 10_000 the residue
+/// stays with the SME (the treasury is never over-credited).
+#[test]
+fn withdraw_fee_rounds_down_residue_to_sme() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    // funded = 7, fee_bps = 5_000 -> 7 * 5_000 / 10_000 = 35_000 / 10_000 = 3 (floor of 3.5).
+    let target = 7i128;
+    let (client, _escrow_id, token, sme, treasury) =
+        setup_withdraw_with_fee(&env, target, 5_000i64, "FEE_ROUND1");
+
+    let treasury_before = token.balance(&treasury);
+    let sme_before = token.balance(&sme);
+
+    client.withdraw();
+
+    let fee = token.balance(&treasury) - treasury_before;
+    let net = token.balance(&sme) - sme_before;
+
+    assert_eq!(fee, 3, "fee must floor to 3");
+    assert_eq!(net, 4, "residue (4) stays with the SME");
+    assert_eq!(
+        fee + net,
+        target,
+        "conservation holds across the rounding boundary"
+    );
+}
+
+/// A sub-`10_000` principal with a tiny fee floors to zero fee: nothing goes to the
+/// treasury and the SME receives everything.
+#[test]
+fn withdraw_fee_floors_to_zero_for_tiny_basis_points() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    // funded = 9_999, fee_bps = 1 -> 9_999 / 10_000 = 0 (floor).
+    let target = 9_999i128;
+    let (client, _escrow_id, token, sme, treasury) =
+        setup_withdraw_with_fee(&env, target, 1i64, "FEE_TINY01");
+
+    let treasury_before = token.balance(&treasury);
+    let sme_before = token.balance(&sme);
+
+    client.withdraw();
+
+    assert_eq!(
+        token.balance(&treasury) - treasury_before,
+        0,
+        "fee floors to zero; no treasury transfer"
+    );
+    assert_eq!(
+        token.balance(&sme) - sme_before,
+        target,
+        "SME receives the full principal"
+    );
+}
+
+/// A large in-range principal stays overflow-safe and conserves value.
+#[test]
+fn withdraw_fee_large_amount_is_overflow_safe() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    // Well within MAX_INVOICE_AMOUNT (i128::MAX / 10_000); funded * 10_000 stays in i128.
+    let target = 1_000_000_000_000_000i128;
+    let fee_bps = 1_234i64;
+    let (client, escrow_id, token, sme, treasury) =
+        setup_withdraw_with_fee(&env, target, fee_bps, "FEE_BIG001");
+
+    let expected_fee = target * fee_bps as i128 / 10_000;
+    let treasury_before = token.balance(&treasury);
+    let sme_before = token.balance(&sme);
+
+    client.withdraw();
+
+    let fee = token.balance(&treasury) - treasury_before;
+    let net = token.balance(&sme) - sme_before;
+    assert_eq!(fee, expected_fee);
+    assert_eq!(net, target - expected_fee);
+    assert_eq!(fee + net, target, "conservation holds for large principal");
+    assert_eq!(token.balance(&escrow_id), 0);
+}
+
+/// `get_protocol_fee_bps` reflects the immutable value configured at init.
+#[test]
+fn protocol_fee_bps_getter_reflects_init_value() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, _escrow_id, _token, _sme, _treasury) =
+        setup_withdraw_with_fee(&env, 1_000_000i128, 375i64, "FEE_GET001");
+
+    assert_eq!(client.get_protocol_fee_bps(), 375i64);
+}
+
+/// `SmeWithdrew` carries the net SME `amount` and the treasury `fee` separately, and
+/// they reconstruct the gross `funded_amount`.
+#[test]
+fn withdraw_event_reports_net_amount_and_fee() {
+    use crate::SmeWithdrew;
+    use soroban_sdk::{symbol_short, testutils::Events};
+
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let target = 8_000_000i128;
+    let fee_bps = 500i64; // 5%
+    let (client, escrow_id, _token, sme, _treasury) =
+        setup_withdraw_with_fee(&env, target, fee_bps, "FEE_EVT001");
+
+    let invoice_id = client.get_escrow().invoice_id.clone();
+    client.withdraw();
+
+    let expected_fee = target * fee_bps as i128 / 10_000; // 400_000
+    let expected_net = target - expected_fee; // 7_600_000
+
+    let expected_xdr = SmeWithdrew {
+        name: symbol_short!("sme_wd"),
+        invoice_id,
+        amount: expected_net,
+        recipient: sme,
+        fee: expected_fee,
+    }
+    .to_xdr(&env, &escrow_id);
+
+    let all_events = env.events().all().filter_by_contract(&escrow_id);
+    let found = all_events.events().iter().any(|e| *e == expected_xdr);
+    assert!(
+        found,
+        "SmeWithdrew must report net amount and fee separately"
+    );
+}
+
+/// `init` rejects a `protocol_fee_bps` above 10_000 with `ProtocolFeeBpsOutOfRange`.
+#[test]
+fn init_rejects_out_of_range_protocol_fee_bps() {
+    use crate::{EscrowError, LiquifactEscrow};
+    use soroban_sdk::{Error, InvokeError};
+
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let token = env.register(MockToken, ());
+    let escrow_id = env.register(LiquifactEscrow, ());
+    let client = LiquifactEscrowClient::new(&env, &escrow_id);
+    let admin = soroban_sdk::Address::generate(&env);
+    let sme = soroban_sdk::Address::generate(&env);
+    let treasury = soroban_sdk::Address::generate(&env);
+
+    let res = client.try_init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "FEE_BAD001"),
+        &sme,
+        &1_000_000i128,
+        &0i64,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &Some(10_001i64), // out of range
+    );
+
+    let expected_code = EscrowError::ProtocolFeeBpsOutOfRange as u32;
+    match res {
+        Err(Ok(error)) => assert_eq!(error, Error::from_contract_error(expected_code)),
+        Err(Err(InvokeError::Contract(code))) => assert_eq!(code, expected_code),
+        other => panic!("expected ProtocolFeeBpsOutOfRange, got {other:?}"),
+    }
 }

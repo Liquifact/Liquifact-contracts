@@ -149,6 +149,9 @@ See also [`docs/escrow-legal-hold.md`](escrow-legal-hold.md),
 | 200 | `PartialSettleUnauthorizedCaller` | `partial_settle` | `caller` is neither `sme_address` nor `admin` | Call as the SME or admin | typed |
 | 201 | `LegalHoldBlocksPartialSettle` | `partial_settle` | legal hold active | Complete legal-hold clear workflow | typed |
 | 202 | `PartialSettleNotOpen` | `partial_settle` | escrow status `!= 0` (open) | Partial settle only while open | typed |
+| 180 | `ProtocolFeeBpsOutOfRange` | `init` | `protocol_fee_bps` outside `0..=10_000` | Pass a fee in `0..=10_000` (or omit for `0`) | typed |
+| 181 | `WithdrawFeeArithmeticOverflow` | `withdraw` | `funded_amount * protocol_fee_bps` overflows `i128` (over-funded escrow) | Keep `funded_amount` within the overflow-safe envelope | typed |
+| 182 | `WithdrawNetArithmeticUnderflow` | `withdraw` | `funded_amount - fee` underflows (unreachable for in-range `fee_bps`) | N/A — defensive guard | typed |
 
 ### Legacy panic strings (migration aid)
 

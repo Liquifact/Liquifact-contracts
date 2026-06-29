@@ -19,6 +19,41 @@ This contract uses Soroban host values and Rust integer types directly. It does 
 - A zero commitment stores `0`, meaning no additional investor claim-time gate.
 - Boundary values are inclusive: a timestamp plus commitment that equals `u64::MAX` is representable; only values above `u64::MAX` fail.
 
+## Protocol fee on SME withdrawal: `i64` basis points
+
+The escrow supports an **immutable** protocol fee on the SME disbursement, configured once at
+`init` via the optional `protocol_fee_bps: Option<i64>` parameter and stored under
+`DataKey::ProtocolFeeBps`.
+
+- **Range:** `protocol_fee_bps` is validated to `0..=10_000` at `init`
+  (`EscrowError::ProtocolFeeBpsOutOfRange`). The default when omitted is `0` (no fee), which
+  preserves the legacy behavior of routing the full `funded_amount` to the SME.
+- **Split math (`withdraw`):**
+
+  ```text
+  fee        = funded_amount * protocol_fee_bps / 10_000   (integer floor)
+  sme_payout = funded_amount - fee
+  ```
+
+  `fee` is transferred to `DataKey::Treasury` and `sme_payout` to `sme_address`. The treasury
+  transfer is skipped entirely when `fee == 0`, and the SME transfer is skipped when
+  `sme_payout == 0` (only reachable at `protocol_fee_bps == 10_000`).
+- **Rounding:** the division floors, so any residue below one `10_000`-th of the principal stays
+  with the SME. The treasury is never over-credited by rounding.
+- **Conservation:** `sme_payout + fee == funded_amount` for every withdrawal — the split neither
+  creates nor destroys principal. `DistributedPrincipal` still advances by the full gross
+  `funded_amount`.
+- **Overflow safety:** the multiplication `funded_amount * protocol_fee_bps` and the division use
+  checked arithmetic. Because an escrow may be over-funded, `funded_amount` is not bounded by
+  `MAX_INVOICE_AMOUNT`; if `funded_amount * 10_000` would exceed `i128::MAX` the contract panics
+  with `EscrowError::WithdrawFeeArithmeticOverflow`. The subtraction is likewise checked
+  (`EscrowError::WithdrawNetArithmeticUnderflow`, unreachable for in-range `fee_bps`).
+- **Dependency on on-chain disbursement:** the fee is only realized when principal is custodied
+  on-chain and the SME calls `withdraw`. It does **not** apply to off-chain `settle`, investor
+  `refund`, or `claim_investor_payout`. See [`ESCROW_SME_WITHDRAWAL.MD`](ESCROW_SME_WITHDRAWAL.MD).
+- **Event:** `SmeWithdrew` is extended append-only with a `fee` field; its `amount` field carries
+  the **net** SME payout, and `amount + fee` reconstructs the gross `funded_amount`.
+
 ## Funding invariants (property-based)
 
 This contract’s funding accounting and state transitions are intended to obey these invariants for all orderings of `fund` / `fund_with_commitment` calls.
