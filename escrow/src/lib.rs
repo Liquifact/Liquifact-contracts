@@ -470,6 +470,46 @@ pub(crate) fn ensure(env: &Env, condition: bool, error: EscrowError) {
     }
 }
 
+/// Assert that `actual_status == expected_status`, emitting `error` otherwise.
+///
+/// This is the shared primitive used by all status gate helpers. Callers that need a
+/// specific named status check (e.g. [`require_funding_open`]) delegate here so the
+/// exact error code is preserved at every call site.
+#[inline(always)]
+pub(crate) fn guard_status_eq(env: &Env, actual_status: u32, expected_status: u32, error: EscrowError) {
+    ensure(env, actual_status == expected_status, error);
+}
+
+/// Assert that `actual_status` is one of the values in `allowed`, emitting `error` otherwise.
+///
+/// Used for terminal-state checks where multiple valid statuses apply (e.g. sweep dust
+/// is allowed in settled/withdrawn/cancelled).
+#[inline(always)]
+pub(crate) fn guard_status_in(env: &Env, actual_status: u32, allowed: &[u32], error: EscrowError) {
+    ensure(env, allowed.contains(&actual_status), error);
+}
+
+/// Shared guard: assert that the escrow is in the **open funding window** (status == 0).
+///
+/// Every entrypoint that accepts new principal — [`LiquifactEscrow::fund`],
+/// [`LiquifactEscrow::fund_with_commitment`], [`LiquifactEscrow::fund_batch`],
+/// [`LiquifactEscrow::update_funding_target`], [`LiquifactEscrow::lower_max_unique_investors`],
+/// and [`LiquifactEscrow::lower_min_contribution_floor`] — must call this helper instead of
+/// inlining the status comparison. Centralising the gate means adding a new open-window
+/// operation cannot accidentally omit or diverge from the check.
+///
+/// # Errors
+/// Panics with [`EscrowError::EscrowNotOpenForFunding`] when `escrow.status != 0`.
+///
+/// # Security notes
+/// This helper is intentionally **read-only** (no storage writes). Callers must complete their
+/// own `Address::require_auth()` before performing any storage mutation; this guard only
+/// validates escrow state and cannot substitute for an authorization check.
+#[inline(always)]
+pub(crate) fn require_funding_open(env: &Env, status: u32) {
+    guard_status_eq(env, status, 0, EscrowError::EscrowNotOpenForFunding);
+}
+
 pub(crate) fn validate_maturity_bounds(env: &Env, maturity: u64, max_horizon: u64) {
     if maturity == 0 {
         return;
@@ -3017,7 +3057,7 @@ impl LiquifactEscrow {
     pub fn lower_max_unique_investors(env: Env, new_cap: u32) -> u32 {
         let escrow = Self::load_escrow_require_admin(&env);
 
-        ensure(&env, escrow.status == 0, EscrowError::CapLowerNotOpen);
+        guard_status_eq(&env, escrow.status, 0, EscrowError::CapLowerNotOpen);
 
         let old_cap: Option<u32> = env
             .storage()
@@ -3065,17 +3105,7 @@ impl LiquifactEscrow {
     pub fn raise_max_unique_investors(env: Env, new_cap: u32) -> u32 {
         let escrow = Self::load_escrow_require_admin(&env);
 
-        // We can reuse the existing EscrowNotOpenForFunding or similar open check.
-        // Or if there's a specific one, we use it. For now EscrowNotOpenForFunding is safe,
-        // or just rely on escrow.status == 0 since that's what the prompt implies.
-        // Actually, reusing EscrowError::EscrowNotOpenForFunding since CapLowerNotOpen is specific to lower.
-        // But wait, the issue said "parallel guards" and "open-state-only".
-        // Let's use EscrowError::EscrowNotOpenForFunding.
-        ensure(
-            &env,
-            escrow.status == 0,
-            EscrowError::EscrowNotOpenForFunding,
-        );
+        require_funding_open(&env, escrow.status);
 
         let old_cap: Option<u32> = env
             .storage()
@@ -3119,7 +3149,7 @@ impl LiquifactEscrow {
     pub fn lower_min_contribution_floor(env: Env, new_floor: i128) -> i128 {
         let escrow = Self::load_escrow_require_admin(&env);
 
-        ensure(&env, escrow.status == 0, EscrowError::FloorLowerNotOpen);
+        guard_status_eq(&env, escrow.status, 0, EscrowError::FloorLowerNotOpen);
         ensure(&env, new_floor > 0, EscrowError::NewFloorNotPositive);
 
         let old_floor: i128 = env
@@ -3168,7 +3198,7 @@ impl LiquifactEscrow {
     pub fn raise_max_per_investor(env: Env, new_cap: i128) -> i128 {
         let escrow = Self::load_escrow_require_admin(&env);
 
-        ensure(&env, escrow.status == 0, EscrowError::CapLowerNotOpen);
+        guard_status_eq(&env, escrow.status, 0, EscrowError::CapLowerNotOpen);
 
         let old_cap: Option<i128> = env.storage().instance().get(&DataKey::MaxPerInvestorCap);
         ensure(
@@ -3511,7 +3541,7 @@ impl LiquifactEscrow {
             !Self::legal_hold_active(&env),
             EscrowError::LegalHoldBlocksFunding,
         );
-        guard_status_eq(&env, escrow.status, 0, EscrowError::EscrowNotOpenForFunding);
+        require_funding_open(&env, escrow.status);
 
         // Check funding deadline
         if let Some(deadline) = env.storage().instance().get(&DataKey::FundingDeadline) {
@@ -3733,7 +3763,7 @@ impl LiquifactEscrow {
             EscrowError::PartialSettleUnauthorizedCaller,
         );
 
-        ensure(&env, escrow.status == 0, EscrowError::PartialSettleNotOpen);
+        require_funding_open(&env, escrow.status);
 
         // Transition to funded status early.
         escrow.status = 1;
