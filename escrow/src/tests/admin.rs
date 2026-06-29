@@ -1,7 +1,7 @@
 use super::*;
 use crate::{
     AdminAcceptedEvent, AdminProposalCancelled, AdminProposedEvent, EscrowCloseSnapshot,
-    FundingTargetUpdated, RegistryRefRebound, DEFAULT_ADMIN_PROPOSAL_VALIDITY_SECS,
+    FundingTargetUpdated, MaturityMaxHorizonRaised, RegistryRefRebound,
     DEFAULT_MATURITY_MAX_HORIZON_SECS,
 };
 
@@ -2454,30 +2454,28 @@ fn test_post_handover_admin_can_clear_hold_set_by_old_admin() {
     assert!(!client.get_legal_hold());
 }
 
-// ── propose_admin validity-window override / default-fallback coverage (issue #560) ──
+// ── raise_maturity_max_horizon forward-only lever coverage (issue #559) ───────
 
-/// Helper: deploy + init an escrow at a known ledger timestamp `now`, returning the
-/// client, current admin, and a fresh successor address.
-///
-/// Centralises the 17-argument `init` boilerplate so the window tests stay focused on
-/// the expiry arithmetic and the inclusive accept boundary.
-fn init_for_propose_window<'a>(
+/// Helper: deploy + init an escrow (no maturity lock) at ledger time `now`, returning
+/// the client and current admin. Centralises the 17-argument `init` boilerplate.
+fn init_for_raise_horizon<'a>(
     env: &'a Env,
     label: &str,
     now: u64,
-) -> (LiquifactEscrowClient<'a>, Address, Address) {
+) -> (LiquifactEscrowClient<'a>, Address) {
     let (client, admin, sme) = setup(env);
+    let (token, treasury) = free_addresses(env);
     env.ledger().set_timestamp(now);
     client.init(
         &admin,
         &soroban_sdk::String::from_str(env, label),
         &sme,
-        &TARGET,
-        &800i64,
+        &1_000i128,
+        &500i64,
         &0u64,
-        &Address::generate(env),
+        &token,
         &None,
-        &Address::generate(env),
+        &treasury,
         &None,
         &None,
         &None,
@@ -2487,74 +2485,107 @@ fn init_for_propose_window<'a>(
         &None,
         &None,
     );
-    let new_admin = Address::generate(env);
-    (client, admin, new_admin)
+    (client, admin)
 }
 
-/// `propose_admin(.., Some(w))` must store the expiry as exactly `now + w`.
+/// A strictly greater horizon is accepted, persisted, returned, and emits
+/// `MaturityMaxHorizonRaised` with the old/new values.
 #[test]
-fn test_propose_admin_explicit_window_stores_now_plus_window() {
+fn test_raise_maturity_max_horizon_success_and_event() {
     let env = Env::default();
     env.mock_all_auths();
-    let now = 1_000u64;
-    let window = 3_600u64;
-    let (client, _admin, new_admin) = init_for_propose_window(&env, "PROP_W_1", now);
+    let (client, _admin) = init_for_raise_horizon(&env, "HORI_RS", 1_000);
+    let contract_id = client.address.clone();
 
-    client.propose_admin(&new_admin, &Some(window));
+    let old = client.get_maturity_max_horizon();
+    let new_horizon = old + 1_000;
 
-    assert_eq!(client.get_pending_admin_expiry(), Some(now + window));
-}
-
-/// `propose_admin(.., None)` must fall back to `now + DEFAULT_ADMIN_PROPOSAL_VALIDITY_SECS`.
-#[test]
-fn test_propose_admin_default_window_fallback() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let now = 2_500u64;
-    let (client, _admin, new_admin) = init_for_propose_window(&env, "PROP_W_2", now);
-
-    client.propose_admin(&new_admin, &None);
+    let returned = client.raise_maturity_max_horizon(&new_horizon);
+    assert_eq!(returned, new_horizon);
+    assert_eq!(client.get_maturity_max_horizon(), new_horizon);
 
     assert_eq!(
-        client.get_pending_admin_expiry(),
-        Some(now + DEFAULT_ADMIN_PROPOSAL_VALIDITY_SECS)
+        env.events().all().events().last().unwrap().clone(),
+        MaturityMaxHorizonRaised {
+            name: symbol_short!("mtry_rse"),
+            invoice_id: client.get_escrow().invoice_id,
+            old_horizon: old,
+            new_horizon,
+        }
+        .to_xdr(&env, &contract_id)
     );
 }
 
-/// `accept_admin` must succeed when `ledger.timestamp() == expiry` (inclusive boundary).
+/// An equal horizon is rejected with `HorizonNotRaised` (#201); the stored value is unchanged.
 #[test]
-fn test_accept_admin_succeeds_at_exact_expiry_boundary() {
+#[should_panic(expected = "Error(Contract, #201)")]
+fn test_raise_maturity_max_horizon_rejects_equal() {
     let env = Env::default();
     env.mock_all_auths();
-    let now = 1_000u64;
-    let window = 5_000u64;
-    let expiry = now + window;
-    let (client, _admin, new_admin) = init_for_propose_window(&env, "PROP_W_3", now);
+    let (client, _admin) = init_for_raise_horizon(&env, "HORI_EQ", 1_000);
 
-    client.propose_admin(&new_admin, &Some(window));
-
-    // Advance to exactly the stored expiry — accept must still succeed.
-    env.ledger().set_timestamp(expiry);
-    let updated = client.accept_admin();
-    assert_eq!(updated.admin, new_admin);
-    assert_eq!(client.get_pending_admin(), None);
-    assert_eq!(client.get_pending_admin_expiry(), None);
+    let current = client.get_maturity_max_horizon();
+    client.raise_maturity_max_horizon(&current);
 }
 
-/// `accept_admin` must fail with `AdminProposalExpired` one second past the expiry.
+/// A lower horizon is rejected with `HorizonNotRaised` (#201).
 #[test]
-#[should_panic(expected = "Error(Contract, #85)")]
-fn test_accept_admin_fails_one_second_past_expiry() {
+#[should_panic(expected = "Error(Contract, #201)")]
+fn test_raise_maturity_max_horizon_rejects_lower() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin) = init_for_raise_horizon(&env, "HORI_LO", 1_000);
+
+    let current = client.get_maturity_max_horizon();
+    client.raise_maturity_max_horizon(&(current - 1));
+}
+
+/// A rejected raise must not mutate the stored horizon.
+#[test]
+fn test_raise_maturity_max_horizon_rejection_leaves_state_intact() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin) = init_for_raise_horizon(&env, "HORI_NS", 1_000);
+
+    let current = client.get_maturity_max_horizon();
+    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.raise_maturity_max_horizon(&current);
+    }));
+    assert!(res.is_err(), "equal horizon must be rejected");
+    assert_eq!(
+        client.get_maturity_max_horizon(),
+        current,
+        "rejected raise must not alter the stored horizon"
+    );
+}
+
+/// `raise_maturity_max_horizon` is admin-gated: an unauthorized caller fails.
+#[test]
+#[should_panic]
+fn test_raise_maturity_max_horizon_requires_admin_auth() {
+    let env = Env::default();
+    let (client, _admin) = init_for_raise_horizon(&env, "HORI_AU", 1_000);
+
+    let current = client.get_maturity_max_horizon();
+    env.mock_auths(&[]);
+    client.raise_maturity_max_horizon(&(current + 1));
+}
+
+/// After raising the ceiling, a later `update_maturity` may target a timestamp within
+/// the newly raised horizon (i.e. beyond the previous default ceiling).
+#[test]
+fn test_raise_maturity_max_horizon_enables_far_maturity_update() {
     let env = Env::default();
     env.mock_all_auths();
     let now = 1_000u64;
-    let window = 5_000u64;
-    let expiry = now + window;
-    let (client, _admin, new_admin) = init_for_propose_window(&env, "PROP_W_4", now);
+    let (client, _admin) = init_for_raise_horizon(&env, "HORI_FU", now);
 
-    client.propose_admin(&new_admin, &Some(window));
+    let old = client.get_maturity_max_horizon();
+    let raised = old + 10_000;
+    client.raise_maturity_max_horizon(&raised);
 
-    // One second past the inclusive boundary — accept must be rejected.
-    env.ledger().set_timestamp(expiry + 1);
-    client.accept_admin();
+    // A maturity at now + old + 1 sits beyond the previous ceiling but within the new one.
+    let target = now + old + 1;
+    client.update_maturity(&target);
+    assert_eq!(client.get_escrow().maturity, target);
 }
