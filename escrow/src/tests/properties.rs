@@ -2063,3 +2063,684 @@ fn snapshot_denominator_consistent_across_all_payout_reads() {
         assert_eq!(snap0, snap_after, "snapshot changed after payout read");
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Remaining-investor-slots conservation and non-underflow invariants (issue #564)
+//
+// Invariant A (no-cap escrow):
+//   get_remaining_investor_slots() == None when no max_unique_investors cap is set.
+//
+// Invariant B (cap set):
+//   let slots = get_remaining_investor_slots().unwrap();
+//   slots >= 0  (no underflow — saturating_sub must never produce a wrapped value)
+//   count + slots == cap  (exact conservation)
+//
+// Invariant C (repeat depositor):
+//   Depositing again by an already-counted investor must NOT decrement remaining
+//   slots because the unique-funder count is identity-based, not deposit-based.
+//
+// Invariant D (cap lowering):
+//   After lower_max_unique_investors(new_cap), remaining == new_cap - count.
+//   remaining is always >= 0 even when lowered to exactly count.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Helper: assert the slots invariant for a given client.
+///
+/// When a cap is present: `count + remaining == cap` and `remaining >= 0`.
+/// When no cap: `get_remaining_investor_slots` returns `None`.
+fn assert_slots_invariant(
+    client: &super::LiquifactEscrowClient<'_>,
+    label: &str,
+) {
+    match client.get_remaining_investor_slots() {
+        None => {
+            // No cap — correct; nothing more to assert.
+        }
+        Some(remaining) => {
+            let count = client.get_unique_funder_count();
+            let cap = client
+                .get_max_unique_investors_cap()
+                .expect("cap must be Some when get_remaining_investor_slots returns Some");
+            assert!(
+                remaining >= 0,
+                "{label}: remaining slots underflowed (remaining={remaining})"
+            );
+            assert_eq!(
+                count + remaining,
+                cap,
+                "{label}: count({count}) + remaining({remaining}) != cap({cap})"
+            );
+        }
+    }
+}
+
+// ── Invariant A: no cap → None ───────────────────────────────────────────────
+
+/// No-cap escrow: get_remaining_investor_slots must always be None regardless of
+/// how many investors fund.
+#[test]
+fn slots_no_cap_is_none_after_multiple_funds() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let client = deploy(&env);
+
+    let target: i128 = 300_000_000_000i128;
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "NOCAP01"),
+        &sme,
+        &target,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,  // no max_unique_investors
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    assert_eq!(
+        client.get_remaining_investor_slots(),
+        None,
+        "pre-funding: must be None when no cap"
+    );
+
+    for _ in 0..5 {
+        client.fund(&Address::generate(&env), &10_000_000_000i128);
+        assert_eq!(
+            client.get_remaining_investor_slots(),
+            None,
+            "post-fund: must remain None when no cap"
+        );
+    }
+}
+
+// ── Invariant B: count + remaining == cap, remaining >= 0 ───────────────────
+
+/// Proptest: random funding sequences with a unique-investor cap.
+/// After every fund call, assert slots conservation and non-underflow.
+proptest! {
+    #[test]
+    fn prop_remaining_slots_conservation_non_underflow(
+        uniq_cap in 1u32..=8u32,
+        n_investors in 1usize..=8usize,
+        seed in 0u64..u64::MAX,
+        funding_target in 10_000i128..=200_000i128,
+    ) {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let sme = Address::generate(&env);
+        let client = deploy(&env);
+        let (token, treasury) = free_addresses(&env);
+
+        let cap = uniq_cap.min(n_investors as u32).max(1);
+
+        client.init(
+            &admin,
+            &soroban_sdk::String::from_str(&env, "SLOTPROP"),
+            &sme,
+            &funding_target,
+            &800i64,
+            &0u64,
+            &token,
+            &None,
+            &treasury,
+            &None,
+            &None,
+            &Some(cap),
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+        );
+
+        // Verify invariant on fresh contract.
+        assert_slots_invariant(&client, "initial");
+
+        let investors: Vec<Address> = (0..n_investors)
+            .map(|_| Address::generate(&env))
+            .collect();
+
+        let mut rng = SplitMix64::new(seed);
+        let mut distinct_count: u32 = 0;
+
+        for step in 0..(n_investors as u32).min(cap) {
+            if client.get_escrow().status != 0 {
+                break;
+            }
+            let idx = rng.gen_usize(n_investors);
+            let inv = investors[idx].clone();
+
+            // Only fund new investors to stay within cap.
+            let already_counted = distinct_count > 0 && {
+                // Check contribution map via unique funder count heuristic:
+                // if this investor would be a duplicate, client already tracks them.
+                false // We track distinctness by index below.
+            };
+            let _ = already_counted;
+
+            let amt = rng.gen_i128_inclusive(1, (funding_target / (cap as i128 + 1)).max(1));
+
+            // Fund only if we have remaining slots for new unique investors.
+            let slots_before = client.get_remaining_investor_slots().unwrap_or(cap);
+            if slots_before == 0 {
+                break;
+            }
+
+            if client.fund(&inv, &amt).status != 0 {
+                break;
+            }
+            distinct_count = client.get_unique_funder_count();
+
+            // Core invariant after every fund.
+            assert_slots_invariant(&client, &format!("step {step}"));
+
+            // remaining must not underflow.
+            let remaining = client.get_remaining_investor_slots().unwrap();
+            prop_assert!(remaining >= 0, "step {step}: remaining underflowed to {remaining}");
+
+            let count = client.get_unique_funder_count();
+            prop_assert_eq!(
+                count + remaining,
+                cap,
+                "step {step}: count({count}) + remaining({remaining}) != cap({cap})"
+            );
+        }
+    }
+}
+
+// ── Invariant C: repeat depositor does not decrement remaining slots ──────────
+
+/// Repeat deposits by the same investor must leave remaining slots unchanged,
+/// because the unique-funder count is identity-based.
+#[test]
+fn slots_repeat_deposit_does_not_decrement_remaining() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let client = deploy(&env);
+
+    let target: i128 = 500_000i128;
+    let cap: u32 = 4;
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "REPEAT01"),
+        &sme,
+        &target,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &Some(cap),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    let investor = Address::generate(&env);
+
+    // First deposit by investor.
+    client.fund(&investor, &10_000i128);
+    assert_slots_invariant(&client, "after first deposit");
+
+    let remaining_after_first = client.get_remaining_investor_slots().unwrap();
+    let count_after_first = client.get_unique_funder_count();
+
+    // Second deposit by the same investor — unique count must not change.
+    client.fund(&investor, &10_000i128);
+    assert_slots_invariant(&client, "after second deposit (same investor)");
+
+    let remaining_after_second = client.get_remaining_investor_slots().unwrap();
+    let count_after_second = client.get_unique_funder_count();
+
+    assert_eq!(
+        count_after_first, count_after_second,
+        "unique funder count must not change on repeat deposit"
+    );
+    assert_eq!(
+        remaining_after_first, remaining_after_second,
+        "remaining slots must not change on repeat deposit by same investor"
+    );
+
+    // Third deposit — still the same investor.
+    client.fund(&investor, &10_000i128);
+    let remaining_after_third = client.get_remaining_investor_slots().unwrap();
+    assert_eq!(
+        remaining_after_first, remaining_after_third,
+        "remaining slots invariant under repeated deposits by same investor"
+    );
+}
+
+// ── Invariant D: cap lowering keeps remaining >= 0 and count + remaining == cap ──
+
+/// After lower_max_unique_investors, the invariant count + remaining == new_cap
+/// must hold and remaining must be >= 0 (no underflow even at minimum new_cap).
+#[test]
+fn slots_lower_cap_mid_sequence_invariant() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let client = deploy(&env);
+
+    let target: i128 = 1_000_000i128;
+    let initial_cap: u32 = 6;
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "LOWER01"),
+        &sme,
+        &target,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &Some(initial_cap),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    // Fund 3 distinct investors.
+    let inv1 = Address::generate(&env);
+    let inv2 = Address::generate(&env);
+    let inv3 = Address::generate(&env);
+
+    client.fund(&inv1, &50_000i128);
+    assert_slots_invariant(&client, "after inv1");
+
+    client.fund(&inv2, &50_000i128);
+    assert_slots_invariant(&client, "after inv2");
+
+    client.fund(&inv3, &50_000i128);
+    assert_slots_invariant(&client, "after inv3");
+
+    // count is now 3, cap is 6, remaining should be 3.
+    let count_before_lower = client.get_unique_funder_count();
+    let remaining_before_lower = client.get_remaining_investor_slots().unwrap();
+    assert_eq!(count_before_lower, 3, "3 distinct investors funded");
+    assert_eq!(remaining_before_lower, 3, "6 - 3 = 3 remaining slots");
+
+    // Lower cap to exactly count (minimum valid lower: 3).
+    client.lower_max_unique_investors(&3u32);
+    assert_slots_invariant(&client, "after lower_cap to 3");
+
+    let cap_after_lower = client.get_max_unique_investors_cap().unwrap();
+    let count_after_lower = client.get_unique_funder_count();
+    let remaining_after_lower = client.get_remaining_investor_slots().unwrap();
+
+    assert_eq!(cap_after_lower, 3);
+    assert_eq!(count_after_lower, 3);
+    assert_eq!(remaining_after_lower, 0, "remaining must be 0 when cap == count");
+
+    // Further lower to mid-range (cap = 5, count stays 3).
+    // First reset cap to 6, then lower to 5.
+    // Actually raise it back then lower again to test a partial lowering.
+    client.raise_max_unique_investors(&6u32);
+    client.lower_max_unique_investors(&5u32);
+    assert_slots_invariant(&client, "after raise then lower to 5");
+
+    let remaining_at_5 = client.get_remaining_investor_slots().unwrap();
+    assert_eq!(remaining_at_5, 2, "6->5 cap, count=3 → remaining=2");
+}
+
+// ── fund_batch: slots conservation after batch operations ────────────────────
+
+/// fund_batch with multiple distinct investors must conserve the slots invariant
+/// after each call.
+#[test]
+fn slots_fund_batch_conservation() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let client = deploy(&env);
+
+    let target: i128 = 2_000_000i128;
+    let cap: u32 = 6;
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "BATCH01"),
+        &sme,
+        &target,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &Some(cap),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    assert_slots_invariant(&client, "pre-batch");
+
+    // Batch 1: 3 new investors.
+    let batch1: soroban_sdk::Vec<(Address, i128)> = {
+        let mut v = soroban_sdk::Vec::new(&env);
+        v.push_back((Address::generate(&env), 50_000i128));
+        v.push_back((Address::generate(&env), 60_000i128));
+        v.push_back((Address::generate(&env), 70_000i128));
+        v
+    };
+    client.fund_batch(&batch1);
+    assert_slots_invariant(&client, "after batch1");
+
+    let count_b1 = client.get_unique_funder_count();
+    let remaining_b1 = client.get_remaining_investor_slots().unwrap();
+    assert_eq!(count_b1, 3, "3 investors after batch1");
+    assert_eq!(remaining_b1, 3, "6 - 3 = 3 remaining after batch1");
+
+    // Batch 2: 2 more new investors.
+    let batch2: soroban_sdk::Vec<(Address, i128)> = {
+        let mut v = soroban_sdk::Vec::new(&env);
+        v.push_back((Address::generate(&env), 40_000i128));
+        v.push_back((Address::generate(&env), 55_000i128));
+        v
+    };
+    client.fund_batch(&batch2);
+    assert_slots_invariant(&client, "after batch2");
+
+    let count_b2 = client.get_unique_funder_count();
+    let remaining_b2 = client.get_remaining_investor_slots().unwrap();
+    assert_eq!(count_b2, 5, "5 investors after batch2");
+    assert_eq!(remaining_b2, 1, "6 - 5 = 1 remaining after batch2");
+}
+
+// ── Proptest: randomised fund+fund_batch+cap-lower sequences ─────────────────
+
+/// Generator for an operation in a random slots-stress sequence.
+#[derive(Clone, Debug)]
+enum SlotOp {
+    /// Single fund by a chosen investor index.
+    Fund { investor_ix: usize, amount: i128 },
+    /// fund_batch with up to 3 investors from the pool.
+    Batch { ixs: Vec<usize>, amounts: Vec<i128> },
+    /// Lower the unique-investor cap by 1 if doing so stays >= current count.
+    LowerCap,
+}
+
+proptest! {
+    /// # Remaining-slots invariant across randomized fund/batch/lower sequences (issue #564)
+    ///
+    /// Generates arbitrary sequences of single-fund, fund_batch, and cap-lowering
+    /// operations over a pool of up to 6 investors. After every operation the
+    /// invariant `count + remaining == cap` and `remaining >= 0` is asserted.
+    /// Also asserts that repeat deposits by an existing investor never change
+    /// remaining slots.
+    #[test]
+    fn prop_slots_invariant_across_fund_flows(
+        initial_cap in 2u32..=6u32,
+        n_investors in 2usize..=6usize,
+        seq_len in 1usize..=10usize,
+        // raw random data for sequence construction
+        op_tags in proptest::collection::vec(0u8..=2u8, 1..=10),
+        investor_ixs in proptest::collection::vec(0usize..=5, 1..=10),
+        amounts in proptest::collection::vec(1i128..=30_000i128, 1..=30),
+        batch_sizes in proptest::collection::vec(1usize..=3usize, 1..=10),
+        seed in 0u64..u64::MAX,
+    ) {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let sme = Address::generate(&env);
+        let client = deploy(&env);
+        let (token, treasury) = free_addresses(&env);
+
+        let cap = initial_cap.min(n_investors as u32).max(2);
+        let funding_target = 10_000_000i128;
+
+        client.init(
+            &admin,
+            &soroban_sdk::String::from_str(&env, "SEQSLOT1"),
+            &sme,
+            &funding_target,
+            &800i64,
+            &0u64,
+            &token,
+            &None,
+            &treasury,
+            &None,
+            &None,
+            &Some(cap),
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+        );
+
+        let investors: Vec<Address> = (0..n_investors)
+            .map(|_| Address::generate(&env))
+            .collect();
+
+        let mut current_cap = cap;
+        let mut funded_set: BTreeSet<usize> = BTreeSet::new();
+        let mut amount_idx: usize = 0;
+        let mut rng = SplitMix64::new(seed);
+
+        // Initial invariant check.
+        prop_assert_eq!(
+            client.get_remaining_investor_slots(),
+            Some(cap),
+            "initial: remaining must equal cap before any fund"
+        );
+
+        let steps = seq_len
+            .min(op_tags.len())
+            .min(investor_ixs.len())
+            .min(batch_sizes.len());
+
+        for step in 0..steps {
+            if client.get_escrow().status != 0 {
+                break;
+            }
+
+            let op_tag = op_tags[step];
+
+            match op_tag % 3 {
+                // ── Single fund ───────────────────────────────────────
+                0 => {
+                    let ix = investor_ixs[step] % n_investors;
+                    let inv = investors[ix].clone();
+                    let amt = if amount_idx < amounts.len() {
+                        let a = amounts[amount_idx];
+                        amount_idx += 1;
+                        a
+                    } else {
+                        1i128
+                    };
+
+                    let is_new = !funded_set.contains(&ix);
+                    if is_new {
+                        let slots = client.get_remaining_investor_slots().unwrap_or(0);
+                        if slots == 0 {
+                            continue;
+                        }
+                    }
+
+                    let remaining_before = client.get_remaining_investor_slots().unwrap_or(0);
+                    let _ = client.fund(&inv, &amt);
+                    if is_new {
+                        funded_set.insert(ix);
+                    }
+
+                    // Invariant: count + remaining == cap.
+                    let count = client.get_unique_funder_count();
+                    let remaining = client.get_remaining_investor_slots().unwrap_or(0);
+                    prop_assert!(remaining >= 0, "step {step} (fund): remaining underflowed");
+                    prop_assert_eq!(
+                        count + remaining,
+                        current_cap,
+                        "step {step} (fund): count({count}) + remaining({remaining}) != cap({current_cap})"
+                    );
+
+                    // Invariant C: repeat funder must not change remaining.
+                    if !is_new {
+                        prop_assert_eq!(
+                            remaining, remaining_before,
+                            "step {step}: repeat deposit changed remaining slots"
+                        );
+                    }
+                }
+                // ── Batch fund ────────────────────────────────────────
+                1 => {
+                    let bsize = batch_sizes[step].min(
+                        (current_cap as usize).saturating_sub(funded_set.len()).min(3)
+                    );
+                    if bsize == 0 {
+                        continue;
+                    }
+
+                    let mut batch_vec = soroban_sdk::Vec::new(&env);
+                    let mut new_ixs: Vec<usize> = Vec::new();
+                    for b in 0..bsize {
+                        let ix = (investor_ixs[step].wrapping_add(b)) % n_investors;
+                        let is_new = !funded_set.contains(&ix);
+                        if is_new {
+                            let slots_left = (current_cap as usize).saturating_sub(funded_set.len() + new_ixs.len());
+                            if slots_left == 0 {
+                                break;
+                            }
+                            new_ixs.push(ix);
+                        }
+                        let amt = if amount_idx < amounts.len() {
+                            let a = amounts[amount_idx];
+                            amount_idx += 1;
+                            a
+                        } else {
+                            1i128
+                        };
+                        batch_vec.push_back((investors[ix].clone(), amt));
+                    }
+                    if batch_vec.is_empty() {
+                        continue;
+                    }
+
+                    let _ = client.fund_batch(&batch_vec);
+                    for ix in new_ixs {
+                        funded_set.insert(ix);
+                    }
+
+                    // Invariant B after batch.
+                    let count = client.get_unique_funder_count();
+                    let remaining = client.get_remaining_investor_slots().unwrap_or(0);
+                    prop_assert!(remaining >= 0, "step {step} (batch): remaining underflowed");
+                    prop_assert_eq!(
+                        count + remaining,
+                        current_cap,
+                        "step {step} (batch): count({count}) + remaining({remaining}) != cap({current_cap})"
+                    );
+                }
+                // ── Lower cap ─────────────────────────────────────────
+                _ => {
+                    let count = client.get_unique_funder_count();
+                    // Lower by 1 if the result would still be >= count and > 1.
+                    let target_cap = current_cap.saturating_sub(
+                        rng.gen_usize(2) as u32 + 1
+                    );
+                    if target_cap >= count && target_cap >= 1 && target_cap < current_cap {
+                        client.lower_max_unique_investors(&target_cap);
+                        current_cap = target_cap;
+                    }
+
+                    // Invariant D after cap lowering.
+                    let count2 = client.get_unique_funder_count();
+                    let remaining = client.get_remaining_investor_slots().unwrap_or(0);
+                    prop_assert!(remaining >= 0, "step {step} (lower_cap): remaining underflowed");
+                    prop_assert_eq!(
+                        count2 + remaining,
+                        current_cap,
+                        "step {step} (lower_cap): count({count2}) + remaining({remaining}) != cap({current_cap})"
+                    );
+                }
+            }
+        }
+    }
+}
+
+// ── Edge case: cap exactly hit ────────────────────────────────────────────────
+
+/// When exactly `cap` unique investors have funded, remaining must be 0 (not negative).
+#[test]
+fn slots_cap_exactly_hit_remaining_is_zero() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let client = deploy(&env);
+
+    let target: i128 = 1_000_000i128;
+    let cap: u32 = 3;
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "EXACTCAP"),
+        &sme,
+        &target,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &Some(cap),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    let investors: Vec<Address> = (0..cap as usize)
+        .map(|_| Address::generate(&env))
+        .collect();
+
+    for (i, inv) in investors.iter().enumerate() {
+        client.fund(inv, &100_000i128);
+        let remaining = client.get_remaining_investor_slots().unwrap();
+        let count = client.get_unique_funder_count();
+        assert!(remaining >= 0, "remaining must not underflow after investor {i}");
+        assert_eq!(
+            count + remaining,
+            cap,
+            "count({count}) + remaining({remaining}) != cap({cap}) after investor {i}"
+        );
+    }
+
+    // After all cap slots consumed: remaining must be 0.
+    let final_remaining = client.get_remaining_investor_slots().unwrap();
+    assert_eq!(final_remaining, 0, "remaining must be exactly 0 when cap is fully consumed");
+    assert_slots_invariant(&client, "cap exactly hit");
+}
