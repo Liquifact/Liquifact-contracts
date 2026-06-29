@@ -67,6 +67,7 @@ re-implementing storage reads to guarantee identical semantics.
 
 **Distributed Principal:**
 - [get_distributed_principal](#get_distributed_principal--i128)
+- [get_reconciliation](#get_reconciliation--reconciliationview)
 
 ---
 
@@ -593,6 +594,47 @@ excess_balance = balance - outstanding_liability  // tokens available for sweep
 
 This view surfaces the balance already consulted internally by [`LiquifactEscrow::sweep_terminal_dust`]
 and [`LiquifactEscrow::withdraw`] for liability-floor enforcement.
+
+---
+
+## `get_reconciliation() → ReconciliationView`
+
+**Storage keys:** reads `DataKey::Escrow`, `DataKey::DistributedPrincipal`, and
+`DataKey::FundingToken` (then queries the token contract for the live balance).
+
+Returns the contract's full reconciliation position in a single call, so operators
+no longer have to fetch the balance, funded amount, distributed principal, and
+settlement state separately and re-implement the liability arithmetic off-chain
+(see the [Reconciliation relationship](#reconciliation-relationship) above).
+
+```text
+outstanding_liability = max(funded_amount - distributed_principal, 0)
+surplus               = token_balance - outstanding_liability
+```
+
+`outstanding_liability` uses the **identical floor** that
+[`LiquifactEscrow::sweep_terminal_dust`] enforces, so the view and the sweep guard
+can never disagree. `surplus` is the sweepable dust when positive and a deficit
+when negative.
+
+### `ReconciliationView` fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `token_balance` | `i128` | Live SEP-41 funding-token balance held by the contract. |
+| `outstanding_liability` | `i128` | Principal still owed to investors: `max(funded_amount - distributed_principal, 0)`. |
+| `surplus` | `i128` | `token_balance - outstanding_liability`. Positive = sweepable surplus; negative = deficit. |
+
+- **Pure read** — no authorization required, no state mutation.
+- **Never panics on values** — all arithmetic is saturating.
+- Emits [`EscrowError::EscrowNotInitialized`] / [`EscrowError::FundingTokenNotSet`]
+  only when the escrow has not been initialized.
+
+**Security note:** in settled (`2`) and withdrawn (`3`) states `distributed_principal`
+is `0` by design, so `outstanding_liability` reflects the full `funded_amount` and the
+reported `surplus` is never larger than what `sweep_terminal_dust` would actually
+permit (that guard only applies the floor in the cancelled state `4`). The view is
+therefore conservative and can never over-report sweepable funds.
 
 ---
 

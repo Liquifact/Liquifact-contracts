@@ -183,6 +183,7 @@ liquifact-contracts/
 | `get_escrow` | — | Read current escrow state. |
 | `get_version` | — | Read stored `DataKey::Version`. |
 | `get_remaining_investor_slots` | — | Read remaining unique investor capacity before reaching the cap. |
+| `get_reconciliation` | — | Read solvency position: live token balance, outstanding liability, and surplus/deficit. See [`docs/escrow-read-api.md`](docs/escrow-read-api.md). |
 
 | `rebind_registry_ref` | Admin | Set or update the off-chain registry hint (`DataKey::RegistryRef`). Emits `RegistryRefRebound`. |
 | `clear_registry_ref` | Admin | Convenience alias for `rebind_registry_ref(None)`. Clears the registry pointer. |

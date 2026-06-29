@@ -4638,6 +4638,80 @@ impl LiquifactEscrow {
             .get(&DataKey::DistributedPrincipal)
             .unwrap_or(0)
     }
+
+    /// Read-only reconciliation position: the live funding-token balance held by
+    /// the contract, the outstanding investor liability, and the resulting
+    /// surplus (sweepable dust) or deficit.
+    ///
+    /// `outstanding_liability` is computed with the **same liability floor** that
+    /// [`LiquifactEscrow::sweep_terminal_dust`] enforces (see line
+    /// `outstanding = funded_amount - distributed_principal` in that function):
+    ///
+    /// ```text
+    /// outstanding_liability = max(funded_amount - distributed_principal, 0)
+    /// surplus               = token_balance - outstanding_liability
+    /// ```
+    ///
+    /// so a caller's view of "what may be swept" never disagrees with the on-chain
+    /// invariant. In settled (`2`) and withdrawn (`3`) states `distributed_principal`
+    /// stays `0` by design, so `outstanding_liability` reflects the full
+    /// `funded_amount`; the reported `surplus` is therefore never larger than what
+    /// `sweep_terminal_dust` would actually permit (it only applies the floor in the
+    /// cancelled state `4`). `surplus` is negative in a deficit.
+    ///
+    /// This is a pure read: no authorization, no storage writes. All arithmetic is
+    /// saturating, so the view cannot panic on extreme balances or amounts.
+    ///
+    /// # Errors
+    ///
+    /// Fails with [`EscrowError::EscrowNotInitialized`] / [`EscrowError::FundingTokenNotSet`]
+    /// only when the escrow has not been initialized; it never panics on numeric values.
+    pub fn get_reconciliation(env: Env) -> ReconciliationView {
+        let escrow = Self::get_escrow(env.clone());
+
+        let distributed: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::DistributedPrincipal)
+            .unwrap_or(0);
+
+        // Same formula as sweep_terminal_dust's liability floor, floored at zero.
+        let outstanding_liability = escrow.funded_amount.saturating_sub(distributed).max(0);
+
+        let token_addr = Self::funding_token_or_fail(&env);
+        let this = env.current_contract_address();
+        let token_balance = TokenClient::new(&env, &token_addr).balance(&this);
+
+        // Surplus is sweepable dust when positive, a deficit when negative.
+        let surplus = token_balance.saturating_sub(outstanding_liability);
+
+        ReconciliationView {
+            token_balance,
+            outstanding_liability,
+            surplus,
+        }
+    }
+}
+
+/// Read-only reconciliation snapshot returned by
+/// [`LiquifactEscrow::get_reconciliation`].
+///
+/// Derive rationale:
+/// - `Debug`: improves failure diagnostics in tests.
+/// - `PartialEq`: allows exact assertions in tests.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReconciliationView {
+    /// Live SEP-41 funding-token balance held by the contract address.
+    pub token_balance: i128,
+    /// Principal still owed to investors:
+    /// `max(funded_amount - distributed_principal, 0)`. Uses the identical floor
+    /// to [`LiquifactEscrow::sweep_terminal_dust`] so the two never disagree.
+    pub outstanding_liability: i128,
+    /// `token_balance - outstanding_liability`. Positive means sweepable dust
+    /// (a surplus); negative means the contract is in deficit for its remaining
+    /// obligations.
+    pub surplus: i128,
 }
 
 #[cfg(test)]
