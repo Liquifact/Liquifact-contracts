@@ -2927,7 +2927,11 @@ impl LiquifactEscrow {
         // Actually, reusing EscrowError::EscrowNotOpenForFunding since CapLowerNotOpen is specific to lower.
         // But wait, the issue said "parallel guards" and "open-state-only".
         // Let's use EscrowError::EscrowNotOpenForFunding.
-        ensure(&env, escrow.status == 0, EscrowError::EscrowNotOpenForFunding);
+        ensure(
+            &env,
+            escrow.status == 0,
+            EscrowError::EscrowNotOpenForFunding,
+        );
 
         let old_cap: Option<u32> = env
             .storage()
@@ -4040,7 +4044,6 @@ impl LiquifactEscrow {
                 INSTANCE_TTL_MIN_EXTENSION_LEDGERS,
             );
         }
-
 
         // Instance storage TTL is contract-wide under Soroban SDK 25. The call above covers
         // Escrow, Version, LegalHold, snapshots, caps, and other instance keys.
