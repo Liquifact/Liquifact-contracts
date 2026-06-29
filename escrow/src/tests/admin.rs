@@ -2330,3 +2330,354 @@ fn test_post_handover_admin_can_clear_hold_set_by_old_admin() {
     client.clear_legal_hold();
     assert!(!client.get_legal_hold());
 }
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Operational pause switch (set_paused / is_paused / PausedChanged)
+//
+// The pause is a lightweight incident-response circuit breaker, orthogonal to the
+// compliance legal hold. These tests verify:
+//   - admin-only toggle + view + event,
+//   - each gated entrypoint (fund, settle, withdraw, claim_investor_payout) is blocked
+//     with its dedicated typed error while paused, and restored after unpause,
+//   - full independence from the legal hold (each flag blocks on its own; clearing one
+//     does not clear the other; neither write touches the other's storage key).
+// ═════════════════════════════════════════════════════════════════════════════
+
+use soroban_sdk::token::StellarAssetClient as PauseSac;
+
+/// Initialise a minimal open escrow (status 0, maturity 0, no tiers) with placeholder addresses.
+fn pause_init_open(
+    client: &LiquifactEscrowClient<'_>,
+    env: &Env,
+    admin: &Address,
+    sme: &Address,
+    id: &str,
+) {
+    client.init(
+        admin,
+        &soroban_sdk::String::from_str(env, id),
+        sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &Address::generate(env),
+        &None,
+        &Address::generate(env),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+}
+
+/// Initialise and fund to target with a placeholder token (no real transfers needed for
+/// settle / claim paths, mirroring the legal-hold test harness).
+fn pause_init_funded(
+    client: &LiquifactEscrowClient<'_>,
+    env: &Env,
+    admin: &Address,
+    sme: &Address,
+    investor: &Address,
+    id: &str,
+) {
+    pause_init_open(client, env, admin, sme, id);
+    client.fund(investor, &TARGET);
+}
+
+/// Initialise with a real SAC token and fund to target so `withdraw()` can transfer.
+fn pause_init_funded_real<'a>(
+    env: &'a Env,
+    admin: &Address,
+    sme: &Address,
+    investor: &Address,
+    id: &str,
+) -> LiquifactEscrowClient<'a> {
+    let sac = env.register_stellar_asset_contract_v2(Address::generate(env));
+    let token_id = sac.address();
+    let sac_admin = PauseSac::new(env, &token_id);
+    let escrow_id = env.register(crate::LiquifactEscrow, ());
+    let client = LiquifactEscrowClient::new(env, &escrow_id);
+    client.init(
+        admin,
+        &soroban_sdk::String::from_str(env, id),
+        sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &token_id,
+        &None,
+        &Address::generate(env),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+    sac_admin.mint(investor, &TARGET);
+    client.fund(investor, &TARGET);
+    client
+}
+
+// ── Admin-only toggle, view, and event ───────────────────────────────────────
+
+#[test]
+fn set_paused_by_admin_toggles_and_view_reflects() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    pause_init_open(&client, &env, &admin, &sme, "PSE001");
+    assert!(!client.is_paused(), "default unpaused");
+    client.set_paused(&true);
+    assert!(client.is_paused());
+    client.set_paused(&false);
+    assert!(!client.is_paused());
+}
+
+#[test]
+fn set_paused_records_admin_auth() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    pause_init_open(&client, &env, &admin, &sme, "PSE002");
+    client.set_paused(&true);
+    assert!(
+        env.auths().iter().any(|(addr, _)| *addr == admin),
+        "admin auth must be recorded for set_paused"
+    );
+}
+
+#[test]
+fn set_paused_emits_event_with_correct_flag() {
+    use soroban_sdk::testutils::Events as _;
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let contract_id = client.address.clone();
+    pause_init_open(&client, &env, &admin, &sme, "PSE003");
+
+    client.set_paused(&true);
+    assert_eq!(
+        env.events().all().events().last().unwrap().clone(),
+        crate::PausedChanged {
+            name: symbol_short!("paused"),
+            invoice_id: client.get_escrow().invoice_id,
+            active: 1,
+        }
+        .to_xdr(&env, &contract_id)
+    );
+
+    client.set_paused(&false);
+    assert_eq!(
+        env.events().all().events().last().unwrap().clone(),
+        crate::PausedChanged {
+            name: symbol_short!("paused"),
+            invoice_id: client.get_escrow().invoice_id,
+            active: 0,
+        }
+        .to_xdr(&env, &contract_id)
+    );
+}
+
+#[test]
+fn set_paused_by_non_admin_panics() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    pause_init_open(&client, &env, &admin, &sme, "PSE004");
+    env.mock_auths(&[]);
+    assert!(client.try_set_paused(&true).is_err());
+}
+
+// ── fund ──────────────────────────────────────────────────────────────────────
+
+#[test]
+fn fund_blocked_when_paused() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    pause_init_open(&client, &env, &admin, &sme, "PGF001");
+    client.set_paused(&true);
+    assert_contract_error(
+        client.try_fund(&investor, &TARGET),
+        crate::EscrowError::PausedBlocksFunding,
+    );
+}
+
+#[test]
+fn fund_passes_after_unpause() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    pause_init_open(&client, &env, &admin, &sme, "PGF002");
+    client.set_paused(&true);
+    client.set_paused(&false);
+    let escrow = client.fund(&investor, &TARGET);
+    assert_eq!(escrow.status, 1);
+}
+
+// ── settle ──────────────────────────────────────────────────────────────────
+
+#[test]
+fn settle_blocked_when_paused() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    pause_init_funded(&client, &env, &admin, &sme, &investor, "PGS001");
+    client.set_paused(&true);
+    assert_contract_error(
+        client.try_settle(),
+        crate::EscrowError::PausedBlocksSettlement,
+    );
+}
+
+#[test]
+fn settle_passes_after_unpause() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    pause_init_funded(&client, &env, &admin, &sme, &investor, "PGS002");
+    client.set_paused(&true);
+    client.set_paused(&false);
+    let escrow = client.settle();
+    assert_eq!(escrow.status, 2);
+}
+
+// ── withdraw ────────────────────────────────────────────────────────────────
+
+#[test]
+fn withdraw_blocked_when_paused() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    pause_init_funded(&client, &env, &admin, &sme, &investor, "PGW001");
+    client.set_paused(&true);
+    assert_contract_error(
+        client.try_withdraw(),
+        crate::EscrowError::PausedBlocksWithdrawal,
+    );
+}
+
+#[test]
+fn withdraw_passes_after_unpause() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let investor = Address::generate(&env);
+    let client = pause_init_funded_real(&env, &admin, &sme, &investor, "PGW002");
+    client.set_paused(&true);
+    client.set_paused(&false);
+    let escrow = client.withdraw();
+    assert_eq!(escrow.status, 3);
+}
+
+// ── claim_investor_payout ────────────────────────────────────────────────────
+
+#[test]
+fn claim_investor_payout_blocked_when_paused() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    pause_init_funded(&client, &env, &admin, &sme, &investor, "PGC001");
+    client.settle();
+    client.set_paused(&true);
+    assert_contract_error(
+        client.try_claim_investor_payout(&investor),
+        crate::EscrowError::PausedBlocksInvestorClaims,
+    );
+}
+
+#[test]
+fn claim_investor_payout_passes_after_unpause() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    pause_init_funded(&client, &env, &admin, &sme, &investor, "PGC002");
+    client.settle();
+    client.set_paused(&true);
+    client.set_paused(&false);
+    client.claim_investor_payout(&investor);
+    assert!(client.is_investor_claimed(&investor));
+}
+
+// ── Independence from legal hold ──────────────────────────────────────────────
+
+#[test]
+fn pause_and_legal_hold_are_independent_storage_flags() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    pause_init_open(&client, &env, &admin, &sme, "PIN001");
+
+    // Setting the pause must not set the legal hold, and vice-versa.
+    client.set_paused(&true);
+    assert!(client.is_paused());
+    assert!(!client.get_legal_hold(), "pause must not touch legal hold");
+
+    client.set_legal_hold(&true);
+    assert!(client.is_paused(), "legal hold must not touch pause");
+    assert!(client.get_legal_hold());
+
+    // Clearing the pause leaves the legal hold intact.
+    client.set_paused(&false);
+    assert!(!client.is_paused());
+    assert!(client.get_legal_hold());
+
+    // Clearing the legal hold leaves the pause state (now false) intact.
+    client.clear_legal_hold();
+    assert!(!client.is_paused());
+    assert!(!client.get_legal_hold());
+}
+
+#[test]
+fn fund_blocked_by_pause_even_when_legal_hold_cleared() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    pause_init_open(&client, &env, &admin, &sme, "PIN002");
+
+    // Both active, then clear ONLY the legal hold: pause must still block.
+    client.set_paused(&true);
+    client.set_legal_hold(&true);
+    client.clear_legal_hold();
+    assert!(!client.get_legal_hold());
+    assert_contract_error(
+        client.try_fund(&investor, &TARGET),
+        crate::EscrowError::PausedBlocksFunding,
+    );
+}
+
+#[test]
+fn fund_blocked_by_legal_hold_even_when_pause_cleared() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    pause_init_open(&client, &env, &admin, &sme, "PIN003");
+
+    // Both active, then clear ONLY the pause: legal hold must still block.
+    client.set_paused(&true);
+    client.set_legal_hold(&true);
+    client.set_paused(&false);
+    assert!(!client.is_paused());
+    assert_contract_error(
+        client.try_fund(&investor, &TARGET),
+        crate::EscrowError::LegalHoldBlocksFunding,
+    );
+}
+
+#[test]
+fn fund_passes_only_when_both_flags_cleared() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    pause_init_open(&client, &env, &admin, &sme, "PIN004");
+
+    client.set_paused(&true);
+    client.set_legal_hold(&true);
+    client.set_paused(&false);
+    client.clear_legal_hold();
+    let escrow = client.fund(&investor, &TARGET);
+    assert_eq!(escrow.status, 1);
+}

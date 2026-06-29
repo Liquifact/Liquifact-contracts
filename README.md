@@ -167,6 +167,8 @@ liquifact-contracts/
 | `sweep_terminal_dust` | Treasury | Treasury sweeps rounding residue from a terminal escrow. |
 | `migrate` | Admin | Schema version gate — **typed errors on all paths** in the current release (codes 90–92). |
 | `set_legal_hold` | Admin | Admin activates/clears compliance hold. |
+| `set_paused` | Admin | Admin toggles a lightweight operational pause (incident response) that blocks `fund`, `settle`, `withdraw`, and `claim_investor_payout`. Orthogonal to legal hold; single-call toggle with no clear delay. |
+| `is_paused` | — | Read the current operational pause flag (defaults to `false`). |
 | `set_allowlist_active` | Admin | Admin enables/disables the investor allowlist gate. |
 | `set_investor_allowlisted` | Admin | Admin sets per-address allowlist status. |
 | `set_investors_allowlisted` | Admin | Admin batch-sets allowlist status for multiple addresses. |
@@ -284,6 +286,11 @@ The escrow supports cancellation by the admin under specific criteria, unlocking
 - **Legal hold:** governance-controlled; misuse risk is mitigated by using a
   multisig `admin` and operational policy (see
   [`docs/OPERATOR_RUNBOOK.md`](docs/OPERATOR_RUNBOOK.md)).
+- **Operational pause:** admin-only `set_paused` is a lightweight incident-response
+  circuit breaker, **orthogonal to legal hold** — no compliance semantics and no
+  clear delay. It gates `fund`, `settle`, `withdraw`, and `claim_investor_payout`
+  as a read-only precondition before `require_auth` (typed errors 201–204). Either
+  flag blocks independently; clearing one never clears the other.
 - **Collateral record:** SME-reported metadata only; not proof of custody,
   token movement, reserved balance, or an enforceable on-chain claim.
 - **Token integration:** fee-on-transfer, rebasing, and hook tokens are

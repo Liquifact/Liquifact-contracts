@@ -446,6 +446,14 @@ pub enum EscrowError {
     NewFloorNotPositive = 175,
     /// Caller is not authorized to perform partial settlement.
     PartialSettleUnauthorizedCaller = 200,
+    /// Operational pause is active; [`LiquifactEscrow::fund`] is blocked. Orthogonal to legal hold.
+    PausedBlocksFunding = 201,
+    /// Operational pause is active; [`LiquifactEscrow::settle`] is blocked. Orthogonal to legal hold.
+    PausedBlocksSettlement = 202,
+    /// Operational pause is active; [`LiquifactEscrow::withdraw`] is blocked. Orthogonal to legal hold.
+    PausedBlocksWithdrawal = 203,
+    /// Operational pause is active; [`LiquifactEscrow::claim_investor_payout`] is blocked. Orthogonal to legal hold.
+    PausedBlocksInvestorClaims = 204,
     MaxPerInvestorCapNotConfigured = 24, // new
     MaxPerInvestorCapNotRaised = 25,     // new
 }
@@ -607,6 +615,14 @@ pub enum DataKey {
     /// Ledger timestamp recorded when [`LiquifactEscrow::settle`] transitions status to 2.
     /// Absent ⇒ not yet settled, or legacy instance. Read via [`LiquifactEscrow::get_settled_at`].
     SettledAt,
+    /// When true, a lightweight **operational pause** blocks risk-bearing entrypoints
+    /// (`fund`, `settle`, `withdraw`, `claim_investor_payout`) for incident response.
+    /// Absent ⇒ `false` (not paused). Toggled by admin via [`LiquifactEscrow::set_paused`].
+    ///
+    /// Orthogonal to [`DataKey::LegalHold`]: the pause has **no** compliance semantics and
+    /// **no** two-phase clear delay — it is a single-call admin switch for incidents such as a
+    /// suspected token bug. Either flag independently blocks the gated entrypoints.
+    Paused,
 }
 
 // --- Data types ---
@@ -929,6 +945,20 @@ pub struct LegalHoldChanged {
     pub active: u32,
 }
 
+/// Emitted by [`LiquifactEscrow::set_paused`] whenever the operational pause flag is written.
+///
+/// Independent of [`LegalHoldChanged`]: this signals the lightweight incident-response switch,
+/// not the compliance hold.
+#[contractevent]
+pub struct PausedChanged {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    /// `1` = pause enabled, `0` = cleared.
+    pub active: u32,
+}
+
 #[contractevent]
 pub struct LegalHoldClearRequested {
     #[topic]
@@ -1183,6 +1213,16 @@ impl LiquifactEscrow {
         env.storage()
             .instance()
             .get(&DataKey::LegalHold)
+            .unwrap_or(false)
+    }
+
+    /// Read the operational pause flag ([`DataKey::Paused`]); defaults to `false` when unset.
+    ///
+    /// Orthogonal to [`LiquifactEscrow::legal_hold_active`] — neither flag affects the other.
+    fn paused_active(env: &Env) -> bool {
+        env.storage()
+            .instance()
+            .get(&DataKey::Paused)
             .unwrap_or(false)
     }
 
@@ -1794,6 +1834,14 @@ impl LiquifactEscrow {
     /// Whether a compliance/legal hold is active (defaults to `false` if unset).
     pub fn get_legal_hold(env: Env) -> bool {
         Self::legal_hold_active(&env)
+    }
+
+    /// Whether the lightweight operational pause is active (defaults to `false` if unset).
+    ///
+    /// Independent of [`LiquifactEscrow::get_legal_hold`]: this reports the incident-response
+    /// switch toggled by [`LiquifactEscrow::set_paused`], not the compliance hold.
+    pub fn is_paused(env: Env) -> bool {
+        Self::paused_active(&env)
     }
 
     /// Configured minimum delay between [`LiquifactEscrow::request_clear_legal_hold`]
@@ -2439,6 +2487,30 @@ impl LiquifactEscrow {
         commitment
     }
 
+    /// Set or clear the lightweight **operational pause**. Only the **current**
+    /// [`InvoiceEscrow::admin`] may call.
+    ///
+    /// This is an incident-response circuit breaker (e.g. a suspected token bug) that is
+    /// **orthogonal to the compliance legal hold**: it carries no compliance semantics and,
+    /// unlike [`LiquifactEscrow::set_legal_hold`], has **no** two-phase clear delay — a single
+    /// authorized call toggles it on or off. While active it blocks [`LiquifactEscrow::fund`],
+    /// [`LiquifactEscrow::settle`], [`LiquifactEscrow::withdraw`], and
+    /// [`LiquifactEscrow::claim_investor_payout`]. Legal-hold state is neither read nor written.
+    ///
+    /// Emits [`PausedChanged`].
+    pub fn set_paused(env: Env, active: bool) {
+        let escrow = Self::load_escrow_require_admin(&env);
+
+        env.storage().instance().set(&DataKey::Paused, &active);
+
+        PausedChanged {
+            name: symbol_short!("paused"),
+            invoice_id: escrow.invoice_id.clone(),
+            active: if active { 1 } else { 0 },
+        }
+        .publish(&env);
+    }
+
     /// Set or clear compliance hold. Only the **current** [`InvoiceEscrow::admin`] may call.
     ///
     /// **Clearing:** always requires the current admin's authorization — there is no timelock,
@@ -2917,7 +2989,11 @@ impl LiquifactEscrow {
         // Actually, reusing EscrowError::EscrowNotOpenForFunding since CapLowerNotOpen is specific to lower.
         // But wait, the issue said "parallel guards" and "open-state-only".
         // Let's use EscrowError::EscrowNotOpenForFunding.
-        ensure(&env, escrow.status == 0, EscrowError::EscrowNotOpenForFunding);
+        ensure(
+            &env,
+            escrow.status == 0,
+            EscrowError::EscrowNotOpenForFunding,
+        );
 
         let old_cap: Option<u32> = env
             .storage()
@@ -3311,6 +3387,12 @@ impl LiquifactEscrow {
 
         // env.clone(): env is used again after this call for storage writes and publish.
         let mut escrow = Self::get_escrow(env.clone());
+        // Operational pause gate (read-only), independent of the compliance legal hold below.
+        ensure(
+            &env,
+            !Self::paused_active(&env),
+            EscrowError::PausedBlocksFunding,
+        );
         // Legal hold check is intentionally after the escrow read: the escrow is needed for
         // status and yield_bps regardless, and hoisting the hold check before the escrow read
         // would not reduce storage operations (both keys are always read on this path).
@@ -3576,6 +3658,12 @@ impl LiquifactEscrow {
     }
 
     pub fn settle(env: Env) -> InvoiceEscrow {
+        // Operational pause gate (read-only), before require_auth and orthogonal to legal hold.
+        ensure(
+            &env,
+            !Self::paused_active(&env),
+            EscrowError::PausedBlocksSettlement,
+        );
         ensure(
             &env,
             !Self::legal_hold_active(&env),
@@ -3633,6 +3721,12 @@ impl LiquifactEscrow {
     /// - [`EscrowError::WithdrawalNotFunded`] — escrow not in funded state.
     /// - [`EscrowError::InsufficientContractBalance`] — contract holds less than `funded_amount`.
     pub fn withdraw(env: Env) -> InvoiceEscrow {
+        // Operational pause gate (read-only), before require_auth and orthogonal to legal hold.
+        ensure(
+            &env,
+            !Self::paused_active(&env),
+            EscrowError::PausedBlocksWithdrawal,
+        );
         ensure(
             &env,
             !Self::legal_hold_active(&env),
@@ -3725,6 +3819,12 @@ impl LiquifactEscrow {
     /// Emits typed [`EscrowError`] codes for legal hold, missing contribution, unsettled escrow,
     /// or an unexpired commitment lock.
     pub fn claim_investor_payout(env: Env, investor: Address) {
+        // Operational pause gate (read-only), before require_auth and orthogonal to legal hold.
+        ensure(
+            &env,
+            !Self::paused_active(&env),
+            EscrowError::PausedBlocksInvestorClaims,
+        );
         ensure(
             &env,
             !Self::legal_hold_active(&env),
@@ -4030,7 +4130,6 @@ impl LiquifactEscrow {
                 INSTANCE_TTL_MIN_EXTENSION_LEDGERS,
             );
         }
-
 
         // Instance storage TTL is contract-wide under Soroban SDK 25. The call above covers
         // Escrow, Version, LegalHold, snapshots, caps, and other instance keys.

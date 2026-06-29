@@ -193,6 +193,18 @@ Emitted when an admin toggles the compliance hold.
 **Data Payload:**
 - `active` (u32): `1` for enabled, `0` for cleared.
 
+### `PausedChanged`
+Emitted when an admin toggles the lightweight operational pause via `set_paused`.
+Orthogonal to `LegalHoldChanged` — it signals the incident-response circuit
+breaker (no compliance semantics, no clear delay), not the compliance hold.
+
+**Topics:**
+1. `paused` (Symbol)
+2. `invoice_id` (Symbol)
+
+**Data Payload:**
+- `active` (u32): `1` for enabled, `0` for cleared.
+
 ---
 
 ## 🛠️ Indexing Recommendations
