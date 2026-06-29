@@ -686,3 +686,101 @@ fn test_inbound_compliant_token_passes() {
     assert_eq!(investor_before - investor_after, amount);
     assert_eq!(escrow_after - escrow_before, amount);
 }
+
+// ---------------------------------------------------------------------------
+// Tests: MOCK_TOKEN_DEFAULT_BALANCE constant — unseen-address semantics
+// ---------------------------------------------------------------------------
+
+/// An unseen address should report exactly MOCK_TOKEN_DEFAULT_BALANCE via the mock.
+#[test]
+fn test_mock_token_default_balance_unseen_address() {
+    use super::super::DefaultMockToken;
+    use super::super::MOCK_TOKEN_DEFAULT_BALANCE;
+    use soroban_sdk::token::TokenClient;
+
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let token_id = env.register(DefaultMockToken, ());
+    let client = TokenClient::new(&env, &token_id);
+
+    let stranger = Address::generate(&env);
+
+    assert_eq!(
+        client.balance(&stranger),
+        MOCK_TOKEN_DEFAULT_BALANCE,
+        "unseen address must report MOCK_TOKEN_DEFAULT_BALANCE"
+    );
+}
+
+/// A transfer between two unseen addresses should produce symmetric deltas around
+/// MOCK_TOKEN_DEFAULT_BALANCE: sender loses `amount`, recipient gains `amount`.
+#[test]
+fn test_mock_token_transfer_between_two_unseen_addresses() {
+    use super::super::DefaultMockToken;
+    use super::super::MOCK_TOKEN_DEFAULT_BALANCE;
+    use soroban_sdk::token::TokenClient;
+
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let token_id = env.register(DefaultMockToken, ());
+    let client = TokenClient::new(&env, &token_id);
+
+    let sender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let amount = 1_000_000i128;
+
+    let sender_before = client.balance(&sender);
+    let recipient_before = client.balance(&recipient);
+
+    assert_eq!(sender_before, MOCK_TOKEN_DEFAULT_BALANCE);
+    assert_eq!(recipient_before, MOCK_TOKEN_DEFAULT_BALANCE);
+
+    client.transfer(&sender, &recipient, &amount);
+
+    assert_eq!(
+        client.balance(&sender),
+        MOCK_TOKEN_DEFAULT_BALANCE - amount,
+        "sender balance should decrease by amount"
+    );
+    assert_eq!(
+        client.balance(&recipient),
+        MOCK_TOKEN_DEFAULT_BALANCE + amount,
+        "recipient balance should increase by amount"
+    );
+}
+
+/// Repeated transfers from an unseen sender accumulate correctly against the default.
+#[test]
+fn test_mock_token_repeated_transfers_from_unseen_sender() {
+    use super::super::DefaultMockToken;
+    use super::super::MOCK_TOKEN_DEFAULT_BALANCE;
+    use soroban_sdk::token::TokenClient;
+
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let token_id = env.register(DefaultMockToken, ());
+    let client = TokenClient::new(&env, &token_id);
+
+    let sender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+    let amount = 500i128;
+    let rounds = 3i128;
+
+    for _ in 0..rounds {
+        client.transfer(&sender, &recipient, &amount);
+    }
+
+    assert_eq!(
+        client.balance(&sender),
+        MOCK_TOKEN_DEFAULT_BALANCE - amount * rounds,
+        "sender balance should decrease by total transferred"
+    );
+    assert_eq!(
+        client.balance(&recipient),
+        MOCK_TOKEN_DEFAULT_BALANCE + amount * rounds,
+        "recipient balance should increase by total transferred"
+    );
+}
