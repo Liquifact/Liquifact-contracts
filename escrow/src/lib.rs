@@ -4616,6 +4616,17 @@ mod test_allowlist_tests;
 #[cfg(test)]
 mod tests;
 
+/// Default starting balance assigned to any address that has never been seen by the
+/// [`DefaultMockToken`] contract.
+///
+/// The value (100 trillion stroops, i.e. 10 000 000 XLM at 7 decimal places) is large
+/// enough that ordinary test escrow amounts never accidentally overdraw an account,
+/// while still being representable in a signed 64-bit integer.  Defined once here so
+/// that `balance` and `transfer` stay in sync and a single edit suffices to change the
+/// test-harness funding level.
+#[cfg(any(test, feature = "testutils"))]
+pub const MOCK_TOKEN_DEFAULT_BALANCE: i128 = 100_000_000_000_000i128;
+
 #[cfg(any(test, feature = "testutils"))]
 #[soroban_sdk::contract]
 pub struct DefaultMockToken;
@@ -4630,7 +4641,7 @@ impl DefaultMockToken {
             .instance()
             .get(&key)
             .unwrap_or_else(|| soroban_sdk::Map::new(&env));
-        balances.get(addr).unwrap_or(100_000_000_000_000i128)
+        balances.get(addr).unwrap_or(MOCK_TOKEN_DEFAULT_BALANCE)
     }
 
     pub fn transfer(
@@ -4647,8 +4658,8 @@ impl DefaultMockToken {
             .unwrap_or_else(|| soroban_sdk::Map::new(&env));
         let from_bal = balances
             .get(from.clone())
-            .unwrap_or(100_000_000_000_000i128);
-        let to_bal = balances.get(to.clone()).unwrap_or(100_000_000_000_000i128);
+            .unwrap_or(MOCK_TOKEN_DEFAULT_BALANCE);
+        let to_bal = balances.get(to.clone()).unwrap_or(MOCK_TOKEN_DEFAULT_BALANCE);
         balances.set(from.clone(), from_bal - amount);
         balances.set(to.clone(), to_bal + amount);
         env.storage().instance().set(&key, &balances);
