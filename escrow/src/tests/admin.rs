@@ -2330,3 +2330,64 @@ fn test_post_handover_admin_can_clear_hold_set_by_old_admin() {
     client.clear_legal_hold();
     assert!(!client.get_legal_hold());
 }
+
+// ──────────────────────────────────────────────────────────────────────────────
+// `partial_settle` typed-error coverage
+//
+// `partial_settle` reverts with stable, append-only `EscrowError` codes (not panic
+// strings) so client SDKs can branch on the numeric code. These tests assert each
+// revert condition via `try_partial_settle`, mirroring the guard order in the
+// contract: legal hold → caller authorization → open-status.
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// A legal hold blocks `partial_settle` with the dedicated
+/// [`EscrowError::LegalHoldBlocksPartialSettle`] code (not the borrowed
+/// settlement code).
+#[test]
+fn test_partial_settle_legal_hold_typed_error() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    client.set_legal_hold(&true);
+
+    assert_contract_error(
+        client.try_partial_settle(&sme),
+        EscrowError::LegalHoldBlocksPartialSettle,
+    );
+}
+
+/// A caller that is neither the SME nor the admin is rejected with
+/// [`EscrowError::PartialSettleUnauthorizedCaller`].
+#[test]
+fn test_partial_settle_unauthorized_caller_typed_error() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    let stranger = Address::generate(&env);
+
+    assert_contract_error(
+        client.try_partial_settle(&stranger),
+        EscrowError::PartialSettleUnauthorizedCaller,
+    );
+}
+
+/// `partial_settle` on a non-open escrow (already funded → status 1) is rejected
+/// with [`EscrowError::PartialSettleNotOpen`].
+#[test]
+fn test_partial_settle_not_open_typed_error() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    // Fund to target so status transitions 0 → 1; partial_settle requires status == 0.
+    let investor = Address::generate(&env);
+    client.fund(&investor, &TARGET);
+    assert_eq!(client.get_escrow().status, 1u32);
+
+    assert_contract_error(
+        client.try_partial_settle(&sme),
+        EscrowError::PartialSettleNotOpen,
+    );
+}

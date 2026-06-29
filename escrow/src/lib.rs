@@ -445,7 +445,12 @@ pub enum EscrowError {
     /// [`LiquifactEscrow::lower_min_contribution_floor`] received a non-positive floor.
     NewFloorNotPositive = 175,
     /// Caller is not authorized to perform partial settlement.
+    /// Only the escrow's `sme_address` or `admin` may call [`LiquifactEscrow::partial_settle`].
     PartialSettleUnauthorizedCaller = 200,
+    /// [`LiquifactEscrow::partial_settle`] blocked while a legal hold is active.
+    LegalHoldBlocksPartialSettle = 201,
+    /// [`LiquifactEscrow::partial_settle`] called while escrow is not in open status (`status != 0`).
+    PartialSettleNotOpen = 202,
     MaxPerInvestorCapNotConfigured = 24, // new
     MaxPerInvestorCapNotRaised = 25,     // new
 }
@@ -3530,7 +3535,7 @@ impl LiquifactEscrow {
         ensure(
             &env,
             !Self::legal_hold_active(&env),
-            EscrowError::LegalHoldBlocksSettlement,
+            EscrowError::LegalHoldBlocksPartialSettle,
         );
 
         let mut escrow = Self::get_escrow(env.clone());
@@ -3541,11 +3546,7 @@ impl LiquifactEscrow {
             EscrowError::PartialSettleUnauthorizedCaller,
         );
 
-        ensure(
-            &env,
-            escrow.status == 0,
-            EscrowError::EscrowNotOpenForFunding,
-        );
+        ensure(&env, escrow.status == 0, EscrowError::PartialSettleNotOpen);
 
         // Transition to funded status early.
         escrow.status = 1;

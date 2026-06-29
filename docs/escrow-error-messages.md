@@ -146,6 +146,9 @@ See also [`docs/escrow-legal-hold.md`](escrow-legal-hold.md),
 | 165 | `ClaimBatchEmpty` | `claim_payouts_batch` | `investors` vec is empty | Pass at least one investor | typed |
 | 166 | `ClaimBatchTooLarge` | `claim_payouts_batch` | `investors` vec exceeds `MAX_CLAIM_BATCH` (32) | Split into smaller batches | typed |
 | 167 | `FundingDeadlinePassed` | `init`, `fund`, `fund_with_commitment`, `fund_batch` | `funding_deadline` configured and `ledger.timestamp()` past deadline | Funding window closed; do not retry deposits | typed |
+| 200 | `PartialSettleUnauthorizedCaller` | `partial_settle` | `caller` is neither `sme_address` nor `admin` | Call as the SME or admin | typed |
+| 201 | `LegalHoldBlocksPartialSettle` | `partial_settle` | legal hold active | Complete legal-hold clear workflow | typed |
+| 202 | `PartialSettleNotOpen` | `partial_settle` | escrow status `!= 0` (open) | Partial settle only while open | typed |
 
 ### Legacy panic strings (migration aid)
 
