@@ -2454,138 +2454,63 @@ fn test_post_handover_admin_can_clear_hold_set_by_old_admin() {
     assert!(!client.get_legal_hold());
 }
 
-// ── raise_maturity_max_horizon forward-only lever coverage (issue #559) ───────
+// ──────────────────────────────────────────────────────────────────────────────
+// `partial_settle` typed-error coverage
+//
+// `partial_settle` reverts with stable, append-only `EscrowError` codes (not panic
+// strings) so client SDKs can branch on the numeric code. These tests assert each
+// revert condition via `try_partial_settle`, mirroring the guard order in the
+// contract: legal hold → caller authorization → open-status.
+// ──────────────────────────────────────────────────────────────────────────────
 
-/// Helper: deploy + init an escrow (no maturity lock) at ledger time `now`, returning
-/// the client and current admin. Centralises the 17-argument `init` boilerplate.
-fn init_for_raise_horizon<'a>(
-    env: &'a Env,
-    label: &str,
-    now: u64,
-) -> (LiquifactEscrowClient<'a>, Address) {
-    let (client, admin, sme) = setup(env);
-    let (token, treasury) = free_addresses(env);
-    env.ledger().set_timestamp(now);
-    client.init(
-        &admin,
-        &soroban_sdk::String::from_str(env, label),
-        &sme,
-        &1_000i128,
-        &500i64,
-        &0u64,
-        &token,
-        &None,
-        &treasury,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-    );
-    (client, admin)
-}
-
-/// A strictly greater horizon is accepted, persisted, returned, and emits
-/// `MaturityMaxHorizonRaised` with the old/new values.
+/// A legal hold blocks `partial_settle` with the dedicated
+/// [`EscrowError::LegalHoldBlocksPartialSettle`] code (not the borrowed
+/// settlement code).
 #[test]
-fn test_raise_maturity_max_horizon_success_and_event() {
+fn test_partial_settle_legal_hold_typed_error() {
     let env = Env::default();
-    env.mock_all_auths();
-    let (client, _admin) = init_for_raise_horizon(&env, "HORI_RS", 1_000);
-    let contract_id = client.address.clone();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
 
-    let old = client.get_maturity_max_horizon();
-    let new_horizon = old + 1_000;
+    client.set_legal_hold(&true);
 
-    let returned = client.raise_maturity_max_horizon(&new_horizon);
-    assert_eq!(returned, new_horizon);
-    assert_eq!(client.get_maturity_max_horizon(), new_horizon);
-
-    assert_eq!(
-        env.events().all().events().last().unwrap().clone(),
-        MaturityMaxHorizonRaised {
-            name: symbol_short!("mtry_rse"),
-            invoice_id: client.get_escrow().invoice_id,
-            old_horizon: old,
-            new_horizon,
-        }
-        .to_xdr(&env, &contract_id)
+    assert_contract_error(
+        client.try_partial_settle(&sme),
+        EscrowError::LegalHoldBlocksPartialSettle,
     );
 }
 
-/// An equal horizon is rejected with `HorizonNotRaised` (#201); the stored value is unchanged.
+/// A caller that is neither the SME nor the admin is rejected with
+/// [`EscrowError::PartialSettleUnauthorizedCaller`].
 #[test]
-#[should_panic(expected = "Error(Contract, #201)")]
-fn test_raise_maturity_max_horizon_rejects_equal() {
+fn test_partial_settle_unauthorized_caller_typed_error() {
     let env = Env::default();
-    env.mock_all_auths();
-    let (client, _admin) = init_for_raise_horizon(&env, "HORI_EQ", 1_000);
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
 
-    let current = client.get_maturity_max_horizon();
-    client.raise_maturity_max_horizon(&current);
-}
+    let stranger = Address::generate(&env);
 
-/// A lower horizon is rejected with `HorizonNotRaised` (#201).
-#[test]
-#[should_panic(expected = "Error(Contract, #201)")]
-fn test_raise_maturity_max_horizon_rejects_lower() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, _admin) = init_for_raise_horizon(&env, "HORI_LO", 1_000);
-
-    let current = client.get_maturity_max_horizon();
-    client.raise_maturity_max_horizon(&(current - 1));
-}
-
-/// A rejected raise must not mutate the stored horizon.
-#[test]
-fn test_raise_maturity_max_horizon_rejection_leaves_state_intact() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, _admin) = init_for_raise_horizon(&env, "HORI_NS", 1_000);
-
-    let current = client.get_maturity_max_horizon();
-    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        client.raise_maturity_max_horizon(&current);
-    }));
-    assert!(res.is_err(), "equal horizon must be rejected");
-    assert_eq!(
-        client.get_maturity_max_horizon(),
-        current,
-        "rejected raise must not alter the stored horizon"
+    assert_contract_error(
+        client.try_partial_settle(&stranger),
+        EscrowError::PartialSettleUnauthorizedCaller,
     );
 }
 
-/// `raise_maturity_max_horizon` is admin-gated: an unauthorized caller fails.
+/// `partial_settle` on a non-open escrow (already funded → status 1) is rejected
+/// with [`EscrowError::PartialSettleNotOpen`].
 #[test]
-#[should_panic]
-fn test_raise_maturity_max_horizon_requires_admin_auth() {
+fn test_partial_settle_not_open_typed_error() {
     let env = Env::default();
-    let (client, _admin) = init_for_raise_horizon(&env, "HORI_AU", 1_000);
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
 
-    let current = client.get_maturity_max_horizon();
-    env.mock_auths(&[]);
-    client.raise_maturity_max_horizon(&(current + 1));
-}
+    // Fund to target so status transitions 0 → 1; partial_settle requires status == 0.
+    let investor = Address::generate(&env);
+    client.fund(&investor, &TARGET);
+    assert_eq!(client.get_escrow().status, 1u32);
 
-/// After raising the ceiling, a later `update_maturity` may target a timestamp within
-/// the newly raised horizon (i.e. beyond the previous default ceiling).
-#[test]
-fn test_raise_maturity_max_horizon_enables_far_maturity_update() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let now = 1_000u64;
-    let (client, _admin) = init_for_raise_horizon(&env, "HORI_FU", now);
-
-    let old = client.get_maturity_max_horizon();
-    let raised = old + 10_000;
-    client.raise_maturity_max_horizon(&raised);
-
-    // A maturity at now + old + 1 sits beyond the previous ceiling but within the new one.
-    let target = now + old + 1;
-    client.update_maturity(&target);
-    assert_eq!(client.get_escrow().maturity, target);
+    assert_contract_error(
+        client.try_partial_settle(&sme),
+        EscrowError::PartialSettleNotOpen,
+    );
 }

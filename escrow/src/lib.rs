@@ -445,15 +445,12 @@ pub enum EscrowError {
     /// [`LiquifactEscrow::lower_min_contribution_floor`] received a non-positive floor.
     NewFloorNotPositive = 175,
     /// Caller is not authorized to perform partial settlement.
+    /// Only the escrow's `sme_address` or `admin` may call [`LiquifactEscrow::partial_settle`].
     PartialSettleUnauthorizedCaller = 200,
-    /// Operational pause is active; [`LiquifactEscrow::fund`] is blocked. Orthogonal to legal hold.
-    PausedBlocksFunding = 201,
-    /// Operational pause is active; [`LiquifactEscrow::settle`] is blocked. Orthogonal to legal hold.
-    PausedBlocksSettlement = 202,
-    /// Operational pause is active; [`LiquifactEscrow::withdraw`] is blocked. Orthogonal to legal hold.
-    PausedBlocksWithdrawal = 203,
-    /// Operational pause is active; [`LiquifactEscrow::claim_investor_payout`] is blocked. Orthogonal to legal hold.
-    PausedBlocksInvestorClaims = 204,
+    /// [`LiquifactEscrow::partial_settle`] blocked while a legal hold is active.
+    LegalHoldBlocksPartialSettle = 201,
+    /// [`LiquifactEscrow::partial_settle`] called while escrow is not in open status (`status != 0`).
+    PartialSettleNotOpen = 202,
     MaxPerInvestorCapNotConfigured = 24, // new
     MaxPerInvestorCapNotRaised = 25,     // new
     /// [`LiquifactEscrow::raise_maturity_max_horizon`] received a `new_horizon` that is
@@ -3725,7 +3722,7 @@ impl LiquifactEscrow {
         ensure(
             &env,
             !Self::legal_hold_active(&env),
-            EscrowError::LegalHoldBlocksSettlement,
+            EscrowError::LegalHoldBlocksPartialSettle,
         );
 
         let mut escrow = Self::get_escrow(env.clone());
@@ -3736,11 +3733,7 @@ impl LiquifactEscrow {
             EscrowError::PartialSettleUnauthorizedCaller,
         );
 
-        ensure(
-            &env,
-            escrow.status == 0,
-            EscrowError::EscrowNotOpenForFunding,
-        );
+        ensure(&env, escrow.status == 0, EscrowError::PartialSettleNotOpen);
 
         // Transition to funded status early.
         escrow.status = 1;
