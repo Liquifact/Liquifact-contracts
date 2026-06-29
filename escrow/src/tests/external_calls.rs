@@ -674,3 +674,189 @@ fn sweep_liability_floor_all_refunded_sweep_all_dust() {
     assert_eq!(swept, expected);
     assert_eq!(token.token.balance(&treasury), expected);
 }
+
+// ── get_reconciliation view ──────────────────────────────────────────────────
+//
+// These tests assert that the reconciliation view's `surplus` equals exactly the
+// amount `sweep_terminal_dust` would permit to be swept (the live balance minus
+// the outstanding investor liability), both before and after partial refunds.
+
+#[test]
+fn reconciliation_reports_zero_surplus_when_balance_equals_liability() {
+    // Cancelled escrow, funded 1000, balance 1000, no refunds yet.
+    // outstanding = 1000, surplus = 0 → nothing is sweepable.
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    let fund_amount = 1_000i128;
+    let (token, _treasury) =
+        setup_cancelled_with_token(&env, &client, &admin, &sme, &investor, fund_amount);
+
+    let view = client.get_reconciliation();
+    assert_eq!(view.token_balance, fund_amount);
+    assert_eq!(view.outstanding_liability, fund_amount);
+    assert_eq!(view.surplus, 0i128);
+    assert_eq!(view.token_balance, token.token.balance(&client.address));
+}
+
+#[test]
+fn reconciliation_surplus_equals_sweepable_dust_before_and_after_partial_refund() {
+    // Two investors fund 500 each; 1 unit of dust is minted on top (balance 1001).
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let investor_a = Address::generate(&env);
+    let investor_b = Address::generate(&env);
+    let token = install_stellar_asset_token(&env);
+    let treasury = Address::generate(&env);
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "RECON01"),
+        &sme,
+        &2_000i128,
+        &0i64,
+        &0u64,
+        &token.id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+    token.stellar.mint(&client.address, &1_001i128);
+    client.fund(&investor_a, &500i128);
+    client.fund(&investor_b, &500i128);
+    client.cancel_funding();
+
+    // Before any refund: outstanding = 1000, balance = 1001, surplus = 1.
+    let before = client.get_reconciliation();
+    assert_eq!(before.token_balance, 1_001i128);
+    assert_eq!(before.outstanding_liability, 1_000i128);
+    assert_eq!(before.surplus, 1i128);
+
+    // After refunding investor A: distributed = 500, outstanding = 500. refund()
+    // transfers A's 500 principal out, so balance drops to 501 (500 for B + 1 dust).
+    client.refund(&investor_a);
+    assert_eq!(client.get_distributed_principal(), 500i128);
+
+    let after = client.get_reconciliation();
+    assert_eq!(after.token_balance, 501i128);
+    assert_eq!(after.outstanding_liability, 500i128);
+    assert_eq!(after.surplus, 1i128);
+
+    // The reported surplus is exactly what sweep_terminal_dust permits: sweeping
+    // `surplus` succeeds and leaves balance == outstanding.
+    let swept = client.sweep_terminal_dust(&after.surplus);
+    assert_eq!(swept, after.surplus);
+    let settled = client.get_reconciliation();
+    assert_eq!(settled.token_balance, 500i128);
+    assert_eq!(settled.outstanding_liability, 500i128);
+    assert_eq!(settled.surplus, 0i128);
+}
+
+#[test]
+fn reconciliation_reports_surplus_when_over_funded() {
+    // Cancelled escrow funded 1000 (balance 1000), then 50 extra dust minted.
+    // outstanding = 1000, balance = 1050, surplus = 50.
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    let fund_amount = 1_000i128;
+    let (token, treasury) =
+        setup_cancelled_with_token(&env, &client, &admin, &sme, &investor, fund_amount);
+    token.stellar.mint(&client.address, &50i128);
+
+    let view = client.get_reconciliation();
+    assert_eq!(view.token_balance, 1_050i128);
+    assert_eq!(view.outstanding_liability, 1_000i128);
+    assert_eq!(view.surplus, 50i128);
+
+    // Surplus never exceeds what sweep permits: sweeping exactly `surplus` works.
+    let swept = client.sweep_terminal_dust(&view.surplus);
+    assert_eq!(swept, 50i128);
+    assert_eq!(token.token.balance(&treasury), 50i128);
+}
+
+#[test]
+#[should_panic]
+fn reconciliation_surplus_is_max_sweepable_one_more_panics() {
+    // Sweeping one unit more than the reported surplus must violate the floor.
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    let fund_amount = 1_000i128;
+    let (token, _treasury) =
+        setup_cancelled_with_token(&env, &client, &admin, &sme, &investor, fund_amount);
+    token.stellar.mint(&client.address, &50i128);
+
+    let view = client.get_reconciliation();
+    assert_eq!(view.surplus, 50i128);
+    // surplus + 1 dips into outstanding liability → panic.
+    client.sweep_terminal_dust(&(view.surplus + 1));
+}
+
+#[test]
+fn reconciliation_zero_balance_and_zero_liability() {
+    // Initialized but never funded and never minted: everything is zero.
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let token = install_stellar_asset_token(&env);
+    let treasury = Address::generate(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "RECON02"),
+        &sme,
+        &1_000i128,
+        &0i64,
+        &0u64,
+        &token.id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    let view = client.get_reconciliation();
+    assert_eq!(view.token_balance, 0i128);
+    assert_eq!(view.outstanding_liability, 0i128);
+    assert_eq!(view.surplus, 0i128);
+}
+
+#[test]
+fn reconciliation_fully_distributed_reports_only_dust_as_surplus() {
+    // Fund 1000, add 1 dust (balance 1001), cancel, refund the only investor.
+    // distributed = 1000 → outstanding = 0; balance = 1 (the dust) → surplus = 1.
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    let fund_amount = 1_000i128;
+    let (token, _treasury) =
+        setup_cancelled_with_token(&env, &client, &admin, &sme, &investor, fund_amount);
+    token.stellar.mint(&client.address, &1i128);
+
+    client.refund(&investor);
+    assert_eq!(client.get_distributed_principal(), fund_amount);
+
+    let view = client.get_reconciliation();
+    assert_eq!(view.token_balance, 1i128);
+    assert_eq!(view.outstanding_liability, 0i128);
+    assert_eq!(view.surplus, 1i128);
+    assert_eq!(view.token_balance, token.token.balance(&client.address));
+}
