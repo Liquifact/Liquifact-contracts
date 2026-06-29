@@ -50,6 +50,8 @@ fn setup_inited(
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
     (client, admin, sme, treasury, token)
 }
@@ -59,7 +61,10 @@ macro_rules! assert_no_auth_panics {
     ($env:expr, $call:expr) => {{
         $env.mock_auths(&[]);
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| $call));
-        assert!(result.is_err(), "expected panic with no auth, but call succeeded");
+        assert!(
+            result.is_err(),
+            "expected panic with no auth, but call succeeded"
+        );
     }};
 }
 

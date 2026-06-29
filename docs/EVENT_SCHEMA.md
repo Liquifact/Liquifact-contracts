@@ -44,7 +44,6 @@ The current contract defines 20 event structs.
 | `MaturityUpdatedEvent` | `maturity` | `update_maturity` |
 | `AdminTransferredEvent` | `admin` | `accept_admin` |
 | `AdminProposedEvent` | `adm_prop` | `propose_admin`, `transfer_admin` |
-| `DeprecatedTransferAdminUsed` | `depr_xfer` | `transfer_admin` |
 | `BeneficiaryRotated` | `ben_rot` | `rotate_beneficiary` |
 | `FundingTargetUpdated` | `fund_tgt` | `update_funding_target` |
 | `LegalHoldChanged` | `legalhld` | `set_legal_hold`, `clear_legal_hold` |
@@ -206,40 +205,6 @@ Data:
 |---|---|
 | `current_admin` | `Address` |
 | `pending_admin` | `Address` |
-
-### `DeprecatedTransferAdminUsed`
-
-Emitted after successful `transfer_admin` (the deprecated one-step admin
-transfer shim). The shim still delegates to `propose_admin`, which emits
-[`AdminProposedEvent`](#adminproposedevent) as its primary signal; this
-event is published **in addition to** that proposal event, in the same
-transaction, after it. The extra event is purely **observability**:
-handover behavior is unchanged and no new authority is granted beyond
-what `propose_admin` already exposes.
-
-Operators can aggregate this event over a deployment window to count
-integrations still calling the legacy `transfer_admin` shim and drive
-them to the canonical `propose_admin` → `accept_admin` two-step flow
-before the shim is removed.
-
-Topics:
-
-| Index | Field | Type | Value |
-|---:|---|---|---|
-| 0 | fixed event topic | `Symbol` | `deprecated_transfer_admin_used` |
-| 1 | `name` | `Symbol` | `depr_xfer` |
-| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
-
-Data:
-
-| Field | Type | Notes |
-|---|---|---|
-| `proposed_address` | `Address` | The address proposed via the deprecated shim; equals `pending_admin` on the prior `AdminProposedEvent` emitted in the same transaction. |
-
-On the rejection path (for example, when the proposed address equals the
-current admin), `propose_admin` aborts with a typed error and neither
-`AdminProposedEvent` nor `DeprecatedTransferAdminUsed` is published.
-Failed shim calls therefore cannot pollute the legacy-usage count.
 
 ### `BeneficiaryRotated`
 

@@ -63,3 +63,11 @@ The state-machine rules above are verified in `escrow/src/tests/funding.rs`:
 | `test_effective_yield_bps_zero_base_yield` | `get_effective_yield_bps` resolves to `0` when base yield is `0` |
 | `test_effective_yield_bps_matches_payout_resolution` | `get_effective_yield_bps` matches the yield `compute_investor_payout` applies |
 
+## Read API
+
+The tier table is readable after `init` via `get_yield_tiers() -> Vec<YieldTier>`.
+
+- Returns an empty `Vec` when no tiers were configured.
+- Returned order matches the validated non-decreasing ordering enforced at `init`.
+- Pure read — no auth required, no state mutation.
+- See `docs/escrow-read-api.md` for the full getter reference.

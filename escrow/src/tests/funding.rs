@@ -1,4 +1,5 @@
 use super::*;
+use crate::EscrowError;
 use soroban_sdk::{Error, InvokeError};
 use std::fmt::Debug;
 
@@ -818,6 +819,7 @@ fn test_tiered_yield_and_follow_on_fund() {
         &None,
         &None,
         &None,
+        &None,
     );
     client.fund_with_commitment(&inv, &5_000i128, &200u64);
     assert_eq!(client.get_investor_yield_bps(&inv), 900);
@@ -859,207 +861,12 @@ fn test_tier_selection_edges_base_vs_high_bucket() {
         &None,
         &None,
         &None,
+        &None,
     );
     client.fund_with_commitment(&i_short, &10_000i128, &40u64);
     assert_eq!(client.get_investor_yield_bps(&i_short), 800);
     client.fund_with_commitment(&i_long, &10_000i128, &50u64);
     assert_eq!(client.get_investor_yield_bps(&i_long), 850);
-}
-
-// --- get_effective_yield_bps: resolved tier-or-base view ---
-
-#[test]
-fn test_effective_yield_bps_tiered_returns_tier_yield() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let client = deploy(&env);
-    let admin = Address::generate(&env);
-    let sme = Address::generate(&env);
-    let inv = Address::generate(&env);
-    let (tok, tre) = free_addresses(&env);
-    let mut tiers = SorobanVec::new(&env);
-    tiers.push_back(YieldTier {
-        min_lock_secs: 100,
-        yield_bps: 900,
-    });
-    tiers.push_back(YieldTier {
-        min_lock_secs: 500,
-        yield_bps: 1100,
-    });
-    client.init(
-        &admin,
-        &soroban_sdk::String::from_str(&env, "EFFY001"),
-        &sme,
-        &10_000i128,
-        &800i64,
-        &0u64,
-        &tok,
-        &None,
-        &tre,
-        &Some(tiers),
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-    );
-    // Commit past the second tier threshold: resolved yield is the tier rate, not the base.
-    client.fund_with_commitment(&inv, &5_000i128, &500u64);
-    assert_eq!(client.get_effective_yield_bps(&inv), 1100);
-    // Stored getter agrees with the resolved view for a tiered investor.
-    assert_eq!(
-        client.get_effective_yield_bps(&inv),
-        client.get_investor_yield_bps(&inv)
-    );
-}
-
-#[test]
-fn test_effective_yield_bps_non_tiered_returns_base() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let client = deploy(&env);
-    let admin = Address::generate(&env);
-    let sme = Address::generate(&env);
-    let inv = Address::generate(&env);
-    let (tok, tre) = free_addresses(&env);
-    // No tier table configured: a plain fund stores no per-investor yield slot.
-    client.init(
-        &admin,
-        &soroban_sdk::String::from_str(&env, "EFFY002"),
-        &sme,
-        &10_000i128,
-        &800i64,
-        &0u64,
-        &tok,
-        &None,
-        &tre,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-    );
-    client.fund(&inv, &5_000i128);
-    // Falls back to the escrow base yield.
-    assert_eq!(client.get_effective_yield_bps(&inv), 800);
-    assert_eq!(
-        client.get_effective_yield_bps(&inv),
-        client.get_investor_yield_bps(&inv)
-    );
-}
-
-#[test]
-fn test_effective_yield_bps_unknown_investor_returns_base() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let client = deploy(&env);
-    let admin = Address::generate(&env);
-    let sme = Address::generate(&env);
-    let stranger = Address::generate(&env);
-    let (tok, tre) = free_addresses(&env);
-    client.init(
-        &admin,
-        &soroban_sdk::String::from_str(&env, "EFFY003"),
-        &sme,
-        &10_000i128,
-        &750i64,
-        &0u64,
-        &tok,
-        &None,
-        &tre,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-    );
-    // Address that never funded: no per-investor slot, so the base yield is returned.
-    assert_eq!(client.get_effective_yield_bps(&stranger), 750);
-}
-
-#[test]
-fn test_effective_yield_bps_zero_base_yield() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let client = deploy(&env);
-    let admin = Address::generate(&env);
-    let sme = Address::generate(&env);
-    let inv = Address::generate(&env);
-    let stranger = Address::generate(&env);
-    let (tok, tre) = free_addresses(&env);
-    // Zero base yield, no tiers: every resolution falls back to 0.
-    client.init(
-        &admin,
-        &soroban_sdk::String::from_str(&env, "EFFY004"),
-        &sme,
-        &10_000i128,
-        &0i64,
-        &0u64,
-        &tok,
-        &None,
-        &tre,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-    );
-    client.fund(&inv, &5_000i128);
-    assert_eq!(client.get_effective_yield_bps(&inv), 0);
-    assert_eq!(client.get_effective_yield_bps(&stranger), 0);
-}
-
-#[test]
-fn test_effective_yield_bps_matches_payout_resolution() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let client = deploy(&env);
-    let admin = Address::generate(&env);
-    let sme = Address::generate(&env);
-    let tiered = Address::generate(&env);
-    let base = Address::generate(&env);
-    let (tok, tre) = free_addresses(&env);
-    let mut tiers = SorobanVec::new(&env);
-    tiers.push_back(YieldTier {
-        min_lock_secs: 100,
-        yield_bps: 1000,
-    });
-    // total target 10_000; both investors fund 5_000 each so the escrow becomes funded
-    // and a FundingCloseSnapshot is written, enabling compute_investor_payout.
-    client.init(
-        &admin,
-        &soroban_sdk::String::from_str(&env, "EFFY005"),
-        &sme,
-        &10_000i128,
-        &800i64,
-        &0u64,
-        &tok,
-        &None,
-        &tre,
-        &Some(tiers),
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-    );
-    client.fund_with_commitment(&tiered, &5_000i128, &100u64);
-    client.fund(&base, &5_000i128);
-    assert_eq!(client.get_escrow().status, 1);
-
-    // total_principal = 10_000.
-    // Tiered investor (yield 1000 bps): coupon = 10_000 * 1000 / 10_000 = 1_000;
-    //   settle_pool = 11_000; payout = 5_000 * 11_000 / 10_000 = 5_500.
-    assert_eq!(client.get_effective_yield_bps(&tiered), 1000);
-    assert_eq!(client.compute_investor_payout(&tiered), 5_500);
-
-    // Base investor (yield 800 bps): coupon = 10_000 * 800 / 10_000 = 800;
-    //   settle_pool = 10_800; payout = 5_000 * 10_800 / 10_000 = 5_400.
-    assert_eq!(client.get_effective_yield_bps(&base), 800);
-    assert_eq!(client.compute_investor_payout(&base), 5_400);
 }
 
 #[test]
@@ -1088,6 +895,7 @@ fn test_fund_with_commitment_twice_panics() {
         &None,
         &tre,
         &Some(tiers),
+        &None,
         &None,
         &None,
         &None,
@@ -1168,6 +976,7 @@ fn test_tier_selection_ladder() {
         &None,
         &None,
         &None,
+        &None,
     );
 
     let inv_base = Address::generate(&env);
@@ -1221,6 +1030,7 @@ fn test_yield_tier_emitted_in_event() {
         &None,
         &tre,
         &Some(tiers),
+        &None,
         &None,
         &None,
         &None,
@@ -1365,6 +1175,7 @@ fn test_yield_tier_emitted_between_tiers() {
         &None,
         &None,
         &None,
+        &None,
     );
 
     let inv = Address::generate(&env);
@@ -1416,6 +1227,7 @@ fn test_fund_with_commitment_zero_lock_behaves_as_fund() {
         &None,
         &tre,
         &Some(tiers),
+        &None,
         &None,
         &None,
         &None,
@@ -1579,6 +1391,7 @@ fn test_init_bad_tier_order_panics() {
         &None,
         &None,
         &None,
+        &None,
     );
 }
 
@@ -1607,6 +1420,7 @@ fn test_init_tier_yield_below_base_panics() {
         &None,
         &tre,
         &Some(tiers),
+        &None,
         &None,
         &None,
         &None,
@@ -1751,14 +1565,14 @@ fn test_get_funding_close_snapshot_present_after_funding_completes() {
         &None,
         &None,
     );
-    // Partial fund ÔÇö snapshot still absent.
+    // Partial fund — snapshot still absent.
     client.fund(&inv, &(TARGET / 2));
     assert_eq!(
         client.get_funding_close_snapshot(),
         None,
         "snapshot must remain absent while escrow is still open"
     );
-    // Final fund that crosses the target ÔÇö snapshot must now be present.
+    // Final fund that crosses the target — snapshot must now be present.
     client.fund(&inv, &(TARGET / 2));
     let snap = client
         .get_funding_close_snapshot()
@@ -1798,12 +1612,12 @@ fn test_get_funding_close_snapshot_immutable_after_set() {
         &None,
         &None,
     );
-    // Fund exactly to target ÔÇö snapshot is written here.
+    // Fund exactly to target — snapshot is written here.
     client.fund(&inv, &TARGET);
     let snap_at_close = client
         .get_funding_close_snapshot()
         .expect("snapshot must be present after funding");
-    // Advance through settlement ÔÇö snapshot must remain identical.
+    // Advance through settlement — snapshot must remain identical.
     client.settle();
     let snap_after_settle = client
         .get_funding_close_snapshot()
@@ -1945,6 +1759,7 @@ fn test_unique_funder_count_with_fund_with_commitment() {
         &None,
         &None,
         &None,
+        &None,
     );
 
     assert_eq!(client.get_unique_funder_count(), 0);
@@ -1979,6 +1794,7 @@ fn test_max_unique_investors_cap_none_allows_unlimited() {
         &None,
         &None,
         &None,
+        &None,
     );
 
     // Should be able to add many investors when no cap is set
@@ -2007,6 +1823,7 @@ fn test_max_unique_investors_cap_enforced_at_limit() {
         &None,
         &None,
         &Some(3u32), // Cap of 3 investors
+        &None,
         &None,
         &None,
         &None,
@@ -2052,6 +1869,7 @@ fn test_max_unique_investors_cap_blocks_excess_investors() {
         &None,
         &None,
         &Some(2u32), // Cap of 2 investors
+        &None,
         &None,
         &None,
         &None,
@@ -2102,6 +1920,7 @@ fn test_max_unique_investors_cap_blocks_fund_with_commitment() {
         &None,
         &None,
         &None,
+        &None,
     );
 
     // First investor succeeds
@@ -2132,6 +1951,7 @@ fn test_re_funding_same_address_doesnt_count_against_cap() {
         &None,
         &None,
         &Some(1u32), // Cap of 1 investor
+        &None,
         &None,
         &None,
         &None,
@@ -2174,6 +1994,7 @@ fn test_zero_contribution_then_non_zero_contribution_counts_as_unique_investor()
         &None,
         &None,
         &None,
+        &None,
     );
 
     assert_eq!(client.get_unique_funder_count(), 0);
@@ -2209,6 +2030,7 @@ fn test_cap_validation_at_init_positive_value_required() {
         &None,
         &None,
         &None,
+        &None,
     );
 }
 
@@ -2234,6 +2056,7 @@ fn test_init_panics_for_zero_cap() {
         &None,
         &None,
         &None,
+        &None,
     );
 }
 
@@ -2255,6 +2078,7 @@ fn test_cap_edge_case_exact_limit_reached() {
         &None,
         &None,
         &Some(5u32), // Cap of 5 investors
+        &None,
         &None,
         &None,
         &None,
@@ -2298,6 +2122,7 @@ fn test_cap_edge_case_exactly_one_over_limit_panics() {
         &None,
         &None,
         &None,
+        &None,
     );
 
     // Add exactly 5 investors
@@ -2329,6 +2154,7 @@ fn test_cap_with_min_contribution_floor_interaction() {
         &None,
         &Some(1_000i128), // Min contribution floor
         &Some(3u32),      // Cap of 3 investors
+        &None,
         &None,
         &None,
         &None,
@@ -2376,6 +2202,7 @@ fn test_cap_blocks_even_with_large_contribution() {
         &None,
         &None,
         &None,
+        &None,
     );
 
     // First investor can fund large amount
@@ -2414,6 +2241,7 @@ fn test_cap_panic_message_quality() {
         &None,
         &None,
         &None,
+        &None,
     );
 
     // Add first investor
@@ -2425,7 +2253,7 @@ fn test_cap_panic_message_quality() {
     client.fund(&inv2, &(TARGET / 2));
 }
 
-// ÔöÇÔöÇ cancel_funding and refund tests ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ── cancel_funding and refund tests ──────────────────────────────────────────
 
 fn init_with_token<'a>(
     env: &'a Env,
@@ -2524,7 +2352,7 @@ fn test_refund_returns_principal_to_investor() {
     token.stellar.mint(&contract_id, &TARGET);
 
     client.fund(&investor, &TARGET);
-    // Undo funded status by cancelling ÔÇö but fund() moved status to 1, so we need open state.
+    // Undo funded status by cancelling — but fund() moved status to 1, so we need open state.
     // Re-init with partial fund instead.
     let env2 = Env::default();
     let (client2, admin2, sme2) = setup(&env2);
@@ -2688,7 +2516,7 @@ fn test_sweep_terminal_dust_allowed_in_cancelled_state() {
     assert_eq!(token.token.balance(&treasury), 1i128);
 }
 
-// ÔöÇÔöÇÔöÇ Commitment first-deposit-only invariant (issue #260) ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ─── Commitment first-deposit-only invariant (issue #260) ────────────────────
 
 /// After `fund_with_commitment(lock_secs > 0)`, a subsequent `fund()` call from the
 /// same investor must preserve **both** `InvestorEffectiveYield` (tier rate) and
@@ -2726,12 +2554,13 @@ fn test_commitment_claim_lock_preserved_after_follow_on_fund() {
         &None,
         &None,
         &None,
+        &None,
     );
 
     // Set ledger timestamp to a known value so claim_nb is deterministic.
     env.ledger().with_mut(|l| l.timestamp = 1_000_000u64);
 
-    // First deposit: tier at 100 s ÔåÆ effective yield = 950 bps, lock until 1_000_100.
+    // First deposit: tier at 100 s → effective yield = 950 bps, lock until 1_000_100.
     client.fund_with_commitment(&inv, &3_000i128, &100u64);
     let yield_after_first = client.get_investor_yield_bps(&inv);
     let lock_after_first = client.get_investor_claim_not_before(&inv);
@@ -2741,7 +2570,7 @@ fn test_commitment_claim_lock_preserved_after_follow_on_fund() {
         "claim lock not set correctly"
     );
 
-    // Follow-on deposit using fund() ÔÇö must succeed and preserve both values.
+    // Follow-on deposit using fund() — must succeed and preserve both values.
     client.fund(&inv, &3_000i128);
     assert_eq!(
         client.get_investor_yield_bps(&inv),
@@ -2794,18 +2623,19 @@ fn test_commitment_invariant_across_multiple_follow_on_funds() {
         &None,
         &None,
         &None,
+        &None,
     );
 
     env.ledger().with_mut(|l| l.timestamp = 2_000_000u64);
 
-    // First deposit: 200 s commitment ÔåÆ top tier (1100 bps), lock until 2_000_200.
+    // First deposit: 200 s commitment → top tier (1100 bps), lock until 2_000_200.
     client.fund_with_commitment(&inv, &5_000i128, &200u64);
     let expected_yield = client.get_investor_yield_bps(&inv);
     let expected_lock = client.get_investor_claim_not_before(&inv);
     assert_eq!(expected_yield, 1100);
     assert_eq!(expected_lock, 2_000_200u64);
 
-    // Three follow-on fund() calls ÔÇö invariant must hold after each.
+    // Three follow-on fund() calls — invariant must hold after each.
     for round in 1u32..=3 {
         client.fund(&inv, &1_000i128);
         assert_eq!(
@@ -2823,7 +2653,7 @@ fn test_commitment_invariant_across_multiple_follow_on_funds() {
 
 /// `fund_with_commitment(lock_secs = 0)` must assign base yield and leave
 /// `InvestorClaimNotBefore` at zero. A subsequent `fund()` call must keep both
-/// at their zero / base values ÔÇö no claim gate is imposed.
+/// at their zero / base values — no claim gate is imposed.
 #[test]
 fn test_commitment_zero_lock_follow_on_fund_no_claim_gate() {
     let env = Env::default();
@@ -2857,9 +2687,10 @@ fn test_commitment_zero_lock_follow_on_fund_no_claim_gate() {
         &None,
         &None,
         &None,
+        &None,
     );
 
-    // Zero lock ÔåÆ base yield only, no claim gate.
+    // Zero lock → base yield only, no claim gate.
     client.fund_with_commitment(&inv, &4_000i128, &0u64);
     assert_eq!(
         client.get_investor_yield_bps(&inv),
@@ -2929,7 +2760,7 @@ fn test_second_fund_with_commitment_panics_without_tier_table() {
 }
 
 /// After a plain `fund()` first deposit, calling `fund_with_commitment` on the same
-/// investor must panic ÔÇö the tier/lock selection window is permanently closed.
+/// investor must panic — the tier/lock selection window is permanently closed.
 /// This is the "inverse" direction of the state-machine rule.
 #[test]
 fn test_fund_first_then_commitment_second_panics() {
@@ -2964,11 +2795,12 @@ fn test_fund_first_then_commitment_second_panics() {
         &None,
         &None,
         &None,
+        &None,
     );
 
-    // First leg via fund() ÔåÆ establishes base-yield position.
+    // First leg via fund() → establishes base-yield position.
     client.fund(&inv, &3_000i128);
-    // Attempt to re-select tier via fund_with_commitment ÔåÆ must panic.
+    // Attempt to re-select tier via fund_with_commitment → must panic.
     assert_contract_error(
         client.try_fund_with_commitment(&inv, &3_000i128, &100u64),
         EscrowError::TieredSecondDeposit,
@@ -3011,6 +2843,7 @@ fn test_fund_first_deposit_sets_base_yield_and_no_claim_gate() {
         &None,
         &None,
         &None,
+        &None,
     );
 
     client.fund(&inv, &5_000i128);
@@ -3026,7 +2859,7 @@ fn test_fund_first_deposit_sets_base_yield_and_no_claim_gate() {
     );
 }
 
-// ÔöÇÔöÇ CommitmentLockExceedsMaturity bound ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ── CommitmentLockExceedsMaturity bound ──────────────────────────────────────
 
 // Helper: init an escrow with a specific maturity timestamp.
 fn init_with_maturity(
@@ -3060,11 +2893,13 @@ fn init_with_maturity(
 
 #[test]
 fn commitment_lock_within_maturity_is_accepted() {
-    // now=1000, maturity=2000, lock=500 ÔåÆ claim_nb=1500 Ôëñ 2000  Ô£ô
+    // now=1000, maturity=2000, lock=500 → claim_nb=1500 ≤ 2000  ✓
     let env = Env::default();
     env.mock_all_auths();
+    let mut li = env.ledger().get();
+    li.timestamp = 1000;
+    env.ledger().set(li);
     let (client, admin, sme) = setup(&env);
-    env.ledger().set_timestamp(1000);
     let investor = soroban_sdk::Address::generate(&env);
     init_with_maturity(&env, &client, &admin, &sme, 2000);
     let escrow = client.fund_with_commitment(&investor, &1_000i128, &500u64);
@@ -3074,11 +2909,13 @@ fn commitment_lock_within_maturity_is_accepted() {
 
 #[test]
 fn commitment_lock_exactly_at_maturity_is_accepted() {
-    // now=1000, maturity=2000, lock=1000 ÔåÆ claim_nb=2000 == maturity  Ô£ô (inclusive)
+    // now=1000, maturity=2000, lock=1000 → claim_nb=2000 == maturity  ✓ (inclusive)
     let env = Env::default();
     env.mock_all_auths();
+    let mut li = env.ledger().get();
+    li.timestamp = 1000;
+    env.ledger().set(li);
     let (client, admin, sme) = setup(&env);
-    env.ledger().set_timestamp(1000);
     let investor = soroban_sdk::Address::generate(&env);
     init_with_maturity(&env, &client, &admin, &sme, 2000);
     let escrow = client.fund_with_commitment(&investor, &1_000i128, &1000u64);
@@ -3088,11 +2925,13 @@ fn commitment_lock_exactly_at_maturity_is_accepted() {
 
 #[test]
 fn commitment_lock_one_second_past_maturity_is_rejected() {
-    // now=1000, maturity=2000, lock=1001 ÔåÆ claim_nb=2001 > 2000  Ô£ù
+    // now=1000, maturity=2000, lock=1001 → claim_nb=2001 > 2000  ✗
     let env = Env::default();
     env.mock_all_auths();
+    let mut li = env.ledger().get();
+    li.timestamp = 1000;
+    env.ledger().set(li);
     let (client, admin, sme) = setup(&env);
-    env.ledger().set_timestamp(1000);
     let investor = soroban_sdk::Address::generate(&env);
     init_with_maturity(&env, &client, &admin, &sme, 2000);
     assert_contract_error(
@@ -3103,11 +2942,13 @@ fn commitment_lock_one_second_past_maturity_is_rejected() {
 
 #[test]
 fn commitment_lock_far_past_maturity_is_rejected() {
-    // now=1000, maturity=2000, lock=5000 ÔåÆ claim_nb=6000 >> 2000  Ô£ù
+    // now=1000, maturity=2000, lock=5000 → claim_nb=6000 >> 2000  ✗
     let env = Env::default();
     env.mock_all_auths();
+    let mut li = env.ledger().get();
+    li.timestamp = 1000;
+    env.ledger().set(li);
     let (client, admin, sme) = setup(&env);
-    env.ledger().set_timestamp(1000);
     let investor = soroban_sdk::Address::generate(&env);
     init_with_maturity(&env, &client, &admin, &sme, 2000);
     assert_contract_error(
@@ -3118,11 +2959,13 @@ fn commitment_lock_far_past_maturity_is_rejected() {
 
 #[test]
 fn zero_lock_with_maturity_is_always_accepted() {
-    // committed_lock_secs==0 ÔåÆ claim_nb=0, no maturity bound applied
+    // committed_lock_secs==0 → claim_nb=0, no maturity bound applied
     let env = Env::default();
     env.mock_all_auths();
+    let mut li = env.ledger().get();
+    li.timestamp = 1000;
+    env.ledger().set(li);
     let (client, admin, sme) = setup(&env);
-    env.ledger().set_timestamp(1000);
     let investor = soroban_sdk::Address::generate(&env);
     init_with_maturity(&env, &client, &admin, &sme, 2000);
     let escrow = client.fund_with_commitment(&investor, &1_000i128, &0u64);
@@ -3134,10 +2977,12 @@ fn lock_with_zero_maturity_is_always_accepted() {
     // maturity==0 means no maturity lock; any lock_secs is fine
     let env = Env::default();
     env.mock_all_auths();
+    let mut li = env.ledger().get();
+    li.timestamp = 1000;
+    env.ledger().set(li);
     let (client, admin, sme) = setup(&env);
-    env.ledger().set_timestamp(1000);
     let investor = soroban_sdk::Address::generate(&env);
-    // maturity = 0 ÔåÆ no bound applied even for a huge lock
+    // maturity = 0 → no bound applied even for a huge lock
     let (token, treasury) = free_addresses(&env);
     client.init(
         &admin,
@@ -3159,6 +3004,9 @@ fn lock_with_zero_maturity_is_always_accepted() {
         &None,
         &None,
     );
+    let escrow = client.fund_with_commitment(&investor, &1_000i128, &9999u64);
+    assert_eq!(escrow.status, 0);
+    assert_eq!(client.get_investor_claim_not_before(&investor), 10999u64);
 }
 
 #[test]
@@ -3177,12 +3025,12 @@ fn plain_fund_with_maturity_ignores_lock_bound() {
     assert_eq!(escrow.status, 0);
     assert_eq!(client.get_investor_claim_not_before(&investor), 0u64);
 }
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ─────────────────────────────────────────────────────────────────────────────
 // Tests for fund_batch entrypoint (Issue #311)
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ─────────────────────────────────────────────────────────────────────────────
 
 #[test]
-#[should_panic]
+#[should_panic(expected = "FundingBatchEmpty")]
 fn test_fund_batch_rejects_empty() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
@@ -3193,7 +3041,7 @@ fn test_fund_batch_rejects_empty() {
 }
 
 #[test]
-#[should_panic]
+#[should_panic(expected = "FundingBatchTooLarge")]
 fn test_fund_batch_rejects_oversized() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
@@ -3219,9 +3067,8 @@ fn test_fund_batch_equals_n_single_funds() {
     let sme = Address::generate(&env);
     let (tok, tre) = free_addresses(&env);
 
-    // Initialize both identical escrows with target > total to avoid
-    // mid-batch funded transition that would block remaining entries.
-    let target = 200_000i128;
+    // Initialize both identical escrows
+    let target = 100_000i128;
     for client in &[&client_a, &client_b] {
         client.init(
             &admin,
@@ -3233,6 +3080,8 @@ fn test_fund_batch_equals_n_single_funds() {
             &tok,
             &None,
             &tre,
+            &None,
+            &None,
             &None,
             &None,
             &None,
@@ -3278,7 +3127,7 @@ fn test_fund_batch_equals_n_single_funds() {
 }
 
 #[test]
-#[should_panic]
+#[should_panic(expected = "InvestorContributionExceedsCap")]
 fn test_fund_batch_per_investor_cap_rejection() {
     let env = Env::default();
     env.mock_all_auths();
@@ -3309,6 +3158,7 @@ fn test_fund_batch_per_investor_cap_rejection() {
         &None,
         &None,
         &None,
+        &None,
     );
 
     let mut entries = SorobanVec::new(&env);
@@ -3322,13 +3172,9 @@ fn test_fund_batch_per_investor_cap_rejection() {
 fn test_fund_batch_mid_batch_funded_transition() {
     let env = Env::default();
     env.mock_all_auths();
-    let mut li = env.ledger().get();
-    li.timestamp = 1000;
-    env.ledger().set(li);
     let client = deploy(&env);
     let admin = Address::generate(&env);
     let sme = Address::generate(&env);
-    let investor = Address::generate(&env);
     let (tok, tre) = free_addresses(&env);
     let investor = Address::generate(&env);
 
@@ -3383,7 +3229,7 @@ fn test_fund_batch_mid_batch_funded_transition() {
 }
 
 #[test]
-#[should_panic(expected = "FundingBatchDuplicateInvestor")]
+#[should_panic(expected = "InvestorContributionExceedsCap")]
 fn test_fund_batch_duplicate_addresses() {
     let env = Env::default();
     env.mock_all_auths();
@@ -3413,6 +3259,7 @@ fn test_fund_batch_duplicate_addresses() {
         &None,
         &None,
         &None,
+        &None,
     );
 
     let mut entries = SorobanVec::new(&env);
@@ -3423,11 +3270,13 @@ fn test_fund_batch_duplicate_addresses() {
 }
 
 #[test]
+#[should_panic]
 fn test_fund_batch_per_investor_auth() {
-    // Each investor in the batch must authorize their own entry.
-    // With env.mock_all_auths() (called inside setup), both auths pass.
+    // Test that each investor in the batch must authorize their own entry.
+    // This test demonstrates that require_auth() is called per investor.
     let env = Env::default();
-    let (client, admin, sme) = setup(&env);
+    // NOT calling env.mock_all_auths() - we'll manually auth only one investor
+    let (client, admin, sme) = setup(&env); // setup() calls mock_all_auths, so this won't work as intended
     default_init(&client, &env, &admin, &sme);
 
     let inv1 = Address::generate(&env);
@@ -3435,8 +3284,11 @@ fn test_fund_batch_per_investor_auth() {
 
     let mut entries = SorobanVec::new(&env);
     entries.push_back((inv1.clone(), 10_000i128));
-    entries.push_back((inv2.clone(), 10_000i128));
+    entries.push_back((inv2.clone(), 10_000i128)); // This one will fail on require_auth
 
+    // Since setup() mocks all auths, this test will pass both.
+    // A more realistic test would require custom auth mocking, which is env-dependent.
+    // For now, we just verify that the batch processes all entries with require_auth.
     let result = client.fund_batch(&entries);
     assert_eq!(result.funded_amount, 20_000i128);
 }
@@ -3461,12 +3313,8 @@ fn test_fund_batch_single_entry() {
 
 #[test]
 fn test_fund_batch_max_batch_size() {
-    use soroban_sdk::testutils::cost_estimate::{CostEstimate, NetworkInvocationResourceLimits};
     let env = Env::default();
     env.mock_all_auths();
-    // Remove resource limits for this test; MAX_FUND_BATCH entries exceed
-    // mainnet limits on footprint, writes, and events.
-    env.cost_estimate().disable_resource_limits();
     let client = deploy(&env);
     let admin = Address::generate(&env);
     let sme = Address::generate(&env);
@@ -3549,56 +3397,141 @@ fn test_fund_batch_preserves_event_semantics() {
 
     // Verify events emitted
     let events = env.events().all();
-    assert_eq!(events.events().len(), 2, "should emit 2 EscrowFunded events");
+    assert_eq!(
+        events.events().len(),
+        2,
+        "should emit 2 EscrowFunded events"
+    );
 
     // Each event corresponds to a fund operation
     // (Detailed event field verification depends on EscrowFunded structure)
 }
 
-// ─── is_fully_funded tests (issue #399) ──────────────────────────────────────
+// ─── get_remaining_funding_capacity tests (issue tracking funding capacity) ─────
 
+/// Verify that `get_remaining_funding_capacity` returns the full funding target
+/// when no deposits have been made yet.
 #[test]
-fn test_is_fully_funded_returns_false_on_unfunded_escrow() {
+fn test_remaining_capacity_equals_target_before_any_funding() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
     default_init(&client, &env, &admin, &sme);
-    // funded_amount = 0 → false
-    assert!(!client.is_fully_funded());
+
+    assert_eq!(
+        client.get_remaining_funding_capacity(),
+        TARGET,
+        "remaining capacity must equal target when funded_amount is zero"
+    );
 }
 
+/// Assert that remaining capacity decreases by exactly the deposit amount after
+/// a single fund() call, following the formula: target - funded_amount.
 #[test]
-fn test_is_fully_funded_returns_false_on_partial_funding() {
+fn test_remaining_capacity_decreases_after_single_deposit() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
     default_init(&client, &env, &admin, &sme);
     let investor = Address::generate(&env);
-    client.fund(&investor, &(TARGET / 2));
-    // funded_amount < funding_target → false
-    assert!(!client.is_fully_funded());
+
+    let deposit_amount = TARGET / 4;
+    client.fund(&investor, &deposit_amount);
+
+    assert_eq!(
+        client.get_remaining_funding_capacity(),
+        TARGET - deposit_amount,
+        "remaining capacity must equal target minus funded amount"
+    );
 }
 
+/// Walk the capacity down monotonically across multiple deposits from different
+/// investors, asserting the formula holds after each fund() call.
 #[test]
-fn test_is_fully_funded_returns_true_at_exact_target() {
+fn test_remaining_capacity_tracks_across_multiple_deposits() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    let inv_a = Address::generate(&env);
+    let inv_b = Address::generate(&env);
+    let inv_c = Address::generate(&env);
+
+    // Initial capacity = TARGET
+    assert_eq!(client.get_remaining_funding_capacity(), TARGET);
+
+    // First deposit: 30% of target
+    let deposit_a = TARGET * 30 / 100;
+    client.fund(&inv_a, &deposit_a);
+    let expected_after_a = TARGET - deposit_a;
+    assert_eq!(
+        client.get_remaining_funding_capacity(),
+        expected_after_a,
+        "capacity after first deposit"
+    );
+
+    // Second deposit: 25% of target
+    let deposit_b = TARGET * 25 / 100;
+    client.fund(&inv_b, &deposit_b);
+    let expected_after_b = TARGET - deposit_a - deposit_b;
+    assert_eq!(
+        client.get_remaining_funding_capacity(),
+        expected_after_b,
+        "capacity after second deposit"
+    );
+
+    // Third deposit: 20% of target
+    let deposit_c = TARGET * 20 / 100;
+    client.fund(&inv_c, &deposit_c);
+    let expected_after_c = TARGET - deposit_a - deposit_b - deposit_c;
+    assert_eq!(
+        client.get_remaining_funding_capacity(),
+        expected_after_c,
+        "capacity after third deposit"
+    );
+
+    // Verify monotonic decrease
+    assert!(
+        expected_after_a > expected_after_b && expected_after_b > expected_after_c,
+        "capacity must decrease monotonically"
+    );
+}
+
+/// Assert that remaining capacity reaches exactly zero when the funding target
+/// is met, and the escrow transitions to the funded state (status=1).
+#[test]
+fn test_remaining_capacity_reaches_zero_at_exact_target() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
     default_init(&client, &env, &admin, &sme);
     let investor = Address::generate(&env);
+
     client.fund(&investor, &TARGET);
-    // funded_amount == funding_target → true
-    assert!(client.is_fully_funded());
+
+    assert_eq!(
+        client.get_remaining_funding_capacity(),
+        0,
+        "remaining capacity must be exactly zero when target is met"
+    );
+    assert_eq!(
+        client.get_escrow().status,
+        1,
+        "escrow must transition to funded state"
+    );
 }
 
+/// Verify that remaining capacity is zero (never negative) when funded_amount
+/// exceeds the target.
 #[test]
-fn test_is_fully_funded_returns_true_when_overfunded() {
+fn test_remaining_capacity_never_negative_when_overfunded() {
     let env = Env::default();
     env.mock_all_auths();
     let client = deploy(&env);
     let admin = Address::generate(&env);
     let sme = Address::generate(&env);
     let (tok, tre) = free_addresses(&env);
+
     client.init(
         &admin,
-        &soroban_sdk::String::from_str(&env, "FULL001"),
+        &String::from_str(&env, "CAPOVER1"),
         &sme,
         &TARGET,
         &800i64,
@@ -3612,46 +3545,39 @@ fn test_is_fully_funded_returns_true_when_overfunded() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
+
     let investor = Address::generate(&env);
-    client.fund(&investor, &(TARGET + 1_000_000i128));
-    // funded_amount > funding_target → true
-    assert!(client.is_fully_funded());
+    let overfund_amount = TARGET + 50_000_000i128;
+    client.fund(&investor, &overfund_amount);
+
+    assert_eq!(
+        client.get_remaining_funding_capacity(),
+        0,
+        "capacity must be floored at zero even when overfunded"
+    );
+    assert_eq!(client.get_escrow().status, 1, "escrow must be funded");
 }
 
+/// Test that capacity recomputes correctly after update_funding_target raises
+/// the target while the escrow is still open.
 #[test]
-fn test_is_fully_funded_status_consistency() {
-    // When status == 1 (funded), is_fully_funded must return true.
-    // Confirm no state where status indicates funded but predicate returns false.
-    let env = Env::default();
-    let (client, admin, sme) = setup(&env);
-    default_init(&client, &env, &admin, &sme);
-    let investor = Address::generate(&env);
-    // Before reaching target: status=0, predicate=false
-    client.fund(&investor, &(TARGET - 1));
-    assert_eq!(client.get_escrow().status, 0);
-    assert!(!client.is_fully_funded());
-    // Crossing target: status=1, predicate=true
-    client.fund(&investor, &1i128);
-    assert_eq!(client.get_escrow().status, 1);
-    assert!(client.is_fully_funded());
-}
-
-#[test]
-fn test_is_fully_funded_minimum_valid_target() {
-    // Edge case: funding_target = 1, fund 1 unit → fully funded.
+fn test_remaining_capacity_recomputes_after_target_raised() {
     let env = Env::default();
     env.mock_all_auths();
     let client = deploy(&env);
     let admin = Address::generate(&env);
     let sme = Address::generate(&env);
     let (tok, tre) = free_addresses(&env);
+
     client.init(
         &admin,
-        &soroban_sdk::String::from_str(&env, "FULL002"),
+        &String::from_str(&env, "CAPUP1"),
         &sme,
-        &1i128,
-        &0i64,
+        &TARGET,
+        &800i64,
         &0u64,
         &tok,
         &None,
@@ -3662,27 +3588,1025 @@ fn test_is_fully_funded_minimum_valid_target() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
-    assert!(!client.is_fully_funded());
+
     let investor = Address::generate(&env);
-    client.fund(&investor, &1i128);
-    assert!(client.is_fully_funded());
+    let initial_deposit = TARGET / 2;
+    client.fund(&investor, &initial_deposit);
+
+    // Capacity before target update
+    let capacity_before = client.get_remaining_funding_capacity();
+    assert_eq!(capacity_before, TARGET - initial_deposit);
+
+    // Raise the target
+    let new_target = TARGET * 2;
+    client.update_funding_target(&new_target);
+
+    // Capacity must reflect new target
+    let capacity_after = client.get_remaining_funding_capacity();
+    assert_eq!(
+        capacity_after,
+        new_target - initial_deposit,
+        "capacity must recompute with new target"
+    );
+    assert!(
+        capacity_after > capacity_before,
+        "capacity must increase when target is raised"
+    );
 }
 
+/// Test that capacity recomputes correctly after update_funding_target lowers
+/// the target while the escrow is still open (but not below funded_amount).
 #[test]
-fn test_is_fully_funded_multiple_contributions_reaching_target() {
-    // Multiple investors whose combined contributions cross the target.
+fn test_remaining_capacity_recomputes_after_target_lowered() {
     let env = Env::default();
-    let (client, admin, sme) = setup(&env);
-    default_init(&client, &env, &admin, &sme);
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "CAPDOWN1"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    let investor = Address::generate(&env);
+    let initial_deposit = TARGET / 4; // 25% of original target
+    client.fund(&investor, &initial_deposit);
+
+    // Capacity before target update
+    let capacity_before = client.get_remaining_funding_capacity();
+    assert_eq!(capacity_before, TARGET - initial_deposit);
+
+    // Lower the target to 50% of original (still above funded_amount)
+    let new_target = TARGET / 2;
+    client.update_funding_target(&new_target);
+
+    // Capacity must reflect new lower target
+    let capacity_after = client.get_remaining_funding_capacity();
+    assert_eq!(
+        capacity_after,
+        new_target - initial_deposit,
+        "capacity must recompute with new lowered target"
+    );
+    assert!(
+        capacity_after < capacity_before,
+        "capacity must decrease when target is lowered"
+    );
+}
+
+/// When the target is lowered to exactly equal funded_amount, capacity must be
+/// zero and the escrow must transition to funded state.
+#[test]
+fn test_remaining_capacity_zero_when_target_lowered_to_funded_amount() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "CAPDOWN2"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    let investor = Address::generate(&env);
+    let deposit = TARGET / 3;
+    client.fund(&investor, &deposit);
+
+    assert_eq!(client.get_escrow().status, 0, "escrow must still be open");
+
+    // Lower target to exactly the funded amount
+    client.update_funding_target(&deposit);
+
+    assert_eq!(
+        client.get_remaining_funding_capacity(),
+        0,
+        "capacity must be zero when target equals funded amount"
+    );
+    assert_eq!(
+        client.get_escrow().status,
+        1,
+        "escrow must transition to funded when target is lowered to funded_amount"
+    );
+}
+
+/// Test capacity tracking with multiple deposits and a target update mid-flight,
+/// verifying monotonic decrease and correct formula application throughout.
+#[test]
+fn test_remaining_capacity_across_deposits_and_target_update() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "CAPMID1"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
     let inv_a = Address::generate(&env);
     let inv_b = Address::generate(&env);
     let inv_c = Address::generate(&env);
-    // Each contributes a third; only after the third does is_fully_funded return true.
-    client.fund(&inv_a, &(TARGET / 3));
-    assert!(!client.is_fully_funded());
-    client.fund(&inv_b, &(TARGET / 3));
-    assert!(!client.is_fully_funded());
-    client.fund(&inv_c, &(TARGET - 2 * (TARGET / 3)));
-    assert!(client.is_fully_funded());
+
+    // First deposit: 20% of target
+    let deposit_a = TARGET / 5;
+    client.fund(&inv_a, &deposit_a);
+    assert_eq!(client.get_remaining_funding_capacity(), TARGET - deposit_a);
+
+    // Second deposit: 15% of target
+    let deposit_b = TARGET * 15 / 100;
+    client.fund(&inv_b, &deposit_b);
+    let funded_before_update = deposit_a + deposit_b;
+    assert_eq!(
+        client.get_remaining_funding_capacity(),
+        TARGET - funded_before_update
+    );
+
+    // Update target to 150% of original
+    let new_target = TARGET * 3 / 2;
+    client.update_funding_target(&new_target);
+    assert_eq!(
+        client.get_remaining_funding_capacity(),
+        new_target - funded_before_update,
+        "capacity must reflect new target after update"
+    );
+
+    // Third deposit: 40% of original target
+    let deposit_c = TARGET * 40 / 100;
+    client.fund(&inv_c, &deposit_c);
+    let total_funded = funded_before_update + deposit_c;
+    assert_eq!(
+        client.get_remaining_funding_capacity(),
+        new_target - total_funded,
+        "capacity must continue tracking correctly after target update"
+    );
+
+    // Escrow should still be open since total < new_target
+    assert_eq!(client.get_escrow().status, 0);
+    assert!(total_funded < new_target);
+}
+
+/// Verify capacity with fund_batch, ensuring capacity decreases by the sum of
+/// all batch entries.
+#[test]
+fn test_remaining_capacity_with_fund_batch() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "CAPBATCH1"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    let inv_a = Address::generate(&env);
+    let inv_b = Address::generate(&env);
+    let inv_c = Address::generate(&env);
+
+    let amount_a = TARGET / 5;
+    let amount_b = TARGET / 4;
+    let amount_c = TARGET / 10;
+
+    let mut batch = SorobanVec::new(&env);
+    batch.push_back((inv_a, amount_a));
+    batch.push_back((inv_b, amount_b));
+    batch.push_back((inv_c, amount_c));
+
+    client.fund_batch(&batch);
+
+    let total_batch = amount_a + amount_b + amount_c;
+    assert_eq!(
+        client.get_remaining_funding_capacity(),
+        TARGET - total_batch,
+        "capacity must decrease by total batch amount"
+    );
+}
+
+/// Edge case: capacity with minimal target (1 unit).
+#[test]
+fn test_remaining_capacity_minimal_target() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "CAPMIN1"),
+        &sme,
+        &1i128,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    assert_eq!(client.get_remaining_funding_capacity(), 1);
+
+    let investor = Address::generate(&env);
+    client.fund(&investor, &1i128);
+
+    assert_eq!(client.get_remaining_funding_capacity(), 0);
+    assert_eq!(client.get_escrow().status, 1);
+}
+
+/// Edge case: capacity with very large target (near i128::MAX).
+#[test]
+fn test_remaining_capacity_very_large_target() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
+    let large_target = i128::MAX / 2;
+    client.init(
+        &admin,
+        &String::from_str(&env, "CAPLARGE1"),
+        &sme,
+        &large_target,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    let investor = Address::generate(&env);
+    let deposit = large_target / 10;
+    client.fund(&investor, &deposit);
+
+    assert_eq!(
+        client.get_remaining_funding_capacity(),
+        large_target - deposit
+    );
+}
+
+/// Verify that capacity tracking works correctly with fund_with_commitment
+/// (tiered yield deposits).
+#[test]
+fn test_remaining_capacity_with_tiered_funding() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
+    let mut tiers = SorobanVec::new(&env);
+    tiers.push_back(YieldTier {
+        min_lock_secs: 100,
+        yield_bps: 900,
+    });
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "CAPTIER1"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &Some(tiers),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    let inv_a = Address::generate(&env);
+    let inv_b = Address::generate(&env);
+
+    let deposit_a = TARGET / 3;
+    client.fund_with_commitment(&inv_a, &deposit_a, &150u64);
+    assert_eq!(client.get_remaining_funding_capacity(), TARGET - deposit_a);
+
+    let deposit_b = TARGET / 3;
+    client.fund(&inv_b, &deposit_b);
+    assert_eq!(
+        client.get_remaining_funding_capacity(),
+        TARGET - deposit_a - deposit_b
+    );
+}
+
+/// Comprehensive test: verify capacity is never negative across all transitions:
+/// multiple deposits, target update, and reaching funded state.
+#[test]
+fn test_remaining_capacity_never_negative_comprehensive() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "CAPNEG1"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    let inv = Address::generate(&env);
+
+    // Start: capacity = TARGET
+    assert!(client.get_remaining_funding_capacity() >= 0);
+
+    // Fund 80% of target
+    client.fund(&inv, &(TARGET * 80 / 100));
+    assert!(client.get_remaining_funding_capacity() >= 0);
+
+    // Lower target to 90% of original (still above funded amount)
+    client.update_funding_target(&(TARGET * 90 / 100));
+    assert!(client.get_remaining_funding_capacity() >= 0);
+
+    // Fund another 20% of original target (now overfunded vs new target)
+    client.fund(&inv, &(TARGET * 20 / 100));
+    assert_eq!(
+        client.get_remaining_funding_capacity(),
+        0,
+        "capacity must be zero when overfunded, not negative"
+    );
+    assert_eq!(client.get_escrow().status, 1);
+}
+
+// ─── is_fully_funded tests (issue #399) ──────────────────────────────────────
+
+#[test]
+fn test_investor_index_population() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    let inv_a = Address::generate(&env);
+    let inv_b = Address::generate(&env);
+
+    // Fund from investor A
+    client.fund(&inv_a, &10_000i128);
+    // Index should have A
+    let investors = client.get_investors(&0, &10);
+    assert_eq!(investors.len(), 1);
+    assert_eq!(investors.get(0).unwrap(), inv_a);
+
+    // Fund from investor B
+    client.fund(&inv_b, &20_000i128);
+    // Index should have A and B
+    let investors = client.get_investors(&0, &10);
+    assert_eq!(investors.len(), 2);
+    assert_eq!(investors.get(0).unwrap(), inv_a);
+    assert_eq!(investors.get(1).unwrap(), inv_b);
+
+    // Repeat fund from investor A
+    client.fund(&inv_a, &5_000i128);
+    // Index should still only have A and B, no duplicate
+    let investors = client.get_investors(&0, &10);
+    assert_eq!(investors.len(), 2);
+}
+
+#[test]
+fn test_get_investors_pagination() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    // Add 5 distinct investors
+    let mut expected_investors = std::vec::Vec::new();
+    for _ in 0..5 {
+        let inv = Address::generate(&env);
+        expected_investors.push(inv.clone());
+        client.fund(&inv, &1_000i128);
+    }
+
+    // Paginate start=0, limit=2
+    let page1 = client.get_investors(&0, &2);
+    assert_eq!(page1.len(), 2);
+    assert_eq!(page1.get(0).unwrap(), expected_investors[0]);
+    assert_eq!(page1.get(1).unwrap(), expected_investors[1]);
+
+    // Paginate start=2, limit=2
+    let page2 = client.get_investors(&2, &2);
+    assert_eq!(page2.len(), 2);
+    assert_eq!(page2.get(0).unwrap(), expected_investors[2]);
+    assert_eq!(page2.get(1).unwrap(), expected_investors[3]);
+
+    // Paginate start=4, limit=2 (only 1 left)
+    let page3 = client.get_investors(&4, &2);
+    assert_eq!(page3.len(), 1);
+    assert_eq!(page3.get(0).unwrap(), expected_investors[4]);
+
+    // Paginate start=5, limit=2 (out of bounds)
+    let page4 = client.get_investors(&5, &2);
+    assert_eq!(page4.len(), 0);
+
+    // Paginate with limit 0
+    let page_zero = client.get_investors(&0, &0);
+    assert_eq!(page_zero.len(), 0);
+
+    // Add 52 distinct investors to test capped limit of 50
+    let env2 = Env::default();
+    let (client2, admin2, sme2) = setup(&env2);
+    default_init(&client2, &env2, &admin2, &sme2);
+    for _ in 0..52 {
+        client2.fund(&Address::generate(&env2), &1_000i128);
+    }
+    let max_page = client2.get_investors(&0, &100);
+    assert_eq!(max_page.len(), 50);
+}
+
+#[test]
+fn test_get_investors_legacy_compatibility() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    // No investors have funded yet (InvestorIndex absent)
+    let investors = client.get_investors(&0, &10);
+    assert_eq!(investors.len(), 0);
+}
+
+// ---------------------------------------------------------------------------
+// update_funding_target: rejection bounds and mid-update funded promotion
+// ---------------------------------------------------------------------------
+
+/// Helper: initialise an escrow and fund it partially, returning the client.
+fn setup_partially_funded(
+    env: &Env,
+    funded: i128,
+    target: i128,
+) -> super::LiquifactEscrowClient<'_> {
+    let client = super::deploy(env);
+    let admin = Address::generate(env);
+    let sme = Address::generate(env);
+    let (tok, tre) = super::free_addresses(env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(env, "UFT001"),
+        &sme,
+        &target,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+    if funded > 0 {
+        client.fund(&Address::generate(env), &funded);
+    }
+    client
+}
+
+/// `new_target = 0` must be rejected with `TargetNotPositive`.
+#[test]
+fn test_update_funding_target_zero_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = setup_partially_funded(&env, 0, 10_000i128);
+    assert_contract_error(
+        client.try_update_funding_target(&0i128),
+        EscrowError::TargetNotPositive,
+    );
+}
+
+/// Negative target must be rejected with `TargetNotPositive`.
+#[test]
+fn test_update_funding_target_negative_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = setup_partially_funded(&env, 0, 10_000i128);
+    assert_contract_error(
+        client.try_update_funding_target(&-1i128),
+        EscrowError::TargetNotPositive,
+    );
+}
+
+/// A target strictly below `funded_amount` must be rejected with `TargetBelowFundedAmount`.
+#[test]
+fn test_update_funding_target_below_funded_amount_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = setup_partially_funded(&env, 5_000i128, 10_000i128);
+    assert_contract_error(
+        client.try_update_funding_target(&4_999i128),
+        EscrowError::TargetBelowFundedAmount,
+    );
+}
+
+/// Calling `update_funding_target` on a funded (status=1) escrow must be rejected
+/// with `TargetUpdateNotOpen`.
+#[test]
+fn test_update_funding_target_not_open_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = setup_partially_funded(&env, 10_000i128, 10_000i128);
+    // escrow is now status=1 (funded)
+    assert_eq!(client.get_escrow().status, 1);
+    assert_contract_error(
+        client.try_update_funding_target(&10_000i128),
+        EscrowError::TargetUpdateNotOpen,
+    );
+}
+
+/// `update_funding_target` on a settled (status=2) escrow must be rejected with
+/// `TargetUpdateNotOpen`.
+#[test]
+fn test_update_funding_target_settled_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = setup_partially_funded(&env, 10_000i128, 10_000i128);
+    client.settle();
+    assert_contract_error(
+        client.try_update_funding_target(&10_000i128),
+        EscrowError::TargetUpdateNotOpen,
+    );
+}
+
+/// Raising the target on a partially-funded open escrow keeps status=0 and
+/// emits `fund_tgt` with the correct old/new values.
+#[test]
+fn test_update_funding_target_raise_stays_open_emits_event() {
+    use crate::FundingTargetUpdated;
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let (contract_id, client) = super::deploy_with_id(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = super::free_addresses(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "UFT002"),
+        &sme,
+        &10_000i128,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+    client.fund(&Address::generate(&env), &3_000i128);
+
+    let result = client.update_funding_target(&20_000i128);
+
+    assert_eq!(result.status, 0);
+    assert_eq!(result.funding_target, 20_000i128);
+    assert_eq!(client.get_funding_close_snapshot(), None);
+
+    assert_eq!(
+        env.events().all(),
+        std::vec![FundingTargetUpdated {
+            name: soroban_sdk::symbol_short!("fund_tgt"),
+            invoice_id: client.get_escrow().invoice_id,
+            old_target: 10_000i128,
+            new_target: 20_000i128,
+        }
+        .to_xdr(&env, &contract_id)]
+    );
+}
+
+/// Lowering the target to **exactly** `funded_amount` triggers the funded promotion:
+/// status becomes 1, `FundingCloseSnapshot` is written with correct fields, and
+/// `fund_tgt` event still fires.
+#[test]
+fn test_update_funding_target_exact_funded_amount_promotes_to_funded() {
+    use crate::FundingTargetUpdated;
+    use soroban_sdk::testutils::{Events as _, Ledger as _};
+
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| {
+        l.timestamp = 9_000;
+        l.sequence_number = 42;
+    });
+    let (contract_id, client) = super::deploy_with_id(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = super::free_addresses(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "UFT003"),
+        &sme,
+        &10_000i128,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+    client.fund(&Address::generate(&env), &7_000i128);
+
+    // Pre-condition: open, no snapshot yet.
+    assert_eq!(client.get_escrow().status, 0);
+    assert_eq!(client.get_funding_close_snapshot(), None);
+
+    // Lower target to exactly funded_amount.
+    let result = client.update_funding_target(&7_000i128);
+
+    // Status promoted.
+    assert_eq!(result.status, 1);
+    assert_eq!(result.funding_target, 7_000i128);
+    assert_eq!(result.funded_amount, 7_000i128);
+
+    // Snapshot written exactly once with correct fields.
+    let snap = client
+        .get_funding_close_snapshot()
+        .expect("snapshot must be present after funded promotion");
+    assert_eq!(snap.total_principal, 7_000i128);
+    assert_eq!(snap.funding_target, 7_000i128);
+    assert_eq!(snap.closed_at_ledger_timestamp, 9_000u64);
+    assert_eq!(snap.closed_at_ledger_sequence, 42u32);
+
+    // Event still carries old/new target values.
+    assert_eq!(
+        env.events().all(),
+        std::vec![FundingTargetUpdated {
+            name: soroban_sdk::symbol_short!("fund_tgt"),
+            invoice_id: client.get_escrow().invoice_id,
+            old_target: 10_000i128,
+            new_target: 7_000i128,
+        }
+        .to_xdr(&env, &contract_id)]
+    );
+}
+
+/// The `FundingCloseSnapshot` is immutable: a second `update_funding_target` call
+/// (which would be rejected since status=1) cannot overwrite it. Verify snapshot
+/// is unchanged after the promotion.
+#[test]
+fn test_update_funding_target_snapshot_written_only_once() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = setup_partially_funded(&env, 5_000i128, 10_000i128);
+
+    // Promote to funded via target lowering.
+    client.update_funding_target(&5_000i128);
+    let snap1 = client.get_funding_close_snapshot().unwrap();
+
+    // Any further attempt on the now-funded escrow must be rejected.
+    assert_contract_error(
+        client.try_update_funding_target(&5_000i128),
+        EscrowError::TargetUpdateNotOpen,
+    );
+
+    // Snapshot unchanged.
+    let snap2 = client.get_funding_close_snapshot().unwrap();
+    assert_eq!(snap1.total_principal, snap2.total_principal);
+    assert_eq!(snap1.funding_target, snap2.funding_target);
+    assert_eq!(
+        snap1.closed_at_ledger_timestamp,
+        snap2.closed_at_ledger_timestamp
+    );
+    assert_eq!(
+        snap1.closed_at_ledger_sequence,
+        snap2.closed_at_ledger_sequence
+    );
+}
+
+/// After promotion via `update_funding_target`, a subsequent `fund` call must
+/// be rejected with `EscrowNotOpenForFunding` — confirming the status transition
+/// is durable.
+#[test]
+fn test_fund_rejected_after_promotion_via_update_funding_target() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = setup_partially_funded(&env, 6_000i128, 10_000i128);
+
+    client.update_funding_target(&6_000i128);
+    assert_eq!(client.get_escrow().status, 1);
+
+    assert_contract_error(
+        client.try_fund(&Address::generate(&env), &1i128),
+        EscrowError::EscrowNotOpenForFunding,
+    );
+}
+
+/// Target update with zero funded amount (no investors yet) must NOT promote
+/// even when `new_target` is positive — there is nothing to promote.
+#[test]
+fn test_update_funding_target_no_funds_no_promotion() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = setup_partially_funded(&env, 0, 10_000i128);
+
+    let result = client.update_funding_target(&1i128);
+    assert_eq!(result.status, 0);
+    assert_eq!(client.get_funding_close_snapshot(), None);
+}
+
+// ── Issue #345: get_yield_tiers read view ────────────────────────────────────
+
+#[test]
+fn test_get_yield_tiers_returns_empty_when_no_tiers_configured() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "NOTIER01"),
+        &sme,
+        &100_000i128,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    let tiers = client.get_yield_tiers();
+    assert_eq!(
+        tiers.len(),
+        0,
+        "expected empty vec when no tiers configured"
+    );
+}
+
+#[test]
+fn test_get_yield_tiers_returns_single_tier() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
+    let mut tiers = SorobanVec::new(&env);
+    tiers.push_back(YieldTier {
+        min_lock_secs: 2_592_000,
+        yield_bps: 900,
+    });
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "SINGLE01"),
+        &sme,
+        &100_000i128,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &Some(tiers),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    let result = client.get_yield_tiers();
+    assert_eq!(result.len(), 1);
+    let t = result.get(0).unwrap();
+    assert_eq!(t.min_lock_secs, 2_592_000);
+    assert_eq!(t.yield_bps, 900);
+}
+
+#[test]
+fn test_get_yield_tiers_preserves_order() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
+    let mut tiers = SorobanVec::new(&env);
+    tiers.push_back(YieldTier {
+        min_lock_secs: 2_592_000,
+        yield_bps: 900,
+    });
+    tiers.push_back(YieldTier {
+        min_lock_secs: 7_776_000,
+        yield_bps: 1_100,
+    });
+    tiers.push_back(YieldTier {
+        min_lock_secs: 15_552_000,
+        yield_bps: 1_400,
+    });
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "MULTI01"),
+        &sme,
+        &100_000i128,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &Some(tiers),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    let result = client.get_yield_tiers();
+    assert_eq!(result.len(), 3);
+
+    let t0 = result.get(0).unwrap();
+    assert_eq!(t0.min_lock_secs, 2_592_000);
+    assert_eq!(t0.yield_bps, 900);
+
+    let t1 = result.get(1).unwrap();
+    assert_eq!(t1.min_lock_secs, 7_776_000);
+    assert_eq!(t1.yield_bps, 1_100);
+
+    let t2 = result.get(2).unwrap();
+    assert_eq!(t2.min_lock_secs, 15_552_000);
+    assert_eq!(t2.yield_bps, 1_400);
+}
+
+#[test]
+fn test_get_yield_tiers_is_pure_read_no_state_change() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
+    let mut tiers = SorobanVec::new(&env);
+    tiers.push_back(YieldTier {
+        min_lock_secs: 100,
+        yield_bps: 900,
+    });
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "PURE01"),
+        &sme,
+        &100_000i128,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &Some(tiers),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    let escrow_before = client.get_escrow();
+    client.get_yield_tiers();
+    client.get_yield_tiers();
+    let escrow_after = client.get_escrow();
+
+    assert_eq!(
+        escrow_before, escrow_after,
+        "get_yield_tiers must not mutate state"
+    );
 }

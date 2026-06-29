@@ -84,6 +84,79 @@ formula to guarantee identical rounding.
 See `docs/escrow-read-api.md` → `compute_investor_payout` for the full parameter, return-value,
 and authorization documentation.
 
+## ✅ Aggregate Payout Invariant (issue #483)
+
+### Uniform yield
+
+When all investors share the same `yield_bps`:
+
+```
+settled_pool = total_principal + total_principal × yield_bps / 10_000   (floor)
+Σ payout_i  ≤ settled_pool
+```
+
+The inequality holds because floor division drops at most 1 unit per investor, so:
+
+```
+0 ≤ residue (= settled_pool − Σ payout_i) < n_investors
+```
+
+The residue is swept by the treasury via `sweep_terminal_dust` after all investors have claimed.
+
+### Tiered / mixed yield
+
+When investors carry per-investor effective yields (from `fund_with_commitment` tier selection),
+each investor `i` has their own `settle_pool_i`:
+
+```
+settle_pool_i = total_principal + total_principal × effective_yield_bps_i / 10_000
+payout_i      = contribution_i × settle_pool_i / total_principal   (floor)
+```
+
+Because floor division always gives `payout_i ≤ exact_i`, summing across all investors:
+
+```
+Σ payout_i ≤ Σ exact_i = Σ (contribution_i × settle_pool_i / total_principal)
+           ≤ total_principal × (1 + max_effective_yield_bps / 10_000)
+```
+
+### Rounding guarantee
+
+Rounding always favors the contract, never the investors collectively:
+
+- No individual investor receives more than their exact rational entitlement.
+- The aggregate can never exceed the exact weighted sum of entitlements.
+- The residue is always non-negative — no shortfall is possible from rounding.
+
+### Snapshot-denominator consistency
+
+`FundingCloseSnapshot` is written exactly once when the escrow first reaches `status == 1`.
+It is stored under `DataKey::FundingCloseSnapshot` and **never overwritten**. All
+`compute_investor_payout` calls read the same `total_principal` denominator from this snapshot,
+so the denominator cannot shift between investor claims.
+
+This invariant is verified in `escrow/src/tests/properties.rs` by
+`snapshot_denominator_consistent_across_all_payout_reads`, which reads the snapshot before
+and after every individual payout call and asserts identity.
+
+### Property-based test coverage (issue #483)
+
+| Test | Coverage |
+|------|----------|
+| `prop_payout_sum_le_settle_pool` | Uniform yield, 2–6 investors, arbitrary amounts & yield |
+| `prop_aggregate_payout_le_settle_pool_tiered` | Tiered/mixed yield, snapshot consistency, max-pool bound |
+| `payout_single_investor_equals_settle_pool` | Single investor receives exact `settle_pool` |
+| `payout_equal_split_conservation` | Equal contributions, sum ≤ `settle_pool` |
+| `payout_zero_yield_returns_principal_only` | Zero yield: `payout_i == contribution_i` |
+| `payout_max_yield_conservation` | 100% yield: conservation still holds |
+| `payout_prime_denominator_residue_bounded` | Prime total → residue < `n_investors` |
+| `payout_highly_skewed_contributions` | 99%/1% split; residue bounded |
+| `payout_many_small_investors_conservation` | 8 investors × 1 unit; aggregate ≤ `settle_pool` |
+| `payout_single_large_single_tiny` | Extreme asymmetry stress test |
+| `payout_tiered_mixed_yield_conservation` | 3-tier mixed yield; per-investor & aggregate bounds |
+| `snapshot_denominator_consistent_across_all_payout_reads` | Snapshot immutable across all reads |
+| `fuzz_payout_conservation_multi_investor` | 64-case fuzz, 1–8 investors, full yield range |
+
 ## 🔗 On-Chain Payout Transfer: `claim_investor_payout`
 
 When a settled investor calls `claim_investor_payout`, the contract:

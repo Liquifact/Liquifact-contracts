@@ -1,5 +1,6 @@
 use super::*;
-use crate::EscrowInitialized;
+use crate::{EscrowError, EscrowInitialized};
+use crate::{EscrowInitialized, DEFAULT_MATURITY_MAX_HORIZON_SECS};
 use proptest::prelude::*;
 extern crate std;
 use std::format;
@@ -136,6 +137,8 @@ fn test_init_unauthorized_panics() {
             &Address::generate(&env),
             &None,
             &Address::generate(&env),
+            &None,
+            &None,
             &None,
             &None,
             &None,
@@ -368,10 +371,10 @@ fn test_init_invoice_id_non_ascii_multibyte_panics() {
     let client = deploy(&env);
     let (admin, sme) = (Address::generate(&env), Address::generate(&env));
     let (t, tr) = free_addresses(&env);
-    // "INV-­ƒÆ®" contains multi-byte UTF-8
+    // "INV-💩" contains multi-byte UTF-8
     client.init(
         &admin,
-        &soroban_sdk::String::from_str(&env, "INV_­ƒÆ®"),
+        &soroban_sdk::String::from_str(&env, "INV_💩"),
         &sme,
         &1000i128,
         &500i64,
@@ -406,7 +409,7 @@ fn test_init_invoice_id_embedded_null_panics() {
 
     client.init(
         &admin, &s, &sme, &1000i128, &500i64, &0u64, &t, &None, &tr, &None, &None, &None, &None,
-        &None, &None, &None,
+        &None, &None, &None, &None,
     );
 }
 
@@ -472,6 +475,7 @@ fn test_init_min_contribution_floor_stored() {
         &None,
         &None,
         &None,
+        &None,
     );
     assert_eq!(client.get_min_contribution_floor(), 1_000i128);
 }
@@ -507,7 +511,7 @@ fn test_init_min_contribution_floor_defaults_to_zero() {
     assert_eq!(client.get_min_contribution_floor(), 0i128);
 }
 
-/// `min_contribution = Some(0)` is rejected ÔÇö the value must be positive when supplied.
+/// `min_contribution = Some(0)` is rejected — the value must be positive when supplied.
 #[test]
 #[should_panic]
 fn test_init_min_contribution_zero_panics() {
@@ -529,6 +533,7 @@ fn test_init_min_contribution_zero_panics() {
         &tre,
         &None,
         &Some(0i128),
+        &None,
         &None,
         &None,
         &None,
@@ -564,10 +569,11 @@ fn test_init_min_contribution_exceeds_amount_panics() {
         &None,
         &None,
         &None,
+        &None,
     );
 }
 
-/// Floor equal to the invoice amount is the boundary ÔÇö must be accepted.
+/// Floor equal to the invoice amount is the boundary — must be accepted.
 #[test]
 fn test_init_min_contribution_equal_to_amount_accepted() {
     let env = Env::default();
@@ -588,6 +594,7 @@ fn test_init_min_contribution_equal_to_amount_accepted() {
         &tre,
         &None,
         &Some(5_000i128),
+        &None,
         &None,
         &None,
         &None,
@@ -829,6 +836,8 @@ fn try_init_with_id(env: &Env, id: &str) -> Result<(), ()> {
             &None,
             &None,
             &None,
+            &None,
+            &None,
         );
     }));
     result.map(|_| ()).map_err(|_| ())
@@ -911,7 +920,7 @@ fn test_invoice_id_digits_only_accepted() {
 /// This covers common punctuation, operators, whitespace, and non-ASCII bytes.
 #[test]
 fn test_invoice_id_illegal_chars_all_rejected() {
-    // Characters that are NOT in [A-Za-z0-9_] ÔÇö representative set covering
+    // Characters that are NOT in [A-Za-z0-9_] — representative set covering
     // punctuation, operators, whitespace, and boundary ASCII values.
     let illegal: &[&str] = &[
         "INV-DASH",  // hyphen
@@ -996,7 +1005,7 @@ proptest! {
     /// Any string with at least one character outside [A-Za-z0-9_] (length 1..=32) must panic.
     #[test]
     fn prop_invalid_charset_invoice_id_always_rejected(
-        // valid prefix + one illegal char + optional valid suffix, total Ôëñ 32
+        // valid prefix + one illegal char + optional valid suffix, total ≤ 32
         prefix in "[A-Za-z0-9_]{0,15}",
         bad_char in "[^A-Za-z0-9_]",
         suffix in "[A-Za-z0-9_]{0,15}",
@@ -1028,11 +1037,11 @@ proptest! {
     }
 }
 
-// ÔöÇÔöÇ DataKey default-on-absence verification (docs/escrow-data-model.md) ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ── DataKey default-on-absence verification (docs/escrow-data-model.md) ──────
 
 #[test]
 fn datakey_defaults_on_fresh_init() {
-    // Verifies that every key documented as "absent ÔçÆ default" actually returns
+    // Verifies that every key documented as "absent ⇒ default" actually returns
     // the documented default on a freshly initialised escrow with no optional
     // configuration supplied.
     let env = Env::default();
@@ -1040,19 +1049,19 @@ fn datakey_defaults_on_fresh_init() {
     let investor = Address::generate(&env);
     default_init(&client, &env, &admin, &sme);
 
-    // Absent ÔçÆ false
+    // Absent ⇒ false
     assert!(!client.get_legal_hold());
     assert!(!client.is_investor_allowlisted(&investor));
     assert!(!client.is_allowlist_active());
     assert!(!client.is_investor_refunded(&investor));
 
-    // Absent ÔçÆ 0
+    // Absent ⇒ 0
     assert_eq!(client.get_contribution(&investor), 0i128);
     assert_eq!(client.get_min_contribution_floor(), 0i128);
     assert_eq!(client.get_unique_funder_count(), 0u32);
     assert_eq!(client.get_distributed_principal(), 0i128);
 
-    // Optional caps absent ÔçÆ None
+    // Optional caps absent ⇒ None
     assert!(client.get_max_unique_investors_cap().is_none());
     assert!(client.get_max_per_investor_cap().is_none());
 
@@ -1126,6 +1135,8 @@ fn test_init_maturity_zero_accepted() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
     assert_eq!(client.get_escrow().maturity, 0);
 }
@@ -1146,6 +1157,8 @@ fn test_init_maturity_within_horizon_accepted() {
         &token,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -1180,6 +1193,8 @@ fn test_init_maturity_at_horizon_boundary_accepted() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
     assert_eq!(client.get_escrow().maturity, at_boundary);
 }
@@ -1201,6 +1216,8 @@ fn test_init_maturity_beyond_horizon_rejected() {
         &token,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -1233,6 +1250,8 @@ fn test_init_maturity_in_past_rejected() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 }
 
@@ -1259,6 +1278,8 @@ fn test_init_with_custom_horizon_used() {
         &None,
         &None,
         &Some(short_horizon),
+        &None,
+        &None,
     );
     assert_eq!(client.get_maturity_max_horizon(), short_horizon);
     assert_eq!(client.get_escrow().maturity, 3000);
@@ -1282,6 +1303,8 @@ fn test_update_maturity_zero_accepted() {
         &token,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -1315,6 +1338,8 @@ fn test_update_maturity_within_horizon_accepted() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
     let updated = client.update_maturity(&2000u64);
     assert_eq!(updated.maturity, 2000);
@@ -1337,6 +1362,8 @@ fn test_update_maturity_at_horizon_boundary_accepted() {
         &token,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -1372,6 +1399,8 @@ fn test_update_maturity_beyond_horizon_rejected() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
     client.update_maturity(&(1000u64 + DEFAULT_MATURITY_MAX_HORIZON_SECS + 1));
 }
@@ -1393,6 +1422,8 @@ fn test_update_maturity_in_past_rejected() {
         &token,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -1421,6 +1452,8 @@ fn test_update_maturity_max_horizon_by_admin() {
         &token,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -1465,7 +1498,515 @@ fn test_update_maturity_honors_reduced_horizon() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
     client.update_maturity_max_horizon(&3600u64); // 1 hour
     client.update_maturity(&(1000u64 + 7200u64)); // 2 hours — exceeds new 1h horizon
+}
+
+// ---------------------------------------------------------------------------
+// invoice_id integration tests — typed-error boundaries, charset coverage,
+// round-trip storage, and event-payload fidelity.
+// ---------------------------------------------------------------------------
+
+/// Helper: attempt init with the given invoice_id string; returns the typed
+/// try_ result so callers can assert on specific error codes.
+fn try_init_with_id_typed(
+    env: &Env,
+    id: &str,
+) -> Result<
+    Result<crate::InvoiceEscrow, soroban_sdk::Error>,
+    Result<soroban_sdk::Error, soroban_sdk::InvokeError>,
+> {
+    env.mock_all_auths();
+    let client = deploy(env);
+    let admin = Address::generate(env);
+    let sme = Address::generate(env);
+    let (t, tr) = free_addresses(env);
+    let res = client.try_init(
+        &admin,
+        &soroban_sdk::String::from_str(env, id),
+        &sme,
+        &1_000i128,
+        &500i64,
+        &0u64,
+        &t,
+        &None,
+        &tr,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+    match res {
+        Ok(inner) => Ok(inner.map_err(|e| soroban_sdk::Error::from(e))),
+        Err(err) => Err(err),
+    }
+}
+
+// ── length: minimum boundary (exactly 1 character) ──────────────────────
+
+/// A single-character invoice_id sits at the minimum boundary and must be
+/// accepted without error.
+#[test]
+fn test_invoice_id_min_length_boundary_accepted() {
+    let env = Env::default();
+    let result = try_init_with_id_typed(&env, "A");
+    assert!(
+        result.is_ok() && result.unwrap().is_ok(),
+        "invoice_id of length 1 (minimum) must be accepted"
+    );
+}
+
+/// A 32-character invoice_id sits at the maximum boundary
+/// (MAX_INVOICE_ID_STRING_LEN = 32) and must be accepted without error.
+#[test]
+fn test_invoice_id_max_length_boundary_accepted() {
+    let env = Env::default();
+    // Exactly 32 chars, all within [A-Za-z0-9_].
+    let id = "ABCDEFGHIJKLMNOPQRSTUVWXYZ012345";
+    assert_eq!(id.len(), 32, "pre-condition: id must be exactly 32 chars");
+    let result = try_init_with_id_typed(&env, id);
+    assert!(
+        result.is_ok() && result.unwrap().is_ok(),
+        "invoice_id of length 32 (maximum) must be accepted"
+    );
+}
+
+// ── length: InvoiceIdInvalidLength on empty and over-max ────────────────
+
+/// An empty invoice_id must be rejected with `InvoiceIdInvalidLength`.
+#[test]
+fn test_invoice_id_empty_rejects_with_invalid_length() {
+    let env = Env::default();
+    let result = try_init_with_id_typed(&env, "");
+    assert_contract_error(result, EscrowError::InvoiceIdInvalidLength);
+}
+
+/// An invoice_id of 33 characters (one over the maximum) must be rejected
+/// with `InvoiceIdInvalidLength`.
+#[test]
+fn test_invoice_id_over_max_rejects_with_invalid_length() {
+    let env = Env::default();
+    // 33 chars — all valid charset, so only the length check fires.
+    let id = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456";
+    assert_eq!(id.len(), 33, "pre-condition: id must be exactly 33 chars");
+    let result = try_init_with_id_typed(&env, id);
+    assert_contract_error(result, EscrowError::InvoiceIdInvalidLength);
+}
+
+// ── charset: all allowed character classes accepted ─────────────────────
+
+/// An invoice_id containing uppercase letters, lowercase letters, digits,
+/// and underscores (all four allowed classes) must be accepted.
+#[test]
+fn test_invoice_id_all_allowed_char_classes_each_accepted() {
+    // Upper-only
+    let env = Env::default();
+    assert!(
+        try_init_with_id_typed(&env, "UPPER").is_ok_and(|r| r.is_ok()),
+        "uppercase-only id must be accepted"
+    );
+
+    // Lower-only
+    let env = Env::default();
+    assert!(
+        try_init_with_id_typed(&env, "lower").is_ok_and(|r| r.is_ok()),
+        "lowercase-only id must be accepted"
+    );
+
+    // Digits-only
+    let env = Env::default();
+    assert!(
+        try_init_with_id_typed(&env, "0123456789").is_ok_and(|r| r.is_ok()),
+        "digits-only id must be accepted"
+    );
+
+    // Underscore-only
+    let env = Env::default();
+    assert!(
+        try_init_with_id_typed(&env, "_").is_ok_and(|r| r.is_ok()),
+        "underscore-only id must be accepted"
+    );
+
+    // Mixed — one character from each class
+    let env = Env::default();
+    assert!(
+        try_init_with_id_typed(&env, "Aa0_").is_ok_and(|r| r.is_ok()),
+        "mixed valid chars id must be accepted"
+    );
+}
+
+// ── charset: InvoiceIdInvalidCharset on disallowed characters ────────────
+
+/// A space character anywhere in the invoice_id must be rejected with
+/// `InvoiceIdInvalidCharset`.
+#[test]
+fn test_invoice_id_space_rejects_with_invalid_charset() {
+    let env = Env::default();
+    let result = try_init_with_id_typed(&env, "INV SPACE");
+    assert_contract_error(result, EscrowError::InvoiceIdInvalidCharset);
+}
+
+/// A hyphen (`-`) in the invoice_id must be rejected with
+/// `InvoiceIdInvalidCharset`.
+#[test]
+fn test_invoice_id_hyphen_rejects_with_invalid_charset() {
+    let env = Env::default();
+    let result = try_init_with_id_typed(&env, "INV-HYPHEN");
+    assert_contract_error(result, EscrowError::InvoiceIdInvalidCharset);
+}
+
+/// A period (`.`) in the invoice_id must be rejected with
+/// `InvoiceIdInvalidCharset`.
+#[test]
+fn test_invoice_id_period_rejects_with_invalid_charset() {
+    let env = Env::default();
+    let result = try_init_with_id_typed(&env, "INV.DOT");
+    assert_contract_error(result, EscrowError::InvoiceIdInvalidCharset);
+}
+
+/// An `@` symbol in the invoice_id must be rejected with
+/// `InvoiceIdInvalidCharset`.
+#[test]
+fn test_invoice_id_at_symbol_rejects_with_invalid_charset() {
+    let env = Env::default();
+    let result = try_init_with_id_typed(&env, "INV@AT");
+    assert_contract_error(result, EscrowError::InvoiceIdInvalidCharset);
+}
+
+/// A tab character in the invoice_id must be rejected with
+/// `InvoiceIdInvalidCharset`.
+#[test]
+fn test_invoice_id_tab_rejects_with_invalid_charset() {
+    let env = Env::default();
+    let result = try_init_with_id_typed(&env, "INV\tTAB");
+    assert_contract_error(result, EscrowError::InvoiceIdInvalidCharset);
+}
+
+/// A `+` character in the invoice_id must be rejected with
+/// `InvoiceIdInvalidCharset`.
+#[test]
+fn test_invoice_id_plus_rejects_with_invalid_charset() {
+    let env = Env::default();
+    let result = try_init_with_id_typed(&env, "INV+PLUS");
+    assert_contract_error(result, EscrowError::InvoiceIdInvalidCharset);
+}
+
+/// A slash (`/`) in the invoice_id must be rejected with
+/// `InvoiceIdInvalidCharset`.
+#[test]
+fn test_invoice_id_slash_rejects_with_invalid_charset() {
+    let env = Env::default();
+    let result = try_init_with_id_typed(&env, "INV/SLASH");
+    assert_contract_error(result, EscrowError::InvoiceIdInvalidCharset);
+}
+
+/// An illegal character at the very start of an otherwise valid string
+/// must still be caught and rejected with `InvoiceIdInvalidCharset`.
+#[test]
+fn test_invoice_id_illegal_char_at_position_zero_rejects_with_invalid_charset() {
+    let env = Env::default();
+    let result = try_init_with_id_typed(&env, "!LEADING");
+    assert_contract_error(result, EscrowError::InvoiceIdInvalidCharset);
+}
+
+/// An illegal character at the very end of an otherwise valid string
+/// must still be caught and rejected with `InvoiceIdInvalidCharset`.
+#[test]
+fn test_invoice_id_illegal_char_at_last_position_rejects_with_invalid_charset() {
+    let env = Env::default();
+    let result = try_init_with_id_typed(&env, "TRAILING!");
+    assert_contract_error(result, EscrowError::InvoiceIdInvalidCharset);
+}
+
+/// An illegal character in the interior of an otherwise valid string
+/// must still be caught and rejected with `InvoiceIdInvalidCharset`.
+#[test]
+fn test_invoice_id_illegal_char_in_interior_rejects_with_invalid_charset() {
+    let env = Env::default();
+    let result = try_init_with_id_typed(&env, "MID!DLE");
+    assert_contract_error(result, EscrowError::InvoiceIdInvalidCharset);
+}
+
+// ── round-trip: stored invoice_id matches the value fetched via get_escrow ──
+
+/// The `invoice_id` stored during `init` must round-trip perfectly when the
+/// escrow is later fetched via `get_escrow`.  The stored `Symbol` value must
+/// equal the `Symbol` constructed from the same string.
+#[test]
+fn test_invoice_id_roundtrips_via_get_escrow_at_min_length() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (token, treasury) = free_addresses(&env);
+
+    // Minimum length: 1 character.
+    let id = "Z";
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, id),
+        &sme,
+        &1_000i128,
+        &500i64,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    let escrow = client.get_escrow();
+    assert_eq!(
+        escrow.invoice_id,
+        Symbol::new(&env, id),
+        "invoice_id fetched via get_escrow must match the value supplied at init (min length)"
+    );
+}
+
+/// The `invoice_id` stored during `init` must round-trip perfectly when the
+/// escrow is later fetched via `get_escrow`, for an id at the maximum allowed
+/// length (32 characters).
+#[test]
+fn test_invoice_id_roundtrips_via_get_escrow_at_max_length() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (token, treasury) = free_addresses(&env);
+
+    // Maximum length: 32 characters, all allowed classes present.
+    let id = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcd01";
+    assert_eq!(id.len(), 32, "pre-condition: id must be exactly 32 chars");
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, id),
+        &sme,
+        &1_000i128,
+        &500i64,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    let escrow = client.get_escrow();
+    assert_eq!(
+        escrow.invoice_id,
+        Symbol::new(&env, id),
+        "invoice_id fetched via get_escrow must match the value supplied at init (max length)"
+    );
+}
+
+/// The value returned by `init` and the value returned by a subsequent
+/// `get_escrow` call must agree on `invoice_id`.
+#[test]
+fn test_invoice_id_init_return_value_matches_get_escrow() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (token, treasury) = free_addresses(&env);
+
+    let id = "INV_RT_001";
+    let returned = client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, id),
+        &sme,
+        &50_000i128,
+        &1_000i64,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+    let fetched = client.get_escrow();
+
+    assert_eq!(
+        returned.invoice_id, fetched.invoice_id,
+        "invoice_id in init return value must equal invoice_id in get_escrow"
+    );
+    assert_eq!(
+        returned.invoice_id,
+        Symbol::new(&env, id),
+        "invoice_id must equal Symbol constructed from the original string"
+    );
+    // The entire escrow structs must also be equal.
+    assert_eq!(
+        returned, fetched,
+        "InvoiceEscrow returned by init must equal the one stored and returned by get_escrow"
+    );
+}
+
+// ── event payload: invoice_id in EscrowInitialized matches get_escrow ───
+
+/// After a successful `init`, the `EscrowInitialized` event must be emitted
+/// exactly once and its embedded `escrow.invoice_id` must match the value
+/// returned by `get_escrow`.
+#[test]
+fn test_invoice_id_matches_escrow_initialized_event_payload() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let contract_id = client.address.clone();
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let token = Address::generate(&env);
+    let treasury = Address::generate(&env);
+
+    let id = "EVT_CHECK_1";
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, id),
+        &sme,
+        &5_000i128,
+        &200i64,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    let escrow = client.get_escrow();
+
+    // Exactly one event must be emitted.
+    let all_events = env.events().all();
+    assert_eq!(
+        all_events.events().len(),
+        1,
+        "exactly one event must be emitted by init"
+    );
+
+    // The event must match the EscrowInitialized structure with the
+    // correct invoice_id inside the embedded escrow.
+    let expected = EscrowInitialized {
+        name: symbol_short!("escrow_ii"),
+        escrow: escrow.clone(),
+        funding_token: token,
+        treasury,
+        registry: None,
+        has_maturity_lock: false,
+    };
+    assert_eq!(
+        all_events,
+        std::vec![expected.to_xdr(&env, &contract_id)],
+        "EscrowInitialized event payload must embed the stored escrow including invoice_id"
+    );
+
+    // The invoice_id inside the event payload's escrow must equal the
+    // Symbol built from the original string.
+    assert_eq!(
+        escrow.invoice_id,
+        Symbol::new(&env, id),
+        "event escrow.invoice_id must round-trip to the original string"
+    );
+}
+
+/// Variant: init with a registry present; the event payload's embedded
+/// `escrow.invoice_id` must still match `get_escrow` and the original string.
+#[test]
+fn test_invoice_id_matches_event_payload_with_registry_present() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let contract_id = client.address.clone();
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let token = Address::generate(&env);
+    let treasury = Address::generate(&env);
+    let registry = Address::generate(&env);
+
+    let id = "EVT_REG_001";
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, id),
+        &sme,
+        &7_500i128,
+        &300i64,
+        &1_000u64,
+        &token,
+        &Some(registry.clone()),
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    let escrow = client.get_escrow();
+
+    let all_events = env.events().all();
+    assert_eq!(
+        all_events.events().len(),
+        1,
+        "exactly one event must be emitted by init"
+    );
+
+    let expected = EscrowInitialized {
+        name: symbol_short!("escrow_ii"),
+        escrow: escrow.clone(),
+        funding_token: token,
+        treasury,
+        registry: Some(registry),
+        has_maturity_lock: true,
+    };
+    assert_eq!(
+        all_events,
+        std::vec![expected.to_xdr(&env, &contract_id)],
+        "EscrowInitialized event payload must match stored escrow when registry is present"
+    );
+
+    assert_eq!(
+        escrow.invoice_id,
+        Symbol::new(&env, id),
+        "event escrow.invoice_id must round-trip to the original string (registry present)"
+    );
 }

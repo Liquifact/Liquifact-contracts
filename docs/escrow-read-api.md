@@ -32,11 +32,15 @@ re-implementing storage reads to guarantee identical semantics.
 - [is_funding_expired](#is_funding_expired--bool)
 - [get_min_contribution_floor](#get_min_contribution_floor--i128)
 - [get_max_unique_investors_cap](#get_max_unique_investors_cap--optionu32)
+- [get_remaining_investor_slots](#get_remaining_investor_slots--optionu32)
 - [get_max_per_investor_cap](#get_max_per_investor_cap--optioni128)
 
 **Maturity & Settlement:**
 - [has_maturity_lock](#has_maturity_lock--bool)
 - [get_funding_close_snapshot](#get_funding_close_snapshot--optionfundingclosesnapshot)
+
+**Tier Lookup:**
+- [preview_yield_tier](#preview_yield_tieramount-i128-lock-u64--i64-u64)
 
 **Per-Investor State:**
 - [get_contribution](#get_contributioninvestor-address--i128)
@@ -46,6 +50,7 @@ re-implementing storage reads to guarantee identical semantics.
 - [is_investor_claimed](#is_investor_claimedinvestor-address--bool)
 - [is_investor_refunded](#is_investor_refundedinvestor-address--bool)
 - [compute_investor_payout](#compute_investor_payoutinvestor-address--i128)
+- [get_claimable_payout](#get_claimable_payoutinvestor-address--i128)
 
 **Attestations:**
 - [get_primary_attestation_hash](#get_primary_attestation_hash--optionbytesn32)
@@ -362,6 +367,21 @@ Returns the optional cap on distinct investor addresses. Reflects the current st
 
 ---
 
+### `get_remaining_investor_slots() -> Option<u32>`
+
+**Signature:** `pub fn get_remaining_investor_slots(env: Env) -> Option<u32>`
+
+Returns the number of remaining investor slots before the `MaxUniqueInvestorsCap` is reached. This safely resolves the gap between the cap and the `get_unique_funder_count`. 
+
+**Requires initialization:** No  
+**Default when absent:** `None` (unlimited investors)
+
+**Return value:**
+- `None` when no cap is configured (i.e., the escrow accepts unlimited distinct investors).
+- `Some(u32)` indicating the exact remaining capacity of new distinct investors. Calculated as `cap - unique_funder_count`. Floored at zero (saturating subtraction) ensuring it stays completely consistent and safe even if the cap is reduced via `lower_max_unique_investors`.
+
+---
+
 ### `get_max_per_investor_cap() → Option<i128>`
 
 **Storage key:** `DataKey::MaxPerInvestorCap`  
@@ -453,6 +473,39 @@ without re-implementing the `unwrap_or` fallback themselves.
 
 `get_investor_yield_bps` returns the same value; prefer `get_effective_yield_bps` when the intent is
 "the rate `compute_investor_payout` will actually apply."
+
+---
+
+## Tier Lookup
+
+### `preview_yield_tier(amount: i128, lock: u64) → (i64, u64)`
+
+**Signature:** `pub fn preview_yield_tier(env: Env, amount: i128, lock: u64) -> (i64, u64)`
+
+Pure read — no auth, no storage writes, safe for simulation.
+
+Returns `(effective_yield_bps, matched_lock_secs)` for a hypothetical first deposit of `amount`
+with `lock` seconds of commitment, using the **exact same tier-selection rule** applied by
+`fund_with_commitment`. This lets a prospective investor see which tier they would receive before
+depositing, without re-implementing the selection logic.
+
+The `amount` parameter mirrors the `fund_with_commitment` signature. In the current release, tier
+selection is lock-only; `amount` is accepted for API parity and forward-compatibility.
+
+**Return values:**
+
+| Condition | `effective_yield_bps` | `matched_lock_secs` |
+|---|---|---|
+| No `YieldTierTable` configured | escrow base `yield_bps` | `0` |
+| `lock == 0` | escrow base `yield_bps` | `0` |
+| `lock` below every tier threshold | escrow base `yield_bps` | `0` |
+| `lock >= min_lock_secs` of a tier | highest qualifying tier's `yield_bps` | that tier's `min_lock_secs` |
+
+> **Note:** this preview reflects the rule applied at **first deposit only**. A follow-on
+> `fund` call does not re-select a tier.
+
+**Security note:** the preview is guaranteed to agree with `fund_with_commitment` because it delegates
+to the same internal `effective_yield_for_commitment` helper — there is no separate selection path.
 
 ---
 
@@ -574,50 +627,27 @@ Returns `true` when an investor's principal has been returned via `refund` in a 
 
 ### `compute_investor_payout(investor: Address) → i128`
 
-**Signature:** `pub fn compute_investor_payout(env: Env, investor: Address) -> i128`
+**Signature:** `pub fn compute_investor_payout(env: Env, investor: Address) → i128`
 
 - `None` — Escrow is not yet funded; no close snapshot exists.
 - `Some(FundingCloseSnapshot)` — The pro-rata denominator snapshot captured when the escrow first transitioned to **funded**.
 
 ---
 
-## `preview_fund(investor: Address, amount: i128) → u32`
+## `get_yield_tiers() → Vec<YieldTier>`
 
-**Pure read-only preview** of a deposit call. Runs the same precondition checks as
-`fund()` in the exact same order, without requiring authorization or mutating state.
+**Storage key:** `DataKey::YieldTierTable`
 
-### Return values
+Returns the yield-tier ladder configured at `init`, or an empty `Vec` when no tiers were configured (base yield applies to all investors).
 
-| Code | Meaning |
-|------|---------|
-| `0`  | Deposit would be accepted by `fund()` |
-| `>0` | The numeric [`EscrowError`](escrow-error-messages.md) code that `fund()` would raise first |
+- **Immutable** — set once at `init`; the contract never mutates this key after initialization.
+- **Order** — returned order matches the validated non-decreasing ordering enforced at `init`: `min_lock_secs` strictly increasing, `yield_bps` non-decreasing.
+- **Empty vec** — returned for both "no tiers passed at init" and "legacy instance predating tier support"; callers must not treat an empty result as an error.
+- **Pure read** — no auth required, no state mutation.
 
-### Guard order (matches `fund_impl`)
+### `YieldTier` fields
 
-| Order | Check | Error code |
-|-------|-------|------------|
-| 1 | Amount is positive | `FundingAmountNotPositive` (100) |
-| 2 | Meets `min_contribution` floor (if configured) | `FundingBelowMinContribution` (101) |
-| 3 | Escrow is initialized (reads `DataKey::Escrow`) | — (panics if uninitialized, matching `fund`) |
-| 4 | No active legal hold | `LegalHoldBlocksFunding` (102) |
-| 5 | Escrow status is open (0) | `EscrowNotOpenForFunding` (103) |
-| 6 | Funding deadline not passed | `FundingDeadlinePassed` (164) |
-| 7 | Allowlist gate (if active): investor is allowlisted | `InvestorNotAllowlisted` (104) |
-| 8 | Investor contribution does not overflow | `InvestorContributionOverflow` (105) |
-| 9 | Per-investor cap not exceeded (if configured) | `InvestorContributionExceedsCap` (106) |
-| 10 | Unique-investor cap not reached (if configured, new investors only) | `UniqueInvestorCapReached` (107) |
-| 11 | Total funded-amount does not overflow | `FundedAmountOverflow` (110) |
-
-### Advisory
-
-This is a **read-only preview**. The actual `fund()` call is the source of truth
-and may still revert due to racing state changes (e.g. another transaction fills
-the unique-investor cap or the admin closes funding between the preview and the
-subsequent `fund()` call).
-
-### Security
-
-- **No `require_auth`** — the investor address is not required to sign.
-- **No storage writes** — returns the first failing code without mutating state.
-- **Advisory only** — callers must still handle `fund()` reverting on race conditions.
+| Field | Type | Description |
+|-------|------|-------------|
+| `min_lock_secs` | `u64` | Minimum `committed_lock_secs` an investor must pass to qualify for this tier |
+| `yield_bps` | `i64` | Effective annualized yield in basis points for qualifying investors |

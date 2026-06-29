@@ -8,10 +8,11 @@
 )]
 #[allow(unused_imports)]
 use super::{
-    AttestationDigestAppended, AttestationDigestRevoked, CollateralRecordedEvt, DataKey,
-    EscrowError, EscrowFunded, EscrowInitialized, FundingTargetUpdated, LiquifactEscrow,
-    LiquifactEscrowClient, MaxUniqueInvestorsCapLowered, PrimaryAttestationBound, YieldTier,
-    MAX_ATTESTATION_APPEND_ENTRIES, MAX_DUST_SWEEP_AMOUNT, MAX_FUND_BATCH, SCHEMA_VERSION,
+    AttestationDigestAppended, AttestationDigestRevoked, AttestationDigestUnrevoked,
+    CollateralRecordedEvt, DataKey, EscrowError, EscrowFunded, EscrowInitialized,
+    FundingTargetUpdated, LiquifactEscrow, LiquifactEscrowClient, MaxUniqueInvestorsCapLowered,
+    PrimaryAttestationBound, YieldTier, MAX_ATTESTATION_APPEND_ENTRIES, MAX_DUST_SWEEP_AMOUNT,
+    MAX_FUND_BATCH, SCHEMA_VERSION,
 };
 use soroban_sdk::{
     symbol_short,
@@ -20,6 +21,8 @@ use soroban_sdk::{
     Address, Env, Error, Event, InvokeError, String, Val, Vec as SorobanVec,
 };
 use std::fmt::Debug;
+
+pub use soroban_sdk::Symbol;
 
 pub(crate) fn assert_contract_error<T, E>(
     result: Result<Result<T, E>, Result<Error, InvokeError>>,
@@ -44,14 +47,18 @@ pub(crate) fn assert_contract_error<T, E>(
 // modules stay assertion-focused and each test still owns a fresh Env.
 mod admin;
 mod attestations;
+mod auth_matrix;
 mod cap_validation;
+#[rustfmt::skip]
 mod coverage;
 mod external_calls;
 mod external_calls_mocked;
 mod funding;
 mod init;
 mod integration;
+mod integration_status_guards;
 mod legal_hold;
+mod migration_errors;
 mod properties;
 mod settlement;
 
@@ -74,7 +81,7 @@ pub fn deploy_with_id(env: &Env) -> (Address, LiquifactEscrowClient<'_>) {
 
 pub fn setup(env: &Env) -> (LiquifactEscrowClient<'_>, Address, Address) {
     let mut ledger_info = env.ledger().get();
-    ledger_info.timestamp = 12345;
+    ledger_info.timestamp = 0;
     ledger_info.sequence_number = 100;
     env.ledger().set(ledger_info);
     env.mock_all_auths();
@@ -133,6 +140,8 @@ pub fn default_init(client: &LiquifactEscrowClient<'_>, env: &Env, admin: &Addre
         &None,
         &None,
         &None,
+        &None, // No funding deadline,
+        &None,
         &None,
     );
 }
@@ -173,6 +182,8 @@ pub fn init_and_fund_with_real_token<'a>(
         &token_id,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
         &None,
         &None,
