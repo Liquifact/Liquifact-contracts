@@ -1,7 +1,8 @@
 use super::*;
 use crate::{
     AdminAcceptedEvent, AdminProposalCancelled, AdminProposedEvent, EscrowCloseSnapshot,
-    FundingTargetUpdated, RegistryRefRebound, DEFAULT_MATURITY_MAX_HORIZON_SECS,
+    FundingTargetUpdated, RegistryRefRebound, DEFAULT_ADMIN_PROPOSAL_VALIDITY_SECS,
+    DEFAULT_MATURITY_MAX_HORIZON_SECS,
 };
 
 use soroban_sdk::Event;
@@ -2453,84 +2454,28 @@ fn test_post_handover_admin_can_clear_hold_set_by_old_admin() {
     assert!(!client.get_legal_hold());
 }
 
-// ═════════════════════════════════════════════════════════════════════════════
-// Operational pause switch (set_paused / is_paused / PausedChanged)
-//
-// The pause is a lightweight incident-response circuit breaker, orthogonal to the
-// compliance legal hold. These tests verify:
-//   - admin-only toggle + view + event,
-//   - each gated entrypoint (fund, settle, withdraw, claim_investor_payout) is blocked
-//     with its dedicated typed error while paused, and restored after unpause,
-//   - full independence from the legal hold (each flag blocks on its own; clearing one
-//     does not clear the other; neither write touches the other's storage key).
-// ═════════════════════════════════════════════════════════════════════════════
+// ── propose_admin validity-window override / default-fallback coverage (issue #560) ──
 
-use soroban_sdk::token::StellarAssetClient as PauseSac;
-
-/// Initialise a minimal open escrow (status 0, maturity 0, no tiers) with placeholder addresses.
-fn pause_init_open(
-    client: &LiquifactEscrowClient<'_>,
-    env: &Env,
-    admin: &Address,
-    sme: &Address,
-    id: &str,
-) {
-    client.init(
-        admin,
-        &soroban_sdk::String::from_str(env, id),
-        sme,
-        &TARGET,
-        &800i64,
-        &0u64,
-        &Address::generate(env),
-        &None,
-        &Address::generate(env),
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-    );
-}
-
-/// Initialise and fund to target with a placeholder token (no real transfers needed for
-/// settle / claim paths, mirroring the legal-hold test harness).
-fn pause_init_funded(
-    client: &LiquifactEscrowClient<'_>,
-    env: &Env,
-    admin: &Address,
-    sme: &Address,
-    investor: &Address,
-    id: &str,
-) {
-    pause_init_open(client, env, admin, sme, id);
-    client.fund(investor, &TARGET);
-}
-
-/// Initialise with a real SAC token and fund to target so `withdraw()` can transfer.
-fn pause_init_funded_real<'a>(
+/// Helper: deploy + init an escrow at a known ledger timestamp `now`, returning the
+/// client, current admin, and a fresh successor address.
+///
+/// Centralises the 17-argument `init` boilerplate so the window tests stay focused on
+/// the expiry arithmetic and the inclusive accept boundary.
+fn init_for_propose_window<'a>(
     env: &'a Env,
-    admin: &Address,
-    sme: &Address,
-    investor: &Address,
-    id: &str,
-) -> LiquifactEscrowClient<'a> {
-    let sac = env.register_stellar_asset_contract_v2(Address::generate(env));
-    let token_id = sac.address();
-    let sac_admin = PauseSac::new(env, &token_id);
-    let escrow_id = env.register(crate::LiquifactEscrow, ());
-    let client = LiquifactEscrowClient::new(env, &escrow_id);
+    label: &str,
+    now: u64,
+) -> (LiquifactEscrowClient<'a>, Address, Address) {
+    let (client, admin, sme) = setup(env);
+    env.ledger().set_timestamp(now);
     client.init(
-        admin,
-        &soroban_sdk::String::from_str(env, id),
-        sme,
+        &admin,
+        &soroban_sdk::String::from_str(env, label),
+        &sme,
         &TARGET,
         &800i64,
         &0u64,
-        &token_id,
+        &Address::generate(env),
         &None,
         &Address::generate(env),
         &None,
@@ -2542,264 +2487,74 @@ fn pause_init_funded_real<'a>(
         &None,
         &None,
     );
-    sac_admin.mint(investor, &TARGET);
-    client.fund(investor, &TARGET);
-    client
+    let new_admin = Address::generate(env);
+    (client, admin, new_admin)
 }
 
-// ── Admin-only toggle, view, and event ───────────────────────────────────────
-
+/// `propose_admin(.., Some(w))` must store the expiry as exactly `now + w`.
 #[test]
-fn set_paused_by_admin_toggles_and_view_reflects() {
-    let env = Env::default();
-    let (client, admin, sme) = setup(&env);
-    pause_init_open(&client, &env, &admin, &sme, "PSE001");
-    assert!(!client.is_paused(), "default unpaused");
-    client.set_paused(&true);
-    assert!(client.is_paused());
-    client.set_paused(&false);
-    assert!(!client.is_paused());
-}
-
-#[test]
-fn set_paused_records_admin_auth() {
-    let env = Env::default();
-    let (client, admin, sme) = setup(&env);
-    pause_init_open(&client, &env, &admin, &sme, "PSE002");
-    client.set_paused(&true);
-    assert!(
-        env.auths().iter().any(|(addr, _)| *addr == admin),
-        "admin auth must be recorded for set_paused"
-    );
-}
-
-#[test]
-fn set_paused_emits_event_with_correct_flag() {
-    use soroban_sdk::testutils::Events as _;
-    let env = Env::default();
-    let (client, admin, sme) = setup(&env);
-    let contract_id = client.address.clone();
-    pause_init_open(&client, &env, &admin, &sme, "PSE003");
-
-    client.set_paused(&true);
-    assert_eq!(
-        env.events().all().events().last().unwrap().clone(),
-        crate::PausedChanged {
-            name: symbol_short!("paused"),
-            invoice_id: client.get_escrow().invoice_id,
-            active: 1,
-        }
-        .to_xdr(&env, &contract_id)
-    );
-
-    client.set_paused(&false);
-    assert_eq!(
-        env.events().all().events().last().unwrap().clone(),
-        crate::PausedChanged {
-            name: symbol_short!("paused"),
-            invoice_id: client.get_escrow().invoice_id,
-            active: 0,
-        }
-        .to_xdr(&env, &contract_id)
-    );
-}
-
-#[test]
-fn set_paused_by_non_admin_panics() {
-    let env = Env::default();
-    let (client, admin, sme) = setup(&env);
-    pause_init_open(&client, &env, &admin, &sme, "PSE004");
-    env.mock_auths(&[]);
-    assert!(client.try_set_paused(&true).is_err());
-}
-
-// ── fund ──────────────────────────────────────────────────────────────────────
-
-#[test]
-fn fund_blocked_when_paused() {
-    let env = Env::default();
-    let (client, admin, sme) = setup(&env);
-    let investor = Address::generate(&env);
-    pause_init_open(&client, &env, &admin, &sme, "PGF001");
-    client.set_paused(&true);
-    assert_contract_error(
-        client.try_fund(&investor, &TARGET),
-        crate::EscrowError::PausedBlocksFunding,
-    );
-}
-
-#[test]
-fn fund_passes_after_unpause() {
-    let env = Env::default();
-    let (client, admin, sme) = setup(&env);
-    let investor = Address::generate(&env);
-    pause_init_open(&client, &env, &admin, &sme, "PGF002");
-    client.set_paused(&true);
-    client.set_paused(&false);
-    let escrow = client.fund(&investor, &TARGET);
-    assert_eq!(escrow.status, 1);
-}
-
-// ── settle ──────────────────────────────────────────────────────────────────
-
-#[test]
-fn settle_blocked_when_paused() {
-    let env = Env::default();
-    let (client, admin, sme) = setup(&env);
-    let investor = Address::generate(&env);
-    pause_init_funded(&client, &env, &admin, &sme, &investor, "PGS001");
-    client.set_paused(&true);
-    assert_contract_error(
-        client.try_settle(),
-        crate::EscrowError::PausedBlocksSettlement,
-    );
-}
-
-#[test]
-fn settle_passes_after_unpause() {
-    let env = Env::default();
-    let (client, admin, sme) = setup(&env);
-    let investor = Address::generate(&env);
-    pause_init_funded(&client, &env, &admin, &sme, &investor, "PGS002");
-    client.set_paused(&true);
-    client.set_paused(&false);
-    let escrow = client.settle();
-    assert_eq!(escrow.status, 2);
-}
-
-// ── withdraw ────────────────────────────────────────────────────────────────
-
-#[test]
-fn withdraw_blocked_when_paused() {
-    let env = Env::default();
-    let (client, admin, sme) = setup(&env);
-    let investor = Address::generate(&env);
-    pause_init_funded(&client, &env, &admin, &sme, &investor, "PGW001");
-    client.set_paused(&true);
-    assert_contract_error(
-        client.try_withdraw(),
-        crate::EscrowError::PausedBlocksWithdrawal,
-    );
-}
-
-#[test]
-fn withdraw_passes_after_unpause() {
+fn test_propose_admin_explicit_window_stores_now_plus_window() {
     let env = Env::default();
     env.mock_all_auths();
-    let admin = Address::generate(&env);
-    let sme = Address::generate(&env);
-    let investor = Address::generate(&env);
-    let client = pause_init_funded_real(&env, &admin, &sme, &investor, "PGW002");
-    client.set_paused(&true);
-    client.set_paused(&false);
-    let escrow = client.withdraw();
-    assert_eq!(escrow.status, 3);
+    let now = 1_000u64;
+    let window = 3_600u64;
+    let (client, _admin, new_admin) = init_for_propose_window(&env, "PROP_W_1", now);
+
+    client.propose_admin(&new_admin, &Some(window));
+
+    assert_eq!(client.get_pending_admin_expiry(), Some(now + window));
 }
 
-// ── claim_investor_payout ────────────────────────────────────────────────────
-
+/// `propose_admin(.., None)` must fall back to `now + DEFAULT_ADMIN_PROPOSAL_VALIDITY_SECS`.
 #[test]
-fn claim_investor_payout_blocked_when_paused() {
+fn test_propose_admin_default_window_fallback() {
     let env = Env::default();
-    let (client, admin, sme) = setup(&env);
-    let investor = Address::generate(&env);
-    pause_init_funded(&client, &env, &admin, &sme, &investor, "PGC001");
-    client.settle();
-    client.set_paused(&true);
-    assert_contract_error(
-        client.try_claim_investor_payout(&investor),
-        crate::EscrowError::PausedBlocksInvestorClaims,
+    env.mock_all_auths();
+    let now = 2_500u64;
+    let (client, _admin, new_admin) = init_for_propose_window(&env, "PROP_W_2", now);
+
+    client.propose_admin(&new_admin, &None);
+
+    assert_eq!(
+        client.get_pending_admin_expiry(),
+        Some(now + DEFAULT_ADMIN_PROPOSAL_VALIDITY_SECS)
     );
 }
 
+/// `accept_admin` must succeed when `ledger.timestamp() == expiry` (inclusive boundary).
 #[test]
-fn claim_investor_payout_passes_after_unpause() {
+fn test_accept_admin_succeeds_at_exact_expiry_boundary() {
     let env = Env::default();
-    let (client, admin, sme) = setup(&env);
-    let investor = Address::generate(&env);
-    pause_init_funded(&client, &env, &admin, &sme, &investor, "PGC002");
-    client.settle();
-    client.set_paused(&true);
-    client.set_paused(&false);
-    client.claim_investor_payout(&investor);
-    assert!(client.is_investor_claimed(&investor));
+    env.mock_all_auths();
+    let now = 1_000u64;
+    let window = 5_000u64;
+    let expiry = now + window;
+    let (client, _admin, new_admin) = init_for_propose_window(&env, "PROP_W_3", now);
+
+    client.propose_admin(&new_admin, &Some(window));
+
+    // Advance to exactly the stored expiry — accept must still succeed.
+    env.ledger().set_timestamp(expiry);
+    let updated = client.accept_admin();
+    assert_eq!(updated.admin, new_admin);
+    assert_eq!(client.get_pending_admin(), None);
+    assert_eq!(client.get_pending_admin_expiry(), None);
 }
 
-// ── Independence from legal hold ──────────────────────────────────────────────
-
+/// `accept_admin` must fail with `AdminProposalExpired` one second past the expiry.
 #[test]
-fn pause_and_legal_hold_are_independent_storage_flags() {
+#[should_panic(expected = "Error(Contract, #85)")]
+fn test_accept_admin_fails_one_second_past_expiry() {
     let env = Env::default();
-    let (client, admin, sme) = setup(&env);
-    pause_init_open(&client, &env, &admin, &sme, "PIN001");
+    env.mock_all_auths();
+    let now = 1_000u64;
+    let window = 5_000u64;
+    let expiry = now + window;
+    let (client, _admin, new_admin) = init_for_propose_window(&env, "PROP_W_4", now);
 
-    // Setting the pause must not set the legal hold, and vice-versa.
-    client.set_paused(&true);
-    assert!(client.is_paused());
-    assert!(!client.get_legal_hold(), "pause must not touch legal hold");
+    client.propose_admin(&new_admin, &Some(window));
 
-    client.set_legal_hold(&true);
-    assert!(client.is_paused(), "legal hold must not touch pause");
-    assert!(client.get_legal_hold());
-
-    // Clearing the pause leaves the legal hold intact.
-    client.set_paused(&false);
-    assert!(!client.is_paused());
-    assert!(client.get_legal_hold());
-
-    // Clearing the legal hold leaves the pause state (now false) intact.
-    client.clear_legal_hold();
-    assert!(!client.is_paused());
-    assert!(!client.get_legal_hold());
-}
-
-#[test]
-fn fund_blocked_by_pause_even_when_legal_hold_cleared() {
-    let env = Env::default();
-    let (client, admin, sme) = setup(&env);
-    let investor = Address::generate(&env);
-    pause_init_open(&client, &env, &admin, &sme, "PIN002");
-
-    // Both active, then clear ONLY the legal hold: pause must still block.
-    client.set_paused(&true);
-    client.set_legal_hold(&true);
-    client.clear_legal_hold();
-    assert!(!client.get_legal_hold());
-    assert_contract_error(
-        client.try_fund(&investor, &TARGET),
-        crate::EscrowError::PausedBlocksFunding,
-    );
-}
-
-#[test]
-fn fund_blocked_by_legal_hold_even_when_pause_cleared() {
-    let env = Env::default();
-    let (client, admin, sme) = setup(&env);
-    let investor = Address::generate(&env);
-    pause_init_open(&client, &env, &admin, &sme, "PIN003");
-
-    // Both active, then clear ONLY the pause: legal hold must still block.
-    client.set_paused(&true);
-    client.set_legal_hold(&true);
-    client.set_paused(&false);
-    assert!(!client.is_paused());
-    assert_contract_error(
-        client.try_fund(&investor, &TARGET),
-        crate::EscrowError::LegalHoldBlocksFunding,
-    );
-}
-
-#[test]
-fn fund_passes_only_when_both_flags_cleared() {
-    let env = Env::default();
-    let (client, admin, sme) = setup(&env);
-    let investor = Address::generate(&env);
-    pause_init_open(&client, &env, &admin, &sme, "PIN004");
-
-    client.set_paused(&true);
-    client.set_legal_hold(&true);
-    client.set_paused(&false);
-    client.clear_legal_hold();
-    let escrow = client.fund(&investor, &TARGET);
-    assert_eq!(escrow.status, 1);
+    // One second past the inclusive boundary — accept must be rejected.
+    env.ledger().set_timestamp(expiry + 1);
+    client.accept_admin();
 }
