@@ -448,6 +448,9 @@ pub enum EscrowError {
     PartialSettleUnauthorizedCaller = 200,
     MaxPerInvestorCapNotConfigured = 24, // new
     MaxPerInvestorCapNotRaised = 25,     // new
+    /// [`LiquifactEscrow::raise_maturity_max_horizon`] received a `new_horizon` that is
+    /// not strictly greater than the current stored horizon.
+    HorizonNotRaised = 201,
 }
 
 #[inline(always)]
@@ -1074,6 +1077,18 @@ pub struct AttestationDigestUnrevoked {
 
 #[contractevent]
 pub struct MaturityMaxHorizonUpdated {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    pub old_horizon: u64,
+    pub new_horizon: u64,
+}
+
+/// Emitted by [`LiquifactEscrow::raise_maturity_max_horizon`] when the maturity ceiling is
+/// monotonically raised. Carries the `invoice_id` and the old/new horizon values.
+#[contractevent]
+pub struct MaturityMaxHorizonRaised {
     #[topic]
     pub name: Symbol,
     #[topic]
@@ -3986,6 +4001,56 @@ impl LiquifactEscrow {
 
         MaturityMaxHorizonUpdated {
             name: symbol_short!("mtry_max"),
+            invoice_id: escrow.invoice_id,
+            old_horizon,
+            new_horizon,
+        }
+        .publish(&env);
+
+        new_horizon
+    }
+
+    /// Monotonically **raise** the maturity-max-horizon ceiling — a forward-only governance lever.
+    ///
+    /// Unlike the general [`LiquifactEscrow::update_maturity_max_horizon`] setter (which accepts any
+    /// value), this entrypoint guarantees the horizon can only ever be raised, never lowered or held
+    /// equal. This supports a "term-extension only" policy and avoids the confusing invalid
+    /// configuration that arises when a horizon is lowered below an already-set maturity.
+    ///
+    /// # Authorization
+    /// Requires the signature of the current [`InvoiceEscrow::admin`].
+    ///
+    /// # Errors
+    /// - [`EscrowError::HorizonNotRaised`] if `new_horizon` is not strictly greater than the current
+    ///   stored horizon (rejects equal or lower values).
+    ///
+    /// # Events
+    /// Emits [`MaturityMaxHorizonRaised`] carrying `invoice_id`, the old horizon, and the new horizon.
+    ///
+    /// # Returns
+    /// The newly stored horizon.
+    pub fn raise_maturity_max_horizon(env: Env, new_horizon: u64) -> u64 {
+        let escrow = Self::load_escrow_require_admin(&env);
+
+        let old_horizon = env
+            .storage()
+            .instance()
+            .get::<DataKey, u64>(&DataKey::MaturityMaxHorizon)
+            .unwrap_or(DEFAULT_MATURITY_MAX_HORIZON_SECS);
+
+        // Forward-only guard: strictly greater than the current ceiling.
+        ensure(
+            &env,
+            new_horizon > old_horizon,
+            EscrowError::HorizonNotRaised,
+        );
+
+        env.storage()
+            .instance()
+            .set(&DataKey::MaturityMaxHorizon, &new_horizon);
+
+        MaturityMaxHorizonRaised {
+            name: symbol_short!("mtry_rse"),
             invoice_id: escrow.invoice_id,
             old_horizon,
             new_horizon,
