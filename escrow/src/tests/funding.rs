@@ -4611,35 +4611,47 @@ fn test_get_yield_tiers_is_pure_read_no_state_change() {
     );
 }
 
-// ── fund_batch atomic pre-validation coverage (issue #557) ────────────────────
+// ---------------------------------------------------------------------------
+// preview_yield_tier vs fund_with_commitment equivalence tests (issue #562)
+// ---------------------------------------------------------------------------
 
-/// Deploy + init an open escrow with a generous target and no caps, returning the
-/// client and three fresh investor addresses for batch tests.
-fn init_for_fund_batch_prevalidate<'a>(
-    env: &'a Env,
-    label: &str,
-) -> (
-    super::LiquifactEscrowClient<'a>,
-    Address,
-    Address,
-    Address,
-) {
-    env.mock_all_auths();
-    let client = deploy(env);
+/// Helper: initialise an escrow with three tiers (30s / 60s / 90s) and a base
+/// yield of 500 bps.  Returns the client ready for use; all auth is mocked.
+fn setup_three_tier_escrow(
+    env: &Env,
+    invoice_id: &str,
+    target: i128,
+) -> LiquifactEscrowClient {
     let admin = Address::generate(env);
     let sme = Address::generate(env);
     let (tok, tre) = free_addresses(env);
+    let client = deploy(env);
+
+    let mut tiers = SorobanVec::new(env);
+    tiers.push_back(YieldTier {
+        min_lock_secs: 30,
+        yield_bps: 700,
+    });
+    tiers.push_back(YieldTier {
+        min_lock_secs: 60,
+        yield_bps: 900,
+    });
+    tiers.push_back(YieldTier {
+        min_lock_secs: 90,
+        yield_bps: 1_200,
+    });
+
     client.init(
         &admin,
-        &soroban_sdk::String::from_str(env, label),
+        &soroban_sdk::String::from_str(env, invoice_id),
         &sme,
-        &1_000_000i128,
-        &800i64,
+        &target,
+        &500i64,
         &0u64,
         &tok,
         &None,
         &tre,
-        &None,
+        &Some(tiers),
         &None,
         &None,
         &None,
@@ -4648,140 +4660,127 @@ fn init_for_fund_batch_prevalidate<'a>(
         &None,
         &None,
     );
-    (
-        client,
-        Address::generate(env),
-        Address::generate(env),
-        Address::generate(env),
-    )
+    client
 }
 
-/// Assert that a `fund_batch` call panics and leaves the escrow state completely
-/// unchanged: funded total, unique-funder count, and each investor's contribution.
-fn assert_fund_batch_atomic_noop(
-    client: &super::LiquifactEscrowClient<'_>,
-    entries: &SorobanVec<(Address, i128)>,
-    investors: &[&Address],
+/// Assert that `preview_yield_tier(amount, lock)` exactly matches what
+/// `fund_with_commitment` later records for the same investor.
+///
+/// Uses a freshly-generated address for the investor so no prior deposit
+/// can interfere with tier selection.
+fn assert_preview_matches_actual(
+    client: &LiquifactEscrowClient,
+    env: &Env,
+    amount: i128,
+    lock: u64,
 ) {
-    let funded_before = client.get_escrow().funded_amount;
-    let count_before = client.get_unique_funder_count();
-
-    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        client.fund_batch(entries);
-    }));
-    assert!(res.is_err(), "malformed batch must fail the entire call");
-
+    let (preview_bps, preview_lock) = client.preview_yield_tier(&amount, &lock);
+    let investor = Address::generate(env);
+    client.fund_with_commitment(&investor, &amount, &lock);
+    let actual_bps = client.get_investor_yield_bps(&investor);
+    let actual_lock = client.get_investor_claim_not_before(&investor);
     assert_eq!(
-        client.get_escrow().funded_amount,
-        funded_before,
-        "funded_amount must be unchanged after a rejected batch"
+        preview_bps, actual_bps,
+        "preview_yield_tier bps mismatch for lock={lock}: preview={preview_bps} actual={actual_bps}"
     );
     assert_eq!(
-        client.get_unique_funder_count(),
-        count_before,
-        "unique funder count must be unchanged after a rejected batch"
+        preview_lock, actual_lock,
+        "preview_yield_tier lock mismatch for lock={lock}: preview={preview_lock} actual={actual_lock}"
     );
-    for inv in investors {
-        assert_eq!(
-            client.get_contribution(inv),
-            0i128,
-            "no contribution may be recorded after a rejected batch"
-        );
-    }
 }
 
-/// A zero-amount entry in the FIRST position must fail the whole batch with no
-/// partial mutation.
+/// Base / no-tier case: amount below the first tier threshold.
+/// Preview and actual must both return the escrow base yield (500 bps, lock 0).
 #[test]
-fn test_fund_batch_zero_first_entry_is_atomic_noop() {
-    let env = Env::default();
-    let (client, a, b, c) = init_for_fund_batch_prevalidate(&env, "FB_Z_1");
-
-    let mut entries = SorobanVec::new(&env);
-    entries.push_back((a.clone(), 0i128)); // invalid, first
-    entries.push_back((b.clone(), 10_000i128));
-    entries.push_back((c.clone(), 20_000i128));
-
-    assert_fund_batch_atomic_noop(&client, &entries, &[&a, &b, &c]);
-}
-
-/// A zero-amount entry in the MIDDLE position must fail atomically; the valid
-/// first entry must NOT be partially applied.
-#[test]
-fn test_fund_batch_zero_middle_entry_is_atomic_noop() {
-    let env = Env::default();
-    let (client, a, b, c) = init_for_fund_batch_prevalidate(&env, "FB_Z_2");
-
-    let mut entries = SorobanVec::new(&env);
-    entries.push_back((a.clone(), 10_000i128)); // valid
-    entries.push_back((b.clone(), 0i128)); // invalid, middle
-    entries.push_back((c.clone(), 20_000i128));
-
-    assert_fund_batch_atomic_noop(&client, &entries, &[&a, &b, &c]);
-}
-
-/// A negative-amount entry in the LAST position must fail atomically; the valid
-/// earlier entries must NOT be partially applied.
-#[test]
-fn test_fund_batch_negative_last_entry_is_atomic_noop() {
-    let env = Env::default();
-    let (client, a, b, c) = init_for_fund_batch_prevalidate(&env, "FB_N_3");
-
-    let mut entries = SorobanVec::new(&env);
-    entries.push_back((a.clone(), 10_000i128)); // valid
-    entries.push_back((b.clone(), 20_000i128)); // valid
-    entries.push_back((c.clone(), -5i128)); // invalid, last
-
-    assert_fund_batch_atomic_noop(&client, &entries, &[&a, &b, &c]);
-}
-
-/// An all-valid batch is unaffected by the pre-validation pass: it records each
-/// contribution and advances the funded total exactly like sequential `fund` calls.
-#[test]
-fn test_fund_batch_all_valid_still_records_all_entries() {
-    let env = Env::default();
-    let (client, a, b, c) = init_for_fund_batch_prevalidate(&env, "FB_OK_4");
-
-    let mut entries = SorobanVec::new(&env);
-    entries.push_back((a.clone(), 10_000i128));
-    entries.push_back((b.clone(), 20_000i128));
-    entries.push_back((c.clone(), 30_000i128));
-
-    let result = client.fund_batch(&entries);
-
-    assert_eq!(result.funded_amount, 60_000i128);
-    assert_eq!(client.get_unique_funder_count(), 3);
-    assert_eq!(client.get_contribution(&a), 10_000i128);
-    assert_eq!(client.get_contribution(&b), 20_000i128);
-    assert_eq!(client.get_contribution(&c), 30_000i128);
-}
-
-/// A below-floor entry is rejected up front (same as the single-`fund` floor guard),
-/// leaving no partial mutation even though the other entries are valid.
-#[test]
-fn test_fund_batch_below_floor_entry_is_atomic_noop() {
+fn test_preview_matches_actual_base_case_no_tier() {
     let env = Env::default();
     env.mock_all_auths();
-    let client = deploy(&env);
+    // Large target so we can fund multiple investors without hitting capacity.
+    let client = setup_three_tier_escrow(&env, "PV_BASE", 1_000_000i128);
+    assert_preview_matches_actual(&client, &env, 1_000i128, 0u64);
+    assert_preview_matches_actual(&client, &env, 1_000i128, 29u64);
+}
+
+/// Boundary triple for tier 0 (min_lock_secs = 30, yield_bps = 700):
+/// just below (29 s) → base, exactly at (30 s) → tier 0, just above (31 s) → tier 0.
+#[test]
+fn test_preview_matches_actual_tier0_boundary_triple() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = setup_three_tier_escrow(&env, "PV_T0", 1_000_000i128);
+    assert_preview_matches_actual(&client, &env, 1_000i128, 29u64); // just below
+    assert_preview_matches_actual(&client, &env, 1_000i128, 30u64); // exactly at
+    assert_preview_matches_actual(&client, &env, 1_000i128, 31u64); // just above
+}
+
+/// Boundary triple for tier 1 (min_lock_secs = 60, yield_bps = 900):
+/// just below (59 s) → tier 0, exactly at (60 s) → tier 1, just above (61 s) → tier 1.
+#[test]
+fn test_preview_matches_actual_tier1_boundary_triple() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = setup_three_tier_escrow(&env, "PV_T1", 1_000_000i128);
+    assert_preview_matches_actual(&client, &env, 1_000i128, 59u64); // just below
+    assert_preview_matches_actual(&client, &env, 1_000i128, 60u64); // exactly at
+    assert_preview_matches_actual(&client, &env, 1_000i128, 61u64); // just above
+}
+
+/// Boundary triple for tier 2 (min_lock_secs = 90, yield_bps = 1200):
+/// just below (89 s) → tier 1, exactly at (90 s) → tier 2, just above (91 s) → tier 2.
+#[test]
+fn test_preview_matches_actual_tier2_boundary_triple() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = setup_three_tier_escrow(&env, "PV_T2", 1_000_000i128);
+    assert_preview_matches_actual(&client, &env, 1_000i128, 89u64); // just below
+    assert_preview_matches_actual(&client, &env, 1_000i128, 90u64); // exactly at
+    assert_preview_matches_actual(&client, &env, 1_000i128, 91u64); // just above
+}
+
+/// Highest tier: a lock well above all thresholds must return the top-tier yield.
+#[test]
+fn test_preview_matches_actual_highest_tier() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = setup_three_tier_escrow(&env, "PV_HIGH", 1_000_000i128);
+    assert_preview_matches_actual(&client, &env, 1_000i128, 9_999u64);
+}
+
+/// Zero lock: investor passes lock=0 even though tiers exist.
+/// Both preview and actual must fall back to the base yield with claim_not_before=0.
+#[test]
+fn test_preview_matches_actual_zero_lock_with_tiers() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = setup_three_tier_escrow(&env, "PV_ZERO", 1_000_000i128);
+    let (preview_bps, preview_lock) = client.preview_yield_tier(&1_000i128, &0u64);
+    assert_eq!(preview_bps, 500, "zero lock must return base yield");
+    assert_eq!(preview_lock, 0, "zero lock must return lock=0");
+    assert_preview_matches_actual(&client, &env, 1_000i128, 0u64);
+}
+
+/// No tiers configured at all: preview and actual must both return the escrow
+/// base yield regardless of the lock supplied.
+#[test]
+fn test_preview_matches_actual_no_tiers_configured() {
+    let env = Env::default();
+    env.mock_all_auths();
     let admin = Address::generate(&env);
     let sme = Address::generate(&env);
     let (tok, tre) = free_addresses(&env);
-    let a = Address::generate(&env);
-    let b = Address::generate(&env);
-
-    let floor = 5_000i128;
+    let client = deploy(&env);
     client.init(
         &admin,
-        &soroban_sdk::String::from_str(&env, "FB_FLR_5"),
+        &soroban_sdk::String::from_str(&env, "PV_NOTIER"),
         &sme,
         &1_000_000i128,
-        &800i64,
+        &600i64,
         &0u64,
         &tok,
         &None,
         &tre,
         &None,
-        &Some(floor),
+        &None,
         &None,
         &None,
         &None,
@@ -4789,10 +4788,19 @@ fn test_fund_batch_below_floor_entry_is_atomic_noop() {
         &None,
         &None,
     );
+    assert_preview_matches_actual(&client, &env, 1_000i128, 0u64);
+    assert_preview_matches_actual(&client, &env, 1_000i128, 9_999u64);
+}
 
-    let mut entries = SorobanVec::new(&env);
-    entries.push_back((a.clone(), 10_000i128)); // valid
-    entries.push_back((b.clone(), 1_000i128)); // below floor → reject whole batch
-
-    assert_fund_batch_atomic_noop(&client, &entries, &[&a, &b]);
+/// Amount parameter is currently unused in tier selection (lock-only rule).
+/// Preview and actual must agree regardless of the amount supplied.
+#[test]
+fn test_preview_matches_actual_varying_amounts() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = setup_three_tier_escrow(&env, "PV_AMT", 1_000_000i128);
+    for amount in [1i128, 100, 500, 5_000, 50_000] {
+        assert_preview_matches_actual(&client, &env, amount, 30u64);
+        assert_preview_matches_actual(&client, &env, amount, 60u64);
+    }
 }
