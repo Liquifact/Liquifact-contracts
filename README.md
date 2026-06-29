@@ -184,6 +184,53 @@ liquifact-contracts/
 | `get_version` | — | Read stored `DataKey::Version`. |
 | `get_remaining_investor_slots` | — | Read remaining unique investor capacity before reaching the cap. |
 
+| `rebind_registry_ref` | Admin | Set or update the off-chain registry hint (`DataKey::RegistryRef`). Emits `RegistryRefRebound`. |
+| `clear_registry_ref` | Admin | Convenience alias for `rebind_registry_ref(None)`. Clears the registry pointer. |
+| `get_registry_ref` | — | Return the current registry hint, or `None` when unbound. |
+
+---
+
+## Off-chain registry-reference pointer
+
+The escrow stores an optional `Option<Address>` under `DataKey::RegistryRef` as a
+**discoverability hint** for off-chain indexers. It is set at `init` (optional) and
+can be updated or cleared at any time by the admin via `rebind_registry_ref` /
+`clear_registry_ref`.
+
+### Non-authority guarantee
+
+**The registry pointer confers no control over on-chain funds, settlement, or
+authorization.** No entrypoint that moves tokens or changes escrow status reads
+`DataKey::RegistryRef`. Integrators must not treat its presence as proof of registry
+membership or as a security boundary.
+
+### Pointer states
+
+| State | `get_registry_ref` returns | Meaning |
+|-------|---------------------------|---------|
+| Unbound | `None` | No off-chain registry is associated with this escrow. |
+| Bound | `Some(addr)` | `addr` is a hint to an off-chain registry contract. Verify membership directly with that contract if authoritative state is needed. |
+
+### Mutation path
+
+Only the current escrow admin may call `rebind_registry_ref` or `clear_registry_ref`.
+Each call emits a `RegistryRefRebound` event (topic: `reg_rebind`) carrying the new
+`Option<Address>` value. Off-chain indexers should subscribe to this event to re-sync
+their cached pointer without polling.
+
+### Lifecycle summary
+
+1. **Init (optional bind):** `init` accepts an optional `registry: Option<Address>`.
+   Passing `Some(addr)` stores the hint immediately; `None` leaves the pointer unset.
+2. **Rebind:** Admin calls `rebind_registry_ref(Some(new_addr))` to change the hint.
+   The `RegistryRefRebound` event fires with the new address.
+3. **Clear:** Admin calls `clear_registry_ref()` (or `rebind_registry_ref(None)`) to
+   delete the key. The `RegistryRefRebound` event fires with `registry = None`.
+
+See [`docs/escrow-registry-ref.md`](docs/escrow-registry-ref.md) for the full lifecycle
+specification and integrator guidance, and [`docs/escrow-events.md`](docs/escrow-events.md)
+for the `RegistryRefRebound` event schema.
+
 ---
 
 ## Storage guardrails

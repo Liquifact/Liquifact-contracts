@@ -183,6 +183,45 @@ Auditors can cross-check `batch_size` against the number of `al_set` events in
 the same transaction to verify that no per-investor events were dropped or
 duplicated during a batch operation.
 
+### `RegistryRefRebound`
+Emitted when the admin calls `rebind_registry_ref` (including via the `clear_registry_ref`
+convenience wrapper). Signals that the off-chain registry hint stored at `DataKey::RegistryRef`
+has changed. **This event carries no settlement authority** — it exists purely so off-chain
+indexers can re-sync their local pointer without polling the contract.
+
+**Topics:**
+1. `reg_rebind` (Symbol)
+2. `invoice_id` (Symbol)
+
+**Data Payload:**
+- `registry` (`Option<Address>`): new hint value. `None` means the pointer was cleared (unbound state).
+
+**Non-authority guarantee:**
+The emitted address is a discoverability hint only. No on-chain logic in the escrow contract
+reads `DataKey::RegistryRef` when moving funds, settling, or authorizing any call. Presence of
+a `Some(addr)` value does **not** imply registry membership — query the registry contract directly
+to verify on-chain state.
+
+**Integrator guidance:**
+- `None` (unbound): no off-chain registry is currently associated with this escrow. Treat as "not registered" for UI/UX purposes.
+- `Some(addr)` (bound): an off-chain indexer hint is set; verify membership with the registry at `addr` if authoritative state is required.
+- On receiving this event, re-sync any cached pointer and do **not** infer fund-flow changes.
+
+**Example (JSON Decoded):**
+```json
+{
+  "topics": ["reg_rebind", "INV_001"],
+  "data": {
+    "registry": "CREG..."
+  }
+}
+```
+
+**Related entrypoints:** `rebind_registry_ref`, `clear_registry_ref`, `get_registry_ref`.
+See also: [`docs/escrow-registry-ref.md`](escrow-registry-ref.md).
+
+---
+
 ### `LegalHoldChanged`
 Emitted when an admin toggles the compliance hold.
 
