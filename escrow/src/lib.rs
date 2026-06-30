@@ -455,7 +455,15 @@ pub enum EscrowError {
     MaxPerInvestorCapNotRaised = 25,     // new
     /// [`LiquifactEscrow::raise_maturity_max_horizon`] received a `new_horizon` that is
     /// not strictly greater than the current stored horizon.
-    HorizonNotRaised = 201,
+    HorizonNotRaised = 210,
+    /// [`LiquifactEscrow::fund`] blocked while operational pause is active.
+    PausedBlocksFunding = 211,
+    /// [`LiquifactEscrow::settle`] blocked while operational pause is active.
+    PausedBlocksSettlement = 212,
+    /// [`LiquifactEscrow::withdraw`] blocked while operational pause is active.
+    PausedBlocksWithdrawal = 213,
+    /// [`LiquifactEscrow::claim_investor_payout`] blocked while operational pause is active.
+    PausedBlocksInvestorClaims = 214,
 }
 
 #[inline(always)]
@@ -476,7 +484,12 @@ pub(crate) fn ensure(env: &Env, condition: bool, error: EscrowError) {
 /// specific named status check (e.g. [`require_funding_open`]) delegate here so the
 /// exact error code is preserved at every call site.
 #[inline(always)]
-pub(crate) fn guard_status_eq(env: &Env, actual_status: u32, expected_status: u32, error: EscrowError) {
+pub(crate) fn guard_status_eq(
+    env: &Env,
+    actual_status: u32,
+    expected_status: u32,
+    error: EscrowError,
+) {
     ensure(env, actual_status == expected_status, error);
 }
 
@@ -2525,8 +2538,7 @@ impl LiquifactEscrow {
     pub fn get_settlement_readiness(env: Env) -> SettlementReadiness {
         let legal_hold_active = Self::legal_hold_active(&env);
         let escrow = Self::get_escrow(env.clone());
-        let maturity_reached =
-            escrow.maturity == 0 || env.ledger().timestamp() >= escrow.maturity;
+        let maturity_reached = escrow.maturity == 0 || env.ledger().timestamp() >= escrow.maturity;
 
         // Reuse the single-source-of-truth gate so this view cannot drift from `settle`.
         let is_settleable = Self::settleable_now(&env);
@@ -3606,11 +3618,9 @@ impl LiquifactEscrow {
         // Capture the effective yield and tier lock threshold in locals so event fields can
         // be populated without post-write storage reads.
         let investor_effective_yield_bps: i64;
-        let tier_lock_secs: u64;
 
-        if simple_fund {
+        let tier_lock_secs: u64 = if simple_fund {
             // Non-tiered deposits never carry a commitment lock.
-            tier_lock_secs = 0;
             if prev == 0 {
                 investor_effective_yield_bps = escrow.yield_bps;
                 Self::set_persistent_investor_effective_yield(
@@ -3619,13 +3629,13 @@ impl LiquifactEscrow {
                     escrow.yield_bps,
                 );
                 Self::set_persistent_investor_claim_not_before(&env, investor.clone(), 0u64);
-                tier_lock_secs = 0;
+                0u64
             } else {
                 // Returning investor: yield was set on first deposit; read it for the event.
                 investor_effective_yield_bps =
                     Self::get_persistent_investor_effective_yield(&env, investor.clone())
                         .unwrap_or(escrow.yield_bps);
-                tier_lock_secs = 0;
+                0u64
             }
             // If prev > 0, preserve existing effective yield and claim lock
         } else {
@@ -3633,7 +3643,6 @@ impl LiquifactEscrow {
             let (eff, lock) =
                 Self::effective_yield_for_commitment(&env, escrow.yield_bps, committed_lock_secs);
             investor_effective_yield_bps = eff;
-            tier_lock_secs = lock;
             Self::set_persistent_investor_effective_yield(&env, investor.clone(), eff);
             let now = env.ledger().timestamp();
             let claim_nb = if committed_lock_secs == 0 {
@@ -3652,7 +3661,8 @@ impl LiquifactEscrow {
                 );
             }
             Self::set_persistent_investor_claim_not_before(&env, investor.clone(), claim_nb);
-        }
+            lock
+        };
 
         escrow.funded_amount = escrow
             .funded_amount
@@ -4145,6 +4155,83 @@ impl LiquifactEscrow {
             .checked_mul(settle_pool)
             .unwrap_or_else(|| fail(&env, EscrowError::ComputePayoutArithmeticOverflow))
             .checked_div(total_principal)
+            .unwrap_or_else(|| fail(&env, EscrowError::ComputePayoutArithmeticOverflow))
+    }
+
+    /// Authoritative on-chain aggregate view of the total settlement pool owed by the SME.
+    ///
+    /// Returns `total_principal + floor(total_principal × yield_bps / 10_000)`, computed
+    /// from [`DataKey::FundingCloseSnapshot`] and the escrow's **base** `yield_bps` using
+    /// the same [`i128::checked_mul`] / [`i128::checked_div`] arithmetic and
+    /// [`EscrowError::ComputePayoutArithmeticOverflow`] guard as
+    /// [`LiquifactEscrow::compute_investor_payout`].
+    ///
+    /// # Rounding
+    ///
+    /// The coupon is computed with truncating (floor) integer division, identical to the
+    /// per-investor formula:
+    ///
+    /// ```text
+    /// coupon       = total_principal × yield_bps / 10_000  (floor)
+    /// settle_pool  = total_principal + coupon
+    /// ```
+    ///
+    /// # Yield note
+    ///
+    /// This view uses the escrow **base yield** (`InvoiceEscrow::yield_bps`). Per-investor
+    /// effective yields from [`LiquifactEscrow::fund_with_commitment`] tier selection are
+    /// reflected individually in [`LiquifactEscrow::compute_investor_payout`] but are **not**
+    /// aggregated here. The result is therefore an authoritative lower-bound aggregate that
+    /// avoids per-investor enumeration; it matches the base-yield pool denominator used by
+    /// all non-tiered investors.
+    ///
+    /// # Returns
+    ///
+    /// - `0` when [`DataKey::FundingCloseSnapshot`] does not exist (escrow not yet funded).
+    /// - Computed floor `total_principal + coupon` otherwise.
+    ///
+    /// # Overflow safety
+    ///
+    /// All intermediate multiplications use [`i128::checked_mul`]; divisions use
+    /// [`i128::checked_div`]. Emits [`EscrowError::ComputePayoutArithmeticOverflow`] (code 129)
+    /// rather than silently producing a wrong value.
+    ///
+    /// # Authorization
+    ///
+    /// None — pure read; no auth required and no state mutation.
+    pub fn get_settlement_pool(env: Env) -> i128 {
+        // Snapshot must exist (written when escrow first reaches status == 1).
+        // Return 0 before funding, matching compute_investor_payout semantics.
+        let Some(snap) = env
+            .storage()
+            .instance()
+            .get::<DataKey, FundingCloseSnapshot>(&DataKey::FundingCloseSnapshot)
+        else {
+            return 0;
+        };
+
+        let total_principal = snap.total_principal;
+        if total_principal <= 0 {
+            return 0;
+        }
+
+        // Read the escrow base yield_bps.
+        let escrow: InvoiceEscrow = env
+            .storage()
+            .instance()
+            .get(&DataKey::Escrow)
+            .unwrap_or_else(|| fail(&env, EscrowError::EscrowNotInitialized));
+
+        // coupon = total_principal × yield_bps / 10_000  (floor)
+        let coupon = total_principal
+            .checked_mul(escrow.yield_bps as i128)
+            .unwrap_or_else(|| fail(&env, EscrowError::ComputePayoutArithmeticOverflow))
+            .checked_div(10_000)
+            .unwrap_or_else(|| fail(&env, EscrowError::ComputePayoutArithmeticOverflow));
+
+        // settle_pool = total_principal + coupon
+        total_principal
+            .checked_add(coupon)
             .unwrap_or_else(|| fail(&env, EscrowError::ComputePayoutArithmeticOverflow))
     }
 
@@ -4763,28 +4850,13 @@ impl DefaultMockToken {
         let from_bal = balances
             .get(from.clone())
             .unwrap_or(MOCK_TOKEN_DEFAULT_BALANCE);
-        let to_bal = balances.get(to.clone()).unwrap_or(MOCK_TOKEN_DEFAULT_BALANCE);
+        let to_bal = balances
+            .get(to.clone())
+            .unwrap_or(MOCK_TOKEN_DEFAULT_BALANCE);
         balances.set(from.clone(), from_bal - amount);
         balances.set(to.clone(), to_bal + amount);
         env.storage().instance().set(&key, &balances);
     }
-}
-
-#[inline(always)]
-pub fn guard_status_eq(env: &Env, actual: u32, expected: u32, err: EscrowError) {
-    ensure(env, actual == expected, err);
-}
-
-#[inline(always)]
-pub fn guard_status_in(env: &Env, actual: u32, expected: &[u32], err: EscrowError) {
-    let mut found = false;
-    for e in expected.iter() {
-        if actual == *e {
-            found = true;
-            break;
-        }
-    }
-    ensure(env, found, err);
 }
 
 #[cfg(any(test, feature = "testutils"))]
