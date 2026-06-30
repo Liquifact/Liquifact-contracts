@@ -39,6 +39,9 @@ mod tests {
             &None,
             &None,
             &past_deadline,
+        &None,
+        &None,
+        &None,
         );
         assert_contract_error(result, EscrowError::FundingDeadlinePassed);
     }

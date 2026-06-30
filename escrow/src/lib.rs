@@ -455,7 +455,15 @@ pub enum EscrowError {
     MaxPerInvestorCapNotRaised = 25,     // new
     /// [`LiquifactEscrow::raise_maturity_max_horizon`] received a `new_horizon` that is
     /// not strictly greater than the current stored horizon.
-    HorizonNotRaised = 201,
+    HorizonNotRaised = 210,
+    /// [`LiquifactEscrow::fund`] blocked while operational pause is active.
+    PausedBlocksFunding = 211,
+    /// [`LiquifactEscrow::settle`] blocked while operational pause is active.
+    PausedBlocksSettlement = 212,
+    /// [`LiquifactEscrow::withdraw`] blocked while operational pause is active.
+    PausedBlocksWithdrawal = 213,
+    /// [`LiquifactEscrow::claim_investor_payout`] blocked while operational pause is active.
+    PausedBlocksInvestorClaims = 214,
 }
 
 #[inline(always)]
@@ -476,7 +484,12 @@ pub(crate) fn ensure(env: &Env, condition: bool, error: EscrowError) {
 /// specific named status check (e.g. [`require_funding_open`]) delegate here so the
 /// exact error code is preserved at every call site.
 #[inline(always)]
-pub(crate) fn guard_status_eq(env: &Env, actual_status: u32, expected_status: u32, error: EscrowError) {
+pub(crate) fn guard_status_eq(
+    env: &Env,
+    actual_status: u32,
+    expected_status: u32,
+    error: EscrowError,
+) {
     ensure(env, actual_status == expected_status, error);
 }
 
@@ -2525,8 +2538,7 @@ impl LiquifactEscrow {
     pub fn get_settlement_readiness(env: Env) -> SettlementReadiness {
         let legal_hold_active = Self::legal_hold_active(&env);
         let escrow = Self::get_escrow(env.clone());
-        let maturity_reached =
-            escrow.maturity == 0 || env.ledger().timestamp() >= escrow.maturity;
+        let maturity_reached = escrow.maturity == 0 || env.ledger().timestamp() >= escrow.maturity;
 
         // Reuse the single-source-of-truth gate so this view cannot drift from `settle`.
         let is_settleable = Self::settleable_now(&env);
@@ -3606,7 +3618,7 @@ impl LiquifactEscrow {
         // Capture the effective yield and tier lock threshold in locals so event fields can
         // be populated without post-write storage reads.
         let investor_effective_yield_bps: i64;
-        let tier_lock_secs: u64;
+        let mut tier_lock_secs: u64;
 
         if simple_fund {
             // Non-tiered deposits never carry a commitment lock.
@@ -4763,28 +4775,13 @@ impl DefaultMockToken {
         let from_bal = balances
             .get(from.clone())
             .unwrap_or(MOCK_TOKEN_DEFAULT_BALANCE);
-        let to_bal = balances.get(to.clone()).unwrap_or(MOCK_TOKEN_DEFAULT_BALANCE);
+        let to_bal = balances
+            .get(to.clone())
+            .unwrap_or(MOCK_TOKEN_DEFAULT_BALANCE);
         balances.set(from.clone(), from_bal - amount);
         balances.set(to.clone(), to_bal + amount);
         env.storage().instance().set(&key, &balances);
     }
-}
-
-#[inline(always)]
-pub fn guard_status_eq(env: &Env, actual: u32, expected: u32, err: EscrowError) {
-    ensure(env, actual == expected, err);
-}
-
-#[inline(always)]
-pub fn guard_status_in(env: &Env, actual: u32, expected: &[u32], err: EscrowError) {
-    let mut found = false;
-    for e in expected.iter() {
-        if actual == *e {
-            found = true;
-            break;
-        }
-    }
-    ensure(env, found, err);
 }
 
 #[cfg(any(test, feature = "testutils"))]

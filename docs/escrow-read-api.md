@@ -51,6 +51,7 @@ re-implementing storage reads to guarantee identical semantics.
 - [is_investor_refunded](#is_investor_refundedinvestor-address--bool)
 - [compute_investor_payout](#compute_investor_payoutinvestor-address--i128)
 - [get_claimable_payout](#get_claimable_payoutinvestor-address--i128)
+- [get_settlement_pool](#get_settlement_pool--i128)
 
 **Attestations:**
 - [get_primary_attestation_hash](#get_primary_attestation_hash--optionbytesn32)
@@ -673,6 +674,46 @@ Returns `true` when an investor's principal has been returned via `refund` in a 
 
 - `None` — Escrow is not yet funded; no close snapshot exists.
 - `Some(FundingCloseSnapshot)` — The pro-rata denominator snapshot captured when the escrow first transitioned to **funded**.
+
+---
+
+### `get_settlement_pool() → i128`
+
+**Storage keys:** `DataKey::FundingCloseSnapshot`, `DataKey::Escrow`  
+**Signature:** `pub fn get_settlement_pool(env: Env) -> i128`
+
+Returns the **total settlement pool** owed by the SME — aggregate principal plus base-yield coupon. Provides the authoritative on-chain aggregate that avoids rounding divergence from off-chain re-derivation.
+
+#### Formula (floor / truncating integer division)
+
+```text
+coupon       = total_principal × yield_bps / 10_000  (floor)
+settle_pool  = total_principal + coupon
+```
+
+#### Yield note
+
+Uses the escrow **base yield** (`InvoiceEscrow::yield_bps`) only. Per-investor effective yields from `fund_with_commitment` tier selection are not aggregated here.
+
+#### Return values
+
+| Condition | Returns |
+|-----------|---------|
+| `DataKey::FundingCloseSnapshot` absent (not yet funded) | `0` |
+| `total_principal <= 0` | `0` |
+| Normal funded state | `total_principal + floor(total_principal × yield_bps / 10_000)` |
+
+#### Overflow safety
+
+All multiplications use `i128::checked_mul`; all divisions use `i128::checked_div`. Emits `EscrowError::ComputePayoutArithmeticOverflow` (code 129) on overflow.
+
+#### Rounding invariant
+
+Sum of all `compute_investor_payout` values ≤ `get_settlement_pool()`. Any residue is swept by `sweep_terminal_dust`.
+
+#### Authorization
+
+None — pure read; no auth required, no state mutation.
 
 ---
 

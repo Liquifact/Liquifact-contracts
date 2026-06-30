@@ -179,3 +179,43 @@ all storage writes including the marker. The investor may retry.
 A second call from the same investor returns early (the marker is already set) and does **not**
 re-transfer. The balance check in `transfer_funding_token_with_balance_checks` would fail a
 second transfer anyway, but the early return avoids the call entirely.
+
+## 🔗 On-Chain Aggregate View: `get_settlement_pool`
+
+```
+LiquifactEscrow::get_settlement_pool(env) → i128
+```
+
+Returns the **total pool** the SME must repay to fully satisfy all investors:
+
+```text
+coupon       = total_principal × yield_bps / 10_000  (floor)
+settle_pool  = total_principal + coupon
+```
+
+### Why this view exists
+
+`compute_investor_payout` derives a *per-investor* share. SME repayment tooling previously
+re-derived `total_principal × yield_bps / 10_000` off-chain, risking rounding divergence.
+`get_settlement_pool` closes that gap with an authoritative on-chain aggregate.
+
+### Yield note
+
+Uses the escrow **base yield** (`InvoiceEscrow::yield_bps`). Per-investor effective yields
+from `fund_with_commitment` tier selection are not aggregated here.
+
+### Return value
+
+| Condition | Returns |
+|-----------|---------|
+| `DataKey::FundingCloseSnapshot` absent | `0` |
+| Normal funded state | `total_principal + floor(total_principal × yield_bps / 10_000)` |
+
+### Overflow safety
+
+All multiplications via `i128::checked_mul`, all divisions via `i128::checked_div`. Emits
+`EscrowError::ComputePayoutArithmeticOverflow` (code 129) on overflow.
+
+### Authorization
+
+None — pure read; no auth required and no state mutation.
