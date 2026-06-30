@@ -682,7 +682,9 @@ Returns `true` when an investor's principal has been returned via `refund` in a 
 **Storage keys:** `DataKey::FundingCloseSnapshot`, `DataKey::Escrow`  
 **Signature:** `pub fn get_settlement_pool(env: Env) -> i128`
 
-Returns the **total settlement pool** owed by the SME — aggregate principal plus base-yield coupon. Provides the authoritative on-chain aggregate that avoids rounding divergence from off-chain re-derivation.
+Returns the **total settlement pool** owed by the SME — the aggregate principal plus base-yield
+coupon the SME must repay to fully satisfy all investors. Avoids rounding divergence that arises
+when off-chain tooling re-derives the formula from raw snapshot fields.
 
 #### Formula (floor / truncating integer division)
 
@@ -691,29 +693,36 @@ coupon       = total_principal × yield_bps / 10_000  (floor)
 settle_pool  = total_principal + coupon
 ```
 
+Where `total_principal` is from `DataKey::FundingCloseSnapshot` and `yield_bps` is the
+escrow base yield from `InvoiceEscrow::yield_bps`.
+
 #### Yield note
 
-Uses the escrow **base yield** (`InvoiceEscrow::yield_bps`) only. Per-investor effective yields from `fund_with_commitment` tier selection are not aggregated here.
+Uses the escrow **base yield** only. Per-investor effective yields from `fund_with_commitment`
+tier selection are reflected individually in `compute_investor_payout` but are **not** aggregated
+here.
 
 #### Return values
 
 | Condition | Returns |
 |-----------|---------|
-| `DataKey::FundingCloseSnapshot` absent (not yet funded) | `0` |
-| `total_principal <= 0` | `0` |
+| `DataKey::FundingCloseSnapshot` absent (escrow not yet funded) | `0` |
+| `total_principal <= 0` (degenerate snapshot) | `0` |
 | Normal funded state | `total_principal + floor(total_principal × yield_bps / 10_000)` |
 
 #### Overflow safety
 
-All multiplications use `i128::checked_mul`; all divisions use `i128::checked_div`. Emits `EscrowError::ComputePayoutArithmeticOverflow` (code 129) on overflow.
+All multiplications use `i128::checked_mul`; all divisions use `i128::checked_div`. Emits
+`EscrowError::ComputePayoutArithmeticOverflow` (code 129) on overflow.
 
 #### Rounding invariant
 
-Sum of all `compute_investor_payout` values ≤ `get_settlement_pool()`. Any residue is swept by `sweep_terminal_dust`.
+Sum of all per-investor `compute_investor_payout` values is guaranteed ≤ `get_settlement_pool()`.
+Any fractional residue is swept by `sweep_terminal_dust`.
 
 #### Authorization
 
-None — pure read; no auth required, no state mutation.
+None — pure read; no auth required and no state mutation.
 
 ---
 

@@ -186,7 +186,9 @@ second transfer anyway, but the early return avoids the call entirely.
 LiquifactEscrow::get_settlement_pool(env) → i128
 ```
 
-Returns the **total pool** the SME must repay to fully satisfy all investors:
+Returns the **total pool** the SME must repay to fully satisfy all investors, computed
+entirely on-chain from [`DataKey::FundingCloseSnapshot`] and the escrow's **base**
+`yield_bps`:
 
 ```text
 coupon       = total_principal × yield_bps / 10_000  (floor)
@@ -195,27 +197,35 @@ settle_pool  = total_principal + coupon
 
 ### Why this view exists
 
-`compute_investor_payout` derives a *per-investor* share. SME repayment tooling previously
-re-derived `total_principal × yield_bps / 10_000` off-chain, risking rounding divergence.
-`get_settlement_pool` closes that gap with an authoritative on-chain aggregate.
+`compute_investor_payout` derives a *per-investor* share. SME repayment tooling and
+dashboards previously had to re-derive `total_principal × yield_bps / 10_000` off-chain,
+risking a rounding divergence from the on-chain math. `get_settlement_pool` closes that gap
+by exposing the authoritative aggregate in a single host invocation.
 
 ### Yield note
 
-Uses the escrow **base yield** (`InvoiceEscrow::yield_bps`). Per-investor effective yields
-from `fund_with_commitment` tier selection are not aggregated here.
+This view uses the escrow **base yield** (`InvoiceEscrow::yield_bps`). Per-investor
+effective yields from [`fund_with_commitment`] tier selection are reflected individually in
+`compute_investor_payout` but are **not** aggregated here. The result is therefore an
+authoritative lower-bound aggregate that avoids per-investor enumeration.
 
 ### Return value
 
 | Condition | Returns |
 |-----------|---------|
-| `DataKey::FundingCloseSnapshot` absent | `0` |
+| [`DataKey::FundingCloseSnapshot`] absent (escrow not yet funded) | `0` |
+| `total_principal <= 0` (degenerate snapshot) | `0` |
 | Normal funded state | `total_principal + floor(total_principal × yield_bps / 10_000)` |
 
 ### Overflow safety
 
-All multiplications via `i128::checked_mul`, all divisions via `i128::checked_div`. Emits
-`EscrowError::ComputePayoutArithmeticOverflow` (code 129) on overflow.
+All intermediate multiplications use `i128::checked_mul`; divisions use `i128::checked_div`.
+Emits [`EscrowError::ComputePayoutArithmeticOverflow`] (code 129) rather than silently
+producing a wrong value.
 
 ### Authorization
 
 None — pure read; no auth required and no state mutation.
+
+See `docs/escrow-read-api.md` → `get_settlement_pool` for the complete parameter and return
+documentation.
