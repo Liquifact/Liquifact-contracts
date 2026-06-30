@@ -2,7 +2,30 @@
 
 Soroban escrow for invoice funding, settlement, and investor claims. This README adds **formal invariant stubs** (machine-readable IDs plus math-style properties), **test traceability**, **attestation hashing**, **minimum contribution floors**, and **unique investor caps** (issues #102–#105).
 
-## Remaining Funding Capacity
+## Investor Allowlist Gate
+
+An optional per-address allowlist controls which investors may call `fund` or `fund_with_commitment`.
+
+- **Toggle** (`set_allowlist_active`) — admin-only; stored in instance storage. When `false` (the default), any address may fund regardless of allowlist entries.
+- **Per-address entries** (`set_investor_allowlisted` / `set_investors_allowlisted`) — admin-only; stored in persistent storage with independent TTLs. Absent entries default to **deny** when the gate is active.
+- **Gate enforcement** — checked on every `fund` / `fund_with_commitment` call in `fund_impl`. A prior contribution does **not** exempt an investor: revocation takes effect immediately on the next deposit.
+- **Toggle independence** — disabling the gate does not delete entries; re-enabling it reinstates the same allowlist without any re-configuration.
+
+### Gate behaviour matrix
+
+| Gate active | Entry value | Outcome |
+|-------------|-------------|---------|
+| `false` | any | ✅ Allowed (gate bypassed) |
+| `true` | `true` | ✅ Allowed |
+| `true` | `false` or absent | ❌ `InvestorNotAllowlisted` (error 104) |
+
+### Security invariant: revocation is immediate
+
+Revoking an investor via `set_investor_allowlisted(addr, false)` blocks all subsequent `fund` and `fund_with_commitment` calls from that address, even if they have an existing contribution. The gate re-checks the current allowlist status on every invocation — historical access grants no bypass.
+
+See [`docs/escrow-allowlist.md`](../docs/escrow-allowlist.md) for the full storage model, TTL behavior, and API reference.
+
+
 
 The contract exposes `get_remaining_funding_capacity(env)` to report how much principal can still be accepted before the funding target is met:
 
@@ -134,6 +157,44 @@ invariants:
       - test::test_double_init_panics
       - test::test_init_sets_initialized_flag
 ```
+
+### `raise_max_per_investor(new_cap: i128)`
+
+Admin-only entrypoint to raise the per-investor contribution cap while the escrow is open.
+
+- **Requires**: escrow status is `Open` (0), caller is admin, cap was configured at init
+- **Enforces**: `new_cap` must be strictly greater than current cap (raise-only)
+- **Emits**: `MaxPerInvestorCapRaised` event with old and new values
+- **Effect**: Subsequent deposits are validated against the new higher cap; existing investors may add more principal up to the new limit
+
+This is the symmetric counterpart to `lower_max_unique_investors` — it allows an SME to admit a larger anchor investor mid-raise without deploying a new escrow. The cap can only increase, never decrease, and only while the escrow remains open.
+
+#### Security invariants
+
+| Invariant | Enforcement |
+|-----------|-------------|
+| Raise-only | `new_cap > old_cap` else `MaxPerInvestorCapNotRaised` |
+| Configured-only | Rejects when no cap was set at init (`MaxPerInvestorCapNotConfigured`) |
+| Open-only | Rejects when escrow status != 0 (`CapLowerNotOpen`) |
+| Admin-only | `load_escrow_require_admin` gates auth before any state change |
+  - id: ESC-CAP-002
+    name: per_investor_cap_raise_only
+    math: "if cap_0 = MaxPerInvestorCap at init then forall raise calls: new_cap > old_cap ∧ old_cap = Some(i128)"
+    tests:
+      - test::test_raise_max_per_investor_success
+      - test::test_raise_cap_rejects_lower
+      - test::test_raise_cap_rejects_equal
+      - test::test_raise_cap_rejects_unconfigured
+      - test::test_raise_cap_rejects_non_open_state
+      - test::test_raise_cap_requires_admin_auth
+      - test::test_raise_cap_unauthorized_panics
+      - test::test_raise_cap_emits_event
+      - test::test_raise_cap_enforced_on_new_deposits
+      - test::test_raise_cap_twice_successive
+      - test::test_raise_cap_existing_investor_above_old_cap_can_add_more
+      - test::test_raise_cap_rejects_negative
+
+
 
 ## New init parameters
 

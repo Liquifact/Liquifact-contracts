@@ -101,4 +101,3 @@ References:
 
 - ADR-007: storage key evolution policy and semantics
 - docs/escrow-ledger-time.md: time gates use `Env::ledger().timestamp()` with inclusive `>=` semantics
-

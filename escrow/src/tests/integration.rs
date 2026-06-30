@@ -1,5 +1,6 @@
 use super::super::external_calls::transfer_funding_token_with_balance_checks;
 use super::*;
+use crate::CollateralRecordedEvt;
 use crate::{CollateralRecordedEvt, DataKey, InvoiceEscrow, LegalHoldChanged};
 use soroban_sdk::{
     contract, contractimpl, vec, IntoVal, Map, MuxedAddress, Symbol, TryFromVal, Val,
@@ -50,6 +51,8 @@ fn test_legal_hold_midflow_blocks_and_resumes_with_ordered_events() {
         &token,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -159,6 +162,8 @@ fn test_escrow_gold_standard_happy_path_open_overfund_snapshot_settle_claim() {
         &None, // No yield tiers for simplicity
         &None, // No min contribution floor
         &None, // No max investors cap
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -391,6 +396,8 @@ fn test_escrow_tiered_yield_with_commitment_locks() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 
     let investor_base = Address::generate(&env);
@@ -511,6 +518,8 @@ fn test_collateral_record_is_metadata_only_and_does_not_invoke_token_contract() 
         &funding,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -748,6 +757,8 @@ fn test_legal_hold_midflow_blocks_then_resumes_with_ordered_events() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 
     // Initial funding succeeds while hold is off.
@@ -871,6 +882,8 @@ fn setup_withdraw_with_token<'a>(
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 
     let investor = soroban_sdk::Address::generate(env);
@@ -987,6 +1000,8 @@ fn withdraw_rejected_wrong_status_open() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
     // No funding — status is 0.
     client.withdraw(); // must panic: WithdrawalNotFunded
@@ -1022,6 +1037,8 @@ fn withdraw_rejected_insufficient_contract_balance() {
         &token_id,
         &None,
         &soroban_sdk::Address::generate(&env),
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -1083,4 +1100,108 @@ fn withdraw_event_includes_recipient() {
         found,
         "SmeWithdrew event with correct recipient and amount must be emitted"
     );
+}
+
+/// **INTEGRATION TEST FOR CANCELLATION, REFUND AND SWEEP LIFECYCLE**
+/// Matches the worked example in docs/escrow-cancellation-refunds.md
+#[test]
+fn test_cancellation_refund_sweep_lifecycle() {
+    let env = Env::default();
+    env.mock_all_auths();
+    use crate::LiquifactEscrow;
+    use soroban_sdk::token::StellarAssetClient;
+
+    // 1. Initial Setup
+    let target = 100_000_000i128; // Target: 100,000,000 base units (100k tokens)
+    let sac = env.register_stellar_asset_contract_v2(soroban_sdk::Address::generate(&env));
+    let token_id = sac.address();
+    let sac_admin = StellarAssetClient::new(&env, &token_id);
+
+    let escrow_id = env.register(LiquifactEscrow, ());
+    let client = LiquifactEscrowClient::new(&env, &escrow_id);
+    let admin = soroban_sdk::Address::generate(&env);
+    let sme = soroban_sdk::Address::generate(&env);
+    let treasury = soroban_sdk::Address::generate(&env);
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "LIFECYCLE01"),
+        &sme,
+        &target,
+        &0i64,
+        &0u64,
+        &token_id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    let alice = soroban_sdk::Address::generate(&env);
+    let bob = soroban_sdk::Address::generate(&env);
+
+    // Alice funds 40,000,000 base units (40k tokens)
+    sac_admin.mint(&alice, &40_000_000i128);
+    // Mint to contract to simulate Alice's tokens being pulled
+    sac_admin.mint(&escrow_id, &40_000_000i128);
+    client.fund(&alice, &40_000_000i128);
+
+    // Bob funds 30,000,000 base units (30k tokens)
+    sac_admin.mint(&bob, &30_000_000i128);
+    // Mint to contract to simulate Bob's tokens being pulled
+    sac_admin.mint(&escrow_id, &30_000_000i128);
+    client.fund(&bob, &30_000_000i128);
+
+    // Bypassing fund(), third party transfers 5,000,000 base units directly to contract
+    sac_admin.mint(&escrow_id, &5_000_000i128);
+
+    // Verify initial state
+    let escrow = client.get_escrow();
+    assert_eq!(escrow.status, 0); // Open
+    assert_eq!(escrow.funded_amount, 70_000_000i128);
+
+    // 2. Cancellation
+    client.cancel_funding();
+    let escrow = client.get_escrow();
+    assert_eq!(escrow.status, 4); // Cancelled
+    assert_eq!(client.get_distributed_principal(), 0);
+
+    // Outstanding principal liability = 70,000,000
+    // Total contract balance = 75,000,000 (40m + 30m + 5m)
+
+    // 3. Treasury attempts early sweep of principal (Blocked by liability floor)
+    // Tries to sweep 10,000,000. Balance after sweep would be 65,000,000 < 70,000,000.
+    let sweep_result = client.try_sweep_terminal_dust(&10_000_000i128);
+    assert!(sweep_result.is_err()); // blocked
+
+    // 4. Treasury attempts to sweep accidental dust (Allowed)
+    // Tries to sweep 5,000,000. Balance after sweep would be 70,000,000 >= 70,000,000.
+    let swept = client.sweep_terminal_dust(&5_000_000i128);
+    assert_eq!(swept, 5_000_000i128);
+
+    // 5. Alice Refunds
+    client.refund(&alice);
+    assert_eq!(client.get_distributed_principal(), 40_000_000i128);
+
+    // Alice second refund attempt fails
+    let refund_again = client.try_refund(&alice);
+    assert!(refund_again.is_err());
+
+    // 6. Treasury attempts sweep in partial refund state (Blocked by outstanding 30,000,000)
+    // Tries to sweep 1,000,000. Contract balance is now 30,000,000 (70m - 40m).
+    // Balance after sweep would be 29,000,000 < 30,000,000 outstanding.
+    let partial_sweep_result = client.try_sweep_terminal_dust(&1_000_000i128);
+    assert!(partial_sweep_result.is_err()); // blocked
+
+    // 7. Bob Refunds
+    client.refund(&bob);
+    assert_eq!(client.get_distributed_principal(), 70_000_000i128);
+
+    // After all refunds, outstanding is 0.
 }

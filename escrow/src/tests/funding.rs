@@ -1,4 +1,5 @@
 use super::*;
+use crate::EscrowError;
 use soroban_sdk::{Error, InvokeError};
 use std::fmt::Debug;
 
@@ -44,6 +45,8 @@ fn test_fund_and_settle() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
     let funded = client.fund(&investor, &TARGET);
     assert_eq!(funded.funded_amount, TARGET);
@@ -67,6 +70,8 @@ fn test_fund_partial_then_full() {
         &Address::generate(&env),
         &None,
         &Address::generate(&env),
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -137,6 +142,8 @@ fn test_single_investor_contribution_tracked() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
     client.fund(&investor, &(30_000_000_000i128));
     let contribution = client.get_contribution(&investor);
@@ -175,6 +182,8 @@ fn test_repeated_funding_accumulates_contribution() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
     client.fund(&investor, &(20_000_000_000i128));
     client.fund(&investor, &(30_000_000_000i128));
@@ -204,6 +213,8 @@ fn test_funding_amount_accumulation_overflow_panics() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 
     client.fund(&investor_a, &(i128::MAX - 1));
@@ -225,6 +236,8 @@ fn test_funding_amount_overflow_does_not_mutate_state() {
         &Address::generate(&env),
         &None,
         &Address::generate(&env),
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -270,6 +283,8 @@ fn test_fund_with_commitment_overflow_panics() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 
     client.fund(&investor_a, &(i128::MAX - 1));
@@ -292,6 +307,8 @@ fn test_fund_with_commitment_overflow_does_not_mutate_state() {
         &Address::generate(&env),
         &None,
         &Address::generate(&env),
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -334,6 +351,8 @@ fn test_per_investor_contribution_uses_persistent_storage() {
         &tok,
         &None,
         &tre,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -393,6 +412,8 @@ fn test_investor_contribution_overflow_panics_even_if_state_is_inconsistent() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 
     env.as_contract(&contract_id, || {
@@ -433,6 +454,8 @@ fn test_investor_contribution_overflow_does_not_mutate_state() {
         &tok,
         &None,
         &tre,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -487,6 +510,8 @@ fn test_multiple_investors_tracked_independently() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
     client.fund(&inv_a, &(20_000_000_000i128));
     client.fund(&inv_b, &(50_000_000_000i128));
@@ -517,6 +542,8 @@ fn test_contributions_sum_equals_funded_amount() {
         &Address::generate(&env),
         &None,
         &Address::generate(&env),
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -554,6 +581,8 @@ fn test_cost_baseline_fund_partial() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
     client.fund(&investor, &(10_000_000_000i128));
 }
@@ -579,6 +608,8 @@ fn test_cost_baseline_fund_full() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
     client.fund(&investor, &TARGET);
 }
@@ -598,6 +629,8 @@ fn test_cost_baseline_fund_overshoot() {
         &Address::generate(&env),
         &None,
         &Address::generate(&env),
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -630,6 +663,8 @@ fn test_cost_baseline_fund_two_step_completion() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
     client.fund(&investor, &(TARGET / 2));
     client.fund(&investor, &(TARGET / 2));
@@ -655,6 +690,8 @@ fn test_funding_close_snapshot_captures_overfunded_total_once() {
         &tok,
         &None,
         &tre,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -697,6 +734,8 @@ fn test_funding_snapshot_immutable_across_second_fund_after_funded() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
     client.fund(&a, &(TARGET / 2));
     assert_eq!(client.get_funding_close_snapshot(), None);
@@ -727,6 +766,8 @@ fn test_pro_rata_weight_ratio_from_snapshot() {
         &tok,
         &None,
         &tre,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -777,6 +818,8 @@ fn test_tiered_yield_and_follow_on_fund() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
     client.fund_with_commitment(&inv, &5_000i128, &200u64);
     assert_eq!(client.get_investor_yield_bps(&inv), 900);
@@ -812,6 +855,8 @@ fn test_tier_selection_edges_base_vs_high_bucket() {
         &None,
         &tre,
         &Some(tiers),
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -855,6 +900,8 @@ fn test_fund_with_commitment_twice_panics() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
     client.fund_with_commitment(&inv, &5_000i128, &10u64);
     client.fund_with_commitment(&inv, &5_000i128, &10u64);
@@ -880,6 +927,8 @@ fn test_fund_then_fund_with_commitment_panics() {
         &tok,
         &None,
         &tre,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -921,6 +970,8 @@ fn test_tier_selection_ladder() {
         &None,
         &tre,
         &Some(tiers),
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -979,6 +1030,8 @@ fn test_yield_tier_emitted_in_event() {
         &None,
         &tre,
         &Some(tiers),
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -1059,6 +1112,8 @@ fn test_yield_tier_emitted_no_tiers() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 
     let inv = Address::generate(&env);
@@ -1114,6 +1169,8 @@ fn test_yield_tier_emitted_between_tiers() {
         &None,
         &tre,
         &Some(tiers),
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -1175,6 +1232,8 @@ fn test_fund_with_commitment_zero_lock_behaves_as_fund() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 
     client.fund_with_commitment(&inv, &5_000i128, &0u64);
@@ -1204,6 +1263,8 @@ fn test_commitment_claim_time_allows_u64_max_boundary() {
         &tok,
         &None,
         &tre,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -1246,6 +1307,8 @@ fn test_commitment_claim_time_overflow_panics() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 
     client.fund_with_commitment(&investor, &100i128, &6u64);
@@ -1273,6 +1336,8 @@ fn test_commitment_claim_time_overflow_does_not_record_position() {
         &tok,
         &None,
         &tre,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -1325,6 +1390,8 @@ fn test_init_bad_tier_order_panics() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 }
 
@@ -1358,6 +1425,8 @@ fn test_init_tier_yield_below_base_panics() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 }
 
@@ -1381,6 +1450,8 @@ fn test_differential_funding_target_eq_exact_cross() {
         &tok,
         &None,
         &tre,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -1421,6 +1492,8 @@ fn test_ledger_sequence_recorded_in_snapshot_with_tick() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
     let seq = env.ledger().sequence();
     client.fund(&inv, &1_000i128);
@@ -1447,6 +1520,8 @@ fn test_get_funding_close_snapshot_absent_before_any_funding() {
         &tok,
         &None,
         &tre,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -1481,6 +1556,8 @@ fn test_get_funding_close_snapshot_present_after_funding_completes() {
         &tok,
         &None,
         &tre,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -1532,6 +1609,8 @@ fn test_get_funding_close_snapshot_immutable_after_set() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
     // Fund exactly to target — snapshot is written here.
     client.fund(&inv, &TARGET);
@@ -1571,6 +1650,8 @@ fn test_unique_funder_count_initialized_to_zero() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
     assert_eq!(client.get_unique_funder_count(), 0);
 }
@@ -1590,6 +1671,8 @@ fn test_unique_funder_count_increments_on_first_investor() {
         &Address::generate(&env),
         &None,
         &Address::generate(&env),
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -1621,6 +1704,8 @@ fn test_unique_funder_count_increments_for_distinct_investors() {
         &Address::generate(&env),
         &None,
         &Address::generate(&env),
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -1673,6 +1758,8 @@ fn test_unique_funder_count_with_fund_with_commitment() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 
     assert_eq!(client.get_unique_funder_count(), 0);
@@ -1706,6 +1793,8 @@ fn test_max_unique_investors_cap_none_allows_unlimited() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 
     // Should be able to add many investors when no cap is set
@@ -1734,6 +1823,8 @@ fn test_max_unique_investors_cap_enforced_at_limit() {
         &None,
         &None,
         &Some(3u32), // Cap of 3 investors
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -1778,6 +1869,8 @@ fn test_max_unique_investors_cap_blocks_excess_investors() {
         &None,
         &None,
         &Some(2u32), // Cap of 2 investors
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -1826,6 +1919,8 @@ fn test_max_unique_investors_cap_blocks_fund_with_commitment() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 
     // First investor succeeds
@@ -1856,6 +1951,8 @@ fn test_re_funding_same_address_doesnt_count_against_cap() {
         &None,
         &None,
         &Some(1u32), // Cap of 1 investor
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -1896,6 +1993,8 @@ fn test_zero_contribution_then_non_zero_contribution_counts_as_unique_investor()
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 
     assert_eq!(client.get_unique_funder_count(), 0);
@@ -1930,6 +2029,8 @@ fn test_cap_validation_at_init_positive_value_required() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 }
 
@@ -1954,6 +2055,8 @@ fn test_init_panics_for_zero_cap() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 }
 
@@ -1975,6 +2078,8 @@ fn test_cap_edge_case_exact_limit_reached() {
         &None,
         &None,
         &Some(5u32), // Cap of 5 investors
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -2016,6 +2121,8 @@ fn test_cap_edge_case_exactly_one_over_limit_panics() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 
     // Add exactly 5 investors
@@ -2047,6 +2154,8 @@ fn test_cap_with_min_contribution_floor_interaction() {
         &None,
         &Some(1_000i128), // Min contribution floor
         &Some(3u32),      // Cap of 3 investors
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -2092,6 +2201,8 @@ fn test_cap_blocks_even_with_large_contribution() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 
     // First investor can fund large amount
@@ -2129,6 +2240,8 @@ fn test_cap_panic_message_quality() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 
     // Add first investor
@@ -2163,6 +2276,8 @@ fn init_with_token<'a>(
         &token.id,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -2438,6 +2553,8 @@ fn test_commitment_claim_lock_preserved_after_follow_on_fund() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 
     // Set ledger timestamp to a known value so claim_nb is deterministic.
@@ -2505,6 +2622,8 @@ fn test_commitment_invariant_across_multiple_follow_on_funds() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 
     env.ledger().with_mut(|l| l.timestamp = 2_000_000u64);
@@ -2562,6 +2681,8 @@ fn test_commitment_zero_lock_follow_on_fund_no_claim_gate() {
         &None,
         &tre,
         &Some(tiers),
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -2626,6 +2747,8 @@ fn test_second_fund_with_commitment_panics_without_tier_table() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 
     client.fund_with_commitment(&inv, &3_000i128, &0u64);
@@ -2666,6 +2789,8 @@ fn test_fund_first_then_commitment_second_panics() {
         &None,
         &tre,
         &Some(tiers),
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -2717,6 +2842,8 @@ fn test_fund_first_deposit_sets_base_yield_and_no_claim_gate() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 
     client.fund(&inv, &5_000i128);
@@ -2753,6 +2880,8 @@ fn init_with_maturity(
         &token,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -2872,6 +3001,8 @@ fn lock_with_zero_maturity_is_always_accepted() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
     let escrow = client.fund_with_commitment(&investor, &1_000i128, &9999u64);
     assert_eq!(escrow.status, 0);
@@ -2955,6 +3086,8 @@ fn test_fund_batch_equals_n_single_funds() {
             &None,
             &None,
             &None,
+            &None,
+            &None,
         );
     }
 
@@ -3024,6 +3157,8 @@ fn test_fund_batch_per_investor_cap_rejection() {
         &Some(per_investor_cap),
         &None,
         &None,
+        &None,
+        &None,
     );
 
     let mut entries = SorobanVec::new(&env);
@@ -3054,6 +3189,8 @@ fn test_fund_batch_mid_batch_funded_transition() {
         &tok,
         &None,
         &tre,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -3119,6 +3256,8 @@ fn test_fund_batch_duplicate_addresses() {
         &None,
         &None,
         &Some(per_investor_cap),
+        &None,
+        &None,
         &None,
         &None,
     );
@@ -3198,6 +3337,8 @@ fn test_fund_batch_max_batch_size() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 
     // Create exactly MAX_FUND_BATCH entries
@@ -3235,6 +3376,8 @@ fn test_fund_batch_preserves_event_semantics() {
         &tok,
         &None,
         &tre,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -3823,6 +3966,7 @@ fn test_remaining_capacity_with_tiered_funding() {
         &None,
         &None,
         &None,
+        &None,
     );
 
     let inv_a = Address::generate(&env);
@@ -3993,7 +4137,11 @@ fn test_get_investors_legacy_compatibility() {
 // ---------------------------------------------------------------------------
 
 /// Helper: initialise an escrow and fund it partially, returning the client.
-fn setup_partially_funded(env: &Env, funded: i128, target: i128) -> super::LiquifactEscrowClient<'_> {
+fn setup_partially_funded(
+    env: &Env,
+    funded: i128,
+    target: i128,
+) -> super::LiquifactEscrowClient<'_> {
     let client = super::deploy(env);
     let admin = Address::generate(env);
     let sme = Address::generate(env);
@@ -4008,6 +4156,8 @@ fn setup_partially_funded(env: &Env, funded: i128, target: i128) -> super::Liqui
         &tok,
         &None,
         &tre,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -4115,6 +4265,8 @@ fn test_update_funding_target_raise_stays_open_emits_event() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
     client.fund(&Address::generate(&env), &3_000i128);
 
@@ -4164,6 +4316,8 @@ fn test_update_funding_target_exact_funded_amount_promotes_to_funded() {
         &tok,
         &None,
         &tre,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -4230,8 +4384,14 @@ fn test_update_funding_target_snapshot_written_only_once() {
     let snap2 = client.get_funding_close_snapshot().unwrap();
     assert_eq!(snap1.total_principal, snap2.total_principal);
     assert_eq!(snap1.funding_target, snap2.funding_target);
-    assert_eq!(snap1.closed_at_ledger_timestamp, snap2.closed_at_ledger_timestamp);
-    assert_eq!(snap1.closed_at_ledger_sequence, snap2.closed_at_ledger_sequence);
+    assert_eq!(
+        snap1.closed_at_ledger_timestamp,
+        snap2.closed_at_ledger_timestamp
+    );
+    assert_eq!(
+        snap1.closed_at_ledger_sequence,
+        snap2.closed_at_ledger_sequence
+    );
 }
 
 /// After promotion via `update_funding_target`, a subsequent `fund` call must
@@ -4263,4 +4423,384 @@ fn test_update_funding_target_no_funds_no_promotion() {
     let result = client.update_funding_target(&1i128);
     assert_eq!(result.status, 0);
     assert_eq!(client.get_funding_close_snapshot(), None);
+}
+
+// ── Issue #345: get_yield_tiers read view ────────────────────────────────────
+
+#[test]
+fn test_get_yield_tiers_returns_empty_when_no_tiers_configured() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "NOTIER01"),
+        &sme,
+        &100_000i128,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    let tiers = client.get_yield_tiers();
+    assert_eq!(
+        tiers.len(),
+        0,
+        "expected empty vec when no tiers configured"
+    );
+}
+
+#[test]
+fn test_get_yield_tiers_returns_single_tier() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
+    let mut tiers = SorobanVec::new(&env);
+    tiers.push_back(YieldTier {
+        min_lock_secs: 2_592_000,
+        yield_bps: 900,
+    });
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "SINGLE01"),
+        &sme,
+        &100_000i128,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &Some(tiers),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    let result = client.get_yield_tiers();
+    assert_eq!(result.len(), 1);
+    let t = result.get(0).unwrap();
+    assert_eq!(t.min_lock_secs, 2_592_000);
+    assert_eq!(t.yield_bps, 900);
+}
+
+#[test]
+fn test_get_yield_tiers_preserves_order() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
+    let mut tiers = SorobanVec::new(&env);
+    tiers.push_back(YieldTier {
+        min_lock_secs: 2_592_000,
+        yield_bps: 900,
+    });
+    tiers.push_back(YieldTier {
+        min_lock_secs: 7_776_000,
+        yield_bps: 1_100,
+    });
+    tiers.push_back(YieldTier {
+        min_lock_secs: 15_552_000,
+        yield_bps: 1_400,
+    });
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "MULTI01"),
+        &sme,
+        &100_000i128,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &Some(tiers),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    let result = client.get_yield_tiers();
+    assert_eq!(result.len(), 3);
+
+    let t0 = result.get(0).unwrap();
+    assert_eq!(t0.min_lock_secs, 2_592_000);
+    assert_eq!(t0.yield_bps, 900);
+
+    let t1 = result.get(1).unwrap();
+    assert_eq!(t1.min_lock_secs, 7_776_000);
+    assert_eq!(t1.yield_bps, 1_100);
+
+    let t2 = result.get(2).unwrap();
+    assert_eq!(t2.min_lock_secs, 15_552_000);
+    assert_eq!(t2.yield_bps, 1_400);
+}
+
+#[test]
+fn test_get_yield_tiers_is_pure_read_no_state_change() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
+    let mut tiers = SorobanVec::new(&env);
+    tiers.push_back(YieldTier {
+        min_lock_secs: 100,
+        yield_bps: 900,
+    });
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "PURE01"),
+        &sme,
+        &100_000i128,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &Some(tiers),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    let escrow_before = client.get_escrow();
+    client.get_yield_tiers();
+    client.get_yield_tiers();
+    let escrow_after = client.get_escrow();
+
+    assert_eq!(
+        escrow_before, escrow_after,
+        "get_yield_tiers must not mutate state"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// preview_yield_tier vs fund_with_commitment equivalence tests (issue #562)
+// ---------------------------------------------------------------------------
+
+/// Helper: initialise an escrow with three tiers (30s / 60s / 90s) and a base
+/// yield of 500 bps.  Returns the client ready for use; all auth is mocked.
+fn setup_three_tier_escrow(
+    env: &Env,
+    invoice_id: &str,
+    target: i128,
+) -> LiquifactEscrowClient {
+    let admin = Address::generate(env);
+    let sme = Address::generate(env);
+    let (tok, tre) = free_addresses(env);
+    let client = deploy(env);
+
+    let mut tiers = SorobanVec::new(env);
+    tiers.push_back(YieldTier {
+        min_lock_secs: 30,
+        yield_bps: 700,
+    });
+    tiers.push_back(YieldTier {
+        min_lock_secs: 60,
+        yield_bps: 900,
+    });
+    tiers.push_back(YieldTier {
+        min_lock_secs: 90,
+        yield_bps: 1_200,
+    });
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(env, invoice_id),
+        &sme,
+        &target,
+        &500i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &Some(tiers),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+    client
+}
+
+/// Assert that `preview_yield_tier(amount, lock)` exactly matches what
+/// `fund_with_commitment` later records for the same investor.
+///
+/// Uses a freshly-generated address for the investor so no prior deposit
+/// can interfere with tier selection.
+fn assert_preview_matches_actual(
+    client: &LiquifactEscrowClient,
+    env: &Env,
+    amount: i128,
+    lock: u64,
+) {
+    let (preview_bps, preview_lock) = client.preview_yield_tier(&amount, &lock);
+    let investor = Address::generate(env);
+    client.fund_with_commitment(&investor, &amount, &lock);
+    let actual_bps = client.get_investor_yield_bps(&investor);
+    let actual_lock = client.get_investor_claim_not_before(&investor);
+    assert_eq!(
+        preview_bps, actual_bps,
+        "preview_yield_tier bps mismatch for lock={lock}: preview={preview_bps} actual={actual_bps}"
+    );
+    assert_eq!(
+        preview_lock, actual_lock,
+        "preview_yield_tier lock mismatch for lock={lock}: preview={preview_lock} actual={actual_lock}"
+    );
+}
+
+/// Base / no-tier case: amount below the first tier threshold.
+/// Preview and actual must both return the escrow base yield (500 bps, lock 0).
+#[test]
+fn test_preview_matches_actual_base_case_no_tier() {
+    let env = Env::default();
+    env.mock_all_auths();
+    // Large target so we can fund multiple investors without hitting capacity.
+    let client = setup_three_tier_escrow(&env, "PV_BASE", 1_000_000i128);
+    assert_preview_matches_actual(&client, &env, 1_000i128, 0u64);
+    assert_preview_matches_actual(&client, &env, 1_000i128, 29u64);
+}
+
+/// Boundary triple for tier 0 (min_lock_secs = 30, yield_bps = 700):
+/// just below (29 s) → base, exactly at (30 s) → tier 0, just above (31 s) → tier 0.
+#[test]
+fn test_preview_matches_actual_tier0_boundary_triple() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = setup_three_tier_escrow(&env, "PV_T0", 1_000_000i128);
+    assert_preview_matches_actual(&client, &env, 1_000i128, 29u64); // just below
+    assert_preview_matches_actual(&client, &env, 1_000i128, 30u64); // exactly at
+    assert_preview_matches_actual(&client, &env, 1_000i128, 31u64); // just above
+}
+
+/// Boundary triple for tier 1 (min_lock_secs = 60, yield_bps = 900):
+/// just below (59 s) → tier 0, exactly at (60 s) → tier 1, just above (61 s) → tier 1.
+#[test]
+fn test_preview_matches_actual_tier1_boundary_triple() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = setup_three_tier_escrow(&env, "PV_T1", 1_000_000i128);
+    assert_preview_matches_actual(&client, &env, 1_000i128, 59u64); // just below
+    assert_preview_matches_actual(&client, &env, 1_000i128, 60u64); // exactly at
+    assert_preview_matches_actual(&client, &env, 1_000i128, 61u64); // just above
+}
+
+/// Boundary triple for tier 2 (min_lock_secs = 90, yield_bps = 1200):
+/// just below (89 s) → tier 1, exactly at (90 s) → tier 2, just above (91 s) → tier 2.
+#[test]
+fn test_preview_matches_actual_tier2_boundary_triple() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = setup_three_tier_escrow(&env, "PV_T2", 1_000_000i128);
+    assert_preview_matches_actual(&client, &env, 1_000i128, 89u64); // just below
+    assert_preview_matches_actual(&client, &env, 1_000i128, 90u64); // exactly at
+    assert_preview_matches_actual(&client, &env, 1_000i128, 91u64); // just above
+}
+
+/// Highest tier: a lock well above all thresholds must return the top-tier yield.
+#[test]
+fn test_preview_matches_actual_highest_tier() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = setup_three_tier_escrow(&env, "PV_HIGH", 1_000_000i128);
+    assert_preview_matches_actual(&client, &env, 1_000i128, 9_999u64);
+}
+
+/// Zero lock: investor passes lock=0 even though tiers exist.
+/// Both preview and actual must fall back to the base yield with claim_not_before=0.
+#[test]
+fn test_preview_matches_actual_zero_lock_with_tiers() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = setup_three_tier_escrow(&env, "PV_ZERO", 1_000_000i128);
+    let (preview_bps, preview_lock) = client.preview_yield_tier(&1_000i128, &0u64);
+    assert_eq!(preview_bps, 500, "zero lock must return base yield");
+    assert_eq!(preview_lock, 0, "zero lock must return lock=0");
+    assert_preview_matches_actual(&client, &env, 1_000i128, 0u64);
+}
+
+/// No tiers configured at all: preview and actual must both return the escrow
+/// base yield regardless of the lock supplied.
+#[test]
+fn test_preview_matches_actual_no_tiers_configured() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    let client = deploy(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "PV_NOTIER"),
+        &sme,
+        &1_000_000i128,
+        &600i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+    assert_preview_matches_actual(&client, &env, 1_000i128, 0u64);
+    assert_preview_matches_actual(&client, &env, 1_000i128, 9_999u64);
+}
+
+/// Amount parameter is currently unused in tier selection (lock-only rule).
+/// Preview and actual must agree regardless of the amount supplied.
+#[test]
+fn test_preview_matches_actual_varying_amounts() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = setup_three_tier_escrow(&env, "PV_AMT", 1_000_000i128);
+    for amount in [1i128, 100, 500, 5_000, 50_000] {
+        assert_preview_matches_actual(&client, &env, amount, 30u64);
+        assert_preview_matches_actual(&client, &env, amount, 60u64);
+    }
 }

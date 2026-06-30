@@ -192,6 +192,139 @@ a bookkeeping step after additive upgrades.
 
 ---
 
+## 2.5. `upgrade()` vs `migrate()`: precise operator guide
+
+### Division of labor
+
+| What changed in the new WASM | Action | Notes |
+|------------------------------|--------|-------|
+| New `DataKey` variants (additive, read with defaults) | `upgrade()` only | No `migrate()` call; old instances return defaults |
+| Bug fix / logic change (no stored type changes) | `upgrade()` only | Storage layout unchanged |
+| Existing `#[contracttype]` struct gained a field | **Redeploy** | Stored XDR cannot be decoded by new WASM |
+| Existing `DataKey` renamed, removed, or reordered | **Redeploy** | XDR discriminant changes corrupt existing state |
+| Storage rewrite is feasible and `migrate()` extended | `upgrade()` then `migrate(stored_version)` | Implement migration branch first |
+
+### Additive-key compatibility rules (ADR-007, Rule 1)
+
+A new `DataKey` variant is safe to deploy in-place (without calling `migrate()`) when:
+
+1. **Read with defaults**: every entrypoint that reads the new key uses
+   `.get(&DataKey::NewVariant).unwrap_or(default)` so pre-existing instances
+   behave as "unset / default" without panicking.
+2. **No struct shape change**: the XDR encoding of every existing stored
+   `#[contracttype]` struct (`InvoiceEscrow`, `FundingCloseSnapshot`,
+   `YieldTier`, `SmeCollateralCommitment`) is unchanged.
+3. **No existing variant changes**: no existing `DataKey` variant is renamed,
+   removed, or reordered.
+
+### DataKey XDR discriminant stability rule (critical)
+
+The `DataKey` enum is serialized to XDR on-chain. In Soroban's `contracttype`
+XDR encoding, **each variant is assigned an integer discriminant equal to its
+position in the enum definition (0-indexed)**. This discriminant is stored
+on-chain as the key identifier.
+
+**Consequence:** if you reorder existing `DataKey` variants, their on-chain
+discriminants change. A storage slot that was previously keyed as discriminant
+5 (`LegalHold`) would become readable only under the new position's integer.
+All existing data keyed under the old discriminant becomes unreachable under the
+new WASM's type system — the contract would silently return defaults or decode
+garbage for those keys.
+
+**Rule: never reorder existing `DataKey` variants. Only append new variants at
+the end of the enum.** This is the "additive-only" guarantee in ADR-007.
+
+Reviewers must verify this rule on every PR that touches `DataKey`. The rule
+applies to both instance and persistent storage keys.
+
+### `migrate()` typed-error branches (current release)
+
+All three branches abort the Soroban transaction with no storage writes:
+
+| Condition | Error | Error code |
+|-----------|-------|-----------|
+| `stored_version != from_version` | `EscrowError::MigrationVersionMismatch` | 90 |
+| `from_version >= SCHEMA_VERSION` | `EscrowError::AlreadyCurrentSchemaVersion` | 91 |
+| `from_version < SCHEMA_VERSION`, no implemented branch | `EscrowError::NoMigrationPath` | 92 |
+
+Execution order within `migrate()`:
+1. `Self::load_escrow_require_admin(&env)` — admin auth gate (always first).
+2. Read `DataKey::Version` from instance storage.
+3. `ensure(stored == from_version)` → `MigrationVersionMismatch` if not equal.
+4. `if from_version >= SCHEMA_VERSION` → `AlreadyCurrentSchemaVersion`.
+5. `else` → `NoMigrationPath` (no implemented migration branch in this release).
+
+**No storage writes occur in any current execution path.** Future extension:
+add the migration logic above step 5, write transformed state, set
+`DataKey::Version` to the new version, and return the new version.
+
+### Step-by-step: additive-only WASM upgrade
+
+Use this path when only new `DataKey` variants are added (no struct changes,
+no variant reordering).
+
+```
+Pre-conditions:
+  - New DataKey variants all use .unwrap_or(default) reads.
+  - No existing DataKey variant was reordered or renamed.
+  - No existing #[contracttype] struct field was added, removed, or changed.
+  - Tests on Testnet pass.
+
+Steps:
+  1. cargo build --target wasm32v1-none --release -p liquifact_escrow
+  2. stellar contract upload --wasm target/.../liquifact_escrow.wasm ...
+     → captures NEW_WASM_HASH
+  3. stellar contract invoke --id <ID> ... -- set_legal_hold --active true
+     (blocks settlements/claims during the swap window)
+  4. stellar contract invoke --id <ID> ... -- upgrade --new_wasm_hash <NEW_WASM_HASH>
+  5. stellar contract invoke --id <ID> ... -- get_version
+     (should still return the same value — upgrade() does not change DataKey::Version)
+  6. stellar contract invoke --id <ID> ... -- get_escrow
+     (verify all fields are intact)
+  7. stellar contract invoke --id <ID> ... -- clear_legal_hold
+  8. Run post-upgrade smoke tests (fund, get_investor_contribution, etc.)
+  *** Do NOT call migrate() — no migration is needed for additive changes. ***
+```
+
+### Step-by-step: schema-breaking upgrade + migrate
+
+Use this path only when an existing stored struct or `DataKey` semantic must
+change AND you have extended `migrate()` with a concrete transformation.
+
+```
+Pre-conditions:
+  - migrate() has been extended with a from_version → new_version branch.
+  - The migration branch reads old data, transforms it, writes new data.
+  - DataKey::Version is written LAST in the migration branch.
+  - SCHEMA_VERSION has been bumped in escrow/src/lib.rs.
+  - cargo test passes with the new migration branch.
+  - Testnet mirror has been upgraded and migrate() called successfully.
+
+Steps:
+  1. cargo build --target wasm32v1-none --release -p liquifact_escrow
+  2. stellar contract upload --wasm target/.../liquifact_escrow.wasm ...
+     → captures NEW_WASM_HASH
+  3. stellar contract invoke --id <ID> ... -- get_version
+     → note STORED_VERSION (e.g., 6)
+  4. stellar contract invoke --id <ID> ... -- set_legal_hold --active true
+  5. stellar contract invoke --id <ID> ... -- upgrade --new_wasm_hash <NEW_WASM_HASH>
+  6. stellar contract invoke --id <ID> ... -- migrate --from_version <STORED_VERSION>
+     (migrate() validates stored == from_version, then applies the transformation)
+  7. stellar contract invoke --id <ID> ... -- get_version
+     (should now return new SCHEMA_VERSION)
+  8. stellar contract invoke --id <ID> ... -- get_escrow
+     (verify all fields are correct under the new schema)
+  9. stellar contract invoke --id <ID> ... -- clear_legal_hold
+  10. Run post-upgrade smoke tests.
+```
+
+> **Warning:** if `migrate()` is called before `upgrade()`, it will run against
+> the old WASM's `SCHEMA_VERSION` constant and will error with
+> `AlreadyCurrentSchemaVersion` (since stored version == old SCHEMA_VERSION ==
+> old WASM's constant). Always upgrade first, then migrate.
+
+---
+
 ## 3. Pre-flight checklist (testnet → mainnet)
 
 Complete all items before promoting to Mainnet.
@@ -302,8 +435,7 @@ stellar contract upload \
   --source $SOURCE_SECRET \
   --network $STELLAR_NETWORK
 
-# Step 2: Invoke the deployed contract's upgrade entrypoint, if present.
-# The current LiquiFact escrow contract does not expose this entrypoint.
+# Step 2: Invoke the deployed contract's upgrade() entrypoint with admin credentials.
 stellar contract invoke \
   --id <EXISTING_CONTRACT_ID> \
   --source $SOURCE_SECRET \
@@ -435,18 +567,19 @@ used as `funding_token` in an escrow instance.
 ### No EVM proxy patterns
 
 This contract does not implement a proxy pattern (no `delegatecall` equivalent
-on Soroban). Same-address upgrade authority should flow through a contract
+on Soroban). Same-address upgrade authority flows through the `upgrade()`
 entrypoint that requires admin authorization before calling
-`env.deployer().update_current_contract_wasm`. The current release does not
-expose that entrypoint, so operators should use redeploy for new WASM.
+`env.deployer().update_current_contract_wasm`. See §4 for the complete
+in-place upgrade procedure.
 
 ### Admin key hygiene
 
 - Use a multisig wallet or a governed contract as `admin` at all times.
 - Never use a single-signer hot wallet as `admin` in production.
-- Admin rotation is two-step: `propose_admin` requires the current admin's
-  authorization, and `accept_admin` requires the proposed successor's
-  authorization. Test both steps on Testnet before executing on Mainnet. (See `test_admin_handover_lifecycle` in `escrow/src/tests/admin.rs` for an end-to-end example).
+- **Two-Step Rotation:** Admin rotation is strictly a two-step procedure to prevent locking out admin-gated functions due to typographical errors:
+  1. **`propose_admin(new_admin, validity_window_secs)`**: Requires authorization from the current admin. It validates that `new_admin` is not the current admin (reverts with `NewAdminSameAsCurrent` / code 80 if they are identical). On success, it writes the successor to `DataKey::PendingAdmin` and the expiry timestamp to `DataKey::PendingAdminExpiry` and emits `AdminProposedEvent` (`adm_prop`).
+  2. **`accept_admin()`**: Requires authorization from the proposed successor address. It verifies that a proposal exists (reverts with `NoPendingAdmin` / code 172 if `DataKey::PendingAdmin` is absent) and that the proposal has not expired (reverts with `AdminProposalExpired` / code 85 if `ledger.timestamp() > PendingAdminExpiry`). On success, it updates `InvoiceEscrow::admin` to the successor address, clears the pending keys from storage, and emits `AdminTransferredEvent` (`admin`).
+- Test both steps on Testnet before executing on Mainnet (see `test_admin_handover_lifecycle` and `test_post_handover_admin_can_clear_hold_set_by_old_admin` in `escrow/src/tests/admin.rs` for implementation reference).
 
 #### Cancelling a pending admin proposal
 
@@ -482,37 +615,28 @@ transaction**. This is intentional — it prevents operators from accidentally
 skipping version validation. Do not script automated `migrate()` calls without
 first implementing the migration path.
 
-### Deprecated-entrypoint observability (issue #386)
+### Deprecated transfer_admin shim and two-step handover
 
-`transfer_admin` is exposed solely as a `#[deprecated]` shim that delegates
-to `propose_admin`. Every successful call publishes two events in this
-order:
+The `transfer_admin` entrypoint is exposed solely as a `#[deprecated]` shim that delegates to [`propose_admin`](#admin-key-hygiene). 
 
-1. `AdminProposedEvent` from the inner `propose_admin` delegation
-   (the existing canonical proposal signal).
-2. `DeprecatedTransferAdminUsed`, carrying the same proposed address, so
-   indexers and operators can flag callers still using the legacy one-step
-   path.
+Calling `transfer_admin` **does not** perform an immediate or one-step handover of admin authority. It only initiates Step 1 of the rotation process by setting a pending proposal in contract storage. The proposed successor address must still explicitly call `accept_admin` to assume active admin authority.
 
-Handover semantics are unchanged; the extra event is purely **observability**.
-Failed `transfer_admin` calls (for example, `new_admin == current_admin`
-rejected with `EscrowError::NewAdminSameAsCurrent`) do **not** publish either
-event, so failed calls cannot pollute the legacy-usage count.
+#### Handover Observability
+Because the shim delegates to `propose_admin`, calling it emits exactly one event:
+- **`AdminProposedEvent`** (topic: `adm_prop`) carrying the `invoice_id`, `current_admin`, and `pending_admin`.
 
-Operator playbook:
+No other events (such as `DeprecatedTransferAdminUsed`) are defined or emitted by the contract code. Operators auditing or indexers parsing for deprecated shim usage should monitor `AdminProposedEvent` and check if the initiating transaction invoked `transfer_admin` instead of the canonical `propose_admin` entrypoint.
 
-- Query historical `DeprecatedTransferAdminUsed` events grouped by
-  `(contractId, invoice_id)` to enumerate integrations still on the legacy path.
-- Notify those callers and confirm they migrate to `propose_admin` followed
-  by `accept_admin`.
-- When the per-deployment count of `DeprecatedTransferAdminUsed` has stayed at
-  zero for a full release window, schedule removal of the `transfer_admin`
-  shim in a follow-up PR. Until then, the shim provides forward-compatibility
-  for un-migrated integrations while emitting the observability signal needed
-  to discover them.
+#### Recovery Path: Overriding Stuck Holds via Key Rotation
+The admin is the only role authorized to call `clear_legal_hold` or `request_clear_legal_hold`. If the active admin's private key is lost or compromised while a legal hold is active, funds will remain frozen on-chain because all risk-bearing operations (funding, settle, withdraw, claim) are blocked by the hold.
 
-See `docs/EVENT_SCHEMA.md` (`DeprecatedTransferAdminUsed`) for the full
-event topic/data layout.
+However, the admin rotation entrypoints (`propose_admin`, `accept_admin`, `cancel_pending_admin`) are **not** gated by the legal hold. This design ensures that operators can execute a recovery handover even while the contract is frozen:
+
+1. **Propose Successor:** The current admin (or the governance multisig/DAO) calls `propose_admin(new_admin, validity_window_secs)` to nominate the recovery key.
+2. **Accept Handover:** The nominated address calls `accept_admin()`. This immediately promotions the new address to `InvoiceEscrow::admin` and clears the pending proposal. The old admin key is immediately locked out.
+3. **Clear Hold:** The newly promoted admin calls `clear_legal_hold()` (or initiates the timelocked clear via `request_clear_legal_hold`), which successfully unfrezes the escrow contract.
+
+This recovery flow ensures that admin key rotation is always available as an emergency lever to restore operations under a compliance lock. See [ADR-002](adr/ADR-002-auth-boundaries.md) for the authorization boundary definitions.
 
 ---
 

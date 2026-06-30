@@ -58,6 +58,14 @@ The 33rd append panics with `"attestation append log capacity reached"`. If more
 incremental anchors are needed, deploy a new escrow instance or extend the log off-chain using
 the event stream.
 
+### `get_attestation_log_stats() -> (u32, u32)`
+
+Returns the current append-log usage and remaining capacity as `(used, remaining)`.
+This is a pure read view for integrators that want to warn before the log fills. The returned
+values satisfy `used + remaining == MAX_ATTESTATION_APPEND_ENTRIES`, and `remaining` drops to
+`0` once the log is full and the next append would fail with
+`AttestationAppendLogCapacityReached`.
+
 ### `revoke_attestation_digest(index: u32)`
 
 | Property | Value |

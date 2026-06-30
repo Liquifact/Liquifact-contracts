@@ -60,12 +60,16 @@ fn test_bind_primary_hash_stores_and_reads() {
     // Assert the `att_bind` event was emitted
     let events = env.events().all().filter_by_contract(&client.address);
     let last_event = events.events().last().unwrap();
-    use soroban_sdk::{symbol_short, IntoVal, Val, Vec};
-    let expected_topics: Vec<Val> =
-        (symbol_short!("att_bind"), client.get_escrow().invoice_id).into_val(&env);
+    let contract_id = client.address.clone();
+    let invoice_id = client.get_escrow().invoice_id;
     assert_eq!(
-        last_event,
-        (client.address.clone(), expected_topics, d.into_val(&env))
+        last_event.clone(),
+        crate::PrimaryAttestationBound {
+            name: symbol_short!("att_bind"),
+            invoice_id,
+            digest: d.clone(),
+        }
+        .to_xdr(&env, &contract_id)
     );
 }
 
@@ -127,6 +131,49 @@ fn test_append_log_empty_before_first_append() {
     let env = Env::default();
     let (client, _) = setup_with_init(&env);
     assert_eq!(client.get_attestation_append_log().len(), 0);
+}
+
+/// The stats view reports zero used entries and the full remaining capacity before any append.
+#[test]
+fn test_attestation_log_stats_empty_before_first_append() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    let (used, remaining) = client.get_attestation_log_stats();
+    assert_eq!(used, 0);
+    assert_eq!(remaining, MAX_ATTESTATION_APPEND_ENTRIES);
+}
+
+/// The stats view tracks partially filled logs without reading the full vector contents.
+#[test]
+fn test_attestation_log_stats_tracks_partial_fill() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    for i in 0u8..5 {
+        client.append_attestation_digest(&digest(&env, i));
+    }
+    let (used, remaining) = client.get_attestation_log_stats();
+    assert_eq!(used, 5);
+    assert_eq!(remaining, MAX_ATTESTATION_APPEND_ENTRIES - 5);
+}
+
+/// The stats view reports full capacity and remains consistent after the capacity error path.
+#[test]
+fn test_attestation_log_stats_full_and_after_capacity_error() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    for i in 0u8..(MAX_ATTESTATION_APPEND_ENTRIES as u8) {
+        client.append_attestation_digest(&digest(&env, i));
+    }
+    let (used, remaining) = client.get_attestation_log_stats();
+    assert_eq!(used, MAX_ATTESTATION_APPEND_ENTRIES);
+    assert_eq!(remaining, 0);
+
+    let result = client.try_append_attestation_digest(&digest(&env, 0xFF));
+    assert_contract_error(result, EscrowError::AttestationAppendLogCapacityReached);
+
+    let (used, remaining) = client.get_attestation_log_stats();
+    assert_eq!(used, MAX_ATTESTATION_APPEND_ENTRIES);
+    assert_eq!(remaining, 0);
 }
 
 /// Single append is stored at index 0.
@@ -239,102 +286,6 @@ fn test_primary_and_append_coexist() {
     }
     assert_eq!(client.get_primary_attestation_hash(), Some(primary));
     assert_eq!(client.get_attestation_append_log().len(), 4);
-}
-
-// ---------------------------------------------------------------------------
-// revoke_attestation_digest — revocation tombstone invariant
-// ---------------------------------------------------------------------------
-
-/// Happy path: revoke index 0 and confirm via `is_attestation_revoked`.
-#[test]
-fn test_revoke_single_entry() {
-    let env = Env::default();
-    let (client, _) = setup_with_init(&env);
-    client.append_attestation_digest(&digest(&env, 0xAA));
-
-    assert!(!client.is_attestation_revoked(&0));
-    client.revoke_attestation_digest(&0);
-    assert!(client.is_attestation_revoked(&0));
-}
-
-/// Revoking index 1 (after two appends) leaves index 0 unaffected.
-#[test]
-fn test_revoke_later_index_does_not_affect_earlier() {
-    let env = Env::default();
-    let (client, _) = setup_with_init(&env);
-    client.append_attestation_digest(&digest(&env, 0x01));
-    client.append_attestation_digest(&digest(&env, 0x02));
-
-    client.revoke_attestation_digest(&1);
-    assert!(!client.is_attestation_revoked(&0));
-    assert!(client.is_attestation_revoked(&1));
-}
-
-/// Revoking all entries sequentially succeeds.
-#[test]
-fn test_revoke_all_entries() {
-    let env = Env::default();
-    let (client, _) = setup_with_init(&env);
-    for i in 0u8..5 {
-        client.append_attestation_digest(&digest(&env, i));
-    }
-    for i in 0u8..5 {
-        assert!(!client.is_attestation_revoked(&(i as u32)));
-        client.revoke_attestation_digest(&(i as u32));
-        assert!(client.is_attestation_revoked(&(i as u32)));
-    }
-}
-
-/// Revoking the same index twice must panic.
-#[test]
-#[should_panic(expected = "attestation already revoked at index")]
-fn test_double_revoke_panics() {
-    let env = Env::default();
-    let (client, _) = setup_with_init(&env);
-    client.append_attestation_digest(&digest(&env, 0x42));
-    client.revoke_attestation_digest(&0);
-    client.revoke_attestation_digest(&0);
-}
-
-/// Revoking an index beyond the current log length must panic.
-#[test]
-#[should_panic(expected = "attestation index out of range")]
-fn test_revoke_out_of_range_panics() {
-    let env = Env::default();
-    let (client, _) = setup_with_init(&env);
-    // Empty log, index 0 is out of range.
-    client.revoke_attestation_digest(&0);
-}
-
-/// Revoking an index equal to log length must panic (0-indexed).
-#[test]
-#[should_panic(expected = "attestation index out of range")]
-fn test_revoke_at_log_len_panics() {
-    let env = Env::default();
-    let (client, _) = setup_with_init(&env);
-    client.append_attestation_digest(&digest(&env, 0x10));
-    // log.len() == 1, so index 1 is out of range.
-    client.revoke_attestation_digest(&1);
-}
-
-/// `is_attestation_revoked` returns `false` for any index on an empty log.
-#[test]
-fn test_is_revoked_empty_log() {
-    let env = Env::default();
-    let (client, _) = setup_with_init(&env);
-    assert!(!client.is_attestation_revoked(&0));
-    assert!(!client.is_attestation_revoked(&99));
-}
-
-/// Non-admin caller must not be able to revoke.
-#[test]
-#[should_panic]
-fn test_revoke_non_admin_panics() {
-    let env = Env::default();
-    let (client, _) = setup_with_init(&env);
-    client.append_attestation_digest(&digest(&env, 0xFF));
-    env.mock_auths(&[]);
-    client.revoke_attestation_digest(&0);
 }
 
 /// Revocation does not alter the append log contents — the digest remains readable.
@@ -679,4 +630,70 @@ fn test_unrevoke_non_admin_returns_error() {
     client.revoke_attestation_digest(&0);
     env.mock_auths(&[]);
     assert!(client.try_unrevoke_attestation_digest(&0).is_err());
+}
+
+// ---------------------------------------------------------------------------
+// get_attestation_digest_at
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_get_attestation_digest_at_none_when_empty() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    assert_eq!(client.get_attestation_digest_at(&0), None);
+    assert_eq!(client.get_attestation_digest_at(&1), None);
+}
+
+#[test]
+fn test_get_attestation_digest_at_none_out_of_bounds() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    client.append_attestation_digest(&digest(&env, 0x01));
+    client.append_attestation_digest(&digest(&env, 0x02));
+
+    assert_eq!(client.get_attestation_digest_at(&2), None);
+    assert_eq!(client.get_attestation_digest_at(&100), None);
+}
+
+#[test]
+fn test_get_attestation_digest_at_retrieves_unrevoked() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    let d0 = digest(&env, 0x10);
+    let d1 = digest(&env, 0x20);
+    client.append_attestation_digest(&d0);
+    client.append_attestation_digest(&d1);
+
+    let info0 = client.get_attestation_digest_at(&0).unwrap();
+    assert_eq!(info0.digest, d0);
+    assert!(!info0.revoked);
+
+    let info1 = client.get_attestation_digest_at(&1).unwrap();
+    assert_eq!(info1.digest, d1);
+    assert!(!info1.revoked);
+}
+
+#[test]
+fn test_get_attestation_digest_at_reflects_revocation_cycle() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    let d = digest(&env, 0xAB);
+    client.append_attestation_digest(&d);
+
+    // Initial state: unrevoked
+    let info = client.get_attestation_digest_at(&0).unwrap();
+    assert_eq!(info.digest, d);
+    assert!(!info.revoked);
+
+    // Revoked state
+    client.revoke_attestation_digest(&0);
+    let info = client.get_attestation_digest_at(&0).unwrap();
+    assert_eq!(info.digest, d);
+    assert!(info.revoked);
+
+    // Unrevoked state again
+    client.unrevoke_attestation_digest(&0);
+    let info = client.get_attestation_digest_at(&0).unwrap();
+    assert_eq!(info.digest, d);
+    assert!(!info.revoked);
 }

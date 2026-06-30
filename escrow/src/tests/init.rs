@@ -1,4 +1,5 @@
 use super::*;
+use crate::{EscrowError, EscrowInitialized};
 use crate::{EscrowInitialized, DEFAULT_MATURITY_MAX_HORIZON_SECS};
 use proptest::prelude::*;
 extern crate std;
@@ -20,6 +21,8 @@ fn test_init_stores_escrow() {
         &Address::generate(&env),
         &None,
         &Address::generate(&env),
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -58,6 +61,8 @@ fn test_init_stores_keyed_invoice_and_lists_it() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
     let got = client.get_escrow();
     assert_eq!(got, escrow);
@@ -77,6 +82,8 @@ fn test_init_requires_admin_auth() {
         &Address::generate(&env),
         &None,
         &Address::generate(&env),
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -136,6 +143,8 @@ fn test_init_unauthorized_panics() {
             &None,
             &None,
             &None,
+            &None,
+            &None,
         );
     }));
     assert!(result.is_err(), "Expected panic without auth");
@@ -178,6 +187,8 @@ fn test_cost_baseline_init() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 }
 
@@ -201,6 +212,8 @@ fn test_cost_baseline_init_zero_maturity() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 }
 
@@ -218,6 +231,8 @@ fn test_cost_baseline_init_max_amount() {
         &Address::generate(&env),
         &None,
         &Address::generate(&env),
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -252,6 +267,8 @@ fn test_init_invoice_id_empty_string_panics() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 }
 
@@ -274,6 +291,8 @@ fn test_init_invoice_id_whitespace_panics() {
         &t,
         &None,
         &tr,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -309,6 +328,8 @@ fn test_init_invoice_id_too_long_panics() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 }
 
@@ -331,6 +352,8 @@ fn test_init_invoice_id_bad_charset_hyphen_panics() {
         &t,
         &None,
         &tr,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -365,6 +388,8 @@ fn test_init_invoice_id_non_ascii_multibyte_panics() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 }
 
@@ -384,7 +409,7 @@ fn test_init_invoice_id_embedded_null_panics() {
 
     client.init(
         &admin, &s, &sme, &1000i128, &500i64, &0u64, &t, &None, &tr, &None, &None, &None, &None,
-        &None, &None,
+        &None, &None, &None, &None,
     );
 }
 
@@ -408,6 +433,8 @@ fn test_init_stores_registry_some_and_getters() {
         &token,
         &Some(reg.clone()),
         &treasury,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -447,6 +474,8 @@ fn test_init_min_contribution_floor_stored() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
     assert_eq!(client.get_min_contribution_floor(), 1_000i128);
 }
@@ -470,6 +499,8 @@ fn test_init_min_contribution_floor_defaults_to_zero() {
         &tok,
         &None,
         &tre,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -506,6 +537,8 @@ fn test_init_min_contribution_zero_panics() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 }
 
@@ -535,6 +568,8 @@ fn test_init_min_contribution_exceeds_amount_panics() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 }
 
@@ -559,6 +594,8 @@ fn test_init_min_contribution_equal_to_amount_accepted() {
         &tre,
         &None,
         &Some(5_000i128),
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -605,6 +642,8 @@ fn test_get_funding_token_after_init_succeeds() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
     assert_eq!(client.get_funding_token(), token);
 }
@@ -624,6 +663,8 @@ fn test_get_treasury_after_init_succeeds() {
         &token,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -666,6 +707,8 @@ fn test_init_registry_none_roundtrip() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
     assert_eq!(client.get_registry_ref(), None);
 }
@@ -694,6 +737,8 @@ fn test_init_escrow_initialized_event_includes_bound_refs() {
         &token,
         &Some(registry.clone()),
         &treasury,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -745,6 +790,8 @@ fn test_init_escrow_initialized_event_registry_none() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 
     assert_eq!(
@@ -783,6 +830,8 @@ fn try_init_with_id(env: &Env, id: &str) -> Result<(), ()> {
             &t,
             &None,
             &tr,
+            &None,
+            &None,
             &None,
             &None,
             &None,
@@ -831,6 +880,8 @@ fn test_invoice_id_length_33_panics() {
         &t,
         &None,
         &tr,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -1045,6 +1096,8 @@ fn datakey_distributed_principal_starts_at_zero_and_increments_on_refund() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 
     assert_eq!(client.get_distributed_principal(), 0i128);
@@ -1082,6 +1135,8 @@ fn test_init_maturity_zero_accepted() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
     assert_eq!(client.get_escrow().maturity, 0);
 }
@@ -1102,6 +1157,8 @@ fn test_init_maturity_within_horizon_accepted() {
         &token,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -1136,6 +1193,8 @@ fn test_init_maturity_at_horizon_boundary_accepted() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
     assert_eq!(client.get_escrow().maturity, at_boundary);
 }
@@ -1157,6 +1216,8 @@ fn test_init_maturity_beyond_horizon_rejected() {
         &token,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -1189,6 +1250,8 @@ fn test_init_maturity_in_past_rejected() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 }
 
@@ -1215,6 +1278,8 @@ fn test_init_with_custom_horizon_used() {
         &None,
         &None,
         &Some(short_horizon),
+        &None,
+        &None,
     );
     assert_eq!(client.get_maturity_max_horizon(), short_horizon);
     assert_eq!(client.get_escrow().maturity, 3000);
@@ -1238,6 +1303,8 @@ fn test_update_maturity_zero_accepted() {
         &token,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -1271,6 +1338,8 @@ fn test_update_maturity_within_horizon_accepted() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
     let updated = client.update_maturity(&2000u64);
     assert_eq!(updated.maturity, 2000);
@@ -1293,6 +1362,8 @@ fn test_update_maturity_at_horizon_boundary_accepted() {
         &token,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -1328,6 +1399,8 @@ fn test_update_maturity_beyond_horizon_rejected() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
     client.update_maturity(&(1000u64 + DEFAULT_MATURITY_MAX_HORIZON_SECS + 1));
 }
@@ -1349,6 +1422,8 @@ fn test_update_maturity_in_past_rejected() {
         &token,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -1377,6 +1452,8 @@ fn test_update_maturity_max_horizon_by_admin() {
         &token,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -1421,6 +1498,8 @@ fn test_update_maturity_honors_reduced_horizon() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
     client.update_maturity_max_horizon(&3600u64); // 1 hour
     client.update_maturity(&(1000u64 + 7200u64)); // 2 hours — exceeds new 1h horizon
@@ -1437,7 +1516,7 @@ fn try_init_with_id_typed(
     env: &Env,
     id: &str,
 ) -> Result<
-    Result<InvoiceEscrow, soroban_sdk::Error>,
+    Result<crate::InvoiceEscrow, soroban_sdk::Error>,
     Result<soroban_sdk::Error, soroban_sdk::InvokeError>,
 > {
     env.mock_all_auths();
@@ -1445,7 +1524,7 @@ fn try_init_with_id_typed(
     let admin = Address::generate(env);
     let sme = Address::generate(env);
     let (t, tr) = free_addresses(env);
-    client.try_init(
+    let res = client.try_init(
         &admin,
         &soroban_sdk::String::from_str(env, id),
         &sme,
@@ -1461,7 +1540,13 @@ fn try_init_with_id_typed(
         &None,
         &None,
         &None,
-    )
+        &None,
+        &None,
+    );
+    match res {
+        Ok(inner) => Ok(inner.map_err(|e| soroban_sdk::Error::from(e))),
+        Err(err) => Err(err),
+    }
 }
 
 // ── length: minimum boundary (exactly 1 character) ──────────────────────
@@ -1681,6 +1766,8 @@ fn test_invoice_id_roundtrips_via_get_escrow_at_min_length() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 
     let escrow = client.get_escrow();
@@ -1722,6 +1809,8 @@ fn test_invoice_id_roundtrips_via_get_escrow_at_max_length() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 
     let escrow = client.get_escrow();
@@ -1754,6 +1843,8 @@ fn test_invoice_id_init_return_value_matches_get_escrow() {
         &token,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -1808,6 +1899,8 @@ fn test_invoice_id_matches_escrow_initialized_event_payload() {
         &token,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -1878,6 +1971,8 @@ fn test_invoice_id_matches_event_payload_with_registry_present() {
         &token,
         &Some(registry.clone()),
         &treasury,
+        &None,
+        &None,
         &None,
         &None,
         &None,

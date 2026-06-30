@@ -232,6 +232,32 @@ Comprehensive tests for the allowlist model are located in `escrow/src/test_allo
 - Multiple toggle cycles
 - Entry persistence across enable/disable
 
+### Funding-gate enforcement matrix
+
+The following typed-error gate tests (`gate_*`) are also in `test_allowlist_tests.rs` and cover every combination of gate state × investor state for both `fund` and `fund_with_commitment`:
+
+| Test name | Gate | Entry | Entrypoint | Expected outcome |
+|-----------|------|-------|------------|-----------------|
+| `gate_fund_allowlist_inactive_no_entry_succeeds` | off | absent | `fund` | ✅ succeeds |
+| `gate_fund_allowlist_inactive_entry_false_succeeds` | off | `false` | `fund` | ✅ succeeds (gate bypassed) |
+| `gate_fund_allowlist_active_investor_allowed_succeeds` | on | `true` | `fund` | ✅ succeeds |
+| `gate_fund_allowlist_active_investor_absent_returns_typed_error` | on | absent | `fund` | ❌ `InvestorNotAllowlisted` (104) |
+| `gate_fund_allowlist_active_investor_denied_returns_typed_error` | on | `false` | `fund` | ❌ `InvestorNotAllowlisted` (104) |
+| `gate_fwc_allowlist_inactive_no_entry_succeeds` | off | absent | `fund_with_commitment` | ✅ succeeds |
+| `gate_fwc_allowlist_active_investor_allowed_succeeds` | on | `true` | `fund_with_commitment` | ✅ succeeds |
+| `gate_fwc_allowlist_active_investor_absent_returns_typed_error` | on | absent | `fund_with_commitment` | ❌ `InvestorNotAllowlisted` (104) |
+| `gate_fwc_allowlist_active_investor_denied_returns_typed_error` | on | `false` | `fund_with_commitment` | ❌ `InvestorNotAllowlisted` (104) |
+
+Toggle and revocation tests:
+
+- `gate_disable_mid_funding_unblocks_any_investor` — disabling the gate mid-funding unblocks a previously-rejected investor immediately.
+- `gate_reenable_after_disable_blocks_unenrolled_investor` — re-enabling the gate without re-allowlisting an investor blocks their next deposit, even if they already have a contribution.
+- `gate_revoke_mid_funding_blocks_next_deposit_fund` — revoking an investor after their first deposit blocks all subsequent deposits; contribution value is unchanged.
+- `gate_revoke_before_first_fwc_deposit_blocks_it` — revocation before the first `fund_with_commitment` deposit blocks the call; contribution stays at zero.
+- `gate_multiple_investors_independent_gating` — per-investor entries are independent; one investor's allowlist state does not affect others.
+- `gate_batch_allowlist_then_gate_active_correct_access` — batch-allowlisted investors can fund; outsiders are rejected.
+- `gate_batch_revoke_blocks_all_revoked_members` — batch revocation immediately blocks all revoked members; contributions are unaffected.
+
 Run tests with:
 
 ```bash

@@ -70,6 +70,43 @@ Read/write semantics are unchanged: absent keys still default to `0`, base `yiel
 by address). `migrate` returns [`EscrowError::NoMigrationPath`]; operators must **redeploy** fresh
 contract instances at `SCHEMA_VERSION = 6`.
 
+### Rule 6 — `DataKey` XDR discriminant stability
+
+The `DataKey` enum is encoded to XDR with each variant assigned a fixed integer
+discriminant equal to its **0-indexed position** in the enum definition. This
+discriminant is stored on-chain as the storage key identifier.
+
+**Consequence:** reordering existing `DataKey` variants changes their on-chain
+discriminant. A key that was previously reachable as discriminant N becomes
+unreachable; existing on-chain data keyed under the old discriminant is invisible
+to the new WASM and cannot be migrated in-place (addresses are not enumerable).
+
+**Rule:** existing `DataKey` variants must **never** be renamed, removed, or
+reordered. Only append new variants at the end of the enum. This applies to both
+instance and persistent storage keys.
+
+This rule is enforced by code review. PRs that touch `DataKey` must include a
+diff showing only appends. Any removal or reorder requires a documented redeploy.
+
+## `upgrade()` and `migrate()` division of labor
+
+The `upgrade(new_wasm_hash)` entrypoint swaps the WASM bytecode for an existing
+contract instance without touching any storage. `migrate(from_version)` is the
+admin-gated entrypoint for applying storage rewrites after a schema-breaking
+upgrade. Their division of labor:
+
+| Change type | Required action |
+|-------------|----------------|
+| New additive `DataKey` (read with defaults) | `upgrade()` only — no `migrate()` needed |
+| Bug fix / logic change (no storage shape change) | `upgrade()` only |
+| Breaking struct / key change (in-place feasible) | `upgrade()` then `migrate(stored_version)` |
+| Breaking struct / key change (not enumerable) | **Redeploy** (no migration path possible) |
+
+In the current release (`SCHEMA_VERSION = 6`), `migrate()` fails on all paths
+with typed contract errors. See `docs/OPERATOR_RUNBOOK.md` §2.5 for step-by-step
+procedures and `escrow/src/lib.rs` `upgrade()` rustdoc for the complete
+additive-key safety contract.
+
 ## Compatibility test plan
 
 1. Deploy version _N_; exercise `init`, `fund`, `settle`, `claim_investor_payout`.

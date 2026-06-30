@@ -18,6 +18,7 @@ Every state-mutating entrypoint and the identity required to authorize it.
 | `update_maturity` | `escrow.admin` | `escrow.admin.require_auth()` | Only in `status == 0` |
 | `update_funding_target` | `escrow.admin` | `escrow.admin.require_auth()` | Only in `status == 0`; `new_target >= funded_amount` |
 | `set_legal_hold` / `clear_legal_hold` | `escrow.admin` | `escrow.admin.require_auth()` | No timelock; no multisig enforced on-chain |
+| `set_paused` | `escrow.admin` | `escrow.admin.require_auth()` | Operational pause, orthogonal to legal hold; single-call toggle, **no** clear delay |
 | `set_allowlist_active` | `escrow.admin` | `escrow.admin.require_auth()` | Enables/disables `AllowlistActive` gate |
 | `set_investor_allowlisted` | `escrow.admin` | `escrow.admin.require_auth()` | Writes to **persistent** storage (see §5.4) |
 | `bind_primary_attestation_hash` | `escrow.admin` | `escrow.admin.require_auth()` | Single-set; second call panics |
@@ -225,6 +226,26 @@ See `docs/escrow-legal-hold.md` § "Failure mode: hold + lost admin key".
 
 `claim_investor_payout` marks an investor as claimed and emits `InvestorPayoutClaimed`. It does not transfer tokens. Off-chain systems that release principal or yield based on this event must implement their own idempotency and replay guards. A re-emitted or replayed event must not trigger a second disbursement.
 
+### 5.10 Operational pause is orthogonal to legal hold
+
+`DataKey::Paused` is a lightweight incident-response circuit breaker toggled by
+the **current** `escrow.admin` via `set_paused(active)` and read via `is_paused()`.
+It is **independent** of `LegalHold`:
+
+- It carries **no compliance semantics** and has **no** two-phase clear delay — a
+  single authorized call flips it on or off, suitable for fast incident response
+  (e.g. a suspected token bug).
+- It gates `fund`, `settle`, `withdraw`, and `claim_investor_payout` as a read-only
+  precondition **before** `require_auth` (ADR-002 / §6 ordering), with dedicated
+  typed errors (`PausedBlocksFunding`, `PausedBlocksSettlement`,
+  `PausedBlocksWithdrawal`, `PausedBlocksInvestorClaims`).
+- Either flag blocks a gated entrypoint **on its own**. Clearing one does not clear
+  the other; `set_paused` never reads or writes any legal-hold key, and the legal-hold
+  entrypoints never touch `DataKey::Paused`.
+
+Same custody caveat as §5.3: a compromised or lost admin can pause indefinitely.
+Production deployments **must** use a governed admin so the pause cannot strand funds.
+
 ---
 
 ## 6. Authorization guard ordering (issue #265)
@@ -256,15 +277,16 @@ and does not weaken the auth boundary. Refactors must not move step 3 above step
 | `update_maturity` | `escrow.admin` | `get_escrow` | line ~1400 | `DataKey::Escrow` set |
 | `update_funding_target` | `escrow.admin` | `get_escrow` | line ~1007 | `DataKey::Escrow` set |
 | `set_legal_hold` / `clear_legal_hold` | current `escrow.admin` | `get_escrow` | line ~940 | `DataKey::LegalHold` set |
+| `set_paused` | current `escrow.admin` | `get_escrow` | `escrow.admin` (via `load_escrow_require_admin`) | `DataKey::Paused` set |
 | `set_allowlist_active` | `escrow.admin` | `get_escrow` | line ~956 | `DataKey::AllowlistActive` set |
 | `set_investor_allowlisted` | `escrow.admin` | `get_escrow` | line ~978 | persistent allowlist set |
 | `bind_primary_attestation_hash` | `escrow.admin` | `get_escrow`, `has` check | line ~791 | `PrimaryAttestationHash` set |
 | `append_attestation_digest` | `escrow.admin` | `get_escrow`, log read | line ~820 | log append + set |
 | `fund` / `fund_with_commitment` | `investor` | floor read | line ~1119 (`investor`) | per-investor keys |
 | `record_sme_collateral_commitment` | `escrow.sme_address` | `get_escrow` | line ~911 | collateral set |
-| `settle` | `escrow.sme_address` | legal hold, `get_escrow` | line ~1282 | `DataKey::Escrow` set |
-| `withdraw` | `escrow.sme_address` | legal hold, `get_escrow` | line ~1321 | `DataKey::Escrow` set |
-| `claim_investor_payout` | `investor` | legal hold, contribution read | line ~1350 | `InvestorClaimed` set |
+| `settle` | `escrow.sme_address` | pause, legal hold, `get_escrow` | line ~1282 | `DataKey::Escrow` set |
+| `withdraw` | `escrow.sme_address` | pause, legal hold, `get_escrow` | line ~1321 | `DataKey::Escrow` set |
+| `claim_investor_payout` | `investor` | pause, legal hold, contribution read | line ~1350 | `InvestorClaimed` set |
 | `sweep_terminal_dust` | `treasury` | legal hold, `get_escrow`, treasury read | line ~702 | SEP-41 transfer |
 | `migrate` | **none** (panics) | version read only | — | none (all paths panic) |
 
