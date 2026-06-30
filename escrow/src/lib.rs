@@ -3618,11 +3618,9 @@ impl LiquifactEscrow {
         // Capture the effective yield and tier lock threshold in locals so event fields can
         // be populated without post-write storage reads.
         let investor_effective_yield_bps: i64;
-        let mut tier_lock_secs: u64;
 
-        if simple_fund {
+        let tier_lock_secs: u64 = if simple_fund {
             // Non-tiered deposits never carry a commitment lock.
-            tier_lock_secs = 0;
             if prev == 0 {
                 investor_effective_yield_bps = escrow.yield_bps;
                 Self::set_persistent_investor_effective_yield(
@@ -3631,13 +3629,13 @@ impl LiquifactEscrow {
                     escrow.yield_bps,
                 );
                 Self::set_persistent_investor_claim_not_before(&env, investor.clone(), 0u64);
-                tier_lock_secs = 0;
+                0u64
             } else {
                 // Returning investor: yield was set on first deposit; read it for the event.
                 investor_effective_yield_bps =
                     Self::get_persistent_investor_effective_yield(&env, investor.clone())
                         .unwrap_or(escrow.yield_bps);
-                tier_lock_secs = 0;
+                0u64
             }
             // If prev > 0, preserve existing effective yield and claim lock
         } else {
@@ -3645,7 +3643,6 @@ impl LiquifactEscrow {
             let (eff, lock) =
                 Self::effective_yield_for_commitment(&env, escrow.yield_bps, committed_lock_secs);
             investor_effective_yield_bps = eff;
-            tier_lock_secs = lock;
             Self::set_persistent_investor_effective_yield(&env, investor.clone(), eff);
             let now = env.ledger().timestamp();
             let claim_nb = if committed_lock_secs == 0 {
@@ -3664,7 +3661,8 @@ impl LiquifactEscrow {
                 );
             }
             Self::set_persistent_investor_claim_not_before(&env, investor.clone(), claim_nb);
-        }
+            lock
+        };
 
         escrow.funded_amount = escrow
             .funded_amount
