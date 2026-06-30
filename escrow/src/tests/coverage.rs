@@ -3,7 +3,6 @@ use crate::{
     EscrowCloseSnapshot, EscrowError, LiquifactEscrow, LiquifactEscrowClient, YieldTier,
     DEFAULT_MATURITY_MAX_HORIZON_SECS, MAX_ATTESTATION_APPEND_ENTRIES, SCHEMA_VERSION,
 };
-use crate::{CollateralCommitmentSnapshot, DataKey, EscrowCloseSnapshot, EscrowError, YieldTier};
 use soroban_sdk::{
     symbol_short,
     testutils::{Address as _, Events as _, Ledger},
@@ -11,7 +10,7 @@ use soroban_sdk::{
 };
 use super::{
     assert_contract_error, default_init, deploy, deploy_with_id, free_addresses,
-    install_stellar_asset_token, setup, StellarTestToken, TARGET,
+    install_stellar_asset_token, setup, StellarTestToken, TARGET, PLEDGE,
 };
 
 pub(crate) use super::assert_contract_error;
@@ -3394,5 +3393,486 @@ fn test_collateral_same_timestamp_replacement_is_allowed() {
     assert_eq!(
         client.get_sme_collateral_commitment().unwrap().amount,
         200i128
+    );
+}
+
+
+// ──────────────────────────────────────────────────────────────────────────────
+// `get_settlement_pool` — aggregate coupon view tests
+//
+// Covers: pool = principal + coupon, zero before snapshot, rounding floor,
+// overflow guard, zero yield, max yield, base-yield-only (not per-investor tier).
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// Returns 0 before any funding (snapshot absent).
+#[test]
+fn get_settlement_pool_returns_zero_before_snapshot() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let (token, treasury) = free_addresses(&env);
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "POOL_Z"),
+        &sme,
+        &1_000i128,
+        &500i64,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    // No funding yet → snapshot absent → pool = 0.
+    assert_eq!(client.get_settlement_pool(), 0);
+}
+
+/// Returns 0 on an uninitialized contract (no escrow stored).
+#[test]
+fn get_settlement_pool_returns_zero_before_init() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+
+    // No init, no snapshot → pool = 0.
+    assert_eq!(client.get_settlement_pool(), 0);
+}
+
+/// Exactly equals `total_principal + floor(total_principal × yield_bps / 10_000)`
+/// after the escrow reaches funded status.
+#[test]
+fn get_settlement_pool_equals_principal_plus_coupon() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let (token, treasury) = free_addresses(&env);
+
+    // 10% yield_bps = 1_000
+    let principal = 10_000i128;
+    let yield_bps = 1_000i64; // 10%
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "POOL_P"),
+        &sme,
+        &principal,
+        &yield_bps,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    let investor = soroban_sdk::Address::generate(&env);
+    client.fund(&investor, &principal);
+
+    // coupon = 10_000 × 1_000 / 10_000 = 1_000
+    // pool   = 10_000 + 1_000 = 11_000
+    let expected = principal + (principal * yield_bps as i128 / 10_000);
+    assert_eq!(client.get_settlement_pool(), expected);
+    assert_eq!(client.get_settlement_pool(), 11_000i128);
+}
+
+/// With zero yield_bps the pool equals just the principal (no coupon).
+#[test]
+fn get_settlement_pool_zero_yield_equals_principal() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let (token, treasury) = free_addresses(&env);
+
+    let principal = 50_000i128;
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "POOL_Y0"),
+        &sme,
+        &principal,
+        &0i64, // 0% yield
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    let investor = soroban_sdk::Address::generate(&env);
+    client.fund(&investor, &principal);
+
+    // coupon = 0, pool = principal
+    assert_eq!(client.get_settlement_pool(), principal);
+}
+
+/// With max yield_bps = 10_000 (100%) the pool equals 2 × principal.
+#[test]
+fn get_settlement_pool_max_yield_equals_two_times_principal() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let (token, treasury) = free_addresses(&env);
+
+    let principal = 1_000i128;
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "POOL_MAX"),
+        &sme,
+        &principal,
+        &10_000i64, // 100% yield
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    let investor = soroban_sdk::Address::generate(&env);
+    client.fund(&investor, &principal);
+
+    // coupon = 1_000 × 10_000 / 10_000 = 1_000
+    // pool   = 1_000 + 1_000 = 2_000
+    assert_eq!(client.get_settlement_pool(), 2 * principal);
+}
+
+/// Floor (truncating) division: coupon is floored, not rounded up.
+#[test]
+fn get_settlement_pool_rounding_is_floor() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let (token, treasury) = free_addresses(&env);
+
+    // 3 × 1 / 10_000 = 0.0003 → floor = 0 (tests that odd remainders do not round up)
+    // Choose principal=3, yield_bps=1 → coupon = 3*1/10_000 = 0 (floor)
+    // pool = 3 + 0 = 3
+    let principal = 3i128;
+    let yield_bps = 1i64;
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "POOL_FL"),
+        &sme,
+        &principal,
+        &yield_bps,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    let investor = soroban_sdk::Address::generate(&env);
+    client.fund(&investor, &principal);
+
+    // coupon = 3 × 1 / 10_000 = 0 (floor)
+    let expected_coupon = (principal * yield_bps as i128) / 10_000;
+    assert_eq!(expected_coupon, 0, "sanity: coupon must floor to 0");
+    assert_eq!(client.get_settlement_pool(), principal + expected_coupon);
+}
+
+/// Pool is idempotent: calling it twice returns the same value.
+#[test]
+fn get_settlement_pool_is_idempotent() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let (token, treasury) = free_addresses(&env);
+
+    let principal = 8_000i128;
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "POOL_IDP"),
+        &sme,
+        &principal,
+        &200i64, // 2%
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    let investor = soroban_sdk::Address::generate(&env);
+    client.fund(&investor, &principal);
+
+    let pool1 = client.get_settlement_pool();
+    let pool2 = client.get_settlement_pool();
+    assert_eq!(pool1, pool2);
+}
+
+/// Pool is consistent after settlement (snapshot is immutable once written).
+#[test]
+fn get_settlement_pool_consistent_after_settle() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let (token, treasury) = free_addresses(&env);
+
+    let principal = 5_000i128;
+    let yield_bps = 400i64; // 4%
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "POOL_AF"),
+        &sme,
+        &principal,
+        &yield_bps,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    let investor = soroban_sdk::Address::generate(&env);
+    client.fund(&investor, &principal);
+    let pool_before = client.get_settlement_pool();
+
+    client.settle();
+
+    // Pool must be the same after settlement — snapshot is immutable.
+    let pool_after = client.get_settlement_pool();
+    assert_eq!(pool_before, pool_after);
+}
+
+/// Pool uses the escrow base yield, not per-investor tiered yield.
+/// An investor funded via `fund_with_commitment` with a higher tier yield
+/// does not change the aggregate pool reported by `get_settlement_pool`.
+#[test]
+fn get_settlement_pool_uses_base_yield_not_tier_yield() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let (token, treasury) = free_addresses(&env);
+
+    let principal = 1_000i128;
+    let base_yield_bps = 500i64; // 5%
+
+    let mut tiers = SorobanVec::new(&env);
+    tiers.push_back(crate::YieldTier {
+        min_lock_secs: 100,
+        yield_bps: 800, // higher tier yield
+    });
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "POOL_TR"),
+        &sme,
+        &principal,
+        &base_yield_bps,
+        &0u64, // no maturity lock so commitment lock is unconstrained
+        &token,
+        &None,
+        &treasury,
+        &Some(tiers),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    // Investor uses fund_with_commitment to get tier yield 800 bps.
+    let investor = soroban_sdk::Address::generate(&env);
+    client.fund_with_commitment(&investor, &principal, &100);
+
+    // get_settlement_pool must use base_yield_bps (500), not tier yield (800).
+    // coupon = 1_000 × 500 / 10_000 = 50
+    // pool   = 1_000 + 50 = 1_050
+    let expected = principal + (principal * base_yield_bps as i128 / 10_000);
+    assert_eq!(client.get_settlement_pool(), expected);
+    assert_eq!(client.get_settlement_pool(), 1_050i128);
+}
+
+/// Pool equals sum of per-investor payouts when all investors share the same
+/// base yield (no tier overrides). This validates the aggregate-matches-per-investor
+/// invariant for the common case.
+#[test]
+fn get_settlement_pool_equals_sum_of_base_yield_payouts() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let (token, treasury) = free_addresses(&env);
+
+    let yield_bps = 300i64; // 3%
+    let contribution_a = 3_000i128;
+    let contribution_b = 7_000i128;
+    let total = contribution_a + contribution_b;
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "POOL_SUM"),
+        &sme,
+        &total,
+        &yield_bps,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    let investor_a = soroban_sdk::Address::generate(&env);
+    let investor_b = soroban_sdk::Address::generate(&env);
+    client.fund(&investor_a, &contribution_a);
+    client.fund(&investor_b, &contribution_b);
+
+    let payout_a = client.compute_investor_payout(&investor_a);
+    let payout_b = client.compute_investor_payout(&investor_b);
+    let pool = client.get_settlement_pool();
+
+    // Sum of individual payouts ≤ pool (floor division residue may go to dust sweep).
+    assert!(
+        payout_a + payout_b <= pool,
+        "sum of payouts ({}) must be ≤ pool ({})",
+        payout_a + payout_b,
+        pool
+    );
+
+    // The gap is at most n_investors (one unit lost per investor due to floor division).
+    let gap = pool - (payout_a + payout_b);
+    let n_investors = 2i128;
+    assert!(
+        gap <= n_investors,
+        "rounding gap ({gap}) must be ≤ number of investors ({n_investors})"
+    );
+}
+
+/// Pool is unchanged even after over-funding past the target.
+/// The snapshot captures funded_amount at the threshold-crossing deposit,
+/// so subsequent deposits do not shift the pool.
+#[test]
+fn get_settlement_pool_is_stable_after_over_funding() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let (token, treasury) = free_addresses(&env);
+
+    let target = 1_000i128;
+    let yield_bps = 500i64;
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "POOL_OV"),
+        &sme,
+        &target,
+        &yield_bps,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    // Fund to exactly the target — snapshot captured here.
+    let investor_a = soroban_sdk::Address::generate(&env);
+    client.fund(&investor_a, &target);
+    let pool_at_target = client.get_settlement_pool();
+
+    // Second investor over-funds (escrow is now funded so this is a no-op for snapshot).
+    let investor_b = soroban_sdk::Address::generate(&env);
+    client.fund(&investor_b, &500i128);
+    let pool_after_overfund = client.get_settlement_pool();
+
+    // Snapshot is immutable once written; pool must not change.
+    assert_eq!(pool_at_target, pool_after_overfund);
+}
+
+/// Overflow guard: inject a pathological snapshot with total_principal near i128::MAX
+/// directly into storage and verify that `get_settlement_pool` emits
+/// `ComputePayoutArithmeticOverflow` (error code 129) rather than silently wrapping.
+#[test]
+fn get_settlement_pool_overflow_guard() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let (token, treasury) = free_addresses(&env);
+
+    // Initialize with a sane amount so the escrow struct is present.
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "POOL_OVF"),
+        &sme,
+        &1_000i128,
+        &10_000i64, // max yield so coupon = principal → multiply overflows when principal > MAX/10_000
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    // Manually inject a snapshot with total_principal that will cause overflow:
+    // MAX_INVOICE_AMOUNT + 1 so that total_principal × 10_000 overflows i128.
+    let overflow_principal = i128::MAX / 10_000 + 1;
+    env.as_contract(&client.address, || {
+        env.storage().instance().set(
+            &DataKey::FundingCloseSnapshot,
+            &crate::FundingCloseSnapshot {
+                total_principal: overflow_principal,
+                funding_target: overflow_principal,
+                closed_at_ledger_timestamp: 12345u64,
+                closed_at_ledger_sequence: 100u32,
+            },
+        );
+    });
+
+    assert_contract_error(
+        client.try_get_settlement_pool(),
+        EscrowError::ComputePayoutArithmeticOverflow,
     );
 }

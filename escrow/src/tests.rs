@@ -142,6 +142,10 @@ pub fn default_init(client: &LiquifactEscrowClient<'_>, env: &Env, admin: &Addre
 #[allow(dead_code)]
 pub const TARGET: i128 = 100_000_000_000i128;
 
+/// Convenience pledge amount used across collateral-metadata tests.
+#[allow(dead_code)]
+pub const PLEDGE: i128 = 5_000i128;
+
 /// Create a **new** escrow contract backed by a real Stellar asset contract (SAC),
 /// initialise it with a funded target, fund it to exactly `target`, and mint `target`
 /// tokens into the escrow contract address so that `withdraw()` can actually transfer

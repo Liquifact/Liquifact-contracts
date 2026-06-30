@@ -48,6 +48,7 @@ re-implementing storage reads to guarantee identical semantics.
 - [is_investor_refunded](#is_investor_refundedinvestor-address--bool)
 - [compute_investor_payout](#compute_investor_payoutinvestor-address--i128)
 - [get_claimable_payout](#get_claimable_payoutinvestor-address--i128)
+- [get_settlement_pool](#get_settlement_pool--i128)
 
 **Attestations:**
 - [get_primary_attestation_hash](#get_primary_attestation_hash--optionbytesn32)
@@ -618,6 +619,60 @@ On-chain read-only view that returns the **claimable payout** for an investor, a
 
 #### Authorization
 None — pure read; no auth required, no state mutation.
+
+---
+
+### `get_settlement_pool() → i128`
+
+**Storage keys:** `DataKey::FundingCloseSnapshot`, `DataKey::Escrow`  
+**Signature:** `pub fn get_settlement_pool(env: Env) -> i128`
+
+Returns the **total settlement pool** owed by the SME — the aggregate principal plus base-yield
+coupon the SME must repay to fully satisfy all investors. This is the authoritative on-chain
+view that avoids the rounding divergence that arises when off-chain tooling re-derives the formula
+from raw snapshot fields.
+
+#### Formula (floor / truncating integer division)
+
+```text
+coupon       = total_principal × yield_bps / 10_000  (floor)
+settle_pool  = total_principal + coupon
+```
+
+Where `total_principal` is from [`DataKey::FundingCloseSnapshot`] and `yield_bps` is the
+**escrow base yield** from `InvoiceEscrow::yield_bps`.
+
+#### Yield note
+
+This view uses the escrow **base yield** (`InvoiceEscrow::yield_bps`). Per-investor effective
+yields from `fund_with_commitment` tier selection are reflected individually in
+`compute_investor_payout` but are **not** aggregated here. The result is therefore an
+authoritative lower-bound aggregate that avoids per-investor enumeration; it matches the
+base-yield pool denominator used by all non-tiered investors.
+
+#### Return values
+
+| Condition | Returns |
+|-----------|---------|
+| [`DataKey::FundingCloseSnapshot`] absent (escrow not yet funded) | `0` |
+| `total_principal <= 0` (degenerate snapshot) | `0` |
+| Normal funded state | `total_principal + floor(total_principal × yield_bps / 10_000)` |
+
+#### Overflow safety
+
+All intermediate multiplications use `i128::checked_mul`; all divisions use `i128::checked_div`.
+Emits [`EscrowError::ComputePayoutArithmeticOverflow`] (code 129) rather than silently producing
+a wrong value.
+
+#### Rounding invariant
+
+Because this view uses the same checked arithmetic and floor division as `compute_investor_payout`,
+the sum of all per-investor payouts is guaranteed to be ≤ `get_settlement_pool()`. Any fractional
+residue is swept by `sweep_terminal_dust`.
+
+#### Authorization
+
+None — pure read; no auth required and no state mutation.
 
 ---
 

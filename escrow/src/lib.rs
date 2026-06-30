@@ -968,7 +968,6 @@ pub struct RegistryRefRebound {
 
 #[contractevent]
 pub struct TreasuryDustSwept {
-
     #[topic]
     pub name: Symbol,
     pub invoice_id: Symbol,
@@ -1202,9 +1201,21 @@ impl LiquifactEscrow {
         admin.require_auth();
 
         ensure(&env, amount > 0, EscrowError::AmountMustBePositive);
-        ensure(&env, amount <= MAX_INVOICE_AMOUNT, EscrowError::AmountExceedsMax);
-        ensure(&env, (0..=10_000).contains(&yield_bps), EscrowError::YieldBpsOutOfRange);
-        ensure(&env, !env.storage().instance().has(&DataKey::Escrow), EscrowError::EscrowAlreadyInitialized);
+        ensure(
+            &env,
+            amount <= MAX_INVOICE_AMOUNT,
+            EscrowError::AmountExceedsMax,
+        );
+        ensure(
+            &env,
+            (0..=10_000).contains(&yield_bps),
+            EscrowError::YieldBpsOutOfRange,
+        );
+        ensure(
+            &env,
+            !env.storage().instance().has(&DataKey::Escrow),
+            EscrowError::EscrowAlreadyInitialized,
+        );
 
         ensure(
             &env,
@@ -1216,40 +1227,58 @@ impl LiquifactEscrow {
 
         let max_horizon = maturity_max_horizon.unwrap_or(DEFAULT_MATURITY_MAX_HORIZON_SECS);
         validate_maturity_bounds(&env, maturity, max_horizon);
-        env.storage().instance().set(&DataKey::MaturityMaxHorizon, &max_horizon);
+        env.storage()
+            .instance()
+            .set(&DataKey::MaturityMaxHorizon, &max_horizon);
 
-        env.storage().instance().set(&DataKey::FundingToken, &funding_token);
+        env.storage()
+            .instance()
+            .set(&DataKey::FundingToken, &funding_token);
         env.storage().instance().set(&DataKey::Treasury, &treasury);
-        
+
         if let Some(reg) = registry.clone() {
             env.storage().instance().set(&DataKey::RegistryRef, &reg);
         }
-        
+
         if let Some(tiers) = yield_tiers {
-            env.storage().instance().set(&DataKey::YieldTierTable, &tiers);
+            env.storage()
+                .instance()
+                .set(&DataKey::YieldTierTable, &tiers);
         }
 
         let floor = min_contribution.unwrap_or(0);
-        env.storage().instance().set(&DataKey::MinContributionFloor, &floor);
-        env.storage().instance().set(&DataKey::UniqueFunderCount, &0u32);
+        env.storage()
+            .instance()
+            .set(&DataKey::MinContributionFloor, &floor);
+        env.storage()
+            .instance()
+            .set(&DataKey::UniqueFunderCount, &0u32);
 
         if let Some(cap) = max_per_investor {
             ensure(&env, cap > 0, EscrowError::MaxPerInvestorNotPositive);
-            env.storage().instance().set(&DataKey::MaxPerInvestorCap, &cap);
+            env.storage()
+                .instance()
+                .set(&DataKey::MaxPerInvestorCap, &cap);
         }
 
         if let Some(cap) = max_unique_investors {
             ensure(&env, cap > 0, EscrowError::MaxUniqueInvestorsNotPositive);
-            env.storage().instance().set(&DataKey::MaxUniqueInvestorsCap, &cap);
+            env.storage()
+                .instance()
+                .set(&DataKey::MaxUniqueInvestorsCap, &cap);
         }
 
         let delay = legal_hold_clear_delay.unwrap_or(0);
         if delay > 0 {
-            env.storage().instance().set(&DataKey::LegalHoldClearDelay, &delay);
+            env.storage()
+                .instance()
+                .set(&DataKey::LegalHoldClearDelay, &delay);
         }
 
         if let Some(active) = allowlist_active {
-            env.storage().instance().set(&DataKey::AllowlistActive, &active);
+            env.storage()
+                .instance()
+                .set(&DataKey::AllowlistActive, &active);
         }
 
         let invoice_sym = validate_invoice_id_string(&env, &invoice_id);
@@ -1265,39 +1294,49 @@ impl LiquifactEscrow {
             maturity,
             status: 0,
         };
-        
+
         env.storage().instance().set(&DataKey::Escrow, &escrow);
-        env.storage().instance().set(&DataKey::FundingToken, &funding_token);
+        env.storage()
+            .instance()
+            .set(&DataKey::FundingToken, &funding_token);
         env.storage().instance().set(&DataKey::Treasury, &treasury);
-        env.storage().instance().set(&DataKey::Version, &SCHEMA_VERSION);
+        env.storage()
+            .instance()
+            .set(&DataKey::Version, &SCHEMA_VERSION);
 
         if let Some(reg) = &registry {
             env.storage().instance().set(&DataKey::RegistryRef, reg);
         }
         if let Some(tiers) = &yield_tiers {
-            env.storage().instance().set(&DataKey::YieldTierTable, tiers);
+            env.storage()
+                .instance()
+                .set(&DataKey::YieldTierTable, tiers);
         }
         if let Some(floor) = min_contribution {
-            env.storage().instance().set(&DataKey::MinContributionFloor, &floor);
+            env.storage()
+                .instance()
+                .set(&DataKey::MinContributionFloor, &floor);
         }
         if let Some(cap) = max_unique_investors {
-            env.storage().instance().set(&DataKey::MaxUniqueInvestorsCap, &cap);
+            env.storage()
+                .instance()
+                .set(&DataKey::MaxUniqueInvestorsCap, &cap);
         }
         if let Some(cap) = max_per_investor {
-            env.storage().instance().set(&DataKey::MaxPerInvestorCap, &cap);
+            env.storage()
+                .instance()
+                .set(&DataKey::MaxPerInvestorCap, &cap);
         }
         if let Some(delay) = legal_hold_clear_delay {
-            env.storage().instance().set(&DataKey::LegalHoldClearDelay, &delay);
+            env.storage()
+                .instance()
+                .set(&DataKey::LegalHoldClearDelay, &delay);
         }
 
         let has_maturity_lock = maturity != 0;
         EscrowInitialized {
             name: symbol_short!("escrow"),
-            escrow: env
-                .storage()
-                .instance()
-                .get(&DataKey::Escrow)
-                .unwrap(),
+            escrow: env.storage().instance().get(&DataKey::Escrow).unwrap(),
             funding_token,
             treasury,
             registry,
@@ -1371,7 +1410,9 @@ impl LiquifactEscrow {
 
         match registry.clone() {
             Some(_) => {
-                env.storage().instance().set(&DataKey::RegistryRef, &registry);
+                env.storage()
+                    .instance()
+                    .set(&DataKey::RegistryRef, &registry);
             }
             None => {
                 env.storage().instance().remove(&DataKey::RegistryRef);
@@ -1385,7 +1426,6 @@ impl LiquifactEscrow {
         }
         .publish(&env);
     }
-
 
     /// Returns the optional pending admin address waiting for [`LiquifactEscrow::accept_admin`],
     /// or [`None`] when no admin handover is in progress.
@@ -2611,9 +2651,7 @@ impl LiquifactEscrow {
 
     /// Get the pending clear timestamp, if any.
     pub fn get_legal_hold_clearable_at(env: Env) -> Option<u64> {
-        env.storage()
-            .instance()
-            .get(&DataKey::LegalHoldClearableAt)
+        env.storage().instance().get(&DataKey::LegalHoldClearableAt)
     }
 
     pub fn update_funding_target(env: Env, new_target: i128) -> InvoiceEscrow {
@@ -3509,6 +3547,79 @@ impl LiquifactEscrow {
             .checked_mul(settle_pool)
             .unwrap_or_else(|| fail(&env, EscrowError::ComputePayoutArithmeticOverflow))
             .checked_div(total_principal)
+            .unwrap_or_else(|| fail(&env, EscrowError::ComputePayoutArithmeticOverflow))
+    }
+
+    /// Authoritative on-chain aggregate view of the total settlement pool owed by the SME.
+    ///
+    /// Returns `total_principal + floor(total_principal × yield_bps / 10_000)`, computed
+    /// from [`DataKey::FundingCloseSnapshot`] and the escrow's **base** `yield_bps` using
+    /// the same [`i128::checked_mul`] / [`i128::checked_div`] arithmetic and
+    /// [`EscrowError::ComputePayoutArithmeticOverflow`] guard as
+    /// [`LiquifactEscrow::compute_investor_payout`].
+    ///
+    /// # Rounding
+    ///
+    /// The coupon is computed with truncating (floor) integer division, identical to the
+    /// per-investor formula:
+    ///
+    /// ```text
+    /// coupon       = total_principal × yield_bps / 10_000  (floor)
+    /// settle_pool  = total_principal + coupon
+    /// ```
+    ///
+    /// # Yield note
+    ///
+    /// This view uses the escrow **base yield** (`InvoiceEscrow::yield_bps`). Per-investor
+    /// effective yields from [`LiquifactEscrow::fund_with_commitment`] tier selection are
+    /// reflected individually in [`LiquifactEscrow::compute_investor_payout`] but are **not**
+    /// aggregated here. The result is therefore an authoritative lower-bound aggregate that
+    /// avoids per-investor enumeration; it matches the base-yield pool denominator used by
+    /// all non-tiered investors.
+    ///
+    /// # Returns
+    ///
+    /// - `0` when [`DataKey::FundingCloseSnapshot`] does not exist (escrow not yet funded).
+    /// - Computed floor `total_principal + coupon` otherwise.
+    ///
+    /// # Overflow safety
+    ///
+    /// All intermediate multiplications use [`i128::checked_mul`]; divisions use
+    /// [`i128::checked_div`]. Emits [`EscrowError::ComputePayoutArithmeticOverflow`] (code 129)
+    /// rather than silently producing a wrong value.
+    ///
+    /// # Authorization
+    ///
+    /// None — pure read; no auth required and no state mutation.
+    pub fn get_settlement_pool(env: Env) -> i128 {
+        // Snapshot must exist (written when escrow first reaches status == 1).
+        // Return 0 before funding, matching compute_investor_payout semantics.
+        let Some(snap) = env
+            .storage()
+            .instance()
+            .get::<DataKey, FundingCloseSnapshot>(&DataKey::FundingCloseSnapshot)
+        else {
+            return 0;
+        };
+
+        let total_principal = snap.total_principal;
+        if total_principal <= 0 {
+            return 0;
+        }
+
+        // Read the escrow base yield_bps.
+        let escrow: InvoiceEscrow = env
+            .storage()
+            .instance()
+            .get(&DataKey::Escrow)
+            .unwrap_or_else(|| fail(&env, EscrowError::EscrowNotInitialized));
+
+        // coupon = total_principal × yield_bps / 10_000  (floor)
+        let coupon = Self::settlement_coupon(&env, total_principal, escrow.yield_bps);
+
+        // settle_pool = total_principal + coupon
+        total_principal
+            .checked_add(coupon)
             .unwrap_or_else(|| fail(&env, EscrowError::ComputePayoutArithmeticOverflow))
     }
 
