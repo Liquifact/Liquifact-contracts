@@ -23,7 +23,7 @@ Some invoice products offer higher yield to investors who commit to a longer loc
 - Stores result under `DataKey::InvestorEffectiveYield(investor)`.
 - If `committed_lock_secs > 0`, stores `ledger.timestamp() + committed_lock_secs` under `DataKey::InvestorClaimNotBefore(investor)`.
 - Emits `EscrowFunded` containing `tier_lock_secs` (the matched threshold, or 0 if base yield).
-- Panics if the investor already has a contribution (prevents re-selection).
+- **Rejects with `EscrowError::TieredSecondDeposit` (code 108)** if the investor already has a contribution (`prev != 0`) — prevents re-selection of tier or lock after the first leg. This is a stable typed `ContractError`, never a raw panic string; SDK clients must branch on `ContractError(108)`.
 
 **Follow-on deposits** — investor must use `fund()`, which reads the already-stored effective yield and does not allow re-selection.
 
@@ -47,11 +47,15 @@ The state-machine rules above are verified in `escrow/src/tests/funding.rs`:
 
 | Test | Rule verified |
 |---|---|
-| `test_fund_with_commitment_twice_panics` | Second `fund_with_commitment` from same investor panics |
-| `test_fund_then_fund_with_commitment_panics` | `fund → fund_with_commitment` (inverse) panics |
-| `test_fund_first_then_commitment_second_panics` | Same inverse rule, with tier table present |
-| `test_second_fund_with_commitment_panics_without_tier_table` | Second `fund_with_commitment` panics on base-only escrow |
+| `test_fund_with_commitment_twice_panics` | Second `fund_with_commitment` from same investor emits `TieredSecondDeposit` (108) |
+| `test_fund_then_fund_with_commitment_panics` | `fund → fund_with_commitment` (inverse) emits `TieredSecondDeposit` (108) |
+| `test_fund_first_then_commitment_second_panics` | Same inverse rule, with tier table present, emits `TieredSecondDeposit` (108) |
+| `test_second_fund_with_commitment_panics_without_tier_table` | Second `fund_with_commitment` on base-only escrow emits `TieredSecondDeposit` (108) |
+| `test_tiered_second_deposit_different_lock_rejected` | Re-entry with a different lock (attempting tier upgrade) is rejected with `TieredSecondDeposit` (108); effective yield unchanged |
+| `test_tiered_second_deposit_zero_lock_also_rejected` | Re-entry with lock=0 (base-yield fallback) is also rejected with `TieredSecondDeposit` (108) |
+| `test_tiered_second_deposit_guard_is_per_investor` | Guard is per-investor: Investor B's first `fund_with_commitment` succeeds while Investor A's second is rejected |
 | `test_tiered_yield_and_follow_on_fund` | Follow-on `fund()` succeeds and preserves tier yield |
+| `test_follow_on_fund_after_tiered_commitment_preserves_all_state` | Three consecutive follow-on `fund()` calls preserve both `InvestorEffectiveYield` and `InvestorClaimNotBefore` |
 | `test_commitment_claim_lock_preserved_after_follow_on_fund` | Follow-on `fund()` preserves `InvestorClaimNotBefore` |
 | `test_commitment_invariant_across_multiple_follow_on_funds` | Invariant holds across 3 consecutive follow-on `fund()` calls |
 | `test_fund_with_commitment_zero_lock_behaves_as_fund` | `committed_lock_secs == 0` → base yield, `InvestorClaimNotBefore == 0` |
