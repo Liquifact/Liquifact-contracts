@@ -212,9 +212,10 @@ proptest! {
         let mut distinct_funders: Vec<Address> = Vec::new();
 
         // Track when the funded status should flip (first step where funded >= target).
-        let mut expected_flip_at: Option<usize> = None;
         let mut actual_transitions_to_funded = 0u32;
-        let prev_status = client.get_escrow().status;
+        let mut prev_status = client.get_escrow().status;
+
+
 
         for step in 0..seq_len {
             if client.get_escrow().status != 0 {
