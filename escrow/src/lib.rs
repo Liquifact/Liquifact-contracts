@@ -335,6 +335,8 @@ pub enum EscrowError {
     MaturityUpdateNotOpen = 79,
     /// [`LiquifactEscrow::propose_admin`] nominated the current admin address.
     NewAdminSameAsCurrent = 80,
+    /// [`LiquifactEscrow::propose_admin`] repeated the already-pending admin address.
+    PendingAdminUnchanged = 177,
     /// [`LiquifactEscrow::update_maturity`] set maturity to the same value as current.
     MaturityUnchanged = 81,
     /// [`LiquifactEscrow::accept_admin`] called after the proposal expiry recorded at
@@ -962,6 +964,21 @@ pub struct AdminProposedEvent {
     pub invoice_id: Symbol,
     pub current_admin: Address,
     pub pending_admin: Address,
+}
+
+/// Emitted by [`LiquifactEscrow::propose_admin`] when a different pending admin proposal is
+/// replaced before it is accepted or cancelled.
+///
+/// Indexers can distinguish a true supersede from a first-time proposal without inferring it from
+/// storage diffs.
+#[contractevent]
+pub struct AdminProposalSuperseded {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    pub previous_pending: Address,
+    pub new_pending: Address,
 }
 
 /// Emitted by [`LiquifactEscrow::cancel_pending_admin`] when a pending admin proposal is cancelled.
@@ -4349,6 +4366,8 @@ impl LiquifactEscrow {
     /// Propose a new admin (`PendingAdmin`) — step 1 of a two-step handover.
     ///
     /// Requires current admin authorization. The destination must differ from the current admin.
+    /// If a pending proposal already exists, re-proposing the same address is rejected while
+    /// replacing it with a different address emits [`AdminProposalSuperseded`].
     ///
     /// Persists [`DataKey::PendingAdmin`] as the proposed successor address and
     /// [`DataKey::PendingAdminExpiry`] as `ledger.timestamp() + window`, where `window`
@@ -4361,7 +4380,8 @@ impl LiquifactEscrow {
     ///
     /// # Errors
     /// Emits typed [`EscrowError`] codes when the escrow is uninitialized, the caller is not the
-    /// current admin, or `new_admin` is the current admin ([`EscrowError::NewAdminSameAsCurrent`]).
+    /// current admin, `new_admin` is the current admin ([`EscrowError::NewAdminSameAsCurrent`]),
+    /// or `new_admin` is already pending ([`EscrowError::PendingAdminUnchanged`]).
     ///
     /// # Events
     /// Emits [`AdminProposedEvent`] (topic: `adm_prop`) containing the `invoice_id`, the `current_admin`,
@@ -4378,6 +4398,23 @@ impl LiquifactEscrow {
             escrow.admin != new_admin,
             EscrowError::NewAdminSameAsCurrent,
         );
+
+        let previous_pending: Option<Address> =
+            env.storage().instance().get(&DataKey::PendingAdmin);
+        if let Some(pending) = previous_pending {
+            ensure(
+                &env,
+                pending != new_admin,
+                EscrowError::PendingAdminUnchanged,
+            );
+            AdminProposalSuperseded {
+                name: symbol_short!("adm_sup"),
+                invoice_id: escrow.invoice_id.clone(),
+                previous_pending: pending,
+                new_pending: new_admin.clone(),
+            }
+            .publish(&env);
+        }
 
         let window = validity_window_secs.unwrap_or(DEFAULT_ADMIN_PROPOSAL_VALIDITY_SECS);
         let expiry = env.ledger().timestamp().saturating_add(window);

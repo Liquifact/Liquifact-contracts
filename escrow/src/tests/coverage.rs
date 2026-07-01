@@ -186,6 +186,7 @@ fn escrow_error_discriminants_match_canonical_table() {
         (EscrowError::NewCapBelowCurrentFunderCount, 78),
         (EscrowError::MaturityUpdateNotOpen, 79),
         (EscrowError::NewAdminSameAsCurrent, 80),
+        (EscrowError::PendingAdminUnchanged, 177),
         (EscrowError::FundingBatchEmpty, 82),
         (EscrowError::FundingBatchTooLarge, 83),
         (EscrowError::MigrationVersionMismatch, 90),
@@ -229,7 +230,7 @@ fn escrow_error_discriminants_match_canonical_table() {
         (EscrowError::NewFloorNotLower, 174),
         (EscrowError::NewFloorNotPositive, 175),
     ];
-    assert_eq!(TABLE.len(), 88);
+    assert_eq!(TABLE.len(), 89);
     for (variant, code) in TABLE {
         assert_eq!(*variant as u32, *code, "discriminant drift for code {code}");
     }
@@ -5361,6 +5362,7 @@ fn test_event_topic0_follows_snake_case_convention() {
     let expected_topics: Vec<(&str, &str)> = vec![
         ("AdminAcceptedEvent", "admin_accepted_event"),
         ("AdminProposalCancelled", "admin_proposal_cancelled"),
+        ("AdminProposalSuperseded", "admin_proposal_superseded"),
         ("AdminProposedEvent", "admin_proposed_event"),
         ("AdminTransferredEvent", "admin_transferred_event"),
         ("AllowlistEnabledChanged", "allowlist_enabled_changed"),
