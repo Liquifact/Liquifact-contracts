@@ -1,7 +1,7 @@
 use super::*;
 use crate::{
-    AdminAcceptedEvent, AdminProposalCancelled, AdminProposedEvent, EscrowCloseSnapshot,
-    FundingTargetUpdated, MaturityMaxHorizonRaised, RegistryRefRebound,
+    AdminAcceptedEvent, AdminProposalCancelled, AdminProposalSuperseded, AdminProposedEvent,
+    EscrowCloseSnapshot, FundingTargetUpdated, MaturityMaxHorizonRaised, RegistryRefRebound,
     DEFAULT_MATURITY_MAX_HORIZON_SECS,
 };
 
@@ -407,6 +407,61 @@ fn test_propose_admin_overwrites_prior_pending() {
     assert_eq!(client.get_pending_admin(), Some(second.clone()));
     let updated = client.accept_admin();
     assert_eq!(updated.admin, second);
+}
+
+#[test]
+fn test_propose_admin_rejects_unchanged_pending_admin() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let pending = Address::generate(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    client.propose_admin(&pending, &None);
+
+    assert_contract_error(
+        client.try_propose_admin(&pending, &None),
+        EscrowError::PendingAdminUnchanged,
+    );
+}
+
+#[test]
+fn test_propose_admin_supersede_emits_distinct_event() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let contract_id = client.address.clone();
+    let first = Address::generate(&env);
+    let second = Address::generate(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    client.propose_admin(&first, &None);
+    client.propose_admin(&second, &None);
+
+    let invoice_id = client.get_escrow().invoice_id;
+    let events = env.events().all();
+    let event_list = events.events();
+    let superseded = AdminProposalSuperseded {
+        name: symbol_short!("adm_sup"),
+        invoice_id: invoice_id.clone(),
+        previous_pending: first,
+        new_pending: second.clone(),
+    };
+    let proposed = AdminProposedEvent {
+        name: symbol_short!("adm_prop"),
+        invoice_id,
+        current_admin: admin,
+        pending_admin: second,
+    };
+
+    assert_eq!(
+        event_list.get(event_list.len() - 2).unwrap().clone(),
+        superseded.to_xdr(&env, &contract_id)
+    );
+    assert_eq!(
+        event_list.last().unwrap().clone(),
+        proposed.to_xdr(&env, &contract_id)
+    );
 }
 
 #[test]
