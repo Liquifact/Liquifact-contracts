@@ -365,6 +365,18 @@ pub enum EscrowError {
     /// A new investor would exceed configured `max_unique_investors`.
     UniqueInvestorCapReached = 107,
     /// [`LiquifactEscrow::fund_with_commitment`] called after investor already has principal.
+    ///
+    /// Tier and lock selection are immutable after the first deposit leg. Once an investor
+    /// has a non-zero contribution recorded under [`DataKey::InvestorContribution`], the
+    /// yield rate and claim-lock timestamp are permanently fixed; calling
+    /// [`LiquifactEscrow::fund_with_commitment`] again would allow re-selecting a tier,
+    /// violating the fairness guarantee.
+    ///
+    /// **Client action:** Use [`LiquifactEscrow::fund`] for all additional principal from
+    /// the same investor. `fund()` reads the stored effective yield set on the first leg
+    /// and does not allow tier re-selection.
+    ///
+    /// **Code:** `108` — stable, append-only.
     TieredSecondDeposit = 108,
     /// Computing investor claim-not-before timestamp would overflow.
     InvestorClaimTimeOverflow = 109,

@@ -116,7 +116,7 @@ See also [`docs/escrow-legal-hold.md`](escrow-legal-hold.md),
 | 105 | `InvestorContributionOverflow` | `fund`, `fund_with_commitment` | investor contribution addition overflows | Reduce deposit size | typed |
 | 106 | `InvestorContributionExceedsCap` | `fund`, `fund_with_commitment` | contribution exceeds `max_per_investor` | Reduce deposit or raise cap at init | typed |
 | 107 | `UniqueInvestorCapReached` | `fund`, `fund_with_commitment` | new investor and `unique funder count >= max_unique_investors` | Cap reached; wait or use existing investor | typed |
-| 108 | `TieredSecondDeposit` | `fund_with_commitment` | investor already has principal and calls `fund_with_commitment` again | Use `fund()` for additional principal | typed |
+| 108 | `TieredSecondDeposit` | `fund_with_commitment` | investor already has principal (`prev != 0`) and calls `fund_with_commitment` again — tier and lock selection are immutable after the first deposit leg | Use `fund()` for all additional principal from the same investor; `fund_with_commitment` is a first-deposit-only entrypoint | typed |
 | 109 | `InvestorClaimTimeOverflow` | `fund_with_commitment` | `timestamp + lock_secs` overflows | Reduce lock duration | typed |
 | 110 | `FundedAmountOverflow` | `fund`, `fund_with_commitment`, `fund_batch` | `funded_amount + amount` overflows | Reduce deposit size | typed |
 | 111 | `CommitmentLockExceedsMaturity` | `fund_with_commitment` | `now + committed_lock_secs > maturity` (when maturity > 0) | Shorten lock or extend maturity before deposit | typed |
@@ -218,7 +218,7 @@ See also [`docs/escrow-legal-hold.md`](escrow-legal-hold.md),
 | 105 | `investor contribution overflow` |
 | 106 | `investor contribution exceeds max_per_investor cap` |
 | 107 | `unique investor cap reached` |
-| 108 | `Additional principal after a tiered first deposit must use fund()` |
+| 108 | `Additional principal after a tiered first deposit must use fund(), not fund_with_commitment()` _(legacy `assert!` — replaced by typed error)_ |
 | 109 | `investor claim time overflow` |
 | 110 | `funded_amount overflow` |
 | 111 | `commitment lock exceeds escrow maturity` |
