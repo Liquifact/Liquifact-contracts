@@ -181,19 +181,51 @@ their principal:
 5. `DataKey::InvestorRefunded` is set to `true` — `is_investor_refunded()` returns `true`.
 6. A second `refund()` call panics with `"no contribution to refund"` (contribution is 0).
 
+### Batch refund (`refund_batch`)
+
+`refund_batch(investors: Vec<Address>)` processes multiple investor refunds in a single call,
+reducing transaction overhead for cancelled-escrow recovery.
+
+**Semantics:**
+- Each address is processed sequentially with per-investor `require_auth()`
+- All existing [`refund()`](#investor-refund-path-status-4--cancelled) invariants (cancelled-status gate, non-zero contribution,
+  checks-effects-interactions, liability-floor accounting) are enforced per entry
+- Already-refunded entries (where [`DataKey::InvestorRefunded`] is `true`) are **skipped** without
+  failing the batch — this makes the entrypoint idempotent and allows relayer-style retry
+- One `InvestorRefundedEvt` event is emitted per newly-refunded investor
+
+**Capacity:**
+- Batch size must be `> 0` and `<= MAX_REFUND_BATCH` (50 entries)
+- Empty batch panics with [`EscrowError::RefundBatchEmpty`]
+- Oversized batch panics with [`EscrowError::RefundBatchTooLarge`]
+
+**Test coverage** (see `escrow/src/tests/funding.rs`):
+
+| Scenario | Test |
+|----------|------|
+| Batch equals N single refunds (balance, zeroing, markers, DistributedPrincipal) | `test_refund_batch_equals_n_single_refunds` |
+| Already-refunded investors are skipped | `test_refund_batch_skips_already_refunded` |
+| `RefundBatchEmpty` typed error | `test_refund_batch_empty_yields_typed_error` |
+| `RefundBatchTooLarge` typed error | `test_refund_batch_too_large_yields_typed_error` |
+| Exactly MAX_REFUND_BATCH entries succeeds | `test_refund_batch_max_batch_size_succeeds` |
+| Non-investor entry panics | `test_refund_batch_non_investor_panics` |
+| Batch panics in non-cancelled state | `test_refund_batch_panics_in_open_state` |
+| Liability floor preserved with batch refunds | `test_refund_batch_preserves_liability_floor` |
+
 ### Invariants
 
 - Total refunded ≤ `funded_amount` (each investor can only reclaim their own contribution).
 - No double-refund: contribution is zeroed before the token transfer.
 - Balance-delta checks enforced by `external_calls` wrapper (SEP-41 conservation).
-- `refund()` is blocked in all states except `4` (cancelled).
+- `refund()` and `refund_batch()` are blocked in all states except `4` (cancelled).
+- Already-refunded entries are safely skipped in `refund_batch()`.
 
 ### Events emitted
 
 | Event | When |
 |-------|------|
 | `FundingCancelled` | `cancel_funding()` succeeds |
-| `InvestorRefundedEvt` | `refund()` succeeds |
+| `InvestorRefundedEvt` | `refund()` or `refund_batch()` succeeds |
 
 ---
 

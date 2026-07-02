@@ -2516,6 +2516,159 @@ fn test_sweep_terminal_dust_allowed_in_cancelled_state() {
     assert_eq!(token.token.balance(&treasury), 1i128);
 }
 
+// ─── refund_batch tests ─────────────────────────────────────────────────────
+
+/// `refund_batch` with N entries equals N sequential `refund` calls
+/// (balance changes, contribution zeroing, refunded marker, DistributedPrincipal).
+#[test]
+fn test_refund_batch_equals_n_single_refunds() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let inv_a = Address::generate(&env);
+    let inv_b = Address::generate(&env);
+    let (token, _) = init_with_token(&env, &client, &admin, &sme);
+    let contract_id = client.address.clone();
+    let amt_a = TARGET / 3;
+    let amt_b = TARGET / 4;
+    token.stellar.mint(&contract_id, &(amt_a + amt_b));
+    client.fund(&inv_a, &amt_a);
+    client.fund(&inv_b, &amt_b);
+    client.cancel_funding();
+
+    let before_a = token.token.balance(&inv_a);
+    let before_b = token.token.balance(&inv_b);
+    let investors = soroban_sdk::vec![&env, inv_a.clone(), inv_b.clone()];
+    client.refund_batch(&investors);
+    assert_eq!(token.token.balance(&inv_a) - before_a, amt_a);
+    assert_eq!(token.token.balance(&inv_b) - before_b, amt_b);
+    assert_eq!(client.get_contribution(&inv_a), 0);
+    assert_eq!(client.get_contribution(&inv_b), 0);
+    assert!(client.is_investor_refunded(&inv_a));
+    assert!(client.is_investor_refunded(&inv_b));
+    let distributed = client.get_distributed_principal();
+    assert_eq!(distributed, amt_a + amt_b);
+}
+
+/// Previously-refunded investors are skipped without failing the batch.
+#[test]
+fn test_refund_batch_skips_already_refunded() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let inv_a = Address::generate(&env);
+    let inv_b = Address::generate(&env);
+    let (token, _) = init_with_token(&env, &client, &admin, &sme);
+    let contract_id = client.address.clone();
+    let amt_a = TARGET / 5;
+    let amt_b = TARGET / 5;
+    token.stellar.mint(&contract_id, &(amt_a + amt_b));
+    client.fund(&inv_a, &amt_a);
+    client.fund(&inv_b, &amt_b);
+    client.cancel_funding();
+    // Refund inv_a individually first.
+    client.refund(&inv_a);
+    assert!(client.is_investor_refunded(&inv_a));
+    assert!(!client.is_investor_refunded(&inv_b));
+
+    let before_b = token.token.balance(&inv_b);
+    let investors = soroban_sdk::vec![&env, inv_a.clone(), inv_b.clone()];
+    client.refund_batch(&investors);
+    // inv_a already refunded — skipped; inv_b refunded now.
+    assert_eq!(token.token.balance(&inv_b) - before_b, amt_b);
+    assert!(client.is_investor_refunded(&inv_b));
+    let distributed = client.get_distributed_principal();
+    assert_eq!(distributed, amt_a + amt_b);
+}
+
+/// Empty batch panics with `RefundBatchEmpty`.
+#[test]
+fn test_refund_batch_empty_yields_typed_error() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    client.cancel_funding();
+    let empty: soroban_sdk::Vec<Address> = soroban_sdk::Vec::new(&env);
+    let result = client.try_refund_batch(&empty);
+    assert_contract_error(result, EscrowError::RefundBatchEmpty);
+}
+
+/// Oversized batch (more than MAX_REFUND_BATCH) panics with `RefundBatchTooLarge`.
+#[test]
+fn test_refund_batch_too_large_yields_typed_error() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    client.cancel_funding();
+    let mut investors = soroban_sdk::Vec::new(&env);
+    for _ in 0..=MAX_REFUND_BATCH {
+        investors.push_back(Address::generate(&env));
+    }
+    let result = client.try_refund_batch(&investors);
+    assert_contract_error(result, EscrowError::RefundBatchTooLarge);
+}
+
+/// Exactly MAX_REFUND_BATCH entries succeeds.
+#[test]
+fn test_refund_batch_max_batch_size_succeeds() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let (token, _) = init_with_token(&env, &client, &admin, &sme);
+    let contract_id = client.address.clone();
+    let amt_per = 1_000i128;
+    let total = (MAX_REFUND_BATCH as i128) * amt_per;
+    token.stellar.mint(&contract_id, &total);
+
+    let mut investors = soroban_sdk::Vec::new(&env);
+    for i in 0..MAX_REFUND_BATCH {
+        let inv = Address::generate(&env);
+        client.fund(&inv, &amt_per);
+        investors.push_back(inv);
+    }
+    client.cancel_funding();
+    client.refund_batch(&investors);
+    assert_eq!(
+        client.get_distributed_principal(),
+        total,
+        "distributed principal must sum all refunds"
+    );
+}
+
+/// Mixed batch: some funded, some not — the non-funded entry panics.
+#[test]
+#[should_panic]
+fn test_refund_batch_non_investor_panics() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let inv = Address::generate(&env);
+    let (token, _) = init_with_token(&env, &client, &admin, &sme);
+    let contract_id = client.address.clone();
+    token.stellar.mint(&contract_id, &(TARGET / 2));
+    client.fund(&inv, &(TARGET / 2));
+    client.cancel_funding();
+    let stranger = Address::generate(&env);
+    let investors = soroban_sdk::vec![&env, inv, stranger];
+    client.refund_batch(&investors);
+}
+
+/// `refund_batch` panics in non-cancelled states.
+#[test]
+#[should_panic]
+fn test_refund_batch_panics_in_open_state() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let inv = Address::generate(&env);
+    default_init(&client, &env, &admin, &sme);
+    client.fund(&inv, &(TARGET / 2));
+    let investors = soroban_sdk::vec![&env, inv];
+    client.refund_batch(&investors);
+}
+
 // ─── Commitment first-deposit-only invariant (issue #260) ────────────────────
 
 /// After `fund_with_commitment(lock_secs > 0)`, a subsequent `fund()` call from the
@@ -4617,11 +4770,7 @@ fn test_get_yield_tiers_is_pure_read_no_state_change() {
 
 /// Helper: initialise an escrow with three tiers (30s / 60s / 90s) and a base
 /// yield of 500 bps.  Returns the client ready for use; all auth is mocked.
-fn setup_three_tier_escrow(
-    env: &Env,
-    invoice_id: &str,
-    target: i128,
-) -> LiquifactEscrowClient {
+fn setup_three_tier_escrow(env: &Env, invoice_id: &str, target: i128) -> LiquifactEscrowClient {
     let admin = Address::generate(env);
     let sme = Address::generate(env);
     let (tok, tre) = free_addresses(env);

@@ -159,11 +159,13 @@ liquifact-contracts/
 | `init` | Admin (implicit) | Create an invoice escrow (invoice id, SME, amount, yield bps, maturity). |
 | `fund` | Investor | Record investor principal and atomically pull the funding token from the investor; marks escrow funded when target is met. |
 | `fund_with_commitment` | Investor | First deposit with optional lock period (atomically pulling the funding token); selects tiered yield. |
+| `fund_batch` | Investor | Batch-fund up to `MAX_FUND_BATCH` investor/amount pairs in a single call. |
 | `settle` | SME | Mark a funded escrow as settled (SME auth required; maturity enforced). |
 | `partial_settle` | SME | SME marks a portion of the escrow as settled before full settlement. |
 | `withdraw` | SME | SME pulls funded liquidity (accounting record). |
 | `cancel_funding` | Admin | Admin cancels an open escrow (transitions status 0 → 4). |
 | `refund` | Investor | Investor pulls contributed liquidity from a cancelled escrow. Increments `DistributedPrincipal` liability. |
+| `refund_batch` | Investor | Batch-refund up to `MAX_REFUND_BATCH` investors in a single call. Already-refunded entries are skipped. |
 | `claim_investor_payout` | Investor | Investor records a payout claim after settlement. |
 | `claim_payouts_batch` | Investor / Any | Batch-record payout claims for up to `MAX_CLAIM_BATCH` investors in one transaction. |
 | `sweep_terminal_dust` | Treasury | Treasury sweeps rounding residue from a terminal escrow. |
