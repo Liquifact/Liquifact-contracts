@@ -1205,3 +1205,75 @@ fn test_cancellation_refund_sweep_lifecycle() {
 
     // After all refunds, outstanding is 0.
 }
+
+/// **INTEGRATION TEST: `refund_batch` preserves liability floor**
+/// Validates that `refund_batch` updates `DistributedPrincipal` identically to
+/// individual `refund` calls, so the liability floor in `sweep_terminal_dust`
+/// remains sound.
+#[test]
+fn test_refund_batch_preserves_liability_floor() {
+    let env = Env::default();
+    env.mock_all_auths();
+    use crate::LiquifactEscrow;
+    use soroban_sdk::token::StellarAssetClient;
+
+    let target = 100_000_000i128;
+    let sac = env.register_stellar_asset_contract_v2(soroban_sdk::Address::generate(&env));
+    let token_id = sac.address();
+    let sac_admin = StellarAssetClient::new(&env, &token_id);
+
+    let escrow_id = env.register(LiquifactEscrow, ());
+    let client = LiquifactEscrowClient::new(&env, &escrow_id);
+    let admin = soroban_sdk::Address::generate(&env);
+    let sme = soroban_sdk::Address::generate(&env);
+    let treasury = soroban_sdk::Address::generate(&env);
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "FLOOR_BATCH"),
+        &sme,
+        &target,
+        &0i64,
+        &0u64,
+        &token_id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    let alice = soroban_sdk::Address::generate(&env);
+    let bob = soroban_sdk::Address::generate(&env);
+
+    sac_admin.mint(&alice, &40_000_000i128);
+    sac_admin.mint(&escrow_id, &40_000_000i128);
+    client.fund(&alice, &40_000_000i128);
+
+    sac_admin.mint(&bob, &30_000_000i128);
+    sac_admin.mint(&escrow_id, &30_000_000i128);
+    client.fund(&bob, &30_000_000i128);
+
+    // Third-party dust
+    sac_admin.mint(&escrow_id, &5_000_000i128);
+
+    client.cancel_funding();
+    assert_eq!(client.get_distributed_principal(), 0);
+
+    // Sweep of accidental dust (5m) should succeed (balance 75m - 5m = 70m >= 70m outstanding)
+    let swept = client.sweep_terminal_dust(&5_000_000i128);
+    assert_eq!(swept, 5_000_000i128);
+
+    // Use refund_batch to refund both investors
+    let investors = soroban_sdk::vec![&env, alice.clone(), bob.clone()];
+    client.refund_batch(&investors);
+    assert_eq!(client.get_distributed_principal(), 70_000_000i128);
+
+    // Outstanding is now 0; sweep the remaining dust
+    let remaining = client.sweep_terminal_dust(&999_999_999i128);
+    assert_eq!(remaining, 0); // No dust left: balance == outstanding == 0
+}
