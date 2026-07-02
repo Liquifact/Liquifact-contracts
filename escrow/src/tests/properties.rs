@@ -143,26 +143,38 @@ struct FundingStep {
     lock_secs: u64,
 }
 
-// Property tests for funding accounting invariants (issue #325).
+/// Property tests for funding accounting invariants (issue #325).
+///
+/// Generates randomized funding sequences (including `fund` vs `fund_with_commitment` on
+/// first-deposit only) and asserts:
+/// 1) principal conservation: `escrow.funded_amount == sum(get_contribution(addr))`
+/// 2) unique funder count: `get_unique_funder_count()` equals number of distinct funded investors
+/// 3) caps are never exceeded (when configured)
+/// 4) status flips from `0` to `1` exactly at the first step where funded_amount >= funding_target
 proptest! {
     #[test]
     fn prop_funding_accounting_invariants_issue_325(
-        // Investors participating in the sequence (addresses may repeat across steps).
+        /// How many distinct investor addresses exist in the model.
         investor_count in 2usize..=6,
-        // Sequence length.
+        /// How many funding steps to attempt.
         seq_len in 1usize..=12,
-        // Escrow target and per-call max.
+        /// Escrow funding target.
         funding_target in 50_000i128..=200_000i128,
+        /// Per-step amount upper bound.
         max_each in 1i128..=50_000i128,
-        // Optional caps toggles.
+        /// Whether caps are enabled at all.
         caps_present in any::<bool>(),
-        // caps values when enabled
+        /// Per-investor cap when caps are enabled.
         per_inv_cap in 1i128..=100_000i128,
+        /// Unique-funder cap when caps are enabled.
         uniq_cap in 1u32..=6u32,
-        // sequence components
+        /// Sequence: for each step, choose an investor index.
         investor_ixs in proptest::collection::vec(0usize..=5, 1usize..=12),
+        /// Sequence: for each step, choose a positive amount.
         amounts in proptest::collection::vec(1i128..=50_000i128, 1usize..=12),
+        /// Sequence: for each step, choose whether to use commitment mode.
         use_commitments in proptest::collection::vec(any::<bool>(), 1usize..=12),
+        /// Sequence: for each step, choose a lock duration.
         lock_secs in proptest::collection::vec(0u64..=200u64, 1usize..=12),
     ) {
         let env = Env::default();
@@ -171,13 +183,21 @@ proptest! {
         let admin = Address::generate(&env);
         let sme = Address::generate(&env);
         let client = deploy(&env);
-
         let (token, treasury) = free_addresses(&env);
 
-        let max_per_investor = if caps_present { Some(per_inv_cap.min(funding_target)) } else { None };
-        let max_unique_investors: Option<u64> = if caps_present { Some(uniq_cap.min(6) as u64) } else { None };
+        let max_per_investor = if caps_present {
+            // Ensure cap remains positive and not larger than target to keep the model tight.
+            Some(per_inv_cap.min(funding_target))
+        } else {
+            None
+        };
 
-        // Optional tiered yield is not required for these invariants; keep it off.
+        let max_unique_investors: Option<u64> = if caps_present {
+            Some(uniq_cap.min(6) as u64)
+        } else {
+            None
+        };
+
         client.init(
             &admin,
             &soroban_sdk::String::from_str(&env, "I325"),
@@ -199,45 +219,43 @@ proptest! {
             .map(|_| Address::generate(&env))
             .collect();
 
-        let seq_len = seq_len
+        let actual_len = seq_len
             .min(investor_ixs.len())
             .min(amounts.len())
             .min(use_commitments.len())
             .min(lock_secs.len());
 
-        // Expected model.
-        let mut expected_contribs: Vec<i128> = vec![0i128; investor_count];
+        // Model state.
+        let mut contribs: Vec<i128> = vec![0; investor_count];
+        let mut distinct_funders: BTreeSet<Address> = BTreeSet::new();
         let mut expected_funded: i128 = 0;
+        let mut expected_status: u32 = 0;
+        let mut expected_first_funded_step: Option<usize> = None;
 
-        let mut distinct_funders: Vec<Address> = Vec::new();
+        // Track snapshot immutability once funded.
+        let mut captured_snapshot: Option<super::FundingCloseSnapshot> = None;
 
-        // Track when the funded status should flip (first step where funded >= target).
-        let mut actual_transitions_to_funded = 0u32;
-        let mut prev_status = client.get_escrow().status;
-
-
-
-        for step in 0..seq_len {
+        for step in 0..actual_len {
+            // Stop once the escrow is funded; production logic rejects additional funding.
             if client.get_escrow().status != 0 {
                 break;
             }
 
             let ix = investor_ixs[step] % investor_count;
-            let inv = investors[ix].clone();
+            let investor = investors[ix].clone();
 
-            let mut amt = amounts[step].min(max_each);
-            if amt <= 0 {
-                amt = 1;
+            let mut amount = amounts[step].min(max_each);
+            if amount <= 0 {
+                amount = 1;
             }
 
-            // Filter out sequences that would violate caps by construction.
+            // Cap model checks: we only proceed with steps that keep the model within caps.
             if let Some(cap) = max_per_investor {
-                if expected_contribs[ix] + amt > cap {
-                    // Skip this generated step by ending the sequence.
+                if contribs[ix] + amount > cap {
                     break;
                 }
             }
-            if expected_contribs[ix] == 0 {
+            if contribs[ix] == 0 {
                 if let Some(uc) = max_unique_investors {
                     if distinct_funders.len() as u64 >= uc {
                         break;
@@ -245,100 +263,101 @@ proptest! {
                 }
             }
 
-            let use_commitment = use_commitments[step];
-            let lock = lock_secs[step];
-
-            let before_funded = client.get_escrow().funded_amount;
             let before_status = client.get_escrow().status;
+            let before_funded = client.get_escrow().funded_amount;
 
-            let after = if use_commitment {
-                // First deposit may use commitment semantics; later deposits must use plain fund().
-                if expected_contribs[ix] == 0 {
-                    client.fund_with_commitment(&inv, &amt, &lock)
+            // Execute step.
+            let after = if use_commitments[step] {
+                // Only allow commitment mode on first deposit; otherwise it should be rejected
+                // by contract rules, so we fall back to `fund` for repeated deposits.
+                if contribs[ix] == 0 {
+                    client.fund_with_commitment(&investor, &amount, &lock_secs[step])
                 } else {
-                    client.fund(&inv, &amt)
+                    client.fund(&investor, &amount)
                 }
             } else {
-                client.fund(&inv, &amt)
+                client.fund(&investor, &amount)
             };
 
-            // Update expected.
-            expected_contribs[ix] += amt;
+            // Update model.
+            contribs[ix] += amount;
             expected_funded = expected_funded
-                .checked_add(amt)
+                .checked_add(amount)
                 .expect("expected_funded overflow");
-            if expected_contribs[ix] > 0 && !distinct_funders.iter().any(|existing| existing == &inv) {
-                distinct_funders.push(inv.clone());
+            if contribs[ix] > 0 {
+                distinct_funders.insert(investor.clone());
             }
 
-            // Invariant: conservation.
+            // Invariant 1: conservation.
             prop_assert_eq!(after.funded_amount, expected_funded);
             prop_assert_eq!(client.get_escrow().funded_amount, expected_funded);
 
-            // Invariant: unique funder count.
+            // Invariant 2: unique funder count.
             prop_assert_eq!(
                 client.get_unique_funder_count(),
                 distinct_funders.len() as u32
             );
 
-            // Invariant: caps never exceeded.
+            // Invariant 3: caps are never exceeded.
             if let Some(cap) = max_per_investor {
-                prop_assert!(expected_contribs[ix] <= cap);
+                prop_assert!(contribs[ix] <= cap);
             }
             if let Some(uc) = max_unique_investors {
                 prop_assert!(distinct_funders.len() as u64 <= uc);
             }
 
-            // Invariant: status flip correctness.
+            // Invariant 4: status flips exactly at first funded crossing.
             let should_be_funded = expected_funded >= funding_target;
-            let status_now = after.status;
-            prop_assert!(status_now >= before_status, "status monotonicity");
-
-            match expected_flip_at {
-                None => {
-                    if should_be_funded {
-                        expected_flip_at = Some(step);
-                        prop_assert_eq!(status_now, 1);
-                        actual_transitions_to_funded += 1;
-                    } else {
-                        prop_assert_eq!(status_now, 0);
-                    }
+            if expected_first_funded_step.is_none() {
+                if should_be_funded {
+                    expected_first_funded_step = Some(step);
+                    expected_status = 1;
+                } else {
+                    expected_status = 0;
                 }
-                Some(_) => {
-                    if should_be_funded {
-                        prop_assert_eq!(status_now, 1);
-                    }
-                }
+            } else {
+                expected_status = 1;
             }
 
-            // status monotonicity and funded_amount monotonicity are already implied by conservation,
-            // but keep a local check.
+            prop_assert_eq!(after.status, expected_status);
             prop_assert!(after.funded_amount >= before_funded);
+            prop_assert!(after.status >= before_status);
 
-            // If we’ve funded, verify snapshot exists and is immutable.
-            if status_now == 1 {
+            // Snapshot checks once funded.
+            if after.status == 1 {
                 let snap = client
                     .get_funding_close_snapshot()
                     .expect("FundingCloseSnapshot must exist when funded");
                 prop_assert_eq!(snap.total_principal, expected_funded);
                 prop_assert_eq!(snap.funding_target, funding_target);
 
-                let snap2 = client
-                    .get_funding_close_snapshot()
-                    .expect("FundingCloseSnapshot must still exist");
-                prop_assert_eq!(snap, snap2);
+                if captured_snapshot.is_none() {
+                    captured_snapshot = Some(snap.clone());
+                } else {
+                    prop_assert_eq!(captured_snapshot.as_ref().unwrap(), &snap);
+                }
+
+                // Once funded, further funding should be impossible.
+                let extra = Address::generate(&env);
+                let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    client.fund(&extra, &1i128);
+                }));
+                prop_assert!(res.is_err());
 
                 break;
             }
-
         }
 
-        // If we ever reached funded state, it must have happened exactly once.
-        if client.get_escrow().status == 1 {
-            prop_assert_eq!(actual_transitions_to_funded, 1);
+        // If we ever reached funded state, the status must have become 1 at exactly the first crossing.
+        let final_status = client.get_escrow().status;
+        if final_status == 1 {
+            let first = expected_first_funded_step
+                .expect("final status is funded, but model never crossed target");
+            prop_assert!(first < actual_len);
         }
     }
 }
+
 
 // Issue #145: Status state machine property tests
 // Valid transitions: 0->1 (fund reaches target), 1->2 (settle), 1->3 (withdraw)
