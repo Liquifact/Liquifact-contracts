@@ -1,6 +1,5 @@
 use super::super::external_calls::transfer_funding_token_with_balance_checks;
 use super::*;
-use crate::CollateralRecordedEvt;
 use crate::{CollateralRecordedEvt, DataKey, InvoiceEscrow, LegalHoldChanged};
 use soroban_sdk::{
     contract, contractimpl, vec, IntoVal, Map, MuxedAddress, Symbol, TryFromVal, Val,
@@ -1238,6 +1237,7 @@ fn test_refund_batch_preserves_liability_floor() {
         &token_id,
         &None,
         &treasury,
+        &None,
         &None,
         &None,
         &None,

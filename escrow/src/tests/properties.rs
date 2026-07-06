@@ -97,7 +97,7 @@ proptest! {
 /// Generate a positive i128 amount bounded by `max`.
 fn gen_positive_amount(max: i128) -> impl Strategy<Value = i128> {
     // NatSpec style: guarantees amount > 0 for escrow entrypoints.
-    (1i128..=max)
+    1i128..=max
 }
 
 /// Generate an investment call sequence.
@@ -184,7 +184,6 @@ proptest! {
         // Track when the funded status should flip (first step where funded >= target).
         let mut expected_flip_at: Option<usize> = None;
         let mut actual_transitions_to_funded = 0u32;
-        let mut prev_status = client.get_escrow().status;
 
         for step in 0..seq_len {
             if client.get_escrow().status != 0 {
@@ -298,8 +297,6 @@ proptest! {
 
                 break;
             }
-
-            prev_status = after.status;
         }
 
         // If we ever reached funded state, it must have happened exactly once.
@@ -2245,13 +2242,14 @@ proptest! {
 
             // remaining must not underflow.
             let remaining = client.get_remaining_investor_slots().unwrap();
-            prop_assert!(remaining >= 0, "step {step}: remaining underflowed to {remaining}");
+            prop_assert!(remaining >= 0, "step {}: remaining underflowed to {}", step, remaining);
 
             let count = client.get_unique_funder_count();
             prop_assert_eq!(
                 count + remaining,
                 cap,
-                "step {step}: count({count}) + remaining({remaining}) != cap({cap})"
+                "step {}: count({}) + remaining({}) != cap({})",
+                step, count, remaining, cap
             );
         }
     }
@@ -2598,18 +2596,20 @@ proptest! {
                     // Invariant: count + remaining == cap.
                     let count = client.get_unique_funder_count();
                     let remaining = client.get_remaining_investor_slots().unwrap_or(0);
-                    prop_assert!(remaining >= 0, "step {step} (fund): remaining underflowed");
+                    prop_assert!(remaining >= 0, "step {} (fund): remaining underflowed", step);
                     prop_assert_eq!(
                         count + remaining,
                         current_cap,
-                        "step {step} (fund): count({count}) + remaining({remaining}) != cap({current_cap})"
+                        "step {} (fund): count({}) + remaining({}) != cap({})",
+                        step, count, remaining, current_cap
                     );
 
                     // Invariant C: repeat funder must not change remaining.
                     if !is_new {
                         prop_assert_eq!(
                             remaining, remaining_before,
-                            "step {step}: repeat deposit changed remaining slots"
+                            "step {}: repeat deposit changed remaining slots",
+                            step
                         );
                     }
                 }
@@ -2655,11 +2655,12 @@ proptest! {
                     // Invariant B after batch.
                     let count = client.get_unique_funder_count();
                     let remaining = client.get_remaining_investor_slots().unwrap_or(0);
-                    prop_assert!(remaining >= 0, "step {step} (batch): remaining underflowed");
+                    prop_assert!(remaining >= 0, "step {} (batch): remaining underflowed", step);
                     prop_assert_eq!(
                         count + remaining,
                         current_cap,
-                        "step {step} (batch): count({count}) + remaining({remaining}) != cap({current_cap})"
+                        "step {} (batch): count({}) + remaining({}) != cap({})",
+                        step, count, remaining, current_cap
                     );
                 }
                 // ── Lower cap ─────────────────────────────────────────
@@ -2677,11 +2678,12 @@ proptest! {
                     // Invariant D after cap lowering.
                     let count2 = client.get_unique_funder_count();
                     let remaining = client.get_remaining_investor_slots().unwrap_or(0);
-                    prop_assert!(remaining >= 0, "step {step} (lower_cap): remaining underflowed");
+                    prop_assert!(remaining >= 0, "step {} (lower_cap): remaining underflowed", step);
                     prop_assert_eq!(
                         count2 + remaining,
                         current_cap,
-                        "step {step} (lower_cap): count({count2}) + remaining({remaining}) != cap({current_cap})"
+                        "step {} (lower_cap): count({}) + remaining({}) != cap({})",
+                        step, count2, remaining, current_cap
                     );
                 }
             }

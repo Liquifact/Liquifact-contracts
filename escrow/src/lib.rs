@@ -4810,7 +4810,7 @@ pub struct DefaultMockToken;
 impl DefaultMockToken {
     pub fn balance(env: soroban_sdk::Env, addr: soroban_sdk::Address) -> i128 {
         let key = soroban_sdk::symbol_short!("balances");
-        let mut balances: soroban_sdk::Map<soroban_sdk::Address, i128> = env
+        let balances: soroban_sdk::Map<soroban_sdk::Address, i128> = env
             .storage()
             .instance()
             .get(&key)
@@ -4852,6 +4852,6 @@ fn register_mock_token_if_needed(env: &Env, token_addr: &Address) {
         let _ = client.balance(&token_clone);
     }));
     if result.is_err() {
-        env.register_contract(token_addr, DefaultMockToken);
+        env.register(token_addr, DefaultMockToken);
     }
 }
