@@ -55,5 +55,3 @@ fn setup_inited(
     );
     (client, admin, sme, treasury, token)
 }
-
-

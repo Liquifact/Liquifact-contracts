@@ -155,7 +155,10 @@ fn test_attestation_log_stats_tracks_partial_fill() {
     }
     let used = client.get_escrow_summary().attestation_log_length;
     assert_eq!(used, 5);
-    assert_eq!(remaining_attestation_slots(&client), MAX_ATTESTATION_APPEND_ENTRIES - 5);
+    assert_eq!(
+        remaining_attestation_slots(&client),
+        MAX_ATTESTATION_APPEND_ENTRIES - 5
+    );
 }
 
 /// The stats view reports full capacity and remains consistent after the capacity error path.

@@ -4770,7 +4770,11 @@ fn test_get_yield_tiers_is_pure_read_no_state_change() {
 
 /// Helper: initialise an escrow with three tiers (30s / 60s / 90s) and a base
 /// yield of 500 bps.  Returns the client ready for use; all auth is mocked.
-fn setup_three_tier_escrow<'a>(env: &'a Env, invoice_id: &'a str, target: i128) -> LiquifactEscrowClient<'a> {
+fn setup_three_tier_escrow<'a>(
+    env: &'a Env,
+    invoice_id: &'a str,
+    target: i128,
+) -> LiquifactEscrowClient<'a> {
     let admin = Address::generate(env);
     let sme = Address::generate(env);
     let (tok, tre) = free_addresses(env);
