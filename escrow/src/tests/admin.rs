@@ -1,7 +1,7 @@
 use super::*;
 use crate::{
     AdminAcceptedEvent, AdminProposalCancelled, AdminProposedEvent, EscrowCloseSnapshot,
-    FundingTargetUpdated, MaxPerInvestorCapRaised, MaturityMaxHorizonRaised, RegistryRefRebound,
+    FundingTargetUpdated, MaturityMaxHorizonRaised, MaxPerInvestorCapRaised, RegistryRefRebound,
     DEFAULT_MATURITY_MAX_HORIZON_SECS,
 };
 
@@ -2600,7 +2600,9 @@ fn test_raise_maturity_max_horizon_emits_event() {
         new_horizon,
     };
     assert!(
-        all_events.events().contains(&expected.to_xdr(&env, &client.address)),
+        all_events
+            .events()
+            .contains(&expected.to_xdr(&env, &client.address)),
         "MaturityMaxHorizonRaised event must be emitted"
     );
 }

@@ -1018,7 +1018,9 @@ fn test_clear_legal_hold_after_delay_succeeds() {
     client.set_legal_hold(&true);
     client.request_clear_legal_hold();
 
-    let clearable_at = client.get_legal_hold_clearable_at().expect("clearable_at set");
+    let clearable_at = client
+        .get_legal_hold_clearable_at()
+        .expect("clearable_at set");
     env.ledger().set_timestamp(clearable_at);
 
     client.clear_legal_hold_after_delay();

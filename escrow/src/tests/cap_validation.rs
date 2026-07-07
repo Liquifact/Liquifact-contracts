@@ -2206,7 +2206,9 @@ fn test_raise_max_per_investor_emits_event() {
         new_cap: 75_000_000_000i128,
     };
     assert!(
-        all_events.events().contains(&expected.to_xdr(&env, &client.address)),
+        all_events
+            .events()
+            .contains(&expected.to_xdr(&env, &client.address)),
         "MaxPerInvestorCapRaised event must be emitted"
     );
 }
