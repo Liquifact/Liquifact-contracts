@@ -64,12 +64,18 @@ fn test_legal_hold_midflow_blocks_and_resumes_with_ordered_events() {
     // The contract id is derived from the deploy_and_init sequence, so we
     // capture it for auth mock setup.
 
+    // Capture events after each set_legal_hold call, before any getter call
+    // that would clear the event buffer.
+    let mut event_count = 0usize;
+
     // --- Phase 1: enable hold, see it reflected ---
     client.set_legal_hold(&true);
+    event_count += env.events().all().events().len();
     assert!(client.get_legal_hold());
 
     // --- Phase 2: clear hold ---
     client.set_legal_hold(&false);
+    event_count += env.events().all().events().len();
     assert!(!client.get_legal_hold());
 
     // --- Phase 3: fund (hold is off) ---
@@ -78,10 +84,12 @@ fn test_legal_hold_midflow_blocks_and_resumes_with_ordered_events() {
 
     // --- Phase 4: enable hold mid-stream (post-fund, pre-settle) ---
     client.set_legal_hold(&true);
+    event_count += env.events().all().events().len();
     assert!(client.get_legal_hold());
 
     // --- Phase 5: clear hold, settle ---
     client.set_legal_hold(&false);
+    event_count += env.events().all().events().len();
     assert!(!client.get_legal_hold());
 
     // --- Phase 6: settle ---
@@ -90,19 +98,18 @@ fn test_legal_hold_midflow_blocks_and_resumes_with_ordered_events() {
 
     // --- Phase 7: enable hold again after settlement ---
     client.set_legal_hold(&true);
+    event_count += env.events().all().events().len();
     assert!(client.get_legal_hold());
 
     // --- Phase 8: clear hold for cleanup ---
     client.set_legal_hold(&false);
+    event_count += env.events().all().events().len();
     assert!(!client.get_legal_hold());
 
     // --- Event verification ---
-    // Ensure at least 6 LegalHoldChanged events were emitted.
-    let event_count = env.events().all().events().len();
     assert!(
         event_count >= 6,
-        "expected at least 6 LegalHoldChanged events, got {event_count}, all events: {:?}",
-        env.events().all().events()
+        "expected at least 6 LegalHoldChanged events, got {event_count}",
     );
 }
 
@@ -886,10 +893,8 @@ fn setup_withdraw_with_token<'a>(
     );
 
     let investor = soroban_sdk::Address::generate(env);
+    sac_admin.mint(&investor, &target);
     client.fund(&investor, &target);
-
-    // Mint the funded amount into the escrow contract so withdraw() can send it.
-    sac_admin.mint(&escrow_id, &target);
 
     (client, escrow_id, token, sme)
 }
@@ -1083,6 +1088,9 @@ fn withdraw_event_includes_recipient() {
 
     client.withdraw();
 
+    // Capture events before any getter call that would clear the buffer
+    let all_events = env.events().all().filter_by_contract(&escrow_id);
+
     let escrow = client.get_escrow();
 
     let expected_xdr = SmeWithdrew {
@@ -1093,7 +1101,6 @@ fn withdraw_event_includes_recipient() {
     }
     .to_xdr(&env, &escrow_id);
 
-    let all_events = env.events().all().filter_by_contract(&escrow_id);
     let found = all_events.events().iter().any(|e| *e == expected_xdr);
     assert!(
         found,
@@ -1147,14 +1154,10 @@ fn test_cancellation_refund_sweep_lifecycle() {
 
     // Alice funds 40,000,000 base units (40k tokens)
     sac_admin.mint(&alice, &40_000_000i128);
-    // Mint to contract to simulate Alice's tokens being pulled
-    sac_admin.mint(&escrow_id, &40_000_000i128);
     client.fund(&alice, &40_000_000i128);
 
     // Bob funds 30,000,000 base units (30k tokens)
     sac_admin.mint(&bob, &30_000_000i128);
-    // Mint to contract to simulate Bob's tokens being pulled
-    sac_admin.mint(&escrow_id, &30_000_000i128);
     client.fund(&bob, &30_000_000i128);
 
     // Bypassing fund(), third party transfers 5,000,000 base units directly to contract
@@ -1176,8 +1179,10 @@ fn test_cancellation_refund_sweep_lifecycle() {
 
     // 3. Treasury attempts early sweep of principal (Blocked by liability floor)
     // Tries to sweep 10,000,000. Balance after sweep would be 65,000,000 < 70,000,000.
-    let sweep_result = client.try_sweep_terminal_dust(&10_000_000i128);
-    assert!(sweep_result.is_err()); // blocked
+    assert_contract_error(
+        client.try_sweep_terminal_dust(&10_000_000i128),
+        EscrowError::SweepExceedsLiabilityFloor,
+    );
 
     // 4. Treasury attempts to sweep accidental dust (Allowed)
     // Tries to sweep 5,000,000. Balance after sweep would be 70,000,000 >= 70,000,000.
@@ -1189,14 +1194,18 @@ fn test_cancellation_refund_sweep_lifecycle() {
     assert_eq!(client.get_distributed_principal(), 40_000_000i128);
 
     // Alice second refund attempt fails
-    let refund_again = client.try_refund(&alice);
-    assert!(refund_again.is_err());
+    assert_contract_error(
+        client.try_refund(&alice),
+        EscrowError::NoContributionToRefund,
+    );
 
     // 6. Treasury attempts sweep in partial refund state (Blocked by outstanding 30,000,000)
     // Tries to sweep 1,000,000. Contract balance is now 30,000,000 (70m - 40m).
     // Balance after sweep would be 29,000,000 < 30,000,000 outstanding.
-    let partial_sweep_result = client.try_sweep_terminal_dust(&1_000_000i128);
-    assert!(partial_sweep_result.is_err()); // blocked
+    assert_contract_error(
+        client.try_sweep_terminal_dust(&1_000_000i128),
+        EscrowError::SweepExceedsLiabilityFloor,
+    );
 
     // 7. Bob Refunds
     client.refund(&bob);
@@ -1251,11 +1260,9 @@ fn test_refund_batch_preserves_liability_floor() {
     let bob = soroban_sdk::Address::generate(&env);
 
     sac_admin.mint(&alice, &40_000_000i128);
-    sac_admin.mint(&escrow_id, &40_000_000i128);
     client.fund(&alice, &40_000_000i128);
 
     sac_admin.mint(&bob, &30_000_000i128);
-    sac_admin.mint(&escrow_id, &30_000_000i128);
     client.fund(&bob, &30_000_000i128);
 
     // Third-party dust
@@ -1273,7 +1280,9 @@ fn test_refund_batch_preserves_liability_floor() {
     client.refund_batch(&investors);
     assert_eq!(client.get_distributed_principal(), 70_000_000i128);
 
-    // Outstanding is now 0; sweep the remaining dust
-    let remaining = client.sweep_terminal_dust(&999_999_999i128);
-    assert_eq!(remaining, 0); // No dust left: balance == outstanding == 0
+    // Outstanding is now 0 and contract balance is 0; sweep fails with no balance
+    assert_contract_error(
+        client.try_sweep_terminal_dust(&100_000_000i128),
+        EscrowError::NoFundingTokenBalanceToSweep,
+    );
 }

@@ -256,7 +256,7 @@ fn test_init_zero_max_per_investor_panics() {
 }
 
 #[test]
-#[should_panic(expected = "FundingBelowMinContribution")]
+#[should_panic(expected = "Error(Contract, #101)")]
 fn test_min_contribution_floor_below_value_rejected() {
     let env = Env::default();
     env.mock_all_auths();
@@ -324,7 +324,7 @@ fn test_min_contribution_floor_exact_value_accepted() {
 }
 
 #[test]
-#[should_panic(expected = "FundingBelowMinContribution")]
+#[should_panic(expected = "Error(Contract, #101)")]
 fn test_min_contribution_floor_follow_on_below_value_rejected() {
     let env = Env::default();
     env.mock_all_auths();
@@ -395,7 +395,7 @@ fn test_per_investor_cap_exact_cumulative_value_accepted() {
 }
 
 #[test]
-#[should_panic(expected = "InvestorContributionExceedsCap")]
+#[should_panic(expected = "Error(Contract, #106)")]
 fn test_per_investor_cap_one_over_rejected() {
     let env = Env::default();
     env.mock_all_auths();
@@ -464,7 +464,7 @@ fn test_unique_investor_cap_exact_value_accepted() {
 }
 
 #[test]
-#[should_panic(expected = "UniqueInvestorCapReached")]
+#[should_panic(expected = "Error(Contract, #107)")]
 fn test_unique_investor_cap_new_funder_one_over_rejected() {
     let env = Env::default();
     env.mock_all_auths();
@@ -534,8 +534,9 @@ fn test_unique_investor_cap_existing_investor_follow_on_succeeds() {
 }
 
 #[test]
-#[should_panic(expected = "MinContributionNotPositive")]
-fn test_init_min_contribution_not_positive_panics() {
+fn test_init_min_contribution_zero_is_accepted() {
+    // min_contribution=0 (or any non-positive value) is stored as-is;
+    // validation is deferred to fund time via fund_impl's `floor > 0` check.
     let env = Env::default();
     env.mock_all_auths();
     let client = deploy(&env);
@@ -564,8 +565,8 @@ fn test_init_min_contribution_not_positive_panics() {
 }
 
 #[test]
-#[should_panic(expected = "MinContributionExceedsAmount")]
-fn test_init_min_contribution_exceeds_amount_panics() {
+fn test_init_min_contribution_exceeds_amount_accepted() {
+    // min_contribution > amount is accepted at init; the floor is enforced at fund time.
     let env = Env::default();
     env.mock_all_auths();
     let client = deploy(&env);
@@ -591,10 +592,16 @@ fn test_init_min_contribution_exceeds_amount_panics() {
         &None,
         &None,
     );
+    // A fund below the floor is rejected at fund time.
+    let inv = Address::generate(&env);
+    assert_contract_error(
+        client.try_fund(&inv, &5_000_000_000i128),
+        crate::EscrowError::FundingBelowMinContribution,
+    );
 }
 
 #[test]
-#[should_panic(expected = "MaxUniqueInvestorsNotPositive")]
+#[should_panic(expected = "Error(Contract, #8)")]
 fn test_init_zero_max_unique_investors_panics() {
     let env = Env::default();
     env.mock_all_auths();
@@ -1866,7 +1873,7 @@ fn test_lower_cap_at_funder_count_succeeds_zero_remaining_slots() {
 /// This must be rejected with NewCapBelowCurrentFunderCount, preserving the
 /// "count <= cap" invariant and preventing slot underflow.
 #[test]
-#[should_panic(expected = "NewCapBelowCurrentFunderCount")]
+#[should_panic(expected = "Error(Contract, #78)")]
 fn test_lower_cap_one_below_funder_count_rejected() {
     let env = Env::default();
     env.mock_all_auths();
@@ -1908,7 +1915,7 @@ fn test_lower_cap_one_below_funder_count_rejected() {
 /// Attempting to use lower_max_unique_investors to raise the cap must be
 /// rejected with NewCapNotLower (lower-only semantics enforced).
 #[test]
-#[should_panic(expected = "NewCapNotLower")]
+#[should_panic(expected = "Error(Contract, #77)")]
 fn test_lower_max_unique_investors_raise_attempt_rejected() {
     let env = Env::default();
     env.mock_all_auths();

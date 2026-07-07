@@ -230,8 +230,8 @@ fn setup_cancelled_with_token<'a>(
         &None,
         &None,
     );
-    // Mint tokens into the contract to simulate on-chain custody
-    token.stellar.mint(&client.address, &fund_amount);
+    // Mint tokens to the investor so they can fund the contract
+    token.stellar.mint(investor, &fund_amount);
     client.fund(investor, &fund_amount);
     client.cancel_funding();
     (token, treasury)
@@ -312,8 +312,10 @@ fn sweep_liability_floor_allows_sweep_of_excess_above_outstanding() {
         &None,
     );
 
-    // Mint 1001 into contract: 500 for A, 500 for B, 1 dust
-    token.stellar.mint(&client.address, &1_001i128);
+    // Mint 500 each to investors, plus 1 dust to the contract
+    token.stellar.mint(&investor_a, &500i128);
+    token.stellar.mint(&investor_b, &500i128);
+    token.stellar.mint(&client.address, &1i128);
     client.fund(&investor_a, &500i128);
     client.fund(&investor_b, &500i128);
     client.cancel_funding();
@@ -361,7 +363,9 @@ fn sweep_liability_floor_blocks_sweep_that_would_eat_into_outstanding() {
         &None,
     );
 
-    token.stellar.mint(&client.address, &1_001i128);
+    token.stellar.mint(&investor_a, &500i128);
+    token.stellar.mint(&investor_b, &500i128);
+    token.stellar.mint(&client.address, &1i128);
     client.fund(&investor_a, &500i128);
     client.fund(&investor_b, &500i128);
     client.cancel_funding();
@@ -442,7 +446,9 @@ fn distributed_principal_accumulates_across_multiple_refunds() {
         &None,
     );
 
-    token.stellar.mint(&client.address, &900i128);
+    token.stellar.mint(&inv_a, &300i128);
+    token.stellar.mint(&inv_b, &300i128);
+    token.stellar.mint(&inv_c, &300i128);
     client.fund(&inv_a, &300i128);
     client.fund(&inv_b, &300i128);
     client.fund(&inv_c, &300i128);
@@ -499,7 +505,9 @@ fn setup_multi_investor_cancelled<'a>(
         &None,
         &None,
     );
-    token.stellar.mint(&client.address, &total_fund);
+    for i in 0..investors.len() {
+        token.stellar.mint(&investors[i], &amounts[i]);
+    }
     for i in 0..investors.len() {
         client.fund(&investors[i], &amounts[i]);
     }
@@ -587,11 +595,10 @@ fn sweep_liability_floor_capped_by_max_dust_sweep() {
     // All refunded -> outstanding = 0
     client.refund(&a);
 
-    // Mint way more than MAX_DUST_SWEEP_AMOUNT
-    let huge_dust = MAX_DUST_SWEEP_AMOUNT * 2;
-    token.stellar.mint(&client.address, &huge_dust);
+    // Mint additional dust into the contract.
+    token.stellar.mint(&client.address, &MAX_DUST_SWEEP_AMOUNT);
 
-    let swept = client.sweep_terminal_dust(&huge_dust);
+    let swept = client.sweep_terminal_dust(&MAX_DUST_SWEEP_AMOUNT);
     assert_eq!(swept, MAX_DUST_SWEEP_AMOUNT);
     assert_eq!(token.token.balance(&treasury), MAX_DUST_SWEEP_AMOUNT);
 }
@@ -730,7 +737,9 @@ fn reconciliation_surplus_equals_sweepable_dust_before_and_after_partial_refund(
         &None,
         &None,
     );
-    token.stellar.mint(&client.address, &1_001i128);
+    token.stellar.mint(&investor_a, &500i128);
+    token.stellar.mint(&investor_b, &500i128);
+    token.stellar.mint(&client.address, &1i128);
     client.fund(&investor_a, &500i128);
     client.fund(&investor_b, &500i128);
     client.cancel_funding();

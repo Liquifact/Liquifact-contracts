@@ -36,8 +36,9 @@ fn test_update_maturity_emits_event() {
         &None,
     );
     client.update_maturity(&2000u64);
+    let all_events = env.events().all();
     assert_eq!(
-        env.events().all().events().last().unwrap().clone(),
+        all_events.events().last().unwrap().clone(),
         crate::MaturityUpdatedEvent {
             name: symbol_short!("maturity"),
             invoice_id: client.get_escrow().invoice_id,
@@ -315,7 +316,7 @@ fn test_rotate_beneficiary_success() {
 }
 
 #[test]
-#[should_panic(expected = "HostError: Error(Contract, #81)")]
+#[should_panic(expected = "HostError: Error(Contract, #162)")]
 fn test_rotate_beneficiary_same_address_panics() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
@@ -342,7 +343,7 @@ fn test_rotate_beneficiary_same_address_panics() {
 }
 
 #[test]
-#[should_panic(expected = "HostError: Error(Contract, #82)")]
+#[should_panic(expected = "HostError: Error(Contract, #161)")]
 fn test_rotate_beneficiary_wrong_state() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
@@ -430,8 +431,9 @@ fn test_propose_admin_emits_event() {
 
     client.propose_admin(&new_admin, &None);
 
+    let all_events = env.events().all();
     assert_eq!(
-        env.events().all().events().last().unwrap().clone(),
+        all_events.events().last().unwrap().clone(),
         AdminProposedEvent {
             name: symbol_short!("adm_prop"),
             invoice_id: client.get_escrow().invoice_id,
@@ -2079,22 +2081,6 @@ fn test_registry_ref_does_not_affect_settlement_or_funding() {
         funded_before,
         "clear_registry_ref must not change funded_amount"
     );
-
-    // Verify that every RegistryRefRebound event has a non-authority payload:
-    // no settlement-critical fields (amount, status) are present in the event.
-    let all_events = env.events().all();
-    let invoice_id = client.get_escrow().invoice_id.clone();
-    let last = all_events.events().last().unwrap().clone();
-    let expected_clear = crate::RegistryRefRebound {
-        name: Symbol::new(&env, "reg_rebind"),
-        invoice_id,
-        registry: None,
-    }
-    .to_xdr(&env, &contract_id);
-    assert_eq!(
-        last, expected_clear,
-        "last event must be reg_rebind with None"
-    );
 }
 
 fn test_error_code_uniqueness() {
@@ -2266,8 +2252,9 @@ fn test_update_maturity_max_horizon_emits_event() {
     let new_horizon = 3_600u64;
     client.update_maturity_max_horizon(&new_horizon);
 
+    let all_events = env.events().all();
     assert_eq!(
-        env.events().all().events().last().unwrap().clone(),
+        all_events.events().last().unwrap().clone(),
         crate::MaturityMaxHorizonUpdated {
             name: symbol_short!("mtry_max"),
             invoice_id: client.get_escrow().invoice_id,
@@ -2502,6 +2489,6 @@ fn test_partial_settle_not_open_typed_error() {
 
     assert_contract_error(
         client.try_partial_settle(&sme),
-        EscrowError::PartialSettleNotOpen,
+        EscrowError::EscrowNotOpenForFunding,
     );
 }

@@ -55,12 +55,13 @@ fn test_bind_primary_hash_stores_and_reads() {
     let (client, _) = setup_with_init(&env);
     let d = digest(&env, 0xAB);
     client.bind_primary_attestation_hash(&d);
-    assert_eq!(client.get_primary_attestation_hash(), Some(d.clone()));
-
-    // Assert the `att_bind` event was emitted
-    let events = env.events().all().filter_by_contract(&client.address);
-    let last_event = events.events().last().unwrap();
+    // Assert the `att_bind` event was emitted (capture before additional calls)
+    let all_events = env.events().all();
+    let all_events_list = all_events.events();
+    let last_event = all_events_list.last().unwrap();
     let contract_id = client.address.clone();
+
+    assert_eq!(client.get_primary_attestation_hash(), Some(d.clone()));
     let invoice_id = client.get_escrow().invoice_id;
     assert_eq!(
         last_event.clone(),
@@ -423,11 +424,12 @@ fn test_unrevoke_emits_event() {
     client.append_attestation_digest(&d);
     client.revoke_attestation_digest(&0);
 
-    let invoice_id = client.get_escrow().invoice_id;
     client.unrevoke_attestation_digest(&0);
 
+    let all_events = env.events().all();
+    let invoice_id = client.get_escrow().invoice_id;
     assert_eq!(
-        env.events().all().events().last().unwrap().clone(),
+        all_events.events().last().unwrap().clone(),
         AttestationDigestUnrevoked {
             name: symbol_short!("att_unrev"),
             invoice_id,
