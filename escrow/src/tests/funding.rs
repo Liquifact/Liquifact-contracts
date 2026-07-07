@@ -3369,19 +3369,13 @@ fn test_fund_batch_equals_n_single_funds() {
     // Path A: fund_batch
     let mut batch_entries = SorobanVec::new(&env);
     for i in 0..5 {
-        batch_entries.push_back((
-            batch_investors.get(i).unwrap(),
-            amounts.get(i).unwrap(),
-        ));
+        batch_entries.push_back((batch_investors.get(i).unwrap(), amounts.get(i).unwrap()));
     }
     let result_batch = client_a.fund_batch(&batch_entries);
 
     // Path B: individual fund calls (separate investors so tokens are not yet spent)
     for i in 0..5 {
-        client_b.fund(
-            &single_investors.get(i).unwrap(),
-            &amounts.get(i).unwrap(),
-        );
+        client_b.fund(&single_investors.get(i).unwrap(), &amounts.get(i).unwrap());
     }
     let result_single = client_b.get_escrow();
 

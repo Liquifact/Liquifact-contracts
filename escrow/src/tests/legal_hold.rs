@@ -509,7 +509,10 @@ fn cancel_clear_legal_hold_allows_new_request_after_cancellation() {
     client.cancel_clear_legal_hold();
     client.request_clear_legal_hold();
     let after_request = client.get_legal_hold_clearable_at();
-    assert!(after_request.is_some(), "clearable_at must be set after re-request");
+    assert!(
+        after_request.is_some(),
+        "clearable_at must be set after re-request"
+    );
     // after clearable_at - delay expected
 }
 
