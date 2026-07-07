@@ -1101,7 +1101,7 @@ fn withdraw_event_includes_recipient() {
     }
     .to_xdr(&env, &escrow_id);
 
-    let found = all_events.events().iter().any(|e| *e == expected_xdr);
+    let found = all_events.events().contains(&expected_xdr);
     assert!(
         found,
         "SmeWithdrew event with correct recipient and amount must be emitted"

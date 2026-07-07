@@ -20,8 +20,8 @@ use super::{
     install_stellar_asset_token, setup, StellarTestToken, TARGET,
 };
 
-const AMOUNT: i128 = 10_000_0000000;
-const PLEDGE: i128 = 5_000_0000000;
+const AMOUNT: i128 = 100_000_000_000;
+const PLEDGE: i128 = 50_000_000_000;
 
 #[test]
 fn typed_error_codes_cover_init_and_state_guards() {
@@ -5260,7 +5260,7 @@ fn test_event_investor_allowlist_changed_batch_symbol_reuse() {
     };
 
     assert_eq!(
-        event_list.get(0).unwrap().clone(),
+        event_list.first().unwrap().clone(),
         expected_a.to_xdr(&env, &contract_id),
         "first batch event must use symbol 'al_set'"
     );
@@ -5342,7 +5342,7 @@ fn test_event_fund_batch_n_events_with_funded_symbol() {
     };
 
     assert_eq!(
-        event_list.get(0).unwrap().clone(),
+        event_list.first().unwrap().clone(),
         expected_a.to_xdr(&env, &contract_id),
         "first batch fund event must use symbol 'funded'"
     );
@@ -5431,7 +5431,7 @@ fn test_event_revoke_attestation_digests_batch_symbol() {
         index: 0,
     };
     assert_eq!(
-        event_list.get(0).unwrap().clone(),
+        event_list.first().unwrap().clone(),
         expected_first.to_xdr(&env, &contract_id),
         "first batch revoke event struct must match"
     );

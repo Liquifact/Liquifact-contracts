@@ -111,7 +111,7 @@ struct FundingStep {
     lock_secs: u64,
 }
 
-/// Property tests for funding accounting invariants (issue #325).
+// Property tests for funding accounting invariants (issue #325).
 proptest! {
     #[test]
     fn prop_funding_accounting_invariants_issue_325(
@@ -143,7 +143,7 @@ proptest! {
         let (token, treasury) = free_addresses(&env);
 
         let max_per_investor = if caps_present { Some(per_inv_cap.min(funding_target)) } else { None };
-        let max_unique_investors: Option<u32> = if caps_present { Some(uniq_cap.min(6) as u32) } else { None };
+        let max_unique_investors: Option<u32> = if caps_present { Some(uniq_cap.min(6)) } else { None };
 
         // Optional tiered yield is not required for these invariants; keep it off.
         client.init(
@@ -179,6 +179,7 @@ proptest! {
         let mut expected_contribs: Vec<i128> = vec![0i128; investor_count];
         let mut expected_funded: i128 = 0;
 
+        #[allow(clippy::mutable_key_type)]
         let mut distinct_funders: BTreeSet<Address> = BTreeSet::new();
 
         // Track when the funded status should flip (first step where funded >= target).
@@ -1170,8 +1171,8 @@ fn funded_and_settled_escrow<'a>(
     client
 }
 
-/// Property: sum of all computed payouts never exceeds settle_pool.
-/// Covers single investor, equal splits, and prime-denominator splits.
+// Property: sum of all computed payouts never exceeds settle_pool.
+// Covers single investor, equal splits, and prime-denominator splits.
 proptest! {
     #[test]
     fn prop_payout_sum_le_settle_pool(
@@ -1573,7 +1574,7 @@ fn fuzz_dust_sweep_liability_floor() {
         .unwrap_or(32);
     let base_seed = read_fuzz_seed_u64();
     for case_idx in 0..cases {
-        let case_seed = base_seed ^ (case_idx as u64).wrapping_mul(0xD0575_0000_0001u64);
+        let case_seed = base_seed ^ (case_idx as u64).wrapping_mul(0x000D_0575_0000_0001_u64);
         let mut rng = SplitMix64::new(case_seed);
         let env = Env::default();
         env.mock_all_auths();
@@ -1593,8 +1594,7 @@ fn fuzz_dust_sweep_liability_floor() {
         let mut order: Vec<usize> = (0..n).collect();
         shuffle_in_place(&mut rng, &mut order);
         let mut distributed: i128 = 0;
-        for i in 0..refund_count.min(n) {
-            let idx = order[i];
+        for &idx in order.iter().take(refund_count.min(n)) {
             let ra = rng.gen_i128_inclusive(0, amounts[idx]);
             if ra > 0 {
                 client.refund(&investors[idx]);
@@ -1923,7 +1923,7 @@ fn payout_many_small_investors_conservation() {
     let pairs: Vec<(Address, i128)> = investors
         .iter()
         .cloned()
-        .zip(std::iter::repeat(1i128).take(n))
+        .zip(std::iter::repeat_n(1i128, n))
         .collect();
 
     let client = funded_and_settled_escrow(&env, "MANY001", 1_250i64, &pairs);
@@ -2095,10 +2095,6 @@ fn assert_slots_invariant(client: &super::LiquifactEscrowClient<'_>, label: &str
             let cap = client
                 .get_max_unique_investors_cap()
                 .expect("cap must be Some when get_remaining_investor_slots returns Some");
-            assert!(
-                remaining >= 0,
-                "{label}: remaining slots underflowed (remaining={remaining})"
-            );
             assert_eq!(
                 count + remaining,
                 cap,
@@ -2159,8 +2155,8 @@ fn slots_no_cap_is_none_after_multiple_funds() {
 
 // ── Invariant B: count + remaining == cap, remaining >= 0 ───────────────────
 
-/// Proptest: random funding sequences with a unique-investor cap.
-/// After every fund call, assert slots conservation and non-underflow.
+// Proptest: random funding sequences with a unique-investor cap.
+// After every fund call, assert slots conservation and non-underflow.
 proptest! {
     #[test]
     fn prop_remaining_slots_conservation_non_underflow(
@@ -2242,7 +2238,6 @@ proptest! {
 
             // remaining must not underflow.
             let remaining = client.get_remaining_investor_slots().unwrap();
-            prop_assert!(remaining >= 0, "step {}: remaining underflowed to {}", step, remaining);
 
             let count = client.get_unique_funder_count();
             prop_assert_eq!(
@@ -2596,7 +2591,6 @@ proptest! {
                     // Invariant: count + remaining == cap.
                     let count = client.get_unique_funder_count();
                     let remaining = client.get_remaining_investor_slots().unwrap_or(0);
-                    prop_assert!(remaining >= 0, "step {} (fund): remaining underflowed", step);
                     prop_assert_eq!(
                         count + remaining,
                         current_cap,
@@ -2655,7 +2649,6 @@ proptest! {
                     // Invariant B after batch.
                     let count = client.get_unique_funder_count();
                     let remaining = client.get_remaining_investor_slots().unwrap_or(0);
-                    prop_assert!(remaining >= 0, "step {} (batch): remaining underflowed", step);
                     prop_assert_eq!(
                         count + remaining,
                         current_cap,
@@ -2678,7 +2671,6 @@ proptest! {
                     // Invariant D after cap lowering.
                     let count2 = client.get_unique_funder_count();
                     let remaining = client.get_remaining_investor_slots().unwrap_or(0);
-                    prop_assert!(remaining >= 0, "step {} (lower_cap): remaining underflowed", step);
                     prop_assert_eq!(
                         count2 + remaining,
                         current_cap,
@@ -2731,10 +2723,6 @@ fn slots_cap_exactly_hit_remaining_is_zero() {
         client.fund(inv, &100_000i128);
         let remaining = client.get_remaining_investor_slots().unwrap();
         let count = client.get_unique_funder_count();
-        assert!(
-            remaining >= 0,
-            "remaining must not underflow after investor {i}"
-        );
         assert_eq!(
             count + remaining,
             cap,

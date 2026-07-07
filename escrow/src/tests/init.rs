@@ -1555,7 +1555,7 @@ fn try_init_with_id_typed(
         &None,
     );
     match res {
-        Ok(inner) => Ok(inner.map_err(|e| soroban_sdk::Error::from(e))),
+        Ok(inner) => Ok(inner.map_err(soroban_sdk::Error::from)),
         Err(err) => Err(err),
     }
 }

@@ -2680,7 +2680,7 @@ fn test_refund_batch_max_batch_size_succeeds() {
     let env = Env::default();
     env.mock_all_auths();
     env.cost_estimate().disable_resource_limits();
-    env.budget().reset_unlimited();
+    env.cost_estimate().budget().reset_unlimited();
     let (client, admin, sme) = setup(&env);
     let (token, _) = init_with_token(&env, &client, &admin, &sme);
     let contract_id = client.address.clone();
@@ -3617,7 +3617,7 @@ fn test_fund_batch_max_batch_size() {
     let env = Env::default();
     env.mock_all_auths();
     env.cost_estimate().disable_resource_limits();
-    env.budget().reset_unlimited();
+    env.cost_estimate().budget().reset_unlimited();
     let client = deploy(&env);
     let admin = Address::generate(&env);
     let sme = Address::generate(&env);
