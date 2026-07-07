@@ -1,14 +1,19 @@
 ﻿use crate::{
-    AttestationDigestAppended, CollateralClearedEvt, CollateralCommitmentSnapshot,
-    CollateralRecordedEvt, DataKey, EscrowCloseSnapshot, EscrowError, FundingCancelled,
-    InvestorRefundedEvt, LiquifactEscrow, LiquifactEscrowClient, PrimaryAttestationBound,
-    RegistryRefRebound, TreasuryDustSwept, YieldTier, DEFAULT_MATURITY_MAX_HORIZON_SECS,
+    AdminProposalCancelled, AdminProposedEvent, AdminTransferredEvent, AllowlistEnabledChanged,
+    AttestationDigestAppended, AttestationDigestRevoked, BeneficiaryRotated,
+    CollateralClearedEvt, CollateralCommitmentSnapshot, CollateralRecordedEvt, DataKey,
+    EscrowCloseSnapshot, EscrowError, EscrowFunded, EscrowInitialized, EscrowPartialSettle,
+    EscrowSettled, FundingCancelled, FundingTargetUpdated, InvestorAllowlistChanged,
+    InvestorPayoutClaimed, InvestorRefundedEvt, LegalHoldChanged, LegalHoldClearCancelled,
+    LegalHoldClearRequested, LiquifactEscrow, LiquifactEscrowClient, MaturityUpdatedEvent,
+    MaxUniqueInvestorsCapLowered, PrimaryAttestationBound, RegistryRefRebound, SmeWithdrew,
+    TreasuryDustSwept, YieldTier, DEFAULT_MATURITY_MAX_HORIZON_SECS,
     MAX_ATTESTATION_APPEND_ENTRIES, SCHEMA_VERSION,
 };
 use soroban_sdk::{
     symbol_short,
-    testutils::{Address as _, Events as _, Ledger},
-    Address, BytesN, Env, Error, InvokeError, Vec as SorobanVec,
+    testutils::{storage::Persistent, Address as _, Events as _, Ledger},
+    Address, BytesN, Env, Error, Event, InvokeError, Symbol, Vec as SorobanVec,
 };
 use super::{
     assert_contract_error, default_init, deploy, deploy_with_id, free_addresses,
@@ -3658,26 +3663,34 @@ fn test_state_machine_illegal_transitions_rejected() {
 }
 
 fn last_event_name_symbol(env: &Env) -> Option<Symbol> {
+    use soroban_sdk::xdr::{ContractEventBody, ScVal};
     let all = env.events().all();
     let events = all.events();
     let last = events.last()?;
-    let topics = last.topics();
+    let topics = match &last.body {
+        ContractEventBody::V0(v0) => &v0.topics,
+    };
     if topics.len() < 2 {
         return None;
     }
-    Some(topics.get(1).unwrap().try_into_val(env).unwrap())
+    let scval: &ScVal = &topics[1];
+    scval.try_into_val(env).ok()
 }
 
 /// Extract the fixed topic 0 from the last contract event.
 fn last_event_topic0(env: &Env) -> Option<Symbol> {
+    use soroban_sdk::xdr::{ContractEventBody, ScVal};
     let all = env.events().all();
     let events = all.events();
     let last = events.last()?;
-    let topics = last.topics();
+    let topics = match &last.body {
+        ContractEventBody::V0(v0) => &v0.topics,
+    };
     if topics.is_empty() {
         return None;
     }
-    Some(topics.get(0).unwrap().try_into_val(env).unwrap())
+    let scval: &ScVal = &topics[0];
+    scval.try_into_val(env).ok()
 }
 
 // ÔöÇÔöÇ EscrowInitialized ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
@@ -3701,6 +3714,8 @@ fn test_event_escrow_initialized_symbol_and_topic0() {
         &funding_token,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -3751,6 +3766,8 @@ fn test_event_max_unique_investors_cap_lowered_symbol() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 
     let invoice_id = client.get_escrow().invoice_id;
@@ -3790,6 +3807,8 @@ fn test_event_escrow_funded_symbol_and_fields() {
         &funding_token,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -3846,6 +3865,8 @@ fn test_event_escrow_partial_settle_symbol() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 
     let invoice_id = client.get_escrow().invoice_id;
@@ -3894,6 +3915,8 @@ fn test_event_escrow_settled_symbol_and_fields() {
         &funding_token,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -3958,6 +3981,8 @@ fn test_event_maturity_updated_symbol() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 
     let invoice_id = client.get_escrow().invoice_id;
@@ -3997,6 +4022,8 @@ fn test_event_admin_transferred_symbol() {
         &funding_token,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -4055,6 +4082,8 @@ fn test_event_admin_proposed_symbol() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 
     let invoice_id = client.get_escrow().invoice_id;
@@ -4095,6 +4124,8 @@ fn test_event_admin_proposal_cancelled_symbol() {
         &funding_token,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -4155,6 +4186,8 @@ fn test_event_beneficiary_rotated_symbol() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 
     let invoice_id = client.get_escrow().invoice_id;
@@ -4195,6 +4228,8 @@ fn test_event_funding_target_updated_symbol() {
         &funding_token,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -4246,6 +4281,8 @@ fn test_event_legal_hold_changed_symbol() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 
     let invoice_id = client.get_escrow().invoice_id;
@@ -4287,6 +4324,8 @@ fn test_event_legal_hold_clear_convenience_emits_same_symbol() {
         &None,
         &None,
         &Some(10u64),
+        &None,
+        &None,
         &None,
     );
 
@@ -4342,6 +4381,8 @@ fn test_event_legal_hold_clear_requested_symbol() {
         &None,
         &Some(10u64),
         &None,
+        &None,
+        &None,
     );
 
     let invoice_id = client.get_escrow().invoice_id;
@@ -4395,6 +4436,8 @@ fn test_event_legal_hold_clear_cancelled_symbol() {
         &None,
         &Some(10u64),
         &None,
+        &None,
+        &None,
     );
 
     let invoice_id = client.get_escrow().invoice_id;
@@ -4447,6 +4490,8 @@ fn test_event_collateral_recorded_symbol() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 
     let asset = Symbol::new(&env, "USDC");
@@ -4492,6 +4537,8 @@ fn test_event_collateral_cleared_struct() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 
     let asset = Symbol::new(&env, "USDC");
@@ -4529,6 +4576,8 @@ fn test_event_sme_withdrew_symbol() {
         &token_id,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -4587,6 +4636,8 @@ fn test_event_investor_payout_claimed_symbol() {
         &token_id,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -4653,6 +4704,8 @@ fn test_event_funding_cancelled_symbol() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 
     let invoice_id = client.get_escrow().invoice_id;
@@ -4703,6 +4756,8 @@ fn test_event_investor_refunded_symbol() {
         &token_id,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -4767,6 +4822,8 @@ fn test_event_registry_ref_rebound_symbol() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 
     let invoice_id = client.get_escrow().invoice_id;
@@ -4774,14 +4831,14 @@ fn test_event_registry_ref_rebound_symbol() {
     client.rebind_registry_ref(&Some(new_registry.clone()));
 
     let expected = RegistryRefRebound {
-        name: symbol_short!("reg_rebind"),
+        name: symbol_short!("reg_rebnd"),
         invoice_id,
         registry: Some(new_registry),
     };
     assert_eq!(
         last_event_name_symbol(&env),
-        Some(symbol_short!("reg_rebind")),
-        "RegistryRefRebound must emit symbol 'reg_rebind'"
+        Some(symbol_short!("reg_rebnd")),
+        "RegistryRefRebound must emit symbol 'reg_rebnd'"
     );
     let events = env.events().all();
     let last = events.events().last().unwrap().clone();
@@ -4815,6 +4872,8 @@ fn test_event_treasury_dust_swept_symbol() {
         &token_id,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -4881,6 +4940,8 @@ fn test_event_primary_attestation_bound_symbol() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 
     let invoice_id = client.get_escrow().invoice_id;
@@ -4920,6 +4981,8 @@ fn test_event_attestation_digest_appended_symbol() {
         &funding_token,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -4966,6 +5029,8 @@ fn test_event_attestation_digest_revoked_symbol() {
         &funding_token,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -5025,6 +5090,8 @@ fn test_event_allowlist_enabled_changed_symbol() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 
     let invoice_id = client.get_escrow().invoice_id;
@@ -5065,6 +5132,8 @@ fn test_event_investor_allowlist_changed_single_symbol() {
         &funding_token,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -5114,6 +5183,8 @@ fn test_event_investor_allowlist_changed_batch_symbol_reuse() {
         &funding_token,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -5192,14 +5263,16 @@ fn test_event_fund_batch_n_events_with_funded_symbol() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 
     let invoice_id = client.get_escrow().invoice_id;
     let inv_a = Address::generate(&env);
     let inv_b = Address::generate(&env);
     let mut funders = SorobanVec::new(&env);
-    funders.push_back((inv_a.clone(), 300i128, 0u64));
-    funders.push_back((inv_b.clone(), 500i128, 0u64));
+    funders.push_back((inv_a.clone(), 300i128));
+    funders.push_back((inv_b.clone(), 500i128));
     client.fund_batch(&funders);
 
     let events = env.events().all();
@@ -5272,6 +5345,8 @@ fn test_event_revoke_attestation_digests_batch_symbol() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 
     let invoice_id = client.get_escrow().invoice_id;
@@ -5294,13 +5369,17 @@ fn test_event_revoke_attestation_digests_batch_symbol() {
 
     // Each event should have symbol 'att_rev'
     for i in 0..event_list.len() {
-        let topics = event_list.get(i).unwrap().topics();
+        use soroban_sdk::xdr::ContractEventBody;
+        let event = event_list.get(i).unwrap();
+        let topics = match &event.body {
+            ContractEventBody::V0(v0) => &v0.topics,
+        };
         assert_eq!(
             topics.len(),
             3,
             "AttestationDigestRevoked must have 3 topics (fixed, name, invoice_id)"
         );
-        let name: Symbol = topics.get(1).unwrap().try_into_val(&env).unwrap();
+        let name: Symbol = topics[1].try_into_val(&env).unwrap();
         assert_eq!(
             name,
             symbol_short!("att_rev"),
@@ -5332,7 +5411,7 @@ fn test_all_event_symbols_are_unique_across_struct_types() {
         "escrow_ii", "inv_cap", "raise_cap", "floor_lo", "funded", "ben_rot",
         "part_set", "escrow_sd", "maturity", "admin", "adm_acc", "adm_prop",
         "adm_can", "depr_xfer", "fund_tgt", "legalhld", "lh_req", "coll_rec",
-        "sme_wd", "inv_claim", "fund_can", "refunded", "reg_rebind", "dust_sw",
+        "sme_wd", "inv_claim", "fund_can", "refunded", "reg_rebnd", "dust_sw",
         "att_bind", "att_app", "att_rev", "att_unrev", "mtry_max", "al_ena",
         "al_set", "lh_cancel", "upgrade",
     ]
@@ -5438,6 +5517,8 @@ fn test_event_attestation_digest_unrevoked_symbol() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 
     let invoice_id = client.get_escrow().invoice_id;
@@ -5492,6 +5573,8 @@ fn test_event_maturity_max_horizon_updated_symbol() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
 
     let invoice_id = client.get_escrow().invoice_id;
@@ -5532,6 +5615,8 @@ fn test_event_deprecated_transfer_admin_used_symbol() {
         &funding_token,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -5592,6 +5677,8 @@ fn test_event_contract_upgraded_symbol() {
         &funding_token,
         &None,
         &treasury,
+        &None,
+        &None,
         &None,
         &None,
         &None,

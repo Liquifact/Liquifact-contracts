@@ -4852,6 +4852,6 @@ fn register_mock_token_if_needed(env: &Env, token_addr: &Address) {
         let _ = client.balance(&token_clone);
     }));
     if result.is_err() {
-        env.register(token_addr, DefaultMockToken);
+        env.register_at(token_addr, DefaultMockToken, ());
     }
 }
