@@ -1,7 +1,7 @@
 use super::*;
 use crate::{
     AdminAcceptedEvent, AdminProposalCancelled, AdminProposedEvent, EscrowCloseSnapshot,
-    FundingTargetUpdated, MaturityMaxHorizonRaised, RegistryRefRebound,
+    FundingTargetUpdated, MaxPerInvestorCapRaised, MaturityMaxHorizonRaised, RegistryRefRebound,
     DEFAULT_MATURITY_MAX_HORIZON_SECS,
 };
 
@@ -2490,5 +2490,117 @@ fn test_partial_settle_not_open_typed_error() {
     assert_contract_error(
         client.try_partial_settle(&sme),
         EscrowError::EscrowNotOpenForFunding,
+    );
+}
+
+// ── raise_maturity_max_horizon ────────────────────────────────────────────
+
+#[test]
+fn test_raise_maturity_max_horizon_succeeds() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let (token, treasury) = free_addresses(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "RMMH001"),
+        &sme,
+        &1_000i128,
+        &500i64,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    let default_horizon = DEFAULT_MATURITY_MAX_HORIZON_SECS;
+    assert_eq!(client.get_maturity_max_horizon(), default_horizon);
+
+    let new_horizon = default_horizon + 3_600;
+    let returned = client.raise_maturity_max_horizon(&new_horizon);
+    assert_eq!(returned, new_horizon);
+    assert_eq!(client.get_maturity_max_horizon(), new_horizon);
+}
+
+#[test]
+fn test_raise_maturity_max_horizon_not_raised_panics() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let (token, treasury) = free_addresses(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "RMMH002"),
+        &sme,
+        &1_000i128,
+        &500i64,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    let default_horizon = DEFAULT_MATURITY_MAX_HORIZON_SECS;
+    assert_contract_error(
+        client.try_raise_maturity_max_horizon(&default_horizon),
+        EscrowError::HorizonNotRaised,
+    );
+}
+
+#[test]
+fn test_raise_maturity_max_horizon_emits_event() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let (token, treasury) = free_addresses(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "RMMH003"),
+        &sme,
+        &1_000i128,
+        &500i64,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    let old_horizon = DEFAULT_MATURITY_MAX_HORIZON_SECS;
+    let new_horizon = old_horizon + 7_200;
+    client.raise_maturity_max_horizon(&new_horizon);
+
+    let all_events = env.events().all();
+    let expected = MaturityMaxHorizonRaised {
+        name: symbol_short!("mtry_rse"),
+        invoice_id: client.get_escrow().invoice_id,
+        old_horizon,
+        new_horizon,
+    };
+    assert!(
+        all_events.events().contains(&expected.to_xdr(&env, &client.address)),
+        "MaturityMaxHorizonRaised event must be emitted"
     );
 }

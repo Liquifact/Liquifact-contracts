@@ -2984,7 +2984,14 @@ impl LiquifactEscrow {
             .instance()
             .remove(&DataKey::LegalHoldClearableAt);
 
-        Self::set_legal_hold(env, false);
+        env.storage().instance().set(&DataKey::LegalHold, &false);
+
+        LegalHoldChanged {
+            name: symbol_short!("legal_h"),
+            invoice_id: escrow.invoice_id,
+            active: 0,
+        }
+        .publish(&env);
     }
     /// Cancel a pending legal-hold clear request.
     ///

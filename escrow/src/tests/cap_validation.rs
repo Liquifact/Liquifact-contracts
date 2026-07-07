@@ -1,7 +1,7 @@
 //! Standalone test for MaxUniqueInvestorsCap and UniqueFunderCount functionality
 //! This test file validates the core functionality without dependencies on other test modules
 use super::*;
-use crate::{MaxUniqueInvestorsCapLowered, MinContributionFloorLowered};
+use crate::{MaxPerInvestorCapRaised, MaxUniqueInvestorsCapLowered, MinContributionFloorLowered};
 use soroban_sdk::{Address, Env, String};
 
 #[test]
@@ -2084,4 +2084,129 @@ fn test_lower_cap_remaining_slots_consistent_after_each_lowering() {
     client.lower_max_unique_investors(&4u32);
     assert_eq!(client.get_max_unique_investors_cap(), Some(4));
     assert_eq!(client.get_remaining_investor_slots(), Some(0));
+}
+
+// ── raise_max_per_investor ─────────────────────────────────────────────────
+
+#[test]
+fn test_raise_max_per_investor_succeeds() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "RMPI001"),
+        &sme,
+        &100_000_000_000i128,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+        &Some(50_000_000_000i128),
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    assert_eq!(client.get_max_per_investor_cap(), Some(50_000_000_000i128));
+    let returned = client.raise_max_per_investor(&75_000_000_000i128);
+    assert_eq!(returned, 75_000_000_000i128);
+    assert_eq!(client.get_max_per_investor_cap(), Some(75_000_000_000i128));
+}
+
+#[test]
+fn test_raise_max_per_investor_not_configured_panics() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    assert_eq!(client.get_max_per_investor_cap(), None);
+    assert_contract_error(
+        client.try_raise_max_per_investor(&10_000i128),
+        EscrowError::MaxPerInvestorCapNotConfigured,
+    );
+}
+
+#[test]
+fn test_raise_max_per_investor_not_raised_rejects_equal() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "RMPI002"),
+        &sme,
+        &100_000_000_000i128,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+        &Some(50_000_000_000i128),
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    assert_contract_error(
+        client.try_raise_max_per_investor(&50_000_000_000i128),
+        EscrowError::MaxPerInvestorCapNotRaised,
+    );
+}
+
+#[test]
+fn test_raise_max_per_investor_emits_event() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let (token, treasury) = free_addresses(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "RMPI003"),
+        &sme,
+        &100_000_000_000i128,
+        &800i64,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &Some(50_000_000_000i128),
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    client.raise_max_per_investor(&75_000_000_000i128);
+
+    let all_events = env.events().all();
+    let expected = MaxPerInvestorCapRaised {
+        name: symbol_short!("inv_cap"),
+        invoice_id: client.get_escrow().invoice_id,
+        old_cap: 50_000_000_000i128,
+        new_cap: 75_000_000_000i128,
+    };
+    assert!(
+        all_events.events().contains(&expected.to_xdr(&env, &client.address)),
+        "MaxPerInvestorCapRaised event must be emitted"
+    );
 }

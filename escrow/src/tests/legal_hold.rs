@@ -1005,3 +1005,52 @@ fn recovery_new_admin_clears_hold_and_operations_resume() {
     client.claim_investor_payout(&investor);
     assert!(client.is_investor_claimed(&investor));
 }
+
+// ── 19. clear_legal_hold_after_delay ─────────────────────────────────────────
+
+/// `clear_legal_hold_after_delay` must succeed after the timelock expires.
+#[test]
+fn test_clear_legal_hold_after_delay_succeeds() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let delay: u64 = 100;
+    init_open_with_clear_delay(&client, &env, &admin, &sme, "LHD001", Some(delay));
+    client.set_legal_hold(&true);
+    client.request_clear_legal_hold();
+
+    let clearable_at = client.get_legal_hold_clearable_at().expect("clearable_at set");
+    env.ledger().set_timestamp(clearable_at);
+
+    client.clear_legal_hold_after_delay();
+    assert!(!client.get_legal_hold());
+    assert!(client.get_legal_hold_clearable_at().is_none());
+}
+
+/// `clear_legal_hold_after_delay` must fail when no clear request is pending.
+#[test]
+fn test_clear_legal_hold_after_delay_no_request_panics() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    init_open_with_clear_delay(&client, &env, &admin, &sme, "LHD002", Some(100));
+    client.set_legal_hold(&true);
+
+    assert_contract_error(
+        client.try_clear_legal_hold_after_delay(),
+        EscrowError::LegalHoldClearRequestMissing,
+    );
+}
+
+/// `clear_legal_hold_after_delay` must fail before the timelock expires.
+#[test]
+fn test_clear_legal_hold_after_delay_before_clearable_at_panics() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    init_open_with_clear_delay(&client, &env, &admin, &sme, "LHD003", Some(100));
+    client.set_legal_hold(&true);
+    client.request_clear_legal_hold();
+
+    assert_contract_error(
+        client.try_clear_legal_hold_after_delay(),
+        EscrowError::LegalHoldClearNotReady,
+    );
+}
