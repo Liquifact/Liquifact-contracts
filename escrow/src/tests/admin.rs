@@ -34,6 +34,9 @@ fn test_update_maturity_emits_event() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
+        &None,
     );
     client.update_maturity(&2000u64);
     assert_eq!(
@@ -71,6 +74,9 @@ fn test_update_maturity_unchanged_panics() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
+        &None,
     );
     client.update_maturity(&2000u64);
 }
@@ -89,6 +95,9 @@ fn test_update_maturity_success() {
         &Address::generate(&env),
         &None,
         &Address::generate(&env),
+        &None,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -2031,13 +2040,13 @@ fn test_registry_ref_does_not_affect_settlement_or_funding() {
     // Fund the escrow.
     let investor = Address::generate(&env);
     client.fund(&investor, &TARGET);
-    let funded_before = client.get_funded_amount();
+    let funded_before = client.get_escrow().funded_amount;
 
     // Bind a registry reference — funded_amount must be unchanged.
     client.rebind_registry_ref(&Some(registry.clone()));
     assert_eq!(client.get_registry_ref(), Some(registry.clone()));
     assert_eq!(
-        client.get_funded_amount(),
+        client.get_escrow().funded_amount,
         funded_before,
         "binding a registry ref must not change funded_amount"
     );
@@ -2047,7 +2056,7 @@ fn test_registry_ref_does_not_affect_settlement_or_funding() {
     client.rebind_registry_ref(&Some(registry2.clone()));
     assert_eq!(client.get_registry_ref(), Some(registry2.clone()));
     assert_eq!(
-        client.get_funded_amount(),
+        client.get_escrow().funded_amount,
         funded_before,
         "rebinding registry ref must not change funded_amount"
     );
@@ -2056,7 +2065,7 @@ fn test_registry_ref_does_not_affect_settlement_or_funding() {
     client.rebind_registry_ref(&None);
     assert_eq!(client.get_registry_ref(), None);
     assert_eq!(
-        client.get_funded_amount(),
+        client.get_escrow().funded_amount,
         funded_before,
         "clearing registry ref must not change funded_amount"
     );
@@ -2066,7 +2075,7 @@ fn test_registry_ref_does_not_affect_settlement_or_funding() {
     client.clear_registry_ref();
     assert_eq!(client.get_registry_ref(), None);
     assert_eq!(
-        client.get_funded_amount(),
+        client.get_escrow().funded_amount,
         funded_before,
         "clear_registry_ref must not change funded_amount"
     );
@@ -2082,7 +2091,10 @@ fn test_registry_ref_does_not_affect_settlement_or_funding() {
         registry: None,
     }
     .to_xdr(&env, &contract_id);
-    assert_eq!(last, expected_clear, "last event must be reg_rebind with None");
+    assert_eq!(
+        last, expected_clear,
+        "last event must be reg_rebind with None"
+    );
 }
 
 fn test_error_code_uniqueness() {

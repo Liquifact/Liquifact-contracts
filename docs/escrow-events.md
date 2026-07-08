@@ -126,6 +126,32 @@ Emitted when an investor records their payout claim.
 }
 ```
 
+### `FundingDeadlineExtended`
+Emitted when the admin extends an existing funding deadline while the escrow is still open.
+
+**Topics:**
+1. `fund_ext` (Symbol)
+2. `invoice_id` (Symbol)
+
+**Data Payload:**
+- `old_deadline` (`u64`): prior funding deadline ledger timestamp.
+- `new_deadline` (`u64`): strictly later funding deadline ledger timestamp.
+
+**Notes:**
+- This event is additive; existing funding and settlement events are unchanged.
+- The entrypoint rejects equal or earlier deadlines, elapsed funding windows, closed escrows, and deadlines at or after maturity.
+
+**Example (JSON Decoded):**
+```json
+{
+  "topics": ["fund_ext", "INV_001"],
+  "data": {
+    "old_deadline": 1714180000,
+    "new_deadline": 1714183600
+  }
+}
+```
+
 ### `InvestorAllowlistChanged`
 Emitted when an admin adds or removes an investor from the allowlist. This event is
 emitted per-address even when the change is performed via the batch entrypoint

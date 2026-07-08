@@ -16,7 +16,15 @@ fn make_env() -> Env {
     env
 }
 
-fn setup_open(env: &Env) -> (LiquifactEscrowClient<'_>, Address, Address, Address, Address) {
+fn setup_open(
+    env: &Env,
+) -> (
+    LiquifactEscrowClient<'_>,
+    Address,
+    Address,
+    Address,
+    Address,
+) {
     let client = LiquifactEscrowClient::new(env, &env.register(LiquifactEscrow, ()));
     let admin = Address::generate(env);
     let sme = Address::generate(env);
@@ -47,7 +55,7 @@ fn setup_open(env: &Env) -> (LiquifactEscrowClient<'_>, Address, Address, Addres
 
 /// Move the escrow to cancelled status (status == 4).
 fn cancel(client: &LiquifactEscrowClient<'_>, admin: &Address) {
-    client.cancel_funding(admin);
+    client.cancel_funding();
 }
 
 // ---------------------------------------------------------------------------
@@ -123,6 +131,7 @@ fn test_lower_max_unique_investors_rejects_when_cancelled() {
         &None,
         &tre,
         &None,
+        &None,
         &Some(10u32), // max_unique_investors cap
         &None,
         &None,
@@ -156,8 +165,8 @@ fn test_lower_min_contribution_floor_rejects_when_cancelled() {
         &tok,
         &None,
         &tre,
-        &Some(100i128), // min_contribution floor
         &None,
+        &Some(100i128), // min_contribution floor
         &None,
         &None,
         &None,
@@ -180,7 +189,7 @@ fn test_cancel_funding_rejects_when_already_cancelled() {
     let env = make_env();
     let (client, admin, _sme, _tok, _tre) = setup_open(&env);
     cancel(&client, &admin);
-    let result = client.try_cancel_funding(&admin);
+    let result = client.try_cancel_funding();
     assert_contract_error(result, EscrowError::CancelFundingNotOpen);
 }
 

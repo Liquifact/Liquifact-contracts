@@ -33,7 +33,7 @@ short routing symbol passed with `symbol_short!(...)`, such as `funded` or
 
 ## Event Catalog
 
-The current contract defines 36 event structs.
+The current contract defines 37 event structs.
 
 | Rust event | `name` symbol | Entrypoint(s) |
 |---|---:|---|
@@ -55,6 +55,7 @@ The current contract defines 36 event structs.
 | `EscrowPartialSettle` | `part_set` | `partial_settle` |
 | `EscrowSettled` | `escrow_sd` | `settle` |
 | `FundingCancelled` | `fund_can` | `cancel_funding` |
+| `FundingDeadlineExtended` | `fund_ext` | `extend_funding_deadline` |
 | `FundingTargetUpdated` | `fund_tgt` | `update_funding_target` |
 | `InvestorAllowlistChanged` | `al_set` | `set_investor_allowlisted`, `set_investors_allowlisted` |
 | `InvestorAllowlistBatchApplied` | `al_batch` | `set_investors_allowlisted` |
@@ -261,6 +262,25 @@ Data:
 |---|---|
 | `prior_sme` | `Address` |
 | `new_sme` | `Address` |
+
+### `FundingDeadlineExtended`
+
+Emitted after successful `extend_funding_deadline`.
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `funding_deadline_extended` |
+| 1 | `name` | `Symbol` | `fund_ext` |
+| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
+
+Data:
+
+| Field | Type |
+|---|---|
+| `old_deadline` | `u64` |
+| `new_deadline` | `u64` |
 
 ### `FundingTargetUpdated`
 

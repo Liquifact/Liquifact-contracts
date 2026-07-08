@@ -161,6 +161,7 @@ liquifact-contracts/
 | `partial_settle` | SME | SME marks a portion of the escrow as settled before full settlement. |
 | `withdraw` | SME | SME pulls funded liquidity (accounting record). |
 | `cancel_funding` | Admin | Admin cancels an open escrow (transitions status 0 → 4). |
+| `extend_funding_deadline` | Admin | Extend an existing funding deadline while the escrow is open; rejects no-op/shorter deadlines, elapsed windows, and deadlines at or after maturity. Emits `FundingDeadlineExtended`. |
 | `refund` | Investor | Investor pulls contributed liquidity from a cancelled escrow. Increments `DistributedPrincipal` liability. |
 | `claim_investor_payout` | Investor | Investor records a payout claim after settlement. |
 | `claim_payouts_batch` | Investor / Any | Batch-record payout claims for up to `MAX_CLAIM_BATCH` investors in one transaction. |
