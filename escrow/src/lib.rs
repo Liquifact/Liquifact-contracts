@@ -455,7 +455,16 @@ pub enum EscrowError {
     MaxPerInvestorCapNotRaised = 25,     // new
     /// [`LiquifactEscrow::raise_maturity_max_horizon`] received a `new_horizon` that is
     /// not strictly greater than the current stored horizon.
-    HorizonNotRaised = 201,
+    HorizonNotRaised = 214,
+
+    /// [`LiquifactEscrow::fund`] blocked while operational pause is active.
+    PausedBlocksFunding = 210,
+    /// [`LiquifactEscrow::settle`] blocked while operational pause is active.
+    PausedBlocksSettlement = 211,
+    /// [`LiquifactEscrow::withdraw`] blocked while operational pause is active.
+    PausedBlocksWithdrawal = 212,
+    /// [`LiquifactEscrow::claim_investor_payout`] blocked while operational pause is active.
+    PausedBlocksInvestorClaims = 213,
 }
 
 #[inline(always)]
@@ -476,7 +485,12 @@ pub(crate) fn ensure(env: &Env, condition: bool, error: EscrowError) {
 /// specific named status check (e.g. [`require_funding_open`]) delegate here so the
 /// exact error code is preserved at every call site.
 #[inline(always)]
-pub(crate) fn guard_status_eq(env: &Env, actual_status: u32, expected_status: u32, error: EscrowError) {
+pub(crate) fn guard_status_eq(
+    env: &Env,
+    actual_status: u32,
+    expected_status: u32,
+    error: EscrowError,
+) {
     ensure(env, actual_status == expected_status, error);
 }
 
@@ -1137,10 +1151,17 @@ pub struct RegistryRefRebound {
 }
 
 #[contractevent]
+/// Emitted after a successful [`LiquifactEscrow::sweep_terminal_dust`] transfer.
+///
+/// Carries the **effective** swept amount (after balance and liability-floor capping),
+/// the treasury recipient, the funding token, and the invoice id for indexer reconciliation.
+#[contractevent]
 pub struct TreasuryDustSwept {
     #[topic]
     pub name: Symbol,
     pub invoice_id: Symbol,
+    /// Immutable treasury address that received the sweep.
+    pub recipient: Address,
     pub token: Address,
     pub amount: i128,
 }
@@ -1805,6 +1826,7 @@ impl LiquifactEscrow {
         TreasuryDustSwept {
             name: symbol_short!("dust_sw"),
             invoice_id: escrow.invoice_id.clone(),
+            recipient: treasury.clone(),
             token: token_addr,
             amount: sweep_amt,
         }
@@ -2525,8 +2547,7 @@ impl LiquifactEscrow {
     pub fn get_settlement_readiness(env: Env) -> SettlementReadiness {
         let legal_hold_active = Self::legal_hold_active(&env);
         let escrow = Self::get_escrow(env.clone());
-        let maturity_reached =
-            escrow.maturity == 0 || env.ledger().timestamp() >= escrow.maturity;
+        let maturity_reached = escrow.maturity == 0 || env.ledger().timestamp() >= escrow.maturity;
 
         // Reuse the single-source-of-truth gate so this view cannot drift from `settle`.
         let is_settleable = Self::settleable_now(&env);
@@ -3619,13 +3640,11 @@ impl LiquifactEscrow {
                     escrow.yield_bps,
                 );
                 Self::set_persistent_investor_claim_not_before(&env, investor.clone(), 0u64);
-                tier_lock_secs = 0;
             } else {
                 // Returning investor: yield was set on first deposit; read it for the event.
                 investor_effective_yield_bps =
                     Self::get_persistent_investor_effective_yield(&env, investor.clone())
                         .unwrap_or(escrow.yield_bps);
-                tier_lock_secs = 0;
             }
             // If prev > 0, preserve existing effective yield and claim lock
         } else {
@@ -4763,28 +4782,13 @@ impl DefaultMockToken {
         let from_bal = balances
             .get(from.clone())
             .unwrap_or(MOCK_TOKEN_DEFAULT_BALANCE);
-        let to_bal = balances.get(to.clone()).unwrap_or(MOCK_TOKEN_DEFAULT_BALANCE);
+        let to_bal = balances
+            .get(to.clone())
+            .unwrap_or(MOCK_TOKEN_DEFAULT_BALANCE);
         balances.set(from.clone(), from_bal - amount);
         balances.set(to.clone(), to_bal + amount);
         env.storage().instance().set(&key, &balances);
     }
-}
-
-#[inline(always)]
-pub fn guard_status_eq(env: &Env, actual: u32, expected: u32, err: EscrowError) {
-    ensure(env, actual == expected, err);
-}
-
-#[inline(always)]
-pub fn guard_status_in(env: &Env, actual: u32, expected: &[u32], err: EscrowError) {
-    let mut found = false;
-    for e in expected.iter() {
-        if actual == *e {
-            found = true;
-            break;
-        }
-    }
-    ensure(env, found, err);
 }
 
 #[cfg(any(test, feature = "testutils"))]

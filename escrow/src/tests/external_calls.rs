@@ -860,3 +860,56 @@ fn reconciliation_fully_distributed_reports_only_dust_as_surplus() {
     assert_eq!(view.surplus, 1i128);
     assert_eq!(view.token_balance, token.token.balance(&client.address));
 }
+// ── Issue #460: TreasuryDustSwept event on successful sweep ────────────────
+
+#[test]
+fn sweep_terminal_dust_emits_treasury_dust_swept_event() {
+    use soroban_sdk::symbol_short;
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    let fund_amount = 1_000i128;
+    let dust = 7i128;
+    let (token, treasury) =
+        setup_cancelled_with_token(&env, &client, &admin, &sme, &investor, fund_amount);
+    token.stellar.mint(&client.address, &(fund_amount + dust));
+    client.refund(&investor);
+
+    let invoice_id = client.get_escrow().invoice_id.clone();
+    let contract_id = client.address.clone();
+    let swept = client.sweep_terminal_dust(&dust);
+    assert_eq!(swept, dust);
+
+    assert_eq!(
+        env.events().all().events().last().unwrap().clone(),
+        TreasuryDustSwept {
+            name: symbol_short!("dust_sw"),
+            invoice_id,
+            recipient: treasury,
+            token: token.id,
+            amount: dust,
+        }
+        .to_xdr(&env, &contract_id)
+    );
+}
+
+#[test]
+fn sweep_liability_floor_blocked_emits_no_dust_event() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    let fund_amount = 500i128;
+    let (token, _treasury) =
+        setup_cancelled_with_token(&env, &client, &admin, &sme, &investor, fund_amount);
+    token.stellar.mint(&client.address, &(fund_amount + 1));
+
+    let events_before = env.events().all().events().len();
+    assert!(client.try_sweep_terminal_dust(&1i128).is_err());
+    assert_eq!(env.events().all().events().len(), events_before);
+}

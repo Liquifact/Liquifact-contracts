@@ -409,8 +409,9 @@ Data:
 | Field | Type |
 |---|---|
 | `invoice_id` | `Symbol` |
+| `recipient` | `Address` | Treasury address that received the sweep |
 | `token` | `Address` |
-| `amount` | `i128` |
+| `amount` | `i128` | Effective swept amount (after balance/floor capping) |
 
 ### `PrimaryAttestationBound`
 

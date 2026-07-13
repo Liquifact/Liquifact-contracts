@@ -164,7 +164,7 @@ liquifact-contracts/
 | `refund` | Investor | Investor pulls contributed liquidity from a cancelled escrow. Increments `DistributedPrincipal` liability. |
 | `claim_investor_payout` | Investor | Investor records a payout claim after settlement. |
 | `claim_payouts_batch` | Investor / Any | Batch-record payout claims for up to `MAX_CLAIM_BATCH` investors in one transaction. |
-| `sweep_terminal_dust` | Treasury | Treasury sweeps rounding residue from a terminal escrow. |
+| `sweep_terminal_dust` | Treasury | Treasury sweeps rounding residue from a terminal escrow. Emits `TreasuryDustSwept` (`dust_sw`) with amount and recipient. |
 | `migrate` | Admin | Schema version gate — **typed errors on all paths** in the current release (codes 90–92). |
 | `set_legal_hold` | Admin | Admin activates/clears compliance hold. |
 | `set_paused` | Admin | Admin toggles a lightweight operational pause (incident response) that blocks `fund`, `settle`, `withdraw`, and `claim_investor_payout`. Orthogonal to legal hold; single-call toggle with no clear delay. |

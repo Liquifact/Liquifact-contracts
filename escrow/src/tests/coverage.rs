@@ -4837,6 +4837,7 @@ fn test_event_treasury_dust_swept_symbol() {
     let expected = TreasuryDustSwept {
         name: symbol_short!("dust_sw"),
         invoice_id,
+        recipient: treasury,
         token: token_id,
         amount: 50,
     };
