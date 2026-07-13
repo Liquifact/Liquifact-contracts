@@ -242,26 +242,25 @@ When `maturity > 0`:
 
 ## Funding deadline update
 
-`update_funding_deadline(new_deadline: Option<u64>)` allows the admin to set, extend, or clear
-the optional funding deadline while the escrow is **open** (status == 0):
+`extend_funding_deadline(new_deadline: u64)` allows the admin to **push the funding deadline forward**
+while the escrow is **open** (status == 0). Shortening or clearing the deadline is not supported by
+this entrypoint.
 
-| Status | `update_funding_deadline` result |
+| Status | `extend_funding_deadline` result |
 |--------|----------------------------------|
-| 0 — Open | ✅ Allowed |
-| 1 — Funded | ❌ Panics: "Funding deadline can only be updated in Open state" |
-| 2 — Settled | ❌ Panics: "Funding deadline can only be updated in Open state" |
-| 3 — Withdrawn | ❌ Panics: "Funding deadline can only be updated in Open state" |
-| 4 — Cancelled | ❌ Panics: "Funding deadline can only be updated in Open state" |
+| 0 — Open | ✅ Allowed when `new_deadline > current` and `< maturity` (when maturity configured) |
+| 1 — Funded | ❌ `FundingDeadlineUpdateNotOpen` |
+| 2 — Settled | ❌ `FundingDeadlineUpdateNotOpen` |
+| 3 — Withdrawn | ❌ `FundingDeadlineUpdateNotOpen` |
+| 4 — Cancelled | ❌ `FundingDeadlineUpdateNotOpen` |
 
 **Validation rules:**
-- `Some(d)`: `d` must be strictly greater than the current ledger timestamp (same rule as `init`).
-- `None`: removes the deadline entirely; funding becomes unrestricted by time.
-- `is_funding_expired()` returns `false` when no deadline is set (key absent from storage).
+- A funding deadline must already be configured (`FundingDeadlineNotSet` otherwise).
+- `new_deadline` must be strictly greater than the stored deadline (`FundingDeadlineNotExtended`).
+- When `maturity > 0`, `new_deadline` must be strictly less than maturity (`FundingDeadlineBeyondMaturity`).
 
-**Events:** `FundingDeadlineUpdated` carries `invoice_id`, `prior_deadline`, and `new_deadline`.
+**Events:** `FundingDeadlineExtended` carries `invoice_id`, `old_deadline`, and `new_deadline`.
 
-This is consistent with `update_funding_target` and `update_maturity`: all three are admin-gated,
-open-state-only setters that emit a typed event with the prior and new values.
 
 ---
 

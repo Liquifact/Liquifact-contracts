@@ -437,6 +437,12 @@ pub enum EscrowError {
     PayoutZero = 170,
     /// `update_funding_deadline` was called on a non-open escrow (status != 0).
     FundingDeadlineUpdateNotOpen = 171,
+    /// [`LiquifactEscrow::extend_funding_deadline`] did not strictly extend the stored deadline.
+    FundingDeadlineNotExtended = 203,
+    /// [`LiquifactEscrow::extend_funding_deadline`] would place the deadline at or beyond maturity.
+    FundingDeadlineBeyondMaturity = 204,
+    /// [`LiquifactEscrow::extend_funding_deadline`] called when no funding deadline is configured.
+    FundingDeadlineNotSet = 205,
 
     /// [`LiquifactEscrow::lower_min_contribution_floor`] called while escrow is not open.
     FloorLowerNotOpen = 173,
@@ -455,7 +461,16 @@ pub enum EscrowError {
     MaxPerInvestorCapNotRaised = 25,     // new
     /// [`LiquifactEscrow::raise_maturity_max_horizon`] received a `new_horizon` that is
     /// not strictly greater than the current stored horizon.
-    HorizonNotRaised = 201,
+    HorizonNotRaised = 214,
+
+    /// [`LiquifactEscrow::fund`] blocked while operational pause is active.
+    PausedBlocksFunding = 210,
+    /// [`LiquifactEscrow::settle`] blocked while operational pause is active.
+    PausedBlocksSettlement = 211,
+    /// [`LiquifactEscrow::withdraw`] blocked while operational pause is active.
+    PausedBlocksWithdrawal = 212,
+    /// [`LiquifactEscrow::claim_investor_payout`] blocked while operational pause is active.
+    PausedBlocksInvestorClaims = 213,
 }
 
 #[inline(always)]
@@ -476,7 +491,12 @@ pub(crate) fn ensure(env: &Env, condition: bool, error: EscrowError) {
 /// specific named status check (e.g. [`require_funding_open`]) delegate here so the
 /// exact error code is preserved at every call site.
 #[inline(always)]
-pub(crate) fn guard_status_eq(env: &Env, actual_status: u32, expected_status: u32, error: EscrowError) {
+pub(crate) fn guard_status_eq(
+    env: &Env,
+    actual_status: u32,
+    expected_status: u32,
+    error: EscrowError,
+) {
     ensure(env, actual_status == expected_status, error);
 }
 
@@ -1008,6 +1028,18 @@ pub struct FundingTargetUpdated {
     pub new_target: i128,
 }
 
+/// Emitted by [\LiquifactEscrow::extend_funding_deadline\] when the admin pushes the
+/// funding deadline forward while the escrow is open.
+#[contractevent]
+pub struct FundingDeadlineExtended {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    pub old_deadline: u64,
+    pub new_deadline: u64,
+}
+
 #[contractevent]
 pub struct LegalHoldChanged {
     #[topic]
@@ -1473,7 +1505,7 @@ impl LiquifactEscrow {
         max_per_investor: Option<i128>,
         legal_hold_clear_delay: Option<u64>,
         maturity_max_horizon: Option<u64>,
-        _funding_deadline: Option<u64>,
+        funding_deadline: Option<u64>,
         allowlist_active: Option<bool>,
     ) -> InvoiceEscrow {
         admin.require_auth();
@@ -1554,6 +1586,21 @@ impl LiquifactEscrow {
             env.storage()
                 .instance()
                 .set(&DataKey::AllowlistActive, &active);
+        }
+
+        if let Some(deadline) = funding_deadline {
+            let now = env.ledger().timestamp();
+            ensure(&env, deadline > now, EscrowError::FundingDeadlinePassed);
+            if maturity > 0 {
+                ensure(
+                    &env,
+                    deadline < maturity,
+                    EscrowError::FundingDeadlineBeyondMaturity,
+                );
+            }
+            env.storage()
+                .instance()
+                .set(&DataKey::FundingDeadline, &deadline);
         }
 
         let invoice_sym = validate_invoice_id_string(&env, &invoice_id);
@@ -1917,6 +1964,55 @@ impl LiquifactEscrow {
         } else {
             false
         }
+    }
+
+    pub fn extend_funding_deadline(env: Env, new_deadline: u64) -> u64 {
+        let escrow = Self::load_escrow_require_admin(&env);
+        guard_status_eq(
+            &env,
+            escrow.status,
+            0,
+            EscrowError::FundingDeadlineUpdateNotOpen,
+        );
+
+        let current: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::FundingDeadline)
+            .unwrap_or_else(|| fail(&env, EscrowError::FundingDeadlineNotSet));
+
+        ensure(
+            &env,
+            new_deadline > current,
+            EscrowError::FundingDeadlineNotExtended,
+        );
+
+        if escrow.maturity > 0 {
+            ensure(
+                &env,
+                new_deadline < escrow.maturity,
+                EscrowError::FundingDeadlineBeyondMaturity,
+            );
+        }
+
+        env.storage()
+            .instance()
+            .set(&DataKey::FundingDeadline, &new_deadline);
+
+        env.storage().instance().extend_ttl(
+            INSTANCE_TTL_MIN_EXTENSION_LEDGERS,
+            INSTANCE_TTL_MIN_EXTENSION_LEDGERS,
+        );
+
+        FundingDeadlineExtended {
+            name: symbol_short!("fund_ext"),
+            invoice_id: escrow.invoice_id.clone(),
+            old_deadline: current,
+            new_deadline,
+        }
+        .publish(&env);
+
+        new_deadline
     }
 
     /// Whether a compliance/legal hold is active (defaults to `false` if unset).
@@ -2525,8 +2621,7 @@ impl LiquifactEscrow {
     pub fn get_settlement_readiness(env: Env) -> SettlementReadiness {
         let legal_hold_active = Self::legal_hold_active(&env);
         let escrow = Self::get_escrow(env.clone());
-        let maturity_reached =
-            escrow.maturity == 0 || env.ledger().timestamp() >= escrow.maturity;
+        let maturity_reached = escrow.maturity == 0 || env.ledger().timestamp() >= escrow.maturity;
 
         // Reuse the single-source-of-truth gate so this view cannot drift from `settle`.
         let is_settleable = Self::settleable_now(&env);
@@ -3619,13 +3714,11 @@ impl LiquifactEscrow {
                     escrow.yield_bps,
                 );
                 Self::set_persistent_investor_claim_not_before(&env, investor.clone(), 0u64);
-                tier_lock_secs = 0;
             } else {
                 // Returning investor: yield was set on first deposit; read it for the event.
                 investor_effective_yield_bps =
                     Self::get_persistent_investor_effective_yield(&env, investor.clone())
                         .unwrap_or(escrow.yield_bps);
-                tier_lock_secs = 0;
             }
             // If prev > 0, preserve existing effective yield and claim lock
         } else {
@@ -4763,28 +4856,13 @@ impl DefaultMockToken {
         let from_bal = balances
             .get(from.clone())
             .unwrap_or(MOCK_TOKEN_DEFAULT_BALANCE);
-        let to_bal = balances.get(to.clone()).unwrap_or(MOCK_TOKEN_DEFAULT_BALANCE);
+        let to_bal = balances
+            .get(to.clone())
+            .unwrap_or(MOCK_TOKEN_DEFAULT_BALANCE);
         balances.set(from.clone(), from_bal - amount);
         balances.set(to.clone(), to_bal + amount);
         env.storage().instance().set(&key, &balances);
     }
-}
-
-#[inline(always)]
-pub fn guard_status_eq(env: &Env, actual: u32, expected: u32, err: EscrowError) {
-    ensure(env, actual == expected, err);
-}
-
-#[inline(always)]
-pub fn guard_status_in(env: &Env, actual: u32, expected: &[u32], err: EscrowError) {
-    let mut found = false;
-    for e in expected.iter() {
-        if actual == *e {
-            found = true;
-            break;
-        }
-    }
-    ensure(env, found, err);
 }
 
 #[cfg(any(test, feature = "testutils"))]
