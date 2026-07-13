@@ -1205,3 +1205,111 @@ fn test_cancellation_refund_sweep_lifecycle() {
 
     // After all refunds, outstanding is 0.
 }
+// ── Issue #396: refund_batch ─────────────────────────────────────────────────
+
+#[test]
+fn test_refund_batch_matches_individual_refunds() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let token = install_stellar_asset_token(&env);
+    let treasury = Address::generate(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "RBATCH"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &token.id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    let inv_a = Address::generate(&env);
+    let inv_b = Address::generate(&env);
+    let amt_a = 30_000i128;
+    let amt_b = 70_000i128;
+    token.stellar.mint(&inv_a, &amt_a);
+    token.stellar.mint(&inv_b, &amt_b);
+    token.stellar.approve(
+        &inv_a,
+        &client.address,
+        &amt_a,
+        &(env.ledger().sequence() + 100),
+    );
+    token.stellar.approve(
+        &inv_b,
+        &client.address,
+        &amt_b,
+        &(env.ledger().sequence() + 100),
+    );
+    client.fund(&inv_a, &amt_a);
+    client.fund(&inv_b, &amt_b);
+    token.stellar.mint(&client.address, &(amt_a + amt_b));
+    client.cancel_funding();
+
+    let mut investors = SorobanVec::new(&env);
+    investors.push_back(inv_a.clone());
+    investors.push_back(inv_b.clone());
+    client.refund_batch(&investors);
+
+    assert_eq!(client.get_distributed_principal(), amt_a + amt_b);
+    assert_eq!(token.stellar.balance(&inv_a), amt_a);
+    assert_eq!(token.stellar.balance(&inv_b), amt_b);
+    assert_eq!(client.get_contribution(&inv_a), 0);
+    assert_eq!(client.get_contribution(&inv_b), 0);
+}
+
+#[test]
+fn test_refund_batch_skips_already_refunded() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let token = install_stellar_asset_token(&env);
+    let treasury = Address::generate(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "RBSKIP"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &token.id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+    let inv = Address::generate(&env);
+    token.stellar.mint(&inv, &10_000i128);
+    token.stellar.approve(
+        &inv,
+        &client.address,
+        &10_000i128,
+        &(env.ledger().sequence() + 100),
+    );
+    client.fund(&inv, &10_000i128);
+    token.stellar.mint(&client.address, &10_000i128);
+    client.cancel_funding();
+    client.refund(&inv);
+
+    let mut investors = SorobanVec::new(&env);
+    investors.push_back(inv.clone());
+    client.refund_batch(&investors);
+    assert_eq!(client.get_distributed_principal(), 10_000i128);
+}

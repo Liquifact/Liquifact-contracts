@@ -149,6 +149,8 @@ See also [`docs/escrow-legal-hold.md`](escrow-legal-hold.md),
 | 200 | `PartialSettleUnauthorizedCaller` | `partial_settle` | `caller` is neither `sme_address` nor `admin` | Call as the SME or admin | typed |
 | 201 | `LegalHoldBlocksPartialSettle` | `partial_settle` | legal hold active | Complete legal-hold clear workflow | typed |
 | 202 | `PartialSettleNotOpen` | `partial_settle` | escrow status `!= 0` (open) | Partial settle only while open | typed |
+| 206 | `RefundBatchEmpty` | `refund_batch` | empty investors vec | Pass at least one address | typed |
+| 207 | `RefundBatchTooLarge` | `refund_batch` | exceeds `MAX_REFUND_BATCH` | Split into smaller batches | typed |
 
 ### Legacy panic strings (migration aid)
 

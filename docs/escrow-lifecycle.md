@@ -263,6 +263,13 @@ the optional funding deadline while the escrow is **open** (status == 0):
 This is consistent with `update_funding_target` and `update_maturity`: all three are admin-gated,
 open-state-only setters that emit a typed event with the prior and new values.
 
+## Batch refund recovery
+
+`refund_batch(investors: Vec<Address>)` returns principal to multiple investors in a cancelled escrow
+(status 4), bounded by `MAX_REFUND_BATCH` (50). Each entry requires per-investor authorization and
+emits `InvestorRefundedEvt` on success. Already-refunded investors are skipped without failing the batch.
+
+
 ---
 
 ## Terminal states and dust sweep
