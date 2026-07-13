@@ -361,6 +361,51 @@ fn test_rotate_beneficiary_wrong_state() {
     client.rotate_beneficiary(&Address::generate(&env));
 }
 
+/// #477: `rotate_beneficiary` requires BOTH the outgoing SME and the admin
+/// to authorize (dual authorization). Authorizing only the SME must still
+/// fail, because the admin's `require_auth` is never satisfied.
+#[test]
+#[should_panic]
+fn test_rotate_beneficiary_missing_admin_auth_panics() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    let new_sme = Address::generate(&env);
+    // Authorize ONLY the SME for this call; admin stays unauthorized.
+    env.mock_auths(&[soroban_sdk::testutils::MockAuth {
+        address: &sme,
+        invoke: &soroban_sdk::testutils::MockAuthInvoke {
+            contract: &client.address,
+            fn_name: "rotate_beneficiary",
+            args: soroban_sdk::Vec::<soroban_sdk::Val>::new(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    client.rotate_beneficiary(&new_sme);
+}
+
+/// #477: Authorizing only the admin must also fail, because the outgoing
+/// SME's `require_auth` (checked first) is never satisfied.
+#[test]
+#[should_panic]
+fn test_rotate_beneficiary_missing_sme_auth_panics() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    let new_sme = Address::generate(&env);
+    // Authorize ONLY the admin for this call; SME stays unauthorized.
+    env.mock_auths(&[soroban_sdk::testutils::MockAuth {
+        address: &admin,
+        invoke: &soroban_sdk::testutils::MockAuthInvoke {
+            contract: &client.address,
+            fn_name: "rotate_beneficiary",
+            args: soroban_sdk::Vec::<soroban_sdk::Val>::new(&env),
+            sub_invokes: &[],
+        },
+    }]);
+    client.rotate_beneficiary(&new_sme);
+}
+
 #[test]
 #[should_panic]
 fn test_transfer_admin_uninitialized_panics() {
