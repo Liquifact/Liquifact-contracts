@@ -4617,11 +4617,7 @@ fn test_get_yield_tiers_is_pure_read_no_state_change() {
 
 /// Helper: initialise an escrow with three tiers (30s / 60s / 90s) and a base
 /// yield of 500 bps.  Returns the client ready for use; all auth is mocked.
-fn setup_three_tier_escrow(
-    env: &Env,
-    invoice_id: &str,
-    target: i128,
-) -> LiquifactEscrowClient {
+fn setup_three_tier_escrow(env: &Env, invoice_id: &str, target: i128) -> LiquifactEscrowClient {
     let admin = Address::generate(env);
     let sme = Address::generate(env);
     let (tok, tre) = free_addresses(env);
@@ -4803,4 +4799,49 @@ fn test_preview_matches_actual_varying_amounts() {
         assert_preview_matches_actual(&client, &env, amount, 30u64);
         assert_preview_matches_actual(&client, &env, amount, 60u64);
     }
+}
+// ── Issue #333: tiered-yield worked examples (docs parity tests) ─────────────
+
+/// Worked example: base=500, tiers=[(30,700),(60,900),(90,1200)].
+/// Lock=45 selects tier 0 (700 bps) and sets claim_not_before = now + 45.
+#[test]
+fn test_tiered_yield_worked_example_tier0_selection() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = setup_three_tier_escrow(&env, "WY_T0", 1_000_000i128);
+    let investor = Address::generate(&env);
+    let now = env.ledger().timestamp();
+    client.fund_with_commitment(&investor, &100_000i128, &45u64);
+    assert_eq!(client.get_effective_yield_bps(&investor), 700);
+    assert_eq!(client.get_investor_claim_not_before(&investor), now + 45);
+}
+
+/// Worked example: follow-on principal must use `fund`, preserving tier yield and lock.
+#[test]
+fn test_tiered_yield_worked_example_follow_on_fund() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = setup_three_tier_escrow(&env, "WY_FO", 1_000_000i128);
+    let investor = Address::generate(&env);
+    let now = env.ledger().timestamp();
+    client.fund_with_commitment(&investor, &100_000i128, &60u64);
+    let lock = client.get_investor_claim_not_before(&investor);
+    client.fund(&investor, &50_000i128);
+    assert_eq!(client.get_effective_yield_bps(&investor), 900);
+    assert_eq!(client.get_investor_claim_not_before(&investor), lock);
+    assert_eq!(lock, now + 60);
+}
+
+/// Worked example: second `fund_with_commitment` from same investor is rejected.
+#[test]
+fn test_tiered_yield_worked_example_second_commitment_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = setup_three_tier_escrow(&env, "WY_2C", 1_000_000i128);
+    let investor = Address::generate(&env);
+    client.fund_with_commitment(&investor, &100_000i128, &30u64);
+    assert_contract_error(
+        client.try_fund_with_commitment(&investor, &50_000i128, &90u64),
+        EscrowError::TieredSecondDeposit,
+    );
 }

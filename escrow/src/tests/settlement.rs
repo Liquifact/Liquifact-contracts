@@ -2097,14 +2097,20 @@ fn test_settlement_readiness_funded_but_held_blocks_ready() {
     let r = client.get_settlement_readiness();
     assert!(r.legal_hold_active);
     assert!(r.maturity_reached);
-    assert!(!r.is_settleable, "a legal hold makes the escrow not settleable");
+    assert!(
+        !r.is_settleable,
+        "a legal hold makes the escrow not settleable"
+    );
     assert!(!r.ready_now, "ready_now must be false under an active hold");
 
     // Parity: ready_now == false ⇒ settle fails.
     let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         client.settle();
     }));
-    assert!(res.is_err(), "settle must fail while a legal hold is active");
+    assert!(
+        res.is_err(),
+        "settle must fail while a legal hold is active"
+    );
 }
 
 /// Funded with a future maturity: pre-maturity `maturity_reached` is false and

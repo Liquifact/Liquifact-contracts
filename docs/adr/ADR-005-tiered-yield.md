@@ -71,3 +71,50 @@ The tier table is readable after `init` via `get_yield_tiers() -> Vec<YieldTier>
 - Returned order matches the validated non-decreasing ordering enforced at `init`.
 - Pure read — no auth required, no state mutation.
 - See `docs/escrow-read-api.md` for the full getter reference.
+
+## Worked examples
+
+All numeric examples below use a three-tier table configured at `init`:
+
+| Tier | `min_lock_secs` | `yield_bps` |
+|------|-----------------|-------------|
+| 0 | 30 | 700 |
+| 1 | 60 | 900 |
+| 2 | 90 | 1_200 |
+
+Base yield (`yield_bps` at init) = **500 bps**.
+
+### Tier selection at first deposit
+
+An investor calls `fund_with_commitment(investor, amount, lock_secs)` on their **first** deposit only:
+
+| `lock_secs` | Matched tier | Effective yield | `InvestorClaimNotBefore` |
+|-------------|--------------|-----------------|---------------------------|
+| 0 | (none) | 500 (base) | `0` (no claim gate) |
+| 45 | tier 0 | 700 | `ledger.timestamp() + 45` |
+| 60 | tier 1 | 900 | `ledger.timestamp() + 60` |
+| 120 | tier 2 | 1_200 | `ledger.timestamp() + 120` |
+
+The contract picks the **highest-yield tier** whose `min_lock_secs <= lock_secs`. If no tier qualifies, the base yield applies.
+
+### Follow-on deposits
+
+After the first deposit, the investor **must** use plain `fund()` for additional principal:
+
+```text
+fund_with_commitment(100_000, lock=60)  → effective yield 900, claim lock set
+fund(50_000)                            → adds principal at 900 bps; lock unchanged
+fund_with_commitment(...)               → TieredSecondDeposit (rejected)
+```
+
+### Validation rejections at `init`
+
+| Misconfigured table | Error |
+|---------------------|-------|
+| Tier yield 400 when base is 500 | `TierYieldBelowBase` |
+| Locks `[60, 30]` (not strictly increasing) | `TierLockNotIncreasing` |
+| Yields `[900, 800]` (decreasing) | `TierYieldNotNonDecreasing` |
+
+### Claim-time enforcement
+
+`claim_investor_payout` requires `ledger.timestamp() >= InvestorClaimNotBefore(investor)` when the stored value is non-zero. The lock is anchored to the **first** `fund_with_commitment` call and is **not** reset by follow-on `fund()` calls.
