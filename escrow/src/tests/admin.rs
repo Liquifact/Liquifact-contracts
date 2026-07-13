@@ -2127,7 +2127,10 @@ fn test_registry_ref_does_not_affect_settlement_or_funding() {
         registry: None,
     }
     .to_xdr(&env, &contract_id);
-    assert_eq!(last, expected_clear, "last event must be reg_rebind with None");
+    assert_eq!(
+        last, expected_clear,
+        "last event must be reg_rebind with None"
+    );
 }
 
 fn test_error_code_uniqueness() {

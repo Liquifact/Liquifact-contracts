@@ -476,7 +476,12 @@ pub(crate) fn ensure(env: &Env, condition: bool, error: EscrowError) {
 /// specific named status check (e.g. [`require_funding_open`]) delegate here so the
 /// exact error code is preserved at every call site.
 #[inline(always)]
-pub(crate) fn guard_status_eq(env: &Env, actual_status: u32, expected_status: u32, error: EscrowError) {
+pub(crate) fn guard_status_eq(
+    env: &Env,
+    actual_status: u32,
+    expected_status: u32,
+    error: EscrowError,
+) {
     ensure(env, actual_status == expected_status, error);
 }
 
@@ -2525,8 +2530,7 @@ impl LiquifactEscrow {
     pub fn get_settlement_readiness(env: Env) -> SettlementReadiness {
         let legal_hold_active = Self::legal_hold_active(&env);
         let escrow = Self::get_escrow(env.clone());
-        let maturity_reached =
-            escrow.maturity == 0 || env.ledger().timestamp() >= escrow.maturity;
+        let maturity_reached = escrow.maturity == 0 || env.ledger().timestamp() >= escrow.maturity;
 
         // Reuse the single-source-of-truth gate so this view cannot drift from `settle`.
         let is_settleable = Self::settleable_now(&env);
@@ -4763,7 +4767,9 @@ impl DefaultMockToken {
         let from_bal = balances
             .get(from.clone())
             .unwrap_or(MOCK_TOKEN_DEFAULT_BALANCE);
-        let to_bal = balances.get(to.clone()).unwrap_or(MOCK_TOKEN_DEFAULT_BALANCE);
+        let to_bal = balances
+            .get(to.clone())
+            .unwrap_or(MOCK_TOKEN_DEFAULT_BALANCE);
         balances.set(from.clone(), from_bal - amount);
         balances.set(to.clone(), to_bal + amount);
         env.storage().instance().set(&key, &balances);
