@@ -2088,10 +2088,7 @@ fn snapshot_denominator_consistent_across_all_payout_reads() {
 ///
 /// When a cap is present: `count + remaining == cap` and `remaining >= 0`.
 /// When no cap: `get_remaining_investor_slots` returns `None`.
-fn assert_slots_invariant(
-    client: &super::LiquifactEscrowClient<'_>,
-    label: &str,
-) {
+fn assert_slots_invariant(client: &super::LiquifactEscrowClient<'_>, label: &str) {
     match client.get_remaining_investor_slots() {
         None => {
             // No cap — correct; nothing more to assert.
@@ -2139,7 +2136,7 @@ fn slots_no_cap_is_none_after_multiple_funds() {
         &Address::generate(&env),
         &None,
         &None,
-        &None,  // no max_unique_investors
+        &None, // no max_unique_investors
         &None,
         &None,
         &None,
@@ -2394,7 +2391,10 @@ fn slots_lower_cap_mid_sequence_invariant() {
 
     assert_eq!(cap_after_lower, 3);
     assert_eq!(count_after_lower, 3);
-    assert_eq!(remaining_after_lower, 0, "remaining must be 0 when cap == count");
+    assert_eq!(
+        remaining_after_lower, 0,
+        "remaining must be 0 when cap == count"
+    );
 
     // Further lower to mid-range (cap = 5, count stays 3).
     // First reset cap to 6, then lower to 5.
@@ -2723,15 +2723,16 @@ fn slots_cap_exactly_hit_remaining_is_zero() {
         &None,
     );
 
-    let investors: Vec<Address> = (0..cap as usize)
-        .map(|_| Address::generate(&env))
-        .collect();
+    let investors: Vec<Address> = (0..cap as usize).map(|_| Address::generate(&env)).collect();
 
     for (i, inv) in investors.iter().enumerate() {
         client.fund(inv, &100_000i128);
         let remaining = client.get_remaining_investor_slots().unwrap();
         let count = client.get_unique_funder_count();
-        assert!(remaining >= 0, "remaining must not underflow after investor {i}");
+        assert!(
+            remaining >= 0,
+            "remaining must not underflow after investor {i}"
+        );
         assert_eq!(
             count + remaining,
             cap,
@@ -2741,6 +2742,9 @@ fn slots_cap_exactly_hit_remaining_is_zero() {
 
     // After all cap slots consumed: remaining must be 0.
     let final_remaining = client.get_remaining_investor_slots().unwrap();
-    assert_eq!(final_remaining, 0, "remaining must be exactly 0 when cap is fully consumed");
+    assert_eq!(
+        final_remaining, 0,
+        "remaining must be exactly 0 when cap is fully consumed"
+    );
     assert_slots_invariant(&client, "cap exactly hit");
 }
