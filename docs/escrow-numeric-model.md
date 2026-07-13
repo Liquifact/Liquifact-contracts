@@ -40,3 +40,21 @@ These invariants are validated with randomized property tests in `escrow/src/tes
 - Maturity and claim-lock checks are ledger-time checks, not wall-clock oracle checks.
 - Unsupported token economics remain out of scope. Fee-on-transfer, rebasing, malicious, or callback-heavy tokens are covered separately in [`escrow/src/external_calls.rs`](../escrow/src/external_calls.rs) and [`ESCROW_TOKEN_INTEGRATION_CHECKLIST.md`](ESCROW_TOKEN_INTEGRATION_CHECKLIST.md).
 
+## Refund conservation (cancelled escrows)
+
+In status **cancelled** (4), the following invariants hold for all refund orderings:
+
+- Each `refund(investor)` returns at most that investor's recorded contribution.
+- `DistributedPrincipal` increases atomically per refund and never exceeds `funded_amount`.
+- Once every investor has refunded, `DistributedPrincipal == funded_amount`.
+- Double-refund is impossible: contribution is zeroed before the token transfer.
+
+These properties are validated in `escrow/src/tests/properties.rs` (`prop_refund_conservation_never_exceeds_funded_principal`).
+
+## Integration Guidance
+
+- Off-chain callers should validate amount and lock-duration inputs before submitting transactions, especially when simulating near integer limits.
+- Risk and accounting systems should use integer arithmetic for base-unit amounts and rational math for pro-rata ratios; avoid floating-point rounding when reconciling on-chain state.
+- Maturity and claim-lock checks are ledger-time checks, not wall-clock oracle checks.
+- Unsupported token economics remain out of scope. Fee-on-transfer, rebasing, malicious, or callback-heavy tokens are covered separately in [`escrow/src/external_calls.rs`](../escrow/src/external_calls.rs) and [`ESCROW_TOKEN_INTEGRATION_CHECKLIST.md`](ESCROW_TOKEN_INTEGRATION_CHECKLIST.md).
+
