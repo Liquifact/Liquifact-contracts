@@ -1710,6 +1710,7 @@ impl LiquifactEscrow {
 
     pub fn get_pending_admin_remaining_secs(env: Env) -> Option<u64> {
         let pending: Option<Address> = env.storage().instance().get(&DataKey::PendingAdmin);
+        #[allow(clippy::question_mark)]
         if pending.is_none() {
             return None;
         }
