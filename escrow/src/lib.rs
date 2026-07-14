@@ -1553,6 +1553,10 @@ impl LiquifactEscrow {
                 .set(&DataKey::YieldTierTable, tiers);
         }
 
+        if let Some(mc) = min_contribution {
+            ensure(&env, mc > 0, EscrowError::MinContributionNotPositive);
+            ensure(&env, mc <= amount, EscrowError::MinContributionExceedsAmount);
+        }
         let floor = min_contribution.unwrap_or(0);
         env.storage()
             .instance()
@@ -3856,7 +3860,7 @@ impl LiquifactEscrow {
             EscrowError::PartialSettleUnauthorizedCaller,
         );
 
-        require_funding_open(&env, escrow.status);
+        guard_status_eq(&env, escrow.status, 0, EscrowError::PartialSettleNotOpen);
 
         // Transition to funded status early.
         escrow.status = 1;

@@ -224,7 +224,7 @@ fn test_cost_baseline_init_max_amount() {
         &admin,
         &soroban_sdk::String::from_str(&env, "INV102"),
         &sme,
-        &i128::MAX,
+        &(crate::MAX_INVOICE_AMOUNT),
         &800i64,
         &1000u64,
         &Address::generate(&env),
@@ -1101,7 +1101,7 @@ fn datakey_distributed_principal_starts_at_zero_and_increments_on_refund() {
 
     assert_eq!(client.get_distributed_principal(), 0i128);
 
-    token.stellar.mint(&client.address, &500i128);
+    token.stellar.mint(&investor, &500i128);
     client.fund(&investor, &500i128);
     client.cancel_funding();
 
@@ -1199,7 +1199,7 @@ fn test_init_maturity_at_horizon_boundary_accepted() {
 }
 
 #[test]
-#[should_panic(expected = "MaturityExceedsMaxHorizon")]
+#[should_panic(expected = "HostError: Error(Contract, #167)")]
 fn test_init_maturity_beyond_horizon_rejected() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
@@ -1227,7 +1227,7 @@ fn test_init_maturity_beyond_horizon_rejected() {
 }
 
 #[test]
-#[should_panic(expected = "MaturityInPast")]
+#[should_panic(expected = "HostError: Error(Contract, #166)")]
 fn test_init_maturity_in_past_rejected() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
@@ -1376,7 +1376,7 @@ fn test_update_maturity_at_horizon_boundary_accepted() {
 }
 
 #[test]
-#[should_panic(expected = "MaturityExceedsMaxHorizon")]
+#[should_panic(expected = "HostError: Error(Contract, #167)")]
 fn test_update_maturity_beyond_horizon_rejected() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
@@ -1405,7 +1405,7 @@ fn test_update_maturity_beyond_horizon_rejected() {
 }
 
 #[test]
-#[should_panic(expected = "MaturityInPast")]
+#[should_panic(expected = "HostError: Error(Contract, #166)")]
 fn test_update_maturity_in_past_rejected() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
@@ -1475,7 +1475,7 @@ fn test_update_maturity_max_horizon_by_admin() {
 }
 
 #[test]
-#[should_panic(expected = "MaturityExceedsMaxHorizon")]
+#[should_panic(expected = "HostError: Error(Contract, #167)")]
 fn test_update_maturity_honors_reduced_horizon() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
