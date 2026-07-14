@@ -1150,7 +1150,6 @@ pub struct RegistryRefRebound {
     pub registry: Option<Address>,
 }
 
-#[contractevent]
 /// Emitted after a successful [`LiquifactEscrow::sweep_terminal_dust`] transfer.
 ///
 /// Carries the **effective** swept amount (after balance and liability-floor capping),
