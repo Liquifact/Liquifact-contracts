@@ -477,7 +477,7 @@ fn cancel_clear_legal_hold_with_pending_request_succeeds() {
 }
 
 #[test]
-#[should_panic(expected = "No pending clear request to cancel")]
+#[should_panic(expected = "HostError: Error(Contract, #150)")]
 fn cancel_clear_legal_hold_without_pending_request_panics() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);

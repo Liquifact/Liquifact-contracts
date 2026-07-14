@@ -333,7 +333,7 @@ fn typed_error_codes_cover_range_boundaries() {
         &None,
         &None,
     );
-    token.stellar.mint(&floor_client.address, &fund_amount);
+    token.stellar.mint(&sweep_investor, &fund_amount);
     floor_client.fund(&sweep_investor, &fund_amount);
     floor_client.cancel_funding();
     assert_contract_error(
@@ -651,7 +651,7 @@ fn typed_error_codes_cover_range_boundaries() {
         &None,
         &None,
     );
-    rot_token.stellar.mint(&rot_terminal.address, &100);
+    rot_token.stellar.mint(&investor, &100);
     rot_terminal.fund(&investor, &100);
     rot_terminal.settle();
     assert_contract_error(
@@ -1564,7 +1564,9 @@ fn test_sweep_terminal_dust_happy_path() {
         &None,
     );
 
-    client.fund(&Address::generate(&env), &100);
+    let inv = Address::generate(&env);
+    token.stellar.mint(&inv, &100);
+    client.fund(&inv, &100);
     env.ledger().with_mut(|li| li.timestamp = 200);
     client.settle();
 
@@ -1722,11 +1724,10 @@ fn test_withdraw_happy_path() {
         &None,
     );
 
-    client.fund(&Address::generate(&env), &100);
+    let investor = Address::generate(&env);
+    sac_admin.mint(&investor, &100);
+    client.fund(&investor, &100);
     assert_eq!(client.get_escrow().status, 1);
-
-    // Mint funded_amount into the escrow contract so withdraw() can transfer it.
-    sac_admin.mint(&escrow_id, &100);
 
     let updated = client.withdraw();
     assert_eq!(updated.status, 3);
@@ -3157,7 +3158,9 @@ fn test_settle_event_emitted_at_current_ledger_time() {
         &None,
         &None,
     );
-    fund_to_target_stl(&env, &client);
+    let investor = Address::generate(&env);
+    tok.stellar.mint(&investor, &200);
+    client.fund(&investor, &200);
     client.settle();
 
     // The settled escrow status confirms the event was emitted
@@ -3193,7 +3196,9 @@ fn read_view_distributed_principal_after_refund() {
         &None,
         &None,
     );
-    fund_to_target_stl(&env, &client);
+    let investor = Address::generate(&env);
+    tok.stellar.mint(&investor, &200);
+    client.fund(&investor, &200);
     client.settle();
 
     // The settled escrow status confirms the event was emitted
