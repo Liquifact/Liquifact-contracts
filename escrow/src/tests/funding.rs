@@ -271,7 +271,7 @@ fn test_funding_amount_accumulation_overflow_panics() {
         &admin,
         &String::from_str(&env, "OVF001"),
         &sme,
-        &i128::MAX,
+        &(crate::MAX_INVOICE_AMOUNT),
         &800i64,
         &0u64,
         &Address::generate(&env),
@@ -287,7 +287,7 @@ fn test_funding_amount_accumulation_overflow_panics() {
         &None,
     );
 
-    client.fund(&investor_a, &(i128::MAX - 1));
+    client.fund(&investor_a, &(crate::MAX_INVOICE_AMOUNT - 1));
 
     client.fund(&investor_b, &2i128);
 }
@@ -305,7 +305,7 @@ fn test_funding_amount_overflow_does_not_mutate_state() {
         &admin,
         &String::from_str(&env, "OVF002"),
         &sme,
-        &i128::MAX,
+        &(crate::MAX_INVOICE_AMOUNT),
         &800i64,
         &0u64,
         &Address::generate(&env),
@@ -321,7 +321,7 @@ fn test_funding_amount_overflow_does_not_mutate_state() {
         &None,
     );
 
-    client.fund(&investor, &(i128::MAX - 1));
+    client.fund(&investor, &(crate::MAX_INVOICE_AMOUNT - 1));
 
     let before = client.get_escrow();
 
@@ -337,7 +337,10 @@ fn test_funding_amount_overflow_does_not_mutate_state() {
 
     assert_eq!(after.status, 0);
 
-    assert_eq!(client.get_contribution(&investor), i128::MAX - 1);
+    assert_eq!(
+        client.get_contribution(&investor),
+        crate::MAX_INVOICE_AMOUNT - 1
+    );
 }
 
 #[test]
@@ -356,7 +359,7 @@ fn test_fund_with_commitment_overflow_panics() {
         &admin,
         &String::from_str(&env, "OVF001b"),
         &sme,
-        &i128::MAX,
+        &(crate::MAX_INVOICE_AMOUNT),
         &800i64,
         &0u64,
         &Address::generate(&env),
@@ -372,7 +375,7 @@ fn test_fund_with_commitment_overflow_panics() {
         &None,
     );
 
-    client.fund(&investor_a, &(i128::MAX - 1));
+    client.fund(&investor_a, &(crate::MAX_INVOICE_AMOUNT - 1));
 
     client.fund_with_commitment(&investor_b, &2i128, &0u64);
 }
@@ -392,7 +395,7 @@ fn test_fund_with_commitment_overflow_does_not_mutate_state() {
         &admin,
         &String::from_str(&env, "OVF002b"),
         &sme,
-        &i128::MAX,
+        &(crate::MAX_INVOICE_AMOUNT),
         &800i64,
         &0u64,
         &Address::generate(&env),
@@ -408,7 +411,7 @@ fn test_fund_with_commitment_overflow_does_not_mutate_state() {
         &None,
     );
 
-    client.fund(&investor_a, &(i128::MAX - 1));
+    client.fund(&investor_a, &(crate::MAX_INVOICE_AMOUNT - 1));
 
     let before = client.get_escrow();
 
@@ -3039,11 +3042,7 @@ fn test_refund_returns_principal_to_investor() {
 
     let (token, _treasury) = init_with_token(&env, &client, &admin, &sme);
 
-    // Mint tokens into the escrow contract so it can refund
-
-    let contract_id = client.address.clone();
-
-    token.stellar.mint(&contract_id, &TARGET);
+    token.stellar.mint(&investor, &TARGET);
 
     client.fund(&investor, &TARGET);
 
@@ -3059,9 +3058,7 @@ fn test_refund_returns_principal_to_investor() {
 
     let (token2, _) = init_with_token(&env2, &client2, &admin2, &sme2);
 
-    let contract_id2 = client2.address.clone();
-
-    token2.stellar.mint(&contract_id2, &(TARGET / 2));
+    token2.stellar.mint(&investor2, &(TARGET / 2));
 
     client2.fund(&investor2, &(TARGET / 2));
 
@@ -3087,9 +3084,7 @@ fn test_refund_zeroes_contribution() {
 
     let (token, _) = init_with_token(&env, &client, &admin, &sme);
 
-    let contract_id = client.address.clone();
-
-    token.stellar.mint(&contract_id, &(TARGET / 2));
+    token.stellar.mint(&investor, &(TARGET / 2));
 
     client.fund(&investor, &(TARGET / 2));
 
@@ -3111,9 +3106,7 @@ fn test_refund_marks_investor_refunded() {
 
     let (token, _) = init_with_token(&env, &client, &admin, &sme);
 
-    let contract_id = client.address.clone();
-
-    token.stellar.mint(&contract_id, &(TARGET / 2));
+    token.stellar.mint(&investor, &(TARGET / 2));
 
     client.fund(&investor, &(TARGET / 2));
 
@@ -3138,9 +3131,7 @@ fn test_refund_double_spend_panics() {
 
     let (token, _) = init_with_token(&env, &client, &admin, &sme);
 
-    let contract_id = client.address.clone();
-
-    token.stellar.mint(&contract_id, &(TARGET / 2));
+    token.stellar.mint(&investor, &(TARGET / 2));
 
     client.fund(&investor, &(TARGET / 2));
 
@@ -3215,9 +3206,7 @@ fn test_refund_requires_investor_auth() {
 
     let (token, _) = init_with_token(&env, &client, &admin, &sme);
 
-    let contract_id = client.address.clone();
-
-    token.stellar.mint(&contract_id, &(TARGET / 2));
+    token.stellar.mint(&investor, &(TARGET / 2));
 
     client.fund(&investor, &(TARGET / 2));
 
@@ -3250,7 +3239,7 @@ fn test_refund_multiple_investors_independent() {
 
     let amt_b = TARGET / 4;
 
-    token.stellar.mint(&contract_id, &(amt_a + amt_b));
+    token.stellar.mint(&inv_a, &(amt_a + amt_b));
 
     client.fund(&inv_a, &amt_a);
 
@@ -3304,7 +3293,7 @@ fn test_sweep_terminal_dust_allowed_in_cancelled_state() {
 
     // Mint slightly more than the investor contributes to leave dust
 
-    token.stellar.mint(&contract_id, &(TARGET / 2 + 1));
+    token.stellar.mint(&investor, &(TARGET / 2 + 1));
 
     client.fund(&investor, &(TARGET / 2));
 
@@ -4030,7 +4019,7 @@ fn plain_fund_with_maturity_ignores_lock_bound() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[test]
-#[should_panic(expected = "FundingBatchEmpty")]
+#[should_panic(expected = "HostError: Error(Contract, #82)")]
 
 fn test_fund_batch_rejects_empty() {
     let env = Env::default();
@@ -4045,7 +4034,7 @@ fn test_fund_batch_rejects_empty() {
 }
 
 #[test]
-#[should_panic(expected = "FundingBatchTooLarge")]
+#[should_panic(expected = "HostError: Error(Contract, #83)")]
 
 fn test_fund_batch_rejects_oversized() {
     let env = Env::default();
@@ -4162,7 +4151,7 @@ fn test_fund_batch_equals_n_single_funds() {
 }
 
 #[test]
-#[should_panic(expected = "InvestorContributionExceedsCap")]
+#[should_panic(expected = "HostError: Error(Contract, #106)")]
 
 fn test_fund_batch_per_investor_cap_rejection() {
     let env = Env::default();
@@ -4299,7 +4288,7 @@ fn test_fund_batch_mid_batch_funded_transition() {
 }
 
 #[test]
-#[should_panic(expected = "InvestorContributionExceedsCap")]
+#[should_panic(expected = "HostError: Error(Contract, #106)")]
 
 fn test_fund_batch_duplicate_addresses() {
     let env = Env::default();
