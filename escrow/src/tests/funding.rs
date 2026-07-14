@@ -6451,7 +6451,7 @@ fn test_tiered_yield_worked_example_tier0_selection() {
 
     client.fund_with_commitment(&investor, &100_000i128, &45u64);
 
-    assert_eq!(client.get_effective_yield_bps(&investor), 700);
+    assert_eq!(client.get_investor_yield_bps(&investor), 700);
 
     assert_eq!(client.get_investor_claim_not_before(&investor), now + 45);
 }
@@ -6477,7 +6477,7 @@ fn test_tiered_yield_worked_example_follow_on_fund() {
 
     client.fund(&investor, &50_000i128);
 
-    assert_eq!(client.get_effective_yield_bps(&investor), 900);
+    assert_eq!(client.get_investor_yield_bps(&investor), 900);
 
     assert_eq!(client.get_investor_claim_not_before(&investor), lock);
 
