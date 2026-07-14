@@ -3707,7 +3707,8 @@ fn test_event_escrow_initialized_symbol_and_topic0() {
         &None,
         &None,
         &None,
-    );
+        &None,
+        &None);
 
     let expected = EscrowInitialized {
         name: symbol_short!("escrow_ii"),
@@ -3751,7 +3752,8 @@ fn test_event_max_unique_investors_cap_lowered_symbol() {
         &None,
         &None,
         &None,
-    );
+        &None,
+        &None);
 
     let invoice_id = client.get_escrow().invoice_id;
     client.lower_max_unique_investors(&3);
@@ -3796,7 +3798,8 @@ fn test_event_escrow_funded_symbol_and_fields() {
         &None,
         &None,
         &None,
-    );
+        &None,
+        &None);
 
     let invoice_id = client.get_escrow().invoice_id;
     let investor = Address::generate(&env);
@@ -3846,7 +3849,8 @@ fn test_event_escrow_partial_settle_symbol() {
         &None,
         &None,
         &None,
-    );
+        &None,
+        &None);
 
     let invoice_id = client.get_escrow().invoice_id;
     let investor = Address::generate(&env);
@@ -3900,7 +3904,8 @@ fn test_event_escrow_settled_symbol_and_fields() {
         &None,
         &None,
         &None,
-    );
+        &None,
+        &None);
 
     let invoice_id = client.get_escrow().invoice_id;
     let investor = Address::generate(&env);
@@ -3958,7 +3963,8 @@ fn test_event_maturity_updated_symbol() {
         &None,
         &None,
         &None,
-    );
+        &None,
+        &None);
 
     let invoice_id = client.get_escrow().invoice_id;
     client.update_maturity(&2000);
@@ -4003,7 +4009,8 @@ fn test_event_admin_transferred_symbol() {
         &None,
         &None,
         &None,
-    );
+        &None,
+        &None);
 
     let new_admin = Address::generate(&env);
     client.propose_admin(&new_admin, &None);
@@ -4055,7 +4062,8 @@ fn test_event_admin_proposed_symbol() {
         &None,
         &None,
         &None,
-    );
+        &None,
+        &None);
 
     let invoice_id = client.get_escrow().invoice_id;
     let new_admin = Address::generate(&env);
@@ -4101,7 +4109,8 @@ fn test_event_admin_proposal_cancelled_symbol() {
         &None,
         &None,
         &None,
-    );
+        &None,
+        &None);
 
     let invoice_id = client.get_escrow().invoice_id;
     let proposed = Address::generate(&env);
@@ -4155,7 +4164,8 @@ fn test_event_beneficiary_rotated_symbol() {
         &None,
         &None,
         &None,
-    );
+        &None,
+        &None);
 
     let invoice_id = client.get_escrow().invoice_id;
     let new_sme = Address::generate(&env);
@@ -4201,7 +4211,8 @@ fn test_event_funding_target_updated_symbol() {
         &None,
         &None,
         &None,
-    );
+        &None,
+        &None);
 
     let invoice_id = client.get_escrow().invoice_id;
     client.update_funding_target(&2000);
@@ -4246,7 +4257,8 @@ fn test_event_legal_hold_changed_symbol() {
         &None,
         &None,
         &None,
-    );
+        &None,
+        &None);
 
     let invoice_id = client.get_escrow().invoice_id;
     client.set_legal_hold(&true);
@@ -4288,7 +4300,8 @@ fn test_event_legal_hold_clear_convenience_emits_same_symbol() {
         &None,
         &Some(10u64),
         &None,
-    );
+        &None,
+        &None);
 
     let invoice_id = client.get_escrow().invoice_id;
     client.set_legal_hold(&true);
@@ -4342,7 +4355,8 @@ fn test_event_legal_hold_clear_requested_symbol() {
         &None,
         &Some(10u64),
         &None,
-    );
+        &None,
+        &None);
 
     let invoice_id = client.get_escrow().invoice_id;
     let clearable_at = env.ledger().timestamp() + 10;
@@ -4395,7 +4409,8 @@ fn test_event_legal_hold_clear_cancelled_symbol() {
         &None,
         &Some(10u64),
         &None,
-    );
+        &None,
+        &None);
 
     let invoice_id = client.get_escrow().invoice_id;
     client.set_legal_hold(&true);
@@ -4447,7 +4462,8 @@ fn test_event_collateral_recorded_symbol() {
         &None,
         &None,
         &None,
-    );
+        &None,
+        &None);
 
     let asset = Symbol::new(&env, "USDC");
     client.record_sme_collateral_commitment(&asset, &5000);
@@ -4492,7 +4508,8 @@ fn test_event_collateral_cleared_struct() {
         &None,
         &None,
         &None,
-    );
+        &None,
+        &None);
 
     let asset = Symbol::new(&env, "USDC");
     client.record_sme_collateral_commitment(&asset, &5000);
@@ -4535,7 +4552,8 @@ fn test_event_sme_withdrew_symbol() {
         &None,
         &None,
         &None,
-    );
+        &None,
+        &None);
 
     let invoice_id = client.get_escrow().invoice_id;
     let investor = Address::generate(&env);
@@ -4593,7 +4611,8 @@ fn test_event_investor_payout_claimed_symbol() {
         &None,
         &None,
         &None,
-    );
+        &None,
+        &None);
 
     let invoice_id = client.get_escrow().invoice_id;
     let investor = Address::generate(&env);
@@ -4653,7 +4672,8 @@ fn test_event_funding_cancelled_symbol() {
         &None,
         &None,
         &None,
-    );
+        &None,
+        &None);
 
     let invoice_id = client.get_escrow().invoice_id;
     let investor = Address::generate(&env);
@@ -4709,7 +4729,8 @@ fn test_event_investor_refunded_symbol() {
         &None,
         &None,
         &None,
-    );
+        &None,
+        &None);
 
     let invoice_id = client.get_escrow().invoice_id;
     let investor = Address::generate(&env);
@@ -4767,7 +4788,8 @@ fn test_event_registry_ref_rebound_symbol() {
         &None,
         &None,
         &None,
-    );
+        &None,
+        &None);
 
     let invoice_id = client.get_escrow().invoice_id;
     let new_registry = Address::generate(&env);
@@ -4821,7 +4843,8 @@ fn test_event_treasury_dust_swept_symbol() {
         &None,
         &None,
         &None,
-    );
+        &None,
+        &None);
 
     let invoice_id = client.get_escrow().invoice_id;
     let investor = Address::generate(&env);
@@ -4881,7 +4904,8 @@ fn test_event_primary_attestation_bound_symbol() {
         &None,
         &None,
         &None,
-    );
+        &None,
+        &None);
 
     let invoice_id = client.get_escrow().invoice_id;
     let digest = BytesN::from_array(&env, &[1u8; 32]);
@@ -4926,7 +4950,8 @@ fn test_event_attestation_digest_appended_symbol() {
         &None,
         &None,
         &None,
-    );
+        &None,
+        &None);
 
     let invoice_id = client.get_escrow().invoice_id;
     let digest = BytesN::from_array(&env, &[2u8; 32]);
@@ -4972,7 +4997,8 @@ fn test_event_attestation_digest_revoked_symbol() {
         &None,
         &None,
         &None,
-    );
+        &None,
+        &None);
 
     let invoice_id = client.get_escrow().invoice_id;
     let digest = BytesN::from_array(&env, &[1u8; 32]);
@@ -5025,7 +5051,8 @@ fn test_event_allowlist_enabled_changed_symbol() {
         &None,
         &None,
         &None,
-    );
+        &None,
+        &None);
 
     let invoice_id = client.get_escrow().invoice_id;
     client.set_allowlist_active(&true);
@@ -5071,7 +5098,8 @@ fn test_event_investor_allowlist_changed_single_symbol() {
         &None,
         &None,
         &None,
-    );
+        &None,
+        &None);
 
     let invoice_id = client.get_escrow().invoice_id;
     let investor = Address::generate(&env);
@@ -5120,7 +5148,8 @@ fn test_event_investor_allowlist_changed_batch_symbol_reuse() {
         &None,
         &None,
         &None,
-    );
+        &None,
+        &None);
 
     let invoice_id = client.get_escrow().invoice_id;
     let investor_a = Address::generate(&env);
@@ -5192,7 +5221,8 @@ fn test_event_fund_batch_n_events_with_funded_symbol() {
         &None,
         &None,
         &None,
-    );
+        &None,
+        &None);
 
     let invoice_id = client.get_escrow().invoice_id;
     let inv_a = Address::generate(&env);
@@ -5272,7 +5302,8 @@ fn test_event_revoke_attestation_digests_batch_symbol() {
         &None,
         &None,
         &None,
-    );
+        &None,
+        &None);
 
     let invoice_id = client.get_escrow().invoice_id;
     let digest = BytesN::from_array(&env, &[1u8; 32]);
@@ -5438,7 +5469,8 @@ fn test_event_attestation_digest_unrevoked_symbol() {
         &None,
         &None,
         &None,
-    );
+        &None,
+        &None);
 
     let invoice_id = client.get_escrow().invoice_id;
     let digest = BytesN::from_array(&env, &[1u8; 32]);
@@ -5492,7 +5524,8 @@ fn test_event_maturity_max_horizon_updated_symbol() {
         &None,
         &None,
         &None,
-    );
+        &None,
+        &None);
 
     let invoice_id = client.get_escrow().invoice_id;
     let old_horizon = client.get_maturity_max_horizon();
@@ -5538,7 +5571,8 @@ fn test_event_deprecated_transfer_admin_used_symbol() {
         &None,
         &None,
         &None,
-    );
+        &None,
+        &None);
 
     let invoice_id = client.get_escrow().invoice_id;
     let new_admin = Address::generate(&env);
@@ -5598,7 +5632,8 @@ fn test_event_contract_upgraded_symbol() {
         &None,
         &None,
         &None,
-    );
+        &None,
+        &None);
 
     // upgrade() requires a valid WASM hash to deploy; we can test symbol emission
     // by checking that a failing upgrade still emits the event if the hash is invalid.
