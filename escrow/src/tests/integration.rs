@@ -1,6 +1,5 @@
 use super::super::external_calls::transfer_funding_token_with_balance_checks;
 use super::*;
-use crate::CollateralRecordedEvt;
 use crate::{CollateralRecordedEvt, DataKey, InvoiceEscrow, LegalHoldChanged};
 use soroban_sdk::{
     contract, contractimpl, symbol_short, vec, IntoVal, Map, MuxedAddress, Symbol, TryFromVal, Val,
