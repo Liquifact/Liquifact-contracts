@@ -5624,6 +5624,6 @@ fn test_event_contract_upgraded_symbol() {
 
 // ÔöÇÔöÇ InvestorAllowlistBatchApplied ÔÇö still planned ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 
-/// NOTE: `InvestorAllowlistBatchApplied` (`al_batch`) is documented in
-/// `EVENT_SCHEMA.md` but the `#[contractevent]` struct and emission code
-/// have not yet been implemented.  A future PR should add this event.
+// NOTE: `InvestorAllowlistBatchApplied` (`al_batch`) is documented in
+// `EVENT_SCHEMA.md` but the `#[contractevent]` struct and emission code
+// have not yet been implemented.  A future PR should add this event.
