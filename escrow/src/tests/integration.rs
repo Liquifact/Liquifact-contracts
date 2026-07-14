@@ -1149,13 +1149,13 @@ fn test_cancellation_refund_sweep_lifecycle() {
     // Alice funds 40,000,000 base units (40k tokens)
     sac_admin.mint(&alice, &40_000_000i128);
     // Mint to contract to simulate Alice's tokens being pulled
-    sac_admin.mint(&escrow_id, &40_000_000i128);
+    sac_admin.mint(&alice, &40_000_000i128);
     client.fund(&alice, &40_000_000i128);
 
     // Bob funds 30,000,000 base units (30k tokens)
     sac_admin.mint(&bob, &30_000_000i128);
     // Mint to contract to simulate Bob's tokens being pulled
-    sac_admin.mint(&escrow_id, &30_000_000i128);
+    sac_admin.mint(&bob, &30_000_000i128);
     client.fund(&bob, &30_000_000i128);
 
     // Bypassing fund(), third party transfers 5,000,000 base units directly to contract
