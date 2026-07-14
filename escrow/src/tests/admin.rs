@@ -306,7 +306,8 @@ fn test_rotate_beneficiary_success() {
         &None,
         &None,
         &None,
-        &None);
+        &None,
+    );
 
     client.rotate_beneficiary(&new_sme);
     let updated = client.get_escrow();
@@ -335,7 +336,8 @@ fn test_rotate_beneficiary_same_address_panics() {
         &None,
         &None,
         &None,
-        &None);
+        &None,
+    );
     client.rotate_beneficiary(&sme);
 }
 
@@ -361,7 +363,8 @@ fn test_rotate_beneficiary_wrong_state() {
         &None,
         &None,
         &None,
-        &None);
+        &None,
+    );
     // Cancel the escrow so it's in a terminal state
     client.cancel_funding();
     client.rotate_beneficiary(&Address::generate(&env));
