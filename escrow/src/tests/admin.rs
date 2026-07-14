@@ -315,7 +315,7 @@ fn test_rotate_beneficiary_success() {
 }
 
 #[test]
-#[should_panic(expected = "HostError: Error(Contract, #81)")]
+#[should_panic(expected = "HostError: Error(Contract, #162)")]
 fn test_rotate_beneficiary_same_address_panics() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
