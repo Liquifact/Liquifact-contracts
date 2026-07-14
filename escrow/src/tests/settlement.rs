@@ -2158,9 +2158,7 @@ fn test_settlement_readiness_maturity_gate_parity() {
         &None,
         &None,
     );
-    let investor = Address::generate(&env);
-    token.stellar.mint(&investor, &TARGET);
-    client.fund(&investor, &TARGET);
+    fund_to_target(&client, &env);
 
     // Pre-maturity: not reached, not ready.
     env.ledger().with_mut(|l| l.timestamp = maturity - 1);

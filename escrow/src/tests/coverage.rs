@@ -3158,9 +3158,7 @@ fn test_settle_event_emitted_at_current_ledger_time() {
         &None,
         &None,
     );
-    let investor = Address::generate(&env);
-    tok.stellar.mint(&investor, &200);
-    client.fund(&investor, &200);
+    fund_to_target_stl(&env, &client);
     client.settle();
 
     // The settled escrow status confirms the event was emitted
@@ -3196,7 +3194,6 @@ fn read_view_distributed_principal_after_refund() {
         &None,
         &None,
     );
-    let investor = Address::generate(&env);
     tok.stellar.mint(&investor, &200);
     client.fund(&investor, &200);
     client.settle();
