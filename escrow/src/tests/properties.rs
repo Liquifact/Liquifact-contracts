@@ -34,7 +34,8 @@ proptest! {
             &None,
             &None,
         &None,
-        &None);
+        &None,
+    );
 
         let before = client.get_escrow().funded_amount;
         client.fund(&investor1, &amount1);
@@ -77,7 +78,8 @@ proptest! {
             &None,
             &None,
         &None,
-        &None);
+        &None,
+    );
         prop_assert_eq!(escrow.status, 0);
 
         let after_fund = client.fund(&investor, &amount);
@@ -163,7 +165,8 @@ proptest! {
             &None,
             &None,
         &None,
-        &None);
+        &None,
+    );
 
         let investors: Vec<Address> = (0..investor_count)
             .map(|_| Address::generate(&env))

@@ -1934,7 +1934,8 @@ fn test_is_settleable_funded_before_maturity() {
         &None,
         &None,
         &None,
-        &None);
+        &None,
+    );
     fund_to_target(&client, &env);
     env.ledger().with_mut(|l| l.timestamp = maturity - 1);
     assert!(
@@ -1968,7 +1969,8 @@ fn test_is_settleable_funded_exact_maturity() {
         &None,
         &None,
         &None,
-        &None);
+        &None,
+    );
     fund_to_target(&client, &env);
     env.ledger().with_mut(|l| l.timestamp = maturity);
     assert!(
@@ -2002,7 +2004,8 @@ fn test_is_settleable_funded_after_maturity() {
         &None,
         &None,
         &None,
-        &None);
+        &None,
+    );
     fund_to_target(&client, &env);
     env.ledger().with_mut(|l| l.timestamp = maturity + 100);
     assert!(
