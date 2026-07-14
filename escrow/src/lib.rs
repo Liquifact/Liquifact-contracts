@@ -1539,6 +1539,10 @@ impl LiquifactEscrow {
             ensure(&env, mc > 0, EscrowError::MinContributionNotPositive);
             ensure(&env, mc <= amount, EscrowError::MinContributionExceedsAmount);
         }
+        if let Some(mc) = min_contribution {
+            ensure(&env, mc > 0, EscrowError::MinContributionNotPositive);
+            ensure(&env, mc <= amount, EscrowError::MinContributionExceedsAmount);
+        }
         let floor = min_contribution.unwrap_or(0);
         env.storage()
             .instance()
