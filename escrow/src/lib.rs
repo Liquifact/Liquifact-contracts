@@ -207,9 +207,8 @@ pub const MAX_INVOICE_AMOUNT: i128 = i128::MAX / 10_000;
 /// Mirrors the spirit of `MAX_ATTESTATION_APPEND_ENTRIES` to limit per-call work.
 pub const MAX_FUND_BATCH: u32 = 50;
 
-/// Upper bound on [`LiquifactEscrow::refund_batch`] entries to keep storage/CPU bounded.
-/// Mirrors [`MAX_FUND_BATCH`] for consistent batch-size expectations.
-pub const MAX_REFUND_BATCH: u32 = 50;
+/// Upper bound on investor read batches/pages to keep view-call work bounded.
+pub const MAX_INVESTOR_READ_BATCH: u32 = 50;
 
 /// Upper bound on [`LiquifactEscrow::set_investors_allowlisted`] batch size.
 pub const MAX_INVESTOR_ALLOWLIST_BATCH: u32 = 32;
@@ -345,6 +344,8 @@ pub enum EscrowError {
     FundingBatchEmpty = 82,
     /// [`LiquifactEscrow::fund_batch`] exceeded [`MAX_FUND_BATCH`].
     FundingBatchTooLarge = 83,
+    /// [`LiquifactEscrow::get_contributions`] exceeded [`MAX_INVESTOR_READ_BATCH`].
+    ContributionReadBatchTooLarge = 203,
     /// [`LiquifactEscrow::update_funding_target`] received a non-positive target.
     TargetNotPositive = 72,
     /// [`LiquifactEscrow::update_funding_target`] called while escrow is not open.
@@ -2313,13 +2314,37 @@ impl LiquifactEscrow {
         Self::get_persistent_investor_contribution(&env, investor)
     }
 
+    /// Public API: contributions recorded for `investors` in the same order as the input.
+    ///
+    /// This bounded read batches the same persistent-storage lookup used by
+    /// [`LiquifactEscrow::get_contribution`]. Unknown addresses return `0`.
+    ///
+    /// # Errors
+    /// Panics with [`EscrowError::ContributionReadBatchTooLarge`] when `investors.len()`
+    /// exceeds [`MAX_INVESTOR_READ_BATCH`].
+    pub fn get_contributions(env: Env, investors: Vec<Address>) -> Vec<i128> {
+        let len = investors.len();
+        ensure(
+            &env,
+            len <= MAX_INVESTOR_READ_BATCH,
+            EscrowError::ContributionReadBatchTooLarge,
+        );
+
+        let mut result = Vec::new(&env);
+        for i in 0..len {
+            let investor = investors.get(i).unwrap();
+            result.push_back(Self::get_persistent_investor_contribution(&env, investor));
+        }
+        result
+    }
+
     /// Returns a paginated list of investor addresses who have contributed to this escrow.
     ///
     /// Legacy instances that predate this feature will return an empty list (backward compatible under ADR-007).
     ///
     /// # Arguments
     /// * `start` - The starting index (0-based) of the pagination.
-    /// * `limit` - The maximum number of investor addresses to return (capped at a hard limit of 50).
+    /// * `limit` - The maximum number of investor addresses to return (capped at [`MAX_INVESTOR_READ_BATCH`]).
     ///
     /// # Returns
     /// A `Vec<Address>` containing the investor addresses within the requested page.
@@ -2335,7 +2360,7 @@ impl LiquifactEscrow {
             return Vec::new(&env);
         }
 
-        let actual_limit = limit.min(50);
+        let actual_limit = limit.min(MAX_INVESTOR_READ_BATCH);
         let end = (start + actual_limit).min(len);
 
         let mut result = Vec::new(&env);

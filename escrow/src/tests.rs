@@ -14,7 +14,7 @@ use super::{
     LiquifactEscrow, LiquifactEscrowClient, MaturityMaxHorizonUpdated,
     MaxUniqueInvestorsCapLowered, PrimaryAttestationBound, RegistryRefRebound, TreasuryDustSwept,
     YieldTier, MAX_ATTESTATION_APPEND_ENTRIES, MAX_DUST_SWEEP_AMOUNT, MAX_FUND_BATCH,
-    MAX_REFUND_BATCH, SCHEMA_VERSION,
+    MAX_INVESTOR_READ_BATCH, SCHEMA_VERSION,
 };
 use soroban_sdk::{
     symbol_short,

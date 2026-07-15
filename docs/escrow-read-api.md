@@ -566,6 +566,22 @@ Returns the cumulative principal contributed by `investor` in token base units.
 
 ---
 
+### `get_contributions(investors: Vec<Address>) → Vec<i128>`
+
+**Storage key:** `DataKey::InvestorContribution(investor)` (persistent, one read per input)
+**Signature:** `pub fn get_contributions(env: Env, investors: Vec<Address>) -> Vec<i128>`
+
+Returns one contribution amount per supplied address, preserving input order. Unknown addresses
+return `0`, matching `get_contribution`.
+
+**Requires initialization:** No
+**Default when absent:** `0` per address
+**Batch bound:** `investors.len() <= MAX_INVESTOR_READ_BATCH` (50)
+**Error:** `EscrowError::ContributionReadBatchTooLarge` when the input exceeds the bound
+**Security note:** Pure read-only; performs no authorization, storage writes, or TTL extension.
+
+---
+
 ### `get_unique_funder_count() → u32`
 
 **Storage key:** `DataKey::UniqueFunderCount`  

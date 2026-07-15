@@ -4464,6 +4464,79 @@ fn test_get_investors_legacy_compatibility() {
     assert_eq!(investors.len(), 0);
 }
 
+#[test]
+fn test_get_contributions_preserves_input_order_and_zero_for_unknowns() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    let inv_a = Address::generate(&env);
+    let inv_b = Address::generate(&env);
+    let stranger = Address::generate(&env);
+
+    client.fund(&inv_a, &10_000i128);
+    client.fund(&inv_b, &20_000i128);
+
+    let mut addresses = SorobanVec::new(&env);
+    addresses.push_back(inv_b.clone());
+    addresses.push_back(stranger.clone());
+    addresses.push_back(inv_a.clone());
+    addresses.push_back(inv_a.clone());
+
+    let amounts = client.get_contributions(&addresses);
+    assert_eq!(amounts.len(), 4);
+    assert_eq!(amounts.get(0).unwrap(), client.get_contribution(&inv_b));
+    assert_eq!(amounts.get(1).unwrap(), 0);
+    assert_eq!(amounts.get(2).unwrap(), client.get_contribution(&inv_a));
+    assert_eq!(amounts.get(3).unwrap(), client.get_contribution(&inv_a));
+}
+
+#[test]
+fn test_get_contributions_empty_input_returns_empty_vec() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    let addresses = SorobanVec::new(&env);
+    let amounts = client.get_contributions(&addresses);
+    assert_eq!(amounts.len(), 0);
+}
+
+#[test]
+fn test_get_contributions_accepts_exact_batch_cap() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    let mut addresses = SorobanVec::new(&env);
+    for _ in 0..MAX_INVESTOR_READ_BATCH {
+        addresses.push_back(Address::generate(&env));
+    }
+
+    let amounts = client.get_contributions(&addresses);
+    assert_eq!(amounts.len(), MAX_INVESTOR_READ_BATCH);
+    for i in 0..MAX_INVESTOR_READ_BATCH {
+        assert_eq!(amounts.get(i).unwrap(), 0);
+    }
+}
+
+#[test]
+fn test_get_contributions_rejects_oversized_batch_with_typed_error() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    let mut addresses = SorobanVec::new(&env);
+    for _ in 0..=MAX_INVESTOR_READ_BATCH {
+        addresses.push_back(Address::generate(&env));
+    }
+
+    assert_contract_error(
+        client.try_get_contributions(&addresses),
+        EscrowError::ContributionReadBatchTooLarge,
+    );
+}
+
 // ---------------------------------------------------------------------------
 // update_funding_target: rejection bounds and mid-update funded promotion
 // ---------------------------------------------------------------------------
