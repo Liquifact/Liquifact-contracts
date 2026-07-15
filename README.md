@@ -164,6 +164,7 @@ liquifact-contracts/
 | `refund` | Investor | Investor pulls contributed liquidity from a cancelled escrow. Increments `DistributedPrincipal` liability. |
 | `claim_investor_payout` | Investor | Investor records a payout claim after settlement. |
 | `claim_payouts_batch` | Investor / Any | Batch-record payout claims for up to `MAX_CLAIM_BATCH` investors in one transaction. |
+| `rotate_beneficiary` | SME + Admin | Dual-auth rotation of the SME payout address before settlement. Rejects no-op rotations (`NewSmeSameAsCurrent`). |
 | `sweep_terminal_dust` | Treasury | Treasury sweeps rounding residue from a terminal escrow. |
 | `migrate` | Admin | Schema version gate — **typed errors on all paths** in the current release (codes 90–92). |
 | `set_legal_hold` | Admin | Admin activates/clears compliance hold. |
@@ -184,7 +185,6 @@ liquifact-contracts/
 | `get_version` | — | Read stored `DataKey::Version`. |
 | `get_remaining_investor_slots` | — | Read remaining unique investor capacity before reaching the cap. |
 | `get_reconciliation` | — | Read solvency position: live token balance, outstanding liability, and surplus/deficit. See [`docs/escrow-read-api.md`](docs/escrow-read-api.md). |
-| `get_pending_admin_remaining_secs` | — | Seconds until the pending admin proposal expires (parity with `accept_admin` inclusive bound). |
 
 | `rebind_registry_ref` | Admin | Set or update the off-chain registry hint (`DataKey::RegistryRef`). Emits `RegistryRefRebound`. |
 | `clear_registry_ref` | Admin | Convenience alias for `rebind_registry_ref(None)`. Clears the registry pointer. |
