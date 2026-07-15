@@ -33,7 +33,7 @@ short routing symbol passed with `symbol_short!(...)`, such as `funded` or
 
 ## Event Catalog
 
-The current contract defines 37 event structs.
+The current contract defines 36 event structs.
 
 | Rust event | `name` symbol | Entrypoint(s) |
 |---|---:|---|
@@ -46,7 +46,7 @@ The current contract defines 37 event structs.
 | `AttestationDigestRevoked` | `att_rev` | `revoke_attestation_digest` |
 | `AttestationDigestUnrevoked` | `att_unrev` | `unrevoke_attestation_digest` |
 | `BeneficiaryRotated` | `ben_rot` | `rotate_beneficiary` |
-| `CollateralClearedEvt` | `coll_clr` | `clear_sme_collateral_commitment` |
+| `CollateralClearedEvt` | — | `clear_sme_collateral_commitment` |
 | `CollateralRecordedEvt` | `coll_rec` | `record_sme_collateral_commitment` |
 | `ContractUpgraded` | `upgrade` | `upgrade` |
 | `DeprecatedTransferAdminUsed` | `depr_xfer` | `transfer_admin` |
@@ -55,7 +55,6 @@ The current contract defines 37 event structs.
 | `EscrowPartialSettle` | `part_set` | `partial_settle` |
 | `EscrowSettled` | `escrow_sd` | `settle` |
 | `FundingCancelled` | `fund_can` | `cancel_funding` |
-| `FundingDeadlineExtended` | `fund_ext` | `extend_funding_deadline` |
 | `FundingTargetUpdated` | `fund_tgt` | `update_funding_target` |
 | `InvestorAllowlistChanged` | `al_set` | `set_investor_allowlisted`, `set_investors_allowlisted` |
 | `InvestorAllowlistBatchApplied` | `al_batch` | `set_investors_allowlisted` |
@@ -263,25 +262,6 @@ Data:
 | `prior_sme` | `Address` |
 | `new_sme` | `Address` |
 
-### `FundingDeadlineExtended`
-
-Emitted after successful `extend_funding_deadline`.
-
-Topics:
-
-| Index | Field | Type | Value |
-|---:|---|---|---|
-| 0 | fixed event topic | `Symbol` | `funding_deadline_extended` |
-| 1 | `name` | `Symbol` | `fund_ext` |
-| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
-
-Data:
-
-| Field | Type |
-|---|---|
-| `old_deadline` | `u64` |
-| `new_deadline` | `u64` |
-
 ### `FundingTargetUpdated`
 
 Emitted after successful `update_funding_target`.
@@ -342,30 +322,6 @@ Data:
 Note: this event records SME-reported collateral metadata only. It is not proof
 of custody, token movement, lien, or enforceable on-chain collateral.
 
-### `CollateralClearedEvt`
-
-Emitted after successful `clear_sme_collateral_commitment`.
-
-Topics:
-
-| Index | Field | Type | Value |
-|---:|---|---|---|
-| 0 | fixed event topic | `Symbol` | `collateral_cleared_evt` |
-| 1 | `name` | `Symbol` | `coll_clr` |
-| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
-
-Data:
-
-| Field | Type |
-|---|---|
-| `asset` | `Symbol` |
-| `amount` | `i128` |
-| `recorded_at` | `u64` |
-
-Note: this event clears SME-reported collateral metadata only. `asset`, `amount`,
-and `recorded_at` are copied from the stored commitment before removal so
-indexers can reconstruct the record -> clear lifecycle from events.
-
 ### `SmeWithdrew`
 
 Emitted after successful `withdraw`.
@@ -380,15 +336,9 @@ Topics:
 
 Data:
 
-| Field | Type | Meaning |
-|---|---|---|
-| `amount` | `i128` | **Net** principal transferred to the SME (`funded_amount - fee`) |
-| `recipient` | `Address` | SME address that received `amount` |
-| `fee` | `i128` | Protocol fee routed to the treasury (`0` when `protocol_fee_bps == 0`) |
-
-> **Append-only:** `fee` was appended after the original `(amount, recipient)` data layout.
-> `amount + fee == funded_amount`. Legacy indexers reading only `amount` still observe the SME
-> payout; add `fee` to reconstruct the gross disbursed principal.
+| Field | Type |
+|---|---|
+| `amount` | `i128` |
 
 ### `InvestorPayoutClaimed`
 
@@ -459,8 +409,9 @@ Data:
 | Field | Type |
 |---|---|
 | `invoice_id` | `Symbol` |
+| `recipient` | `Address` | Treasury address that received the sweep |
 | `token` | `Address` |
-| `amount` | `i128` |
+| `amount` | `i128` | Effective swept amount (after balance/floor capping) |
 
 ### `PrimaryAttestationBound`
 
@@ -640,4 +591,3 @@ Status values:
 | 2026-06-24 | v0.4 | Added `settled_at_ledger_timestamp` field to `EscrowSettled` event; added `is_settleable` view |
 | 2026-06-26 | v0.5 | Issue #379: Added `InvestorAllowlistBatchApplied` (`al_batch`) event emitted once per `set_investors_allowlisted` call for indexer disambiguation |
 | 2026-06-29 | v0.6 | Added `DeprecatedTransferAdminUsed` (`depr_xfer`) for deprecated one-step admin transfer shim; renamed `EscrowInitialized.name` from `escrow` to `escrow_ii` to fix upstream collision; fixed duplicate `BeneficiaryRotated` struct; added missing event struct sections (`AdminAcceptedEvent`, `AdminProposalCancelled`, `CollateralClearedEvt`, `ContractUpgraded`, `EscrowPartialSettle`, `LegalHoldClearCancelled`, `LegalHoldClearRequested`, `MaturityMaxHorizonUpdated`, `MaxPerInvestorCapRaised`, `MaxUniqueInvestorsCapRaised`, `MinContributionFloorLowered`, `RegistryRefRebound`) |
-| 2026-07-09 | v0.7 | Added the `coll_clr` name topic and stored collateral metadata payload to `CollateralClearedEvt` for indexer reconstruction of clear events |

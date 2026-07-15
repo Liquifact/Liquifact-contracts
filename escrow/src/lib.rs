@@ -1302,11 +1302,17 @@ pub struct RegistryRefRebound {
     pub registry: Option<Address>,
 }
 
+/// Emitted after a successful [`LiquifactEscrow::sweep_terminal_dust`] transfer.
+///
+/// Carries the **effective** swept amount (after balance and liability-floor capping),
+/// the treasury recipient, the funding token, and the invoice id for indexer reconciliation.
 #[contractevent]
 pub struct TreasuryDustSwept {
     #[topic]
     pub name: Symbol,
     pub invoice_id: Symbol,
+    /// Immutable treasury address that received the sweep.
+    pub recipient: Address,
     pub token: Address,
     pub amount: i128,
 }
@@ -2031,6 +2037,7 @@ impl LiquifactEscrow {
         TreasuryDustSwept {
             name: symbol_short!("dust_sw"),
             invoice_id: escrow.invoice_id.clone(),
+            recipient: treasury.clone(),
             token: token_addr,
             amount: sweep_amt,
         }
