@@ -16,7 +16,15 @@ fn make_env() -> Env {
     env
 }
 
-fn setup_open(env: &Env) -> (LiquifactEscrowClient<'_>, Address, Address, Address, Address) {
+fn setup_open(
+    env: &Env,
+) -> (
+    LiquifactEscrowClient<'_>,
+    Address,
+    Address,
+    Address,
+    Address,
+) {
     let client = LiquifactEscrowClient::new(env, &env.register(LiquifactEscrow, ()));
     let admin = Address::generate(env);
     let sme = Address::generate(env);
