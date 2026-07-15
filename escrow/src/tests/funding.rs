@@ -4973,12 +4973,7 @@ fn test_get_yield_tiers_is_pure_read_no_state_change() {
 
 /// Helper: initialise an escrow with three tiers (30s / 60s / 90s) and a base
 /// yield of 500 bps.  Returns the client ready for use; all auth is mocked.
-/// Also returns the SAC admin so callers can mint tokens to investors.
-fn setup_three_tier_escrow_with_sac<'a>(
-    env: &'a Env,
-    invoice_id: &'a str,
-    target: i128,
-) -> (LiquifactEscrowClient<'a>, StellarAssetClient<'a>) {
+fn setup_three_tier_escrow(env: &Env, invoice_id: &str, target: i128) -> LiquifactEscrowClient {
     let admin = Address::generate(env);
     let sme = Address::generate(env);
     let client = deploy(env);

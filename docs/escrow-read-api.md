@@ -23,6 +23,8 @@ re-implementing storage reads to guarantee identical semantics.
 
 **Admin & Governance:**
 - [get_pending_admin](#get_pending_admin--optionaddress)
+- [get_pending_admin_expiry](#get_pending_admin_expiry--optionu64)
+- [get_pending_admin_remaining_secs](#get_pending_admin_remaining_secs--optionu64)
 - [get_legal_hold](#get_legal_hold--bool)
 - [get_legal_hold_clear_delay](#get_legal_hold_clear_delay--u64)
 - [get_legal_hold_clearable_at](#get_legal_hold_clearable_at--optionu64)
@@ -198,6 +200,44 @@ Returns the proposed successor admin waiting for `accept_admin`, or `None` when 
 **Return value:**
 - `Some(Address)` when a handover is pending.
 - `None` when no `propose_admin` has been issued, or after a successful `accept_admin`.
+
+### `get_pending_admin_expiry() → Option<u64>`
+
+**Storage key:** `DataKey::PendingAdminExpiry`
+
+**Signature:** `pub fn get_pending_admin_expiry(env: Env) -> Option<u64>`
+
+Returns the absolute ledger timestamp recorded by `propose_admin`, or `None` when no expiry has been recorded.
+
+**Requires initialization:** No
+
+**Default when absent:** `None`
+
+**Return value:**
+- `Some(timestamp)` when a handover proposal with an expiry exists.
+- `None` before `propose_admin`, after `accept_admin`, after `cancel_pending_admin`, or when no expiry key is present.
+
+### `get_pending_admin_remaining_secs() → Option<u64>`
+
+**Storage keys:** `DataKey::PendingAdmin`, `DataKey::PendingAdminExpiry`
+
+**Signature:** `pub fn get_pending_admin_remaining_secs(env: Env) -> Option<u64>`
+
+Returns the pending-admin proposal's remaining validity window computed against `Env::ledger().timestamp()`.
+
+**Requires initialization:** No
+
+**Default when absent:** `None`
+
+**Return value:**
+- `None` when no pending admin proposal is active.
+- `Some(expiry - now)` while `now < expiry`.
+- `Some(0)` when `now >= expiry`, using saturating arithmetic.
+
+**Boundary parity with `accept_admin`:**
+- At `now == expiry`, this view returns `Some(0)` and `accept_admin` still accepts the proposal.
+- At `now > expiry`, this view still returns `Some(0)` and `accept_admin` rejects with `AdminProposalExpired`.
+- Pure read: no authorization, no storage writes, no TTL bump.
 
 ---
 

@@ -2745,6 +2745,10 @@ fn slots_cap_exactly_hit_remaining_is_zero() {
         client.fund(inv, &100_000i128);
         let remaining = client.get_remaining_investor_slots().unwrap();
         let count = client.get_unique_funder_count();
+        assert!(
+            remaining >= 0,
+            "remaining must not underflow after investor {i}"
+        );
         assert_eq!(
             count + remaining,
             cap,

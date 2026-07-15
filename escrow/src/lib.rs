@@ -486,6 +486,15 @@ pub enum EscrowError {
     /// `update_funding_deadline` was called on a non-open escrow (status != 0).
     FundingDeadlineUpdateNotOpen = 171,
 
+    /// [`LiquifactEscrow::fund`] / [`LiquifactEscrow::fund_with_commitment`] blocked by operational pause.
+    PausedBlocksFunding = 180,
+    /// [`LiquifactEscrow::settle`] blocked by operational pause.
+    PausedBlocksSettlement = 181,
+    /// [`LiquifactEscrow::withdraw`] blocked by operational pause.
+    PausedBlocksWithdrawal = 182,
+    /// [`LiquifactEscrow::claim_investor_payout`] blocked by operational pause.
+    PausedBlocksInvestorClaims = 183,
+
     /// [`LiquifactEscrow::lower_min_contribution_floor`] called while escrow is not open.
     FloorLowerNotOpen = 173,
     /// [`LiquifactEscrow::lower_min_contribution_floor`] did not strictly lower the floor.
@@ -501,17 +510,9 @@ pub enum EscrowError {
     PartialSettleNotOpen = 202,
     MaxPerInvestorCapNotConfigured = 24,
     MaxPerInvestorCapNotRaised = 25,
-    /// [`LiquifactEscrow::fund`] etc. blocked while the operational pause is active.
-    PausedBlocksFunding = 26,
-    /// [`LiquifactEscrow::settle`] blocked while the operational pause is active.
-    PausedBlocksSettlement = 27,
-    /// [`LiquifactEscrow::withdraw`] blocked while the operational pause is active.
-    PausedBlocksWithdrawal = 28,
-    /// [`LiquifactEscrow::claim_investor_payout`] blocked while the operational pause is active.
-    PausedBlocksInvestorClaims = 29,
     /// [`LiquifactEscrow::raise_maturity_max_horizon`] received a `new_horizon` that is
     /// not strictly greater than the current stored horizon.
-    HorizonNotRaised = 203,
+    HorizonNotRaised = 204,
 }
 
 #[inline(always)]
@@ -1792,6 +1793,26 @@ impl LiquifactEscrow {
     /// current proposal, or [`None`] when no expiry is recorded (no handover in progress).
     pub fn get_pending_admin_expiry(env: Env) -> Option<u64> {
         env.storage().instance().get(&DataKey::PendingAdminExpiry)
+    }
+
+    /// Returns the remaining validity window, in seconds, for the pending admin proposal.
+    ///
+    /// This is a pure read: it performs no authorization, storage writes, or TTL bumps.
+    /// It returns [`None`] when no pending admin proposal is active. When a proposal is
+    /// active, it subtracts the current ledger timestamp from [`DataKey::PendingAdminExpiry`]
+    /// with saturating arithmetic, so both exactly-at-expiry and already-expired proposals
+    /// report `Some(0)`.
+    ///
+    /// Boundary semantics match [`LiquifactEscrow::accept_admin`]: `now == expiry` reports
+    /// zero seconds remaining but is still accepted by `accept_admin`; `now > expiry` also
+    /// reports zero and `accept_admin` rejects with [`EscrowError::AdminProposalExpired`].
+    pub fn get_pending_admin_remaining_secs(env: Env) -> Option<u64> {
+        let _pending: Address = env.storage().instance().get(&DataKey::PendingAdmin)?;
+
+        env.storage()
+            .instance()
+            .get::<DataKey, u64>(&DataKey::PendingAdminExpiry)
+            .map(|expiry| expiry.saturating_sub(env.ledger().timestamp()))
     }
 
     /// Return whether this escrow has a configured maturity time lock.
@@ -3731,31 +3752,29 @@ impl LiquifactEscrow {
 
         // Capture the effective yield and tier lock threshold in locals so event fields can
         // be populated without post-write storage reads.
-        let investor_effective_yield_bps: i64;
-
-        if simple_fund {
+        let (investor_effective_yield_bps, tier_lock_secs) = if simple_fund {
+            // Non-tiered deposits never carry a commitment lock.
             if prev == 0 {
-                investor_effective_yield_bps = escrow.yield_bps;
                 Self::set_persistent_investor_effective_yield(
                     &env,
                     investor.clone(),
                     escrow.yield_bps,
                 );
                 Self::set_persistent_investor_claim_not_before(&env, investor.clone(), 0u64);
-                0u64
+                (escrow.yield_bps, 0u64)
             } else {
                 // Returning investor: yield was set on first deposit; read it for the event.
-                investor_effective_yield_bps =
+                (
                     Self::get_persistent_investor_effective_yield(&env, investor.clone())
-                        .unwrap_or(escrow.yield_bps);
-                0u64
+                        .unwrap_or(escrow.yield_bps),
+                    0u64,
+                )
             }
             // If prev > 0, preserve existing effective yield and claim lock
         } else {
             ensure(&env, prev == 0, EscrowError::TieredSecondDeposit);
             let (eff, lock) =
                 Self::effective_yield_for_commitment(&env, escrow.yield_bps, committed_lock_secs);
-            investor_effective_yield_bps = eff;
             Self::set_persistent_investor_effective_yield(&env, investor.clone(), eff);
             let now = env.ledger().timestamp();
             let claim_nb = if committed_lock_secs == 0 {
@@ -3774,7 +3793,7 @@ impl LiquifactEscrow {
                 );
             }
             Self::set_persistent_investor_claim_not_before(&env, investor.clone(), claim_nb);
-            lock
+            (eff, lock)
         };
 
         escrow.funded_amount = escrow

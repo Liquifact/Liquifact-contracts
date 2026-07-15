@@ -187,6 +187,7 @@ liquifact-contracts/
 | `cancel_pending_admin` | Admin | Admin withdraws an unaccepted proposal. |
 | `get_escrow` | — | Read current escrow state. |
 | `get_version` | — | Read stored `DataKey::Version`. |
+| `get_pending_admin_remaining_secs` | — | Read the pending admin proposal's remaining validity seconds; returns `None` when no proposal exists and `Some(0)` at/after expiry. |
 | `get_remaining_investor_slots` | — | Read remaining unique investor capacity before reaching the cap. |
 | `get_reconciliation` | — | Read solvency position: live token balance, outstanding liability, and surplus/deficit. See [`docs/escrow-read-api.md`](docs/escrow-read-api.md). |
 

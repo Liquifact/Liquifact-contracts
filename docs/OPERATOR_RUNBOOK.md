@@ -579,14 +579,15 @@ in-place upgrade procedure.
 - **Two-Step Rotation:** Admin rotation is strictly a two-step procedure to prevent locking out admin-gated functions due to typographical errors:
   1. **`propose_admin(new_admin, validity_window_secs)`**: Requires authorization from the current admin. It validates that `new_admin` is not the current admin (reverts with `NewAdminSameAsCurrent` / code 80 if they are identical). On success, it writes the successor to `DataKey::PendingAdmin` and the expiry timestamp to `DataKey::PendingAdminExpiry` and emits `AdminProposedEvent` (`adm_prop`).
   2. **`accept_admin()`**: Requires authorization from the proposed successor address. It verifies that a proposal exists (reverts with `NoPendingAdmin` / code 172 if `DataKey::PendingAdmin` is absent) and that the proposal has not expired (reverts with `AdminProposalExpired` / code 85 if `ledger.timestamp() > PendingAdminExpiry`). On success, it updates `InvoiceEscrow::admin` to the successor address, clears the pending keys from storage, and emits `AdminTransferredEvent` (`admin`).
+- Dashboards and runbooks should call `get_pending_admin_remaining_secs()` to display the remaining proposal validity window. The view returns `Some(0)` exactly at expiry while `accept_admin` still accepts, and also after expiry when `accept_admin` rejects.
 - Test both steps on Testnet before executing on Mainnet (see `test_admin_handover_lifecycle` and `test_post_handover_admin_can_clear_hold_set_by_old_admin` in `escrow/src/tests/admin.rs` for implementation reference).
 
 #### Cancelling a pending admin proposal
 
 If you proposed the wrong successor, or the handover is being abandoned before
 `accept_admin` is called, use `cancel_pending_admin` to retract the nomination.
-Until cancelled, the proposed address can call `accept_admin` at any future
-ledger — leaving the pending key live is a standing key-rotation risk.
+Until cancelled or expired, the proposed address can call `accept_admin`;
+leaving the pending key live is a standing key-rotation risk.
 
 ```bash
 # Cancel an unaccepted handover — requires current admin authorization.
