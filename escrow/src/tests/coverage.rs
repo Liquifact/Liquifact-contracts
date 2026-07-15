@@ -4572,31 +4572,25 @@ fn test_event_collateral_cleared_struct() {
     let commitment = client.record_sme_collateral_commitment(&asset, &5000);
     client.clear_sme_collateral_commitment();
 
-    let invoice_id = client.get_escrow().invoice_id;
-    let legacy = CollateralClearedEvt {
-        invoice_id: invoice_id.clone(),
-        amount: 5000,
-    };
-    let detailed = CollateralCommitmentCleared {
+    let expected = CollateralClearedEvt {
         name: symbol_short!("coll_clr"),
-        invoice_id,
+        invoice_id: client.get_escrow().invoice_id,
         asset,
         amount: 5000,
         recorded_at: commitment.recorded_at,
     };
-
+    assert_eq!(
+        last_event_name_symbol(&env),
+        Some(symbol_short!("coll_clr")),
+        "CollateralClearedEvt must emit symbol 'coll_clr'"
+    );
     let events = env.events().all();
     let all_events = events.events();
-    assert!(
-        all_events
-            .iter()
-            .any(|event| *event == legacy.to_xdr(&env, &contract_id)),
-        "legacy CollateralClearedEvt must still be emitted"
-    );
+    let last = all_events.last().unwrap().clone();
     assert_eq!(
-        all_events.last().unwrap().clone(),
-        detailed.to_xdr(&env, &contract_id),
-        "CollateralCommitmentCleared must emit symbol 'coll_clr' with the cleared commitment identity"
+        last,
+        expected.to_xdr(&env, &contract_id),
+        "CollateralClearedEvt struct must match"
     );
 }
 
@@ -5474,9 +5468,9 @@ fn test_all_event_symbols_are_unique_across_struct_types() {
     .cloned()
     .collect();
 
-    // 34 unique symbols across 37 defined event structs.
-    // CollateralClearedEvt has no name field, LegalHoldClearDelayUpdated has no hardcoded symbol,
-    // and inv_cap is shared by MaxUniqueInvestorsCapLowered and MaxPerInvestorCapRaised.
+    // 34 unique symbols across 36 defined event structs.
+    // LegalHoldClearDelayUpdated has no hardcoded symbol, and inv_cap is shared
+    // by MaxUniqueInvestorsCapLowered and MaxPerInvestorCapRaised.
     assert_eq!(
         symbols.len(),
         34,

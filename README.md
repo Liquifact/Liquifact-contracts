@@ -310,7 +310,7 @@ fee-on-transfer, rebasing, hook, and lying token behaviors at the host-call boun
 
 ## SME collateral metadata
 
-See [`docs/escrow-sme-collateral.md`](docs/escrow-sme-collateral.md) for the risk-team handling rules for `record_sme_collateral_commitment` and `CollateralRecordedEvt`. The record is SME-reported metadata only; it is not proof of custody, token movement, or an enforceable on-chain claim.
+See [`docs/escrow-sme-collateral.md`](docs/escrow-sme-collateral.md) for the risk-team handling rules for `record_sme_collateral_commitment`, `clear_sme_collateral_commitment`, `CollateralRecordedEvt`, and `CollateralClearedEvt`. The record is SME-reported metadata only; it is not proof of custody, token movement, or an enforceable on-chain claim.
 
 ## Investor allowlist
 

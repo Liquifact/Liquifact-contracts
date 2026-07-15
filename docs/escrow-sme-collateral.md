@@ -31,6 +31,12 @@ Returns the current pledge record, or `None` if none has been recorded (or it wa
 
 Retires a previously recorded pledge, removing it from storage.
 
+- **Auth**: SME address (`sme_address` from the escrow record).
+- **Storage**: removes `DataKey::SmeCollateralPledge` (instance storage).
+- **Event**: emits `CollateralClearedEvt { name, invoice_id, asset, amount, recorded_at }`
+  under topic `(coll_clr, invoice_id)`.
+- **Token movement**: none.
+
 ## Test Coverage
 
 The scenarios below are covered by the focused collateral suite in
@@ -83,8 +89,11 @@ pub struct CollateralRecordedEvt {
 }
 
 pub struct CollateralClearedEvt {
+    pub name: Symbol,     // hardcoded coll_clr topic
     pub invoice_id: Symbol,
+    pub asset: Symbol,    // carried from the pledge at the time of removal
     pub amount: i128,   // carried from the pledge at the time of removal
+    pub recorded_at: u64, // original pledge ledger timestamp
 }
 
 pub struct CollateralCommitmentCleared {
@@ -133,6 +142,5 @@ SME calls record_sme_collateral_commitment(5_000_0000000)
 
 SME calls clear_sme_collateral_commitment()
   → DataKey::SmeCollateralPledge removed
-  → CollateralClearedEvt { invoice_id: "INV001", amount: 5_000_0000000 } emitted
-  → CollateralCommitmentCleared { name: coll_clr, invoice_id: "INV001", asset: "USDC", amount: 5_000_0000000, recorded_at } emitted
+  → CollateralClearedEvt { name: "coll_clr", invoice_id: "INV001", asset: "USDC", amount: 5_000_0000000, recorded_at } emitted
 ```

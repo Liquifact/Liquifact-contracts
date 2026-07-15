@@ -270,6 +270,24 @@ breaker (no compliance semantics, no clear delay), not the compliance hold.
 **Data Payload:**
 - `active` (u32): `1` for enabled, `0` for cleared.
 
+### `CollateralClearedEvt`
+Emitted when the SME clears the metadata-only collateral commitment recorded under
+`DataKey::SmeCollateralPledge`.
+
+**Topics:**
+1. `coll_clr` (Symbol)
+2. `invoice_id` (Symbol)
+
+**Data Payload:**
+- `asset` (Symbol): SME-reported off-chain asset label from the stored commitment.
+- `amount` (i128): SME-reported amount from the stored commitment.
+- `recorded_at` (u64): ledger timestamp from the original commitment record.
+
+**Indexer guidance:**
+Use `coll_clr` to remove or mark retired the active collateral commitment for the
+invoice. This event is metadata-only and does not prove custody, asset movement,
+or enforceable collateral.
+
 ---
 
 ## 🛠️ Indexing Recommendations

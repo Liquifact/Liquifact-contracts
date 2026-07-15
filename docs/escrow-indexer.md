@@ -36,7 +36,7 @@ Contract event names (`symbol_short`) emitted by `escrow/src/lib.rs`:
 - `maturity` - maturity updated
 - `fund_tgt` - funding target updated
 - `coll_rec` - SME collateral commitment recorded
-- `coll_clr` - SME collateral commitment cleared, including the cleared asset, amount, and original record timestamp
+- `coll_clr` - SME collateral commitment cleared
 - `att_bind` - primary attestation hash bound
 - `att_app` - attestation append-log updated
 - `al_ena` - allowlist mode enabled/disabled
@@ -149,4 +149,3 @@ Do not treat `RegistryRef` as a trust anchor in risk engines without independent
 - Indexers should surface these failures as integration alerts, not silently smooth them over.
 - Treat attestation and collateral entries as metadata records unless/until on-chain enforcement is
   explicitly introduced by contract APIs.
-
