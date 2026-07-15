@@ -2775,3 +2775,102 @@ fn slots_cap_exactly_hit_remaining_is_zero() {
     );
     assert_slots_invariant(&client, "cap exactly hit");
 }
+// ── Issue #482: refund conservation invariant ────────────────────────────────
+//
+// In a cancelled escrow, the sum of per-investor refunds must never exceed
+// `funded_amount`, and `DistributedPrincipal` must equal total contributions
+// once every investor has refunded. No ordering of refunds can over-distribute.
+
+/// Property: refund conservation across arbitrary investor sets and refund orderings.
+///
+/// Assumes a standard SEP-41 token and a cancelled escrow with no partial refunds.
+/// Each investor may refund at most once; double-refund is impossible by construction.
+proptest! {
+    #[test]
+    fn prop_refund_conservation_never_exceeds_funded_principal(
+        n in 1usize..8,
+        seed in any::<u64>(),
+    ) {
+        let mut rng = SplitMix64::new(seed);
+        let env = Env::default();
+        env.mock_all_auths();
+        let token = install_stellar_asset_token(&env);
+        let treasury = Address::generate(&env);
+        let admin = Address::generate(&env);
+        let sme = Address::generate(&env);
+        let client = deploy(&env);
+
+        let mut amounts: Vec<i128> = (0..n)
+            .map(|_| rng.gen_i128_inclusive(1, 50_000))
+            .collect();
+        let total: i128 = amounts.iter().sum();
+        let target = total + 1_000_000;
+
+        client.init(
+            &admin,
+            &soroban_sdk::String::from_str(&env, "RFNDPR"),
+            &sme,
+            &target,
+            &800i64,
+            &0u64,
+            &token.id,
+            &None,
+            &treasury,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+        );
+
+        let investors: Vec<Address> = (0..n).map(|_| Address::generate(&env)).collect();
+        for (inv, &amt) in investors.iter().zip(amounts.iter()) {
+            token.stellar.mint(inv, &amt);
+            token.stellar.approve(
+                inv,
+                &client.address,
+                &amt,
+                &(env.ledger().sequence() + 100),
+            );
+            client.fund(inv, &amt);
+        }
+        token.stellar.mint(&client.address, &total);
+        client.cancel_funding();
+
+        let funded = client.get_escrow().funded_amount;
+        prop_assert_eq!(funded, total);
+
+        let mut order: Vec<usize> = (0..n).collect();
+        shuffle_in_place(&mut rng, &mut order);
+
+        let mut total_refunded: i128 = 0;
+        for &idx in &order {
+            let inv = &investors[idx];
+            let contrib = client.get_contribution(inv);
+            if contrib <= 0 {
+                continue;
+            }
+            prop_assert!(contrib <= funded);
+            let bal_before = token.stellar.balance(&client.address);
+            client.refund(inv);
+            let refunded = contrib;
+            total_refunded = total_refunded.saturating_add(refunded);
+            prop_assert!(total_refunded <= funded);
+            let bal_after = token.stellar.balance(&client.address);
+            prop_assert!(bal_after >= 0);
+            prop_assert_eq!(bal_after, bal_before - refunded);
+            prop_assert_eq!(client.get_distributed_principal(), total_refunded);
+            // double-refund must fail
+            prop_assert!(client.try_refund(inv).is_err());
+        }
+
+        for inv in &investors {
+            prop_assert_eq!(client.get_contribution(inv), 0);
+        }
+        prop_assert_eq!(client.get_distributed_principal(), funded);
+        prop_assert_eq!(total_refunded, funded);
+    }
+}

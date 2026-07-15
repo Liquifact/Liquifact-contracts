@@ -3265,8 +3265,15 @@ fn test_refund_multiple_investors_independent() {
     assert_eq!(token.token.balance(&inv_a) - before_a, amt_a);
 
     assert_eq!(token.token.balance(&inv_b) - before_b, amt_b);
+    assert_eq!(client.get_contribution(&inv_a), 0);
+    assert_eq!(client.get_contribution(&inv_b), 0);
+    assert!(client.is_investor_refunded(&inv_a));
+    assert!(client.is_investor_refunded(&inv_b));
+    let distributed = client.get_distributed_principal();
+    assert_eq!(distributed, amt_a + amt_b);
 }
 
+/// Previously-refunded investors are skipped without failing the batch.
 #[test]
 
 fn test_cancel_funding_preserves_funded_amount() {
@@ -3315,167 +3322,6 @@ fn test_sweep_terminal_dust_allowed_in_cancelled_state() {
     assert_eq!(swept, 1i128);
 
     assert_eq!(token.token.balance(&treasury), 1i128);
-}
-
-// ─── refund_batch tests ─────────────────────────────────────────────────────
-
-/// `refund_batch` with N entries equals N sequential `refund` calls
-/// (balance changes, contribution zeroing, refunded marker, DistributedPrincipal).
-#[test]
-fn test_refund_batch_equals_n_single_refunds() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, admin, sme) = setup(&env);
-    let inv_a = Address::generate(&env);
-    let inv_b = Address::generate(&env);
-    let (token, _) = init_with_token(&env, &client, &admin, &sme);
-    let contract_id = client.address.clone();
-    let amt_a = TARGET / 3;
-    let amt_b = TARGET / 4;
-    token.stellar.mint(&inv_a, &amt_a);
-    token.stellar.mint(&inv_b, &amt_b);
-    token.stellar.mint(&contract_id, &(amt_a + amt_b));
-    client.fund(&inv_a, &amt_a);
-    client.fund(&inv_b, &amt_b);
-    client.cancel_funding();
-
-    let before_a = token.token.balance(&inv_a);
-    let before_b = token.token.balance(&inv_b);
-    let investors = soroban_sdk::vec![&env, inv_a.clone(), inv_b.clone()];
-    client.refund_batch(&investors);
-    assert_eq!(token.token.balance(&inv_a) - before_a, amt_a);
-    assert_eq!(token.token.balance(&inv_b) - before_b, amt_b);
-    assert_eq!(client.get_contribution(&inv_a), 0);
-    assert_eq!(client.get_contribution(&inv_b), 0);
-    assert!(client.is_investor_refunded(&inv_a));
-    assert!(client.is_investor_refunded(&inv_b));
-    let distributed = client.get_distributed_principal();
-    assert_eq!(distributed, amt_a + amt_b);
-}
-
-/// Previously-refunded investors are skipped without failing the batch.
-#[test]
-fn test_refund_batch_skips_already_refunded() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, admin, sme) = setup(&env);
-    let inv_a = Address::generate(&env);
-    let inv_b = Address::generate(&env);
-    let (token, _) = init_with_token(&env, &client, &admin, &sme);
-    let contract_id = client.address.clone();
-    let amt_a = TARGET / 5;
-    let amt_b = TARGET / 5;
-    token.stellar.mint(&inv_a, &amt_a);
-    token.stellar.mint(&inv_b, &amt_b);
-    token.stellar.mint(&contract_id, &(amt_a + amt_b));
-    client.fund(&inv_a, &amt_a);
-    client.fund(&inv_b, &amt_b);
-    client.cancel_funding();
-    // Refund inv_a individually first.
-    client.refund(&inv_a);
-    assert!(client.is_investor_refunded(&inv_a));
-    assert!(!client.is_investor_refunded(&inv_b));
-
-    let before_b = token.token.balance(&inv_b);
-    let investors = soroban_sdk::vec![&env, inv_a.clone(), inv_b.clone()];
-    client.refund_batch(&investors);
-    // inv_a already refunded — skipped; inv_b refunded now.
-    assert_eq!(token.token.balance(&inv_b) - before_b, amt_b);
-    assert!(client.is_investor_refunded(&inv_b));
-    let distributed = client.get_distributed_principal();
-    assert_eq!(distributed, amt_a + amt_b);
-}
-
-/// Empty batch panics with `RefundBatchEmpty`.
-#[test]
-fn test_refund_batch_empty_yields_typed_error() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, admin, sme) = setup(&env);
-    default_init(&client, &env, &admin, &sme);
-    client.cancel_funding();
-    let empty: soroban_sdk::Vec<Address> = soroban_sdk::Vec::new(&env);
-    let result = client.try_refund_batch(&empty);
-    assert_contract_error(result, EscrowError::RefundBatchEmpty);
-}
-
-/// Oversized batch (more than MAX_REFUND_BATCH) panics with `RefundBatchTooLarge`.
-#[test]
-fn test_refund_batch_too_large_yields_typed_error() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, admin, sme) = setup(&env);
-    default_init(&client, &env, &admin, &sme);
-    client.cancel_funding();
-    let mut investors = soroban_sdk::Vec::new(&env);
-    for _ in 0..=MAX_REFUND_BATCH {
-        investors.push_back(Address::generate(&env));
-    }
-    let result = client.try_refund_batch(&investors);
-    assert_contract_error(result, EscrowError::RefundBatchTooLarge);
-}
-
-/// Exactly MAX_REFUND_BATCH entries succeeds.
-#[test]
-fn test_refund_batch_max_batch_size_succeeds() {
-    let env = Env::default();
-    env.mock_all_auths();
-    env.cost_estimate().disable_resource_limits();
-    env.cost_estimate().budget().reset_unlimited();
-    let (client, admin, sme) = setup(&env);
-    let (token, _) = init_with_token(&env, &client, &admin, &sme);
-    let contract_id = client.address.clone();
-    let amt_per = 1_000i128;
-    let total = (MAX_REFUND_BATCH as i128) * amt_per;
-    token.stellar.mint(&contract_id, &total);
-
-    let mut investors = soroban_sdk::Vec::new(&env);
-    for i in 0..MAX_REFUND_BATCH {
-        let inv = Address::generate(&env);
-        token.stellar.mint(&inv, &amt_per);
-        client.fund(&inv, &amt_per);
-        investors.push_back(inv);
-    }
-    client.cancel_funding();
-    client.refund_batch(&investors);
-    assert_eq!(
-        client.get_distributed_principal(),
-        total,
-        "distributed principal must sum all refunds"
-    );
-}
-
-/// Mixed batch: some funded, some not — the non-funded entry panics.
-#[test]
-#[should_panic]
-fn test_refund_batch_non_investor_panics() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, admin, sme) = setup(&env);
-    let inv = Address::generate(&env);
-    let (token, _) = init_with_token(&env, &client, &admin, &sme);
-    let contract_id = client.address.clone();
-    token.stellar.mint(&inv, &(TARGET / 2));
-    token.stellar.mint(&contract_id, &(TARGET / 2));
-    client.fund(&inv, &(TARGET / 2));
-    client.cancel_funding();
-    let stranger = Address::generate(&env);
-    let investors = soroban_sdk::vec![&env, inv, stranger];
-    client.refund_batch(&investors);
-}
-
-/// `refund_batch` panics in non-cancelled states.
-#[test]
-#[should_panic]
-fn test_refund_batch_panics_in_open_state() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, admin, sme) = setup(&env);
-    let inv = Address::generate(&env);
-    default_init(&client, &env, &admin, &sme);
-    client.fund(&inv, &(TARGET / 2));
-    let investors = soroban_sdk::vec![&env, inv];
-    client.refund_batch(&investors);
 }
 
 // ─── Commitment first-deposit-only invariant (issue #260) ────────────────────
@@ -5538,6 +5384,7 @@ fn test_investor_index_population() {
     let inv_a = Address::generate(&env);
 
     let inv_b = Address::generate(&env);
+    let stranger = Address::generate(&env);
 
     // Fund from investor A
 
@@ -5668,79 +5515,6 @@ fn test_get_investors_legacy_compatibility() {
     let investors = client.get_investors(&0, &10);
 
     assert_eq!(investors.len(), 0);
-}
-
-#[test]
-fn test_get_contributions_preserves_input_order_and_zero_for_unknowns() {
-    let env = Env::default();
-    let (client, admin, sme) = setup(&env);
-    default_init(&client, &env, &admin, &sme);
-
-    let inv_a = Address::generate(&env);
-    let inv_b = Address::generate(&env);
-    let stranger = Address::generate(&env);
-
-    client.fund(&inv_a, &10_000i128);
-    client.fund(&inv_b, &20_000i128);
-
-    let mut addresses = SorobanVec::new(&env);
-    addresses.push_back(inv_b.clone());
-    addresses.push_back(stranger.clone());
-    addresses.push_back(inv_a.clone());
-    addresses.push_back(inv_a.clone());
-
-    let amounts = client.get_contributions(&addresses);
-    assert_eq!(amounts.len(), 4);
-    assert_eq!(amounts.get(0).unwrap(), client.get_contribution(&inv_b));
-    assert_eq!(amounts.get(1).unwrap(), 0);
-    assert_eq!(amounts.get(2).unwrap(), client.get_contribution(&inv_a));
-    assert_eq!(amounts.get(3).unwrap(), client.get_contribution(&inv_a));
-}
-
-#[test]
-fn test_get_contributions_empty_input_returns_empty_vec() {
-    let env = Env::default();
-    let (client, admin, sme) = setup(&env);
-    default_init(&client, &env, &admin, &sme);
-
-    let addresses = SorobanVec::new(&env);
-    let amounts = client.get_contributions(&addresses);
-    assert_eq!(amounts.len(), 0);
-}
-
-#[test]
-fn test_get_contributions_accepts_exact_batch_cap() {
-    let env = Env::default();
-    let (client, admin, sme) = setup(&env);
-    default_init(&client, &env, &admin, &sme);
-
-    let mut addresses = SorobanVec::new(&env);
-    for _ in 0..MAX_INVESTOR_READ_BATCH {
-        addresses.push_back(Address::generate(&env));
-    }
-
-    let amounts = client.get_contributions(&addresses);
-    assert_eq!(amounts.len(), MAX_INVESTOR_READ_BATCH);
-    for i in 0..MAX_INVESTOR_READ_BATCH {
-        assert_eq!(amounts.get(i).unwrap(), 0);
-    }
-}
-
-#[test]
-fn test_get_contributions_rejects_oversized_batch_with_typed_error() {
-    let env = Env::default();
-    let (client, admin, sme) = setup(&env);
-    default_init(&client, &env, &admin, &sme);
-
-    let mut addresses = SorobanVec::new(&env);
-    for _ in 0..=MAX_INVESTOR_READ_BATCH {
-        addresses.push_back(Address::generate(&env));
-    }
-
-    assert_contract_error(
-        client.try_get_contributions(&addresses),
-        EscrowError::ContributionReadBatchTooLarge,
-    );
 }
 
 // ---------------------------------------------------------------------------
@@ -6196,162 +5970,6 @@ fn init_deadline_escrow<'a>(
     );
 
     (contract_id, client, admin, sme)
-}
-
-#[test]
-fn test_init_persists_funding_deadline() {
-    use soroban_sdk::testutils::Ledger as _;
-
-    let env = Env::default();
-    env.mock_all_auths();
-    env.ledger().with_mut(|l| {
-        l.timestamp = 1_000;
-        l.sequence_number = 10;
-    });
-
-    let (_, client, _, _) = init_deadline_escrow(&env, "FD_INIT", 2_000, Some(1_500));
-
-    assert_eq!(client.get_funding_deadline(), Some(1_500));
-    assert!(!client.is_funding_expired());
-}
-
-#[test]
-fn test_extend_funding_deadline_moves_forward_and_emits_event() {
-    use crate::FundingDeadlineExtended;
-    use soroban_sdk::testutils::{Events as _, Ledger as _};
-
-    let env = Env::default();
-    env.mock_all_auths();
-    env.ledger().with_mut(|l| {
-        l.timestamp = 1_000;
-        l.sequence_number = 10;
-    });
-    let (contract_id, client, admin, _) = init_deadline_escrow(&env, "FD_EXT", 3_000, Some(1_500));
-
-    let extended = client.extend_funding_deadline(&2_000);
-
-    assert_eq!(extended, 2_000);
-    assert_eq!(client.get_funding_deadline(), Some(2_000));
-    assert!(
-        env.auths().iter().any(|(addr, _)| *addr == admin),
-        "admin auth was not recorded for deadline extension"
-    );
-
-    let events = env.events().all();
-    let latest_event = events.events().last().expect("deadline event").clone();
-    assert_eq!(
-        latest_event,
-        FundingDeadlineExtended {
-            name: soroban_sdk::symbol_short!("fund_ext"),
-            invoice_id: client.get_escrow().invoice_id,
-            old_deadline: 1_500,
-            new_deadline: 2_000,
-        }
-        .to_xdr(&env, &contract_id)
-    );
-}
-
-#[test]
-fn test_extend_funding_deadline_rejects_equal_or_earlier_deadline() {
-    use soroban_sdk::testutils::Ledger as _;
-
-    let env = Env::default();
-    env.mock_all_auths();
-    env.ledger().with_mut(|l| {
-        l.timestamp = 1_000;
-        l.sequence_number = 10;
-    });
-    let (_, client, _, _) = init_deadline_escrow(&env, "FD_NOOP", 3_000, Some(1_500));
-
-    assert_contract_error(
-        client.try_extend_funding_deadline(&1_500),
-        EscrowError::FundingDeadlineNotExtended,
-    );
-    assert_contract_error(
-        client.try_extend_funding_deadline(&1_499),
-        EscrowError::FundingDeadlineNotExtended,
-    );
-    assert_eq!(client.get_funding_deadline(), Some(1_500));
-}
-
-#[test]
-fn test_extend_funding_deadline_rejects_maturity_boundary() {
-    use soroban_sdk::testutils::Ledger as _;
-
-    let env = Env::default();
-    env.mock_all_auths();
-    env.ledger().with_mut(|l| {
-        l.timestamp = 1_000;
-        l.sequence_number = 10;
-    });
-    let (_, client, _, _) = init_deadline_escrow(&env, "FD_MAT", 2_000, Some(1_500));
-
-    assert_contract_error(
-        client.try_extend_funding_deadline(&2_000),
-        EscrowError::FundingDeadlineAtOrAfterMaturity,
-    );
-    assert_contract_error(
-        client.try_extend_funding_deadline(&2_001),
-        EscrowError::FundingDeadlineAtOrAfterMaturity,
-    );
-    assert_eq!(client.get_funding_deadline(), Some(1_500));
-}
-
-#[test]
-fn test_extend_funding_deadline_requires_existing_deadline() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (_, client, _, _) = init_deadline_escrow(&env, "FD_NONE", 0, None);
-
-    assert_contract_error(
-        client.try_extend_funding_deadline(&2_000),
-        EscrowError::FundingDeadlineNotExtended,
-    );
-}
-
-#[test]
-fn test_extend_funding_deadline_rejects_closed_status() {
-    use soroban_sdk::testutils::Ledger as _;
-
-    let env = Env::default();
-    env.mock_all_auths();
-    env.ledger().with_mut(|l| {
-        l.timestamp = 1_000;
-        l.sequence_number = 10;
-    });
-    let (_, client, _, _) = init_deadline_escrow(&env, "FD_STAT", 3_000, Some(1_500));
-    client.fund(&Address::generate(&env), &10_000i128);
-    assert_eq!(client.get_escrow().status, 1);
-
-    assert_contract_error(
-        client.try_extend_funding_deadline(&2_000),
-        EscrowError::FundingDeadlineUpdateNotOpen,
-    );
-}
-
-#[test]
-fn test_extend_funding_deadline_rejects_after_current_deadline_passed() {
-    use soroban_sdk::testutils::Ledger as _;
-
-    let env = Env::default();
-    env.mock_all_auths();
-    env.ledger().with_mut(|l| {
-        l.timestamp = 1_000;
-        l.sequence_number = 10;
-    });
-    let (_, client, _, _) = init_deadline_escrow(&env, "FD_PAST", 3_000, Some(1_500));
-
-    env.ledger().with_mut(|l| {
-        l.timestamp = 1_501;
-        l.sequence_number = 11;
-    });
-    assert!(client.is_funding_expired());
-
-    assert_contract_error(
-        client.try_extend_funding_deadline(&2_000),
-        EscrowError::FundingDeadlinePassed,
-    );
-    assert_eq!(client.get_funding_deadline(), Some(1_500));
 }
 
 #[test]

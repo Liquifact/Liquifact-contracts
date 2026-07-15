@@ -11,8 +11,8 @@ use crate::{
 };
 use soroban_sdk::{
     symbol_short,
-    testutils::{storage::Persistent, Address as _, Events as _, Ledger},
-    Address, BytesN, Env, Error, Event, InvokeError, Symbol, TryIntoVal, Vec as SorobanVec,
+    testutils::{Address as _, Events as _, Ledger},
+    Address, BytesN, Env, Error, InvokeError, Vec as SorobanVec,
 };
 
 const AMOUNT: i128 = 100_000_000_000;
