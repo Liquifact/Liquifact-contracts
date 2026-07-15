@@ -44,6 +44,11 @@ fn setup_with_init(env: &Env) -> (LiquifactEscrowClient<'_>, Address) {
     (client, admin)
 }
 
+fn attestation_log_stats(client: &LiquifactEscrowClient<'_>) -> (u32, u32) {
+    let used = client.get_attestation_append_log().len();
+    (used, MAX_ATTESTATION_APPEND_ENTRIES.saturating_sub(used))
+}
+
 // ---------------------------------------------------------------------------
 // bind_primary_attestation_hash — single-set invariant
 // ---------------------------------------------------------------------------
@@ -139,11 +144,9 @@ fn test_append_log_empty_before_first_append() {
 fn test_attestation_log_stats_empty_before_first_append() {
     let env = Env::default();
     let (client, _) = setup_with_init(&env);
-    let summary = client.get_escrow_summary();
-    assert_eq!(summary.attestation_log_length, 0);
-}
-fn remaining_attestation_slots(client: &LiquifactEscrowClient<'_>) -> u32 {
-    MAX_ATTESTATION_APPEND_ENTRIES - client.get_escrow_summary().attestation_log_length
+    let (used, remaining) = attestation_log_stats(&client);
+    assert_eq!(used, 0);
+    assert_eq!(remaining, MAX_ATTESTATION_APPEND_ENTRIES);
 }
 
 /// The stats view tracks partially filled logs without reading the full vector contents.
@@ -154,7 +157,7 @@ fn test_attestation_log_stats_tracks_partial_fill() {
     for i in 0u8..5 {
         client.append_attestation_digest(&digest(&env, i));
     }
-    let used = client.get_escrow_summary().attestation_log_length;
+    let (used, remaining) = attestation_log_stats(&client);
     assert_eq!(used, 5);
     assert_eq!(
         remaining_attestation_slots(&client),
@@ -170,14 +173,14 @@ fn test_attestation_log_stats_full_and_after_capacity_error() {
     for i in 0u8..(MAX_ATTESTATION_APPEND_ENTRIES as u8) {
         client.append_attestation_digest(&digest(&env, i));
     }
-    let used = client.get_escrow_summary().attestation_log_length;
+    let (used, remaining) = attestation_log_stats(&client);
     assert_eq!(used, MAX_ATTESTATION_APPEND_ENTRIES);
     assert_eq!(remaining_attestation_slots(&client), 0);
 
     let result = client.try_append_attestation_digest(&digest(&env, 0xFF));
     assert_contract_error(result, EscrowError::AttestationAppendLogCapacityReached);
 
-    let used = client.get_escrow_summary().attestation_log_length;
+    let (used, remaining) = attestation_log_stats(&client);
     assert_eq!(used, MAX_ATTESTATION_APPEND_ENTRIES);
     assert_eq!(remaining_attestation_slots(&client), 0);
 }

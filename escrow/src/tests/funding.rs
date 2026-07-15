@@ -4856,6 +4856,200 @@ fn test_update_funding_target_no_funds_no_promotion() {
 
 // ── Issue #345: get_yield_tiers read view ────────────────────────────────────
 
+// ---------------------------------------------------------------------------
+// extend_funding_deadline: forward-only funding-window extension (issue #551)
+// ---------------------------------------------------------------------------
+
+fn init_deadline_escrow<'a>(
+    env: &'a Env,
+    invoice_id: &str,
+    maturity: u64,
+    deadline: Option<u64>,
+) -> (Address, LiquifactEscrowClient<'a>, Address, Address) {
+    let (contract_id, client) = super::deploy_with_id(env);
+    let admin = Address::generate(env);
+    let sme = Address::generate(env);
+    let (tok, tre) = super::free_addresses(env);
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(env, invoice_id),
+        &sme,
+        &10_000i128,
+        &800i64,
+        &maturity,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &deadline,
+        &None,
+    );
+
+    (contract_id, client, admin, sme)
+}
+
+#[test]
+fn test_init_persists_funding_deadline() {
+    use soroban_sdk::testutils::Ledger as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| {
+        l.timestamp = 1_000;
+        l.sequence_number = 10;
+    });
+
+    let (_, client, _, _) = init_deadline_escrow(&env, "FD_INIT", 2_000, Some(1_500));
+
+    assert_eq!(client.get_funding_deadline(), Some(1_500));
+    assert!(!client.is_funding_expired());
+}
+
+#[test]
+fn test_extend_funding_deadline_moves_forward_and_emits_event() {
+    use crate::FundingDeadlineExtended;
+    use soroban_sdk::testutils::{Events as _, Ledger as _};
+
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| {
+        l.timestamp = 1_000;
+        l.sequence_number = 10;
+    });
+    let (contract_id, client, admin, _) = init_deadline_escrow(&env, "FD_EXT", 3_000, Some(1_500));
+
+    let extended = client.extend_funding_deadline(&2_000);
+
+    assert_eq!(extended, 2_000);
+    assert_eq!(client.get_funding_deadline(), Some(2_000));
+    assert!(
+        env.auths().iter().any(|(addr, _)| *addr == admin),
+        "admin auth was not recorded for deadline extension"
+    );
+
+    let events = env.events().all();
+    let latest_event = events.events().last().expect("deadline event").clone();
+    assert_eq!(
+        latest_event,
+        FundingDeadlineExtended {
+            name: soroban_sdk::symbol_short!("fund_ext"),
+            invoice_id: client.get_escrow().invoice_id,
+            old_deadline: 1_500,
+            new_deadline: 2_000,
+        }
+        .to_xdr(&env, &contract_id)
+    );
+}
+
+#[test]
+fn test_extend_funding_deadline_rejects_equal_or_earlier_deadline() {
+    use soroban_sdk::testutils::Ledger as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| {
+        l.timestamp = 1_000;
+        l.sequence_number = 10;
+    });
+    let (_, client, _, _) = init_deadline_escrow(&env, "FD_NOOP", 3_000, Some(1_500));
+
+    assert_contract_error(
+        client.try_extend_funding_deadline(&1_500),
+        EscrowError::FundingDeadlineNotExtended,
+    );
+    assert_contract_error(
+        client.try_extend_funding_deadline(&1_499),
+        EscrowError::FundingDeadlineNotExtended,
+    );
+    assert_eq!(client.get_funding_deadline(), Some(1_500));
+}
+
+#[test]
+fn test_extend_funding_deadline_rejects_maturity_boundary() {
+    use soroban_sdk::testutils::Ledger as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| {
+        l.timestamp = 1_000;
+        l.sequence_number = 10;
+    });
+    let (_, client, _, _) = init_deadline_escrow(&env, "FD_MAT", 2_000, Some(1_500));
+
+    assert_contract_error(
+        client.try_extend_funding_deadline(&2_000),
+        EscrowError::FundingDeadlineAtOrAfterMaturity,
+    );
+    assert_contract_error(
+        client.try_extend_funding_deadline(&2_001),
+        EscrowError::FundingDeadlineAtOrAfterMaturity,
+    );
+    assert_eq!(client.get_funding_deadline(), Some(1_500));
+}
+
+#[test]
+fn test_extend_funding_deadline_requires_existing_deadline() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (_, client, _, _) = init_deadline_escrow(&env, "FD_NONE", 0, None);
+
+    assert_contract_error(
+        client.try_extend_funding_deadline(&2_000),
+        EscrowError::FundingDeadlineNotExtended,
+    );
+}
+
+#[test]
+fn test_extend_funding_deadline_rejects_closed_status() {
+    use soroban_sdk::testutils::Ledger as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| {
+        l.timestamp = 1_000;
+        l.sequence_number = 10;
+    });
+    let (_, client, _, _) = init_deadline_escrow(&env, "FD_STAT", 3_000, Some(1_500));
+    client.fund(&Address::generate(&env), &10_000i128);
+    assert_eq!(client.get_escrow().status, 1);
+
+    assert_contract_error(
+        client.try_extend_funding_deadline(&2_000),
+        EscrowError::FundingDeadlineUpdateNotOpen,
+    );
+}
+
+#[test]
+fn test_extend_funding_deadline_rejects_after_current_deadline_passed() {
+    use soroban_sdk::testutils::Ledger as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().with_mut(|l| {
+        l.timestamp = 1_000;
+        l.sequence_number = 10;
+    });
+    let (_, client, _, _) = init_deadline_escrow(&env, "FD_PAST", 3_000, Some(1_500));
+
+    env.ledger().with_mut(|l| {
+        l.timestamp = 1_501;
+        l.sequence_number = 11;
+    });
+    assert!(client.is_funding_expired());
+
+    assert_contract_error(
+        client.try_extend_funding_deadline(&2_000),
+        EscrowError::FundingDeadlinePassed,
+    );
+    assert_eq!(client.get_funding_deadline(), Some(1_500));
+}
+
 #[test]
 fn test_get_yield_tiers_returns_empty_when_no_tiers_configured() {
     let env = Env::default();
@@ -5046,7 +5240,11 @@ fn test_get_yield_tiers_is_pure_read_no_state_change() {
 
 /// Helper: initialise an escrow with three tiers (30s / 60s / 90s) and a base
 /// yield of 500 bps.  Returns the client ready for use; all auth is mocked.
-fn setup_three_tier_escrow(env: &Env, invoice_id: &str, target: i128) -> LiquifactEscrowClient {
+fn setup_three_tier_escrow<'a>(
+    env: &'a Env,
+    invoice_id: &str,
+    target: i128,
+) -> LiquifactEscrowClient<'a> {
     let admin = Address::generate(env);
     let sme = Address::generate(env);
     let client = deploy(env);

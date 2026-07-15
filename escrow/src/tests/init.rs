@@ -1,7 +1,6 @@
 use super::*;
-use crate::{
-    EscrowError, EscrowInitialized, DEFAULT_MATURITY_MAX_HORIZON_SECS, MAX_INVOICE_AMOUNT,
-};
+use crate::DEFAULT_MATURITY_MAX_HORIZON_SECS;
+use crate::{EscrowError, EscrowInitialized};
 use proptest::prelude::*;
 extern crate std;
 use std::format;

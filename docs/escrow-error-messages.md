@@ -156,8 +156,8 @@ See also [`docs/escrow-legal-hold.md`](escrow-legal-hold.md),
 | 200 | `PartialSettleUnauthorizedCaller` | `partial_settle` | `caller` is neither `sme_address` nor `admin` | Call as the SME or admin | typed |
 | 201 | `LegalHoldBlocksPartialSettle` | `partial_settle` | legal hold active | Complete legal-hold clear workflow | typed |
 | 202 | `PartialSettleNotOpen` | `partial_settle` | escrow status `!= 0` (open) | Partial settle only while open | typed |
-| 203 | `ContributionReadBatchTooLarge` | `get_contributions` | `investors.len() > MAX_INVESTOR_READ_BATCH` | Split the read into smaller batches | typed |
-| 204 | `HorizonNotRaised` | `raise_maturity_max_horizon` | `new_horizon <= current horizon` | Pass a strictly higher horizon | typed |
+| 203 | `FundingDeadlineNotExtended` | `extend_funding_deadline` | no deadline exists, or `new_deadline <= old_deadline` | Configure a deadline at init and pass a strictly later timestamp | typed |
+| 204 | `FundingDeadlineAtOrAfterMaturity` | `init`, `extend_funding_deadline` | funding deadline would be at or after a non-zero maturity timestamp | Keep funding deadline strictly before maturity | typed |
 
 ### Legacy panic strings (migration aid)
 

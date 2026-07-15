@@ -238,7 +238,7 @@ reducing transaction overhead for cancelled-escrow recovery.
 | `cancel_funding()` | Admin only |
 | `set_legal_hold()` | Admin only |
 | `update_maturity()` | Admin only |
-| `update_funding_deadline()` | Admin only |
+| `extend_funding_deadline()` | Admin only |
 | `propose_admin()` | Admin only |
 | `accept_admin()` | Pending admin only |
 
@@ -272,12 +272,13 @@ When `maturity > 0`:
 
 `withdraw()` does **not** check maturity; it is a pull model for SME liquidity.
 
-## Funding deadline update
+## Funding deadline extension
 
-`update_funding_deadline(new_deadline: Option<u64>)` allows the admin to set, extend, or clear
-the optional funding deadline while the escrow is **open** (status == 0):
+`extend_funding_deadline(new_deadline: u64)` lets the admin move an existing
+funding deadline forward while the escrow is **open** (status == 0) and the
+current funding window has not elapsed.
 
-| Status | `update_funding_deadline` result |
+| Status | `extend_funding_deadline` result |
 |--------|----------------------------------|
 | 0 — Open | ✅ Allowed |
 | 1 — Funded | ❌ Panics: "Funding deadline can only be updated in Open state" |
@@ -286,14 +287,17 @@ the optional funding deadline while the escrow is **open** (status == 0):
 | 4 — Cancelled | ❌ Panics: "Funding deadline can only be updated in Open state" |
 
 **Validation rules:**
-- `Some(d)`: `d` must be strictly greater than the current ledger timestamp (same rule as `init`).
-- `None`: removes the deadline entirely; funding becomes unrestricted by time.
+- A deadline must already be configured; no-deadline escrows are not shortened by this entrypoint.
+- `new_deadline` must be strictly greater than the stored deadline.
+- If the stored deadline has already passed, the call fails with `FundingDeadlinePassed`.
+- If `maturity > 0`, `new_deadline` must remain strictly before maturity.
 - `is_funding_expired()` returns `false` when no deadline is set (key absent from storage).
 
-**Events:** `FundingDeadlineUpdated` carries `invoice_id`, `prior_deadline`, and `new_deadline`.
+**Events:** `FundingDeadlineExtended` carries `invoice_id`, `old_deadline`, and `new_deadline`.
 
-This is consistent with `update_funding_target` and `update_maturity`: all three are admin-gated,
-open-state-only setters that emit a typed event with the prior and new values.
+This is consistent with the contract's forward-only governance controls: the
+entrypoint is admin-gated, open-state-only, additive, and never shortens the
+funding window.
 
 ---
 

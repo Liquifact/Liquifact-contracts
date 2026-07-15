@@ -34,6 +34,9 @@ fn test_update_maturity_emits_event() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
+        &None,
     );
     client.update_maturity(&2000u64);
     let all_events = env.events().all();
@@ -72,6 +75,9 @@ fn test_update_maturity_unchanged_panics() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
+        &None,
     );
     client.update_maturity(&2000u64);
 }
@@ -90,6 +96,9 @@ fn test_update_maturity_success() {
         &Address::generate(&env),
         &None,
         &Address::generate(&env),
+        &None,
+        &None,
+        &None,
         &None,
         &None,
         &None,

@@ -165,6 +165,7 @@ liquifact-contracts/
 | `withdraw` | SME | SME pulls funded liquidity, **net of the immutable protocol fee**: `fee = funded_amount * protocol_fee_bps / 10_000` goes to the treasury, the remainder to the SME. |
 | `get_protocol_fee_bps` | — | Read the immutable protocol fee in basis points (defaults to `0`). |
 | `cancel_funding` | Admin | Admin cancels an open escrow (transitions status 0 → 4). |
+| `extend_funding_deadline` | Admin | Extend an existing funding deadline while the escrow is open; rejects no-op/shorter deadlines, elapsed windows, and deadlines at or after maturity. Emits `FundingDeadlineExtended`. |
 | `refund` | Investor | Investor pulls contributed liquidity from a cancelled escrow. Increments `DistributedPrincipal` liability. |
 | `refund_batch` | Investor | Batch-refund up to `MAX_REFUND_BATCH` investors in a single call. Already-refunded entries are skipped. |
 | `claim_investor_payout` | Investor | Investor records a payout claim after settlement. |
