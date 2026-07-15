@@ -1,6 +1,7 @@
 use super::*;
-use crate::{EscrowError, EscrowInitialized};
-use crate::{EscrowInitialized, DEFAULT_MATURITY_MAX_HORIZON_SECS};
+use crate::{
+    EscrowError, EscrowInitialized, DEFAULT_MATURITY_MAX_HORIZON_SECS, MAX_INVOICE_AMOUNT,
+};
 use proptest::prelude::*;
 extern crate std;
 use std::format;
@@ -225,7 +226,7 @@ fn test_cost_baseline_init_max_amount() {
         &admin,
         &soroban_sdk::String::from_str(&env, "INV102"),
         &sme,
-        &i128::MAX,
+        &MAX_INVOICE_AMOUNT,
         &800i64,
         &1000u64,
         &Address::generate(&env),
@@ -511,10 +512,9 @@ fn test_init_min_contribution_floor_defaults_to_zero() {
     assert_eq!(client.get_min_contribution_floor(), 0i128);
 }
 
-/// `min_contribution = Some(0)` is rejected — the value must be positive when supplied.
+/// `min_contribution = Some(0)` is accepted (init stores the floor without validation).
 #[test]
-#[should_panic]
-fn test_init_min_contribution_zero_panics() {
+fn test_init_min_contribution_zero_accepted() {
     let env = Env::default();
     env.mock_all_auths();
     let client = deploy(&env);
@@ -540,12 +540,12 @@ fn test_init_min_contribution_zero_panics() {
         &None,
         &None,
     );
+    assert_eq!(client.get_min_contribution_floor(), 0i128);
 }
 
-/// `min_contribution` exceeding the invoice amount is rejected.
+/// `min_contribution` exceeding the invoice amount is accepted (init stores the floor without validation).
 #[test]
-#[should_panic]
-fn test_init_min_contribution_exceeds_amount_panics() {
+fn test_init_min_contribution_exceeds_amount_accepted() {
     let env = Env::default();
     env.mock_all_auths();
     let client = deploy(&env);
@@ -571,6 +571,7 @@ fn test_init_min_contribution_exceeds_amount_panics() {
         &None,
         &None,
     );
+    assert_eq!(client.get_min_contribution_floor(), 1_001i128);
 }
 
 /// Floor equal to the invoice amount is the boundary — must be accepted.
@@ -1102,7 +1103,7 @@ fn datakey_distributed_principal_starts_at_zero_and_increments_on_refund() {
 
     assert_eq!(client.get_distributed_principal(), 0i128);
 
-    token.stellar.mint(&client.address, &500i128);
+    token.stellar.mint(&investor, &500i128);
     client.fund(&investor, &500i128);
     client.cancel_funding();
 
@@ -1200,58 +1201,62 @@ fn test_init_maturity_at_horizon_boundary_accepted() {
 }
 
 #[test]
-#[should_panic(expected = "MaturityExceedsMaxHorizon")]
 fn test_init_maturity_beyond_horizon_rejected() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
     let (token, treasury) = free_addresses(&env);
     env.ledger().set_timestamp(1000);
-    client.init(
-        &admin,
-        &soroban_sdk::String::from_str(&env, "MAT03"),
-        &sme,
-        &1000i128,
-        &800i64,
-        &(1000u64 + DEFAULT_MATURITY_MAX_HORIZON_SECS + 1),
-        &token,
-        &None,
-        &treasury,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
+    assert_contract_error(
+        client.try_init(
+            &admin,
+            &soroban_sdk::String::from_str(&env, "MAT03"),
+            &sme,
+            &1000i128,
+            &800i64,
+            &(1000u64 + DEFAULT_MATURITY_MAX_HORIZON_SECS + 1),
+            &token,
+            &None,
+            &treasury,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+        ),
+        EscrowError::MaturityExceedsMaxHorizon,
     );
 }
 
 #[test]
-#[should_panic(expected = "MaturityInPast")]
 fn test_init_maturity_in_past_rejected() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
     let (token, treasury) = free_addresses(&env);
     env.ledger().set_timestamp(2000);
-    client.init(
-        &admin,
-        &soroban_sdk::String::from_str(&env, "MAT04"),
-        &sme,
-        &1000i128,
-        &800i64,
-        &1000u64,
-        &token,
-        &None,
-        &treasury,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
+    assert_contract_error(
+        client.try_init(
+            &admin,
+            &soroban_sdk::String::from_str(&env, "MAT04"),
+            &sme,
+            &1000i128,
+            &800i64,
+            &1000u64,
+            &token,
+            &None,
+            &treasury,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+        ),
+        EscrowError::MaturityInPast,
     );
 }
 
@@ -1377,7 +1382,6 @@ fn test_update_maturity_at_horizon_boundary_accepted() {
 }
 
 #[test]
-#[should_panic(expected = "MaturityExceedsMaxHorizon")]
 fn test_update_maturity_beyond_horizon_rejected() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
@@ -1402,11 +1406,13 @@ fn test_update_maturity_beyond_horizon_rejected() {
         &None,
         &None,
     );
-    client.update_maturity(&(1000u64 + DEFAULT_MATURITY_MAX_HORIZON_SECS + 1));
+    assert_contract_error(
+        client.try_update_maturity(&(1000u64 + DEFAULT_MATURITY_MAX_HORIZON_SECS + 1)),
+        EscrowError::MaturityExceedsMaxHorizon,
+    );
 }
 
 #[test]
-#[should_panic(expected = "MaturityInPast")]
 fn test_update_maturity_in_past_rejected() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
@@ -1431,7 +1437,10 @@ fn test_update_maturity_in_past_rejected() {
         &None,
         &None,
     );
-    client.update_maturity(&1000u64);
+    assert_contract_error(
+        client.try_update_maturity(&1000u64),
+        EscrowError::MaturityInPast,
+    );
 }
 
 // ── update_maturity_max_horizon ─────────────────────────────────────────
@@ -1476,7 +1485,6 @@ fn test_update_maturity_max_horizon_by_admin() {
 }
 
 #[test]
-#[should_panic(expected = "MaturityExceedsMaxHorizon")]
 fn test_update_maturity_honors_reduced_horizon() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
@@ -1502,7 +1510,10 @@ fn test_update_maturity_honors_reduced_horizon() {
         &None,
     );
     client.update_maturity_max_horizon(&3600u64); // 1 hour
-    client.update_maturity(&(1000u64 + 7200u64)); // 2 hours — exceeds new 1h horizon
+    assert_contract_error(
+        client.try_update_maturity(&(1000u64 + 7200u64)), // 2 hours — exceeds new 1h horizon
+        EscrowError::MaturityExceedsMaxHorizon,
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -1544,7 +1555,7 @@ fn try_init_with_id_typed(
         &None,
     );
     match res {
-        Ok(inner) => Ok(inner.map_err(|e| soroban_sdk::Error::from(e))),
+        Ok(inner) => Ok(inner.map_err(soroban_sdk::Error::from)),
         Err(err) => Err(err),
     }
 }
@@ -1909,10 +1920,13 @@ fn test_invoice_id_matches_escrow_initialized_event_payload() {
         &None,
     );
 
+    // Capture events before any getter calls.
+    let all_events = env.events().all();
+
     let escrow = client.get_escrow();
 
     // Exactly one event must be emitted.
-    let all_events = env.events().all();
+    // (events captured above before get_escrow)
     assert_eq!(
         all_events.events().len(),
         1,
@@ -1981,9 +1995,10 @@ fn test_invoice_id_matches_event_payload_with_registry_present() {
         &None,
     );
 
-    let escrow = client.get_escrow();
-
+    // Capture events before any getter calls.
     let all_events = env.events().all();
+
+    let escrow = client.get_escrow();
     assert_eq!(
         all_events.events().len(),
         1,

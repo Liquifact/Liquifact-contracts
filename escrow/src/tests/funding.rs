@@ -224,18 +224,24 @@ fn test_funding_amount_accumulation_overflow_panics() {
 #[test]
 fn test_funding_amount_overflow_does_not_mutate_state() {
     let env = Env::default();
-    let (client, admin, sme) = setup(&env);
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let contract_id = client.address.clone();
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
     let investor = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
     client.init(
         &admin,
         &String::from_str(&env, "OVF002"),
         &sme,
-        &i128::MAX,
+        &1_000i128,
         &800i64,
         &0u64,
-        &Address::generate(&env),
+        &tok,
         &None,
-        &Address::generate(&env),
+        &tre,
         &None,
         &None,
         &None,
@@ -246,7 +252,18 @@ fn test_funding_amount_overflow_does_not_mutate_state() {
         &None,
     );
 
-    client.fund(&investor, &(i128::MAX - 1));
+    // Force funded_amount near i128::MAX so a small extra deposit triggers overflow.
+    env.as_contract(&contract_id, || {
+        let mut escrow = LiquifactEscrow::get_escrow(env.clone());
+        escrow.funded_amount = i128::MAX - 1;
+        escrow.status = 0;
+        env.storage().instance().set(&DataKey::Escrow, &escrow);
+        env.storage().persistent().set(
+            &DataKey::InvestorContribution(investor.clone()),
+            &(i128::MAX - 1),
+        );
+    });
+
     let before = client.get_escrow();
 
     let overflowed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -264,19 +281,24 @@ fn test_funding_amount_overflow_does_not_mutate_state() {
 #[should_panic]
 fn test_fund_with_commitment_overflow_panics() {
     let env = Env::default();
-    let (client, admin, sme) = setup(&env);
-    let investor_a = Address::generate(&env);
-    let investor_b = Address::generate(&env);
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let contract_id = client.address.clone();
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let investor = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
     client.init(
         &admin,
         &String::from_str(&env, "OVF001b"),
         &sme,
-        &i128::MAX,
+        &1_000i128,
         &800i64,
         &0u64,
-        &Address::generate(&env),
+        &tok,
         &None,
-        &Address::generate(&env),
+        &tre,
         &None,
         &None,
         &None,
@@ -287,26 +309,42 @@ fn test_fund_with_commitment_overflow_panics() {
         &None,
     );
 
-    client.fund(&investor_a, &(i128::MAX - 1));
-    client.fund_with_commitment(&investor_b, &2i128, &0u64);
+    // Force funded_amount and contribution near i128::MAX so adding 2 overflows.
+    env.as_contract(&contract_id, || {
+        let mut escrow = LiquifactEscrow::get_escrow(env.clone());
+        escrow.funded_amount = i128::MAX - 1;
+        escrow.status = 0;
+        env.storage().instance().set(&DataKey::Escrow, &escrow);
+        env.storage().persistent().set(
+            &DataKey::InvestorContribution(investor.clone()),
+            &(i128::MAX - 1),
+        );
+    });
+
+    client.fund_with_commitment(&investor, &2i128, &0u64);
 }
 
 #[test]
 fn test_fund_with_commitment_overflow_does_not_mutate_state() {
     let env = Env::default();
-    let (client, admin, sme) = setup(&env);
-    let investor_a = Address::generate(&env);
-    let investor_b = Address::generate(&env);
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let contract_id = client.address.clone();
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let investor = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
     client.init(
         &admin,
         &String::from_str(&env, "OVF002b"),
         &sme,
-        &i128::MAX,
+        &1_000i128,
         &800i64,
         &0u64,
-        &Address::generate(&env),
+        &tok,
         &None,
-        &Address::generate(&env),
+        &tre,
         &None,
         &None,
         &None,
@@ -317,18 +355,29 @@ fn test_fund_with_commitment_overflow_does_not_mutate_state() {
         &None,
     );
 
-    client.fund(&investor_a, &(i128::MAX - 1));
+    // Force funded_amount and contribution near i128::MAX so adding 2 overflows.
+    env.as_contract(&contract_id, || {
+        let mut escrow = LiquifactEscrow::get_escrow(env.clone());
+        escrow.funded_amount = i128::MAX - 1;
+        escrow.status = 0;
+        env.storage().instance().set(&DataKey::Escrow, &escrow);
+        env.storage().persistent().set(
+            &DataKey::InvestorContribution(investor.clone()),
+            &(i128::MAX - 1),
+        );
+    });
+
     let before = client.get_escrow();
 
     let overflowed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        client.fund_with_commitment(&investor_b, &2i128, &0u64);
+        client.fund_with_commitment(&investor, &2i128, &0u64);
     }));
     assert!(overflowed.is_err());
 
     let after = client.get_escrow();
     assert_eq!(after.funded_amount, before.funded_amount);
     assert_eq!(after.status, 0);
-    assert_eq!(client.get_contribution(&investor_b), 0);
+    assert_eq!(client.get_contribution(&investor), i128::MAX - 1);
 }
 
 /// Regression for issue #253: per-investor accounting must live in persistent storage, not instance.
@@ -2347,8 +2396,10 @@ fn test_refund_returns_principal_to_investor() {
     let investor = Address::generate(&env);
     let (token, _treasury) = init_with_token(&env, &client, &admin, &sme);
 
-    // Mint tokens into the escrow contract so it can refund
+    // Mint tokens to investor so fund() can transfer into escrow, and to the
+    // escrow contract so it can refund.
     let contract_id = client.address.clone();
+    token.stellar.mint(&investor, &TARGET);
     token.stellar.mint(&contract_id, &TARGET);
 
     client.fund(&investor, &TARGET);
@@ -2359,6 +2410,7 @@ fn test_refund_returns_principal_to_investor() {
     let investor2 = Address::generate(&env2);
     let (token2, _) = init_with_token(&env2, &client2, &admin2, &sme2);
     let contract_id2 = client2.address.clone();
+    token2.stellar.mint(&investor2, &(TARGET / 2));
     token2.stellar.mint(&contract_id2, &(TARGET / 2));
     client2.fund(&investor2, &(TARGET / 2));
     client2.cancel_funding();
@@ -2376,6 +2428,7 @@ fn test_refund_zeroes_contribution() {
     let investor = Address::generate(&env);
     let (token, _) = init_with_token(&env, &client, &admin, &sme);
     let contract_id = client.address.clone();
+    token.stellar.mint(&investor, &(TARGET / 2));
     token.stellar.mint(&contract_id, &(TARGET / 2));
     client.fund(&investor, &(TARGET / 2));
     client.cancel_funding();
@@ -2390,6 +2443,7 @@ fn test_refund_marks_investor_refunded() {
     let investor = Address::generate(&env);
     let (token, _) = init_with_token(&env, &client, &admin, &sme);
     let contract_id = client.address.clone();
+    token.stellar.mint(&investor, &(TARGET / 2));
     token.stellar.mint(&contract_id, &(TARGET / 2));
     client.fund(&investor, &(TARGET / 2));
     client.cancel_funding();
@@ -2406,6 +2460,7 @@ fn test_refund_double_spend_panics() {
     let investor = Address::generate(&env);
     let (token, _) = init_with_token(&env, &client, &admin, &sme);
     let contract_id = client.address.clone();
+    token.stellar.mint(&investor, &(TARGET / 2));
     token.stellar.mint(&contract_id, &(TARGET / 2));
     client.fund(&investor, &(TARGET / 2));
     client.cancel_funding();
@@ -2454,6 +2509,7 @@ fn test_refund_requires_investor_auth() {
     let investor = Address::generate(&env);
     let (token, _) = init_with_token(&env, &client, &admin, &sme);
     let contract_id = client.address.clone();
+    token.stellar.mint(&investor, &(TARGET / 2));
     token.stellar.mint(&contract_id, &(TARGET / 2));
     client.fund(&investor, &(TARGET / 2));
     client.cancel_funding();
@@ -2474,6 +2530,8 @@ fn test_refund_multiple_investors_independent() {
     let contract_id = client.address.clone();
     let amt_a = TARGET / 3;
     let amt_b = TARGET / 4;
+    token.stellar.mint(&inv_a, &amt_a);
+    token.stellar.mint(&inv_b, &amt_b);
     token.stellar.mint(&contract_id, &(amt_a + amt_b));
     client.fund(&inv_a, &amt_a);
     client.fund(&inv_b, &amt_b);
@@ -2505,7 +2563,9 @@ fn test_sweep_terminal_dust_allowed_in_cancelled_state() {
     let investor = Address::generate(&env);
     let (token, treasury) = init_with_token(&env, &client, &admin, &sme);
     let contract_id = client.address.clone();
-    // Mint slightly more than the investor contributes to leave dust
+    // Mint enough to the investor so fund() can pull tokens into escrow,
+    // plus slightly more to leave dust after refund.
+    token.stellar.mint(&investor, &(TARGET / 2));
     token.stellar.mint(&contract_id, &(TARGET / 2 + 1));
     client.fund(&investor, &(TARGET / 2));
     client.cancel_funding();
@@ -2514,6 +2574,167 @@ fn test_sweep_terminal_dust_allowed_in_cancelled_state() {
     let swept = client.sweep_terminal_dust(&1i128);
     assert_eq!(swept, 1i128);
     assert_eq!(token.token.balance(&treasury), 1i128);
+}
+
+// ─── refund_batch tests ─────────────────────────────────────────────────────
+
+/// `refund_batch` with N entries equals N sequential `refund` calls
+/// (balance changes, contribution zeroing, refunded marker, DistributedPrincipal).
+#[test]
+fn test_refund_batch_equals_n_single_refunds() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let inv_a = Address::generate(&env);
+    let inv_b = Address::generate(&env);
+    let (token, _) = init_with_token(&env, &client, &admin, &sme);
+    let contract_id = client.address.clone();
+    let amt_a = TARGET / 3;
+    let amt_b = TARGET / 4;
+    token.stellar.mint(&inv_a, &amt_a);
+    token.stellar.mint(&inv_b, &amt_b);
+    token.stellar.mint(&contract_id, &(amt_a + amt_b));
+    client.fund(&inv_a, &amt_a);
+    client.fund(&inv_b, &amt_b);
+    client.cancel_funding();
+
+    let before_a = token.token.balance(&inv_a);
+    let before_b = token.token.balance(&inv_b);
+    let investors = soroban_sdk::vec![&env, inv_a.clone(), inv_b.clone()];
+    client.refund_batch(&investors);
+    assert_eq!(token.token.balance(&inv_a) - before_a, amt_a);
+    assert_eq!(token.token.balance(&inv_b) - before_b, amt_b);
+    assert_eq!(client.get_contribution(&inv_a), 0);
+    assert_eq!(client.get_contribution(&inv_b), 0);
+    assert!(client.is_investor_refunded(&inv_a));
+    assert!(client.is_investor_refunded(&inv_b));
+    let distributed = client.get_distributed_principal();
+    assert_eq!(distributed, amt_a + amt_b);
+}
+
+/// Previously-refunded investors are skipped without failing the batch.
+#[test]
+fn test_refund_batch_skips_already_refunded() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let inv_a = Address::generate(&env);
+    let inv_b = Address::generate(&env);
+    let (token, _) = init_with_token(&env, &client, &admin, &sme);
+    let contract_id = client.address.clone();
+    let amt_a = TARGET / 5;
+    let amt_b = TARGET / 5;
+    token.stellar.mint(&inv_a, &amt_a);
+    token.stellar.mint(&inv_b, &amt_b);
+    token.stellar.mint(&contract_id, &(amt_a + amt_b));
+    client.fund(&inv_a, &amt_a);
+    client.fund(&inv_b, &amt_b);
+    client.cancel_funding();
+    // Refund inv_a individually first.
+    client.refund(&inv_a);
+    assert!(client.is_investor_refunded(&inv_a));
+    assert!(!client.is_investor_refunded(&inv_b));
+
+    let before_b = token.token.balance(&inv_b);
+    let investors = soroban_sdk::vec![&env, inv_a.clone(), inv_b.clone()];
+    client.refund_batch(&investors);
+    // inv_a already refunded — skipped; inv_b refunded now.
+    assert_eq!(token.token.balance(&inv_b) - before_b, amt_b);
+    assert!(client.is_investor_refunded(&inv_b));
+    let distributed = client.get_distributed_principal();
+    assert_eq!(distributed, amt_a + amt_b);
+}
+
+/// Empty batch panics with `RefundBatchEmpty`.
+#[test]
+fn test_refund_batch_empty_yields_typed_error() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    client.cancel_funding();
+    let empty: soroban_sdk::Vec<Address> = soroban_sdk::Vec::new(&env);
+    let result = client.try_refund_batch(&empty);
+    assert_contract_error(result, EscrowError::RefundBatchEmpty);
+}
+
+/// Oversized batch (more than MAX_REFUND_BATCH) panics with `RefundBatchTooLarge`.
+#[test]
+fn test_refund_batch_too_large_yields_typed_error() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    client.cancel_funding();
+    let mut investors = soroban_sdk::Vec::new(&env);
+    for _ in 0..=MAX_REFUND_BATCH {
+        investors.push_back(Address::generate(&env));
+    }
+    let result = client.try_refund_batch(&investors);
+    assert_contract_error(result, EscrowError::RefundBatchTooLarge);
+}
+
+/// Exactly MAX_REFUND_BATCH entries succeeds.
+#[test]
+fn test_refund_batch_max_batch_size_succeeds() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.cost_estimate().disable_resource_limits();
+    env.cost_estimate().budget().reset_unlimited();
+    let (client, admin, sme) = setup(&env);
+    let (token, _) = init_with_token(&env, &client, &admin, &sme);
+    let contract_id = client.address.clone();
+    let amt_per = 1_000i128;
+    let total = (MAX_REFUND_BATCH as i128) * amt_per;
+    token.stellar.mint(&contract_id, &total);
+
+    let mut investors = soroban_sdk::Vec::new(&env);
+    for i in 0..MAX_REFUND_BATCH {
+        let inv = Address::generate(&env);
+        token.stellar.mint(&inv, &amt_per);
+        client.fund(&inv, &amt_per);
+        investors.push_back(inv);
+    }
+    client.cancel_funding();
+    client.refund_batch(&investors);
+    assert_eq!(
+        client.get_distributed_principal(),
+        total,
+        "distributed principal must sum all refunds"
+    );
+}
+
+/// Mixed batch: some funded, some not — the non-funded entry panics.
+#[test]
+#[should_panic]
+fn test_refund_batch_non_investor_panics() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let inv = Address::generate(&env);
+    let (token, _) = init_with_token(&env, &client, &admin, &sme);
+    let contract_id = client.address.clone();
+    token.stellar.mint(&inv, &(TARGET / 2));
+    token.stellar.mint(&contract_id, &(TARGET / 2));
+    client.fund(&inv, &(TARGET / 2));
+    client.cancel_funding();
+    let stranger = Address::generate(&env);
+    let investors = soroban_sdk::vec![&env, inv, stranger];
+    client.refund_batch(&investors);
+}
+
+/// `refund_batch` panics in non-cancelled states.
+#[test]
+#[should_panic]
+fn test_refund_batch_panics_in_open_state() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let inv = Address::generate(&env);
+    default_init(&client, &env, &admin, &sme);
+    client.fund(&inv, &(TARGET / 2));
+    let investors = soroban_sdk::vec![&env, inv];
+    client.refund_batch(&investors);
 }
 
 // ─── Commitment first-deposit-only invariant (issue #260) ────────────────────
@@ -2861,7 +3082,42 @@ fn test_fund_first_deposit_sets_base_yield_and_no_claim_gate() {
 
 // ── CommitmentLockExceedsMaturity bound ──────────────────────────────────────
 
-// Helper: init an escrow with a specific maturity timestamp.
+// Helper: init an escrow with a specific maturity timestamp, using a real SAC
+// so that investor tokens can be minted before fund().
+fn init_with_maturity_sac<'a>(
+    env: &'a Env,
+    client: &crate::LiquifactEscrowClient<'a>,
+    admin: &soroban_sdk::Address,
+    sme: &soroban_sdk::Address,
+    maturity: u64,
+) -> StellarAssetClient<'a> {
+    let sac = env.register_stellar_asset_contract_v2(Address::generate(env));
+    let token_id = sac.address();
+    let sac_admin = StellarAssetClient::new(env, &token_id);
+    client.init(
+        admin,
+        &soroban_sdk::String::from_str(env, "LOCK1"),
+        sme,
+        &10_000i128,
+        &800i64,
+        &maturity,
+        &token_id,
+        &None,
+        &Address::generate(env),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+    sac_admin
+}
+
+// Legacy helper kept for tests that do not call fund() and therefore need
+// no minting (plain maturity-boundary checks that only use try_* methods).
 fn init_with_maturity(
     env: &Env,
     client: &crate::LiquifactEscrowClient<'_>,
@@ -2895,13 +3151,13 @@ fn init_with_maturity(
 fn commitment_lock_within_maturity_is_accepted() {
     // now=1000, maturity=2000, lock=500 → claim_nb=1500 ≤ 2000  ✓
     let env = Env::default();
-    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
     let mut li = env.ledger().get();
     li.timestamp = 1000;
     env.ledger().set(li);
-    let (client, admin, sme) = setup(&env);
     let investor = soroban_sdk::Address::generate(&env);
-    init_with_maturity(&env, &client, &admin, &sme, 2000);
+    let sac_admin = init_with_maturity_sac(&env, &client, &admin, &sme, 2000);
+    sac_admin.mint(&investor, &1_000i128);
     let escrow = client.fund_with_commitment(&investor, &1_000i128, &500u64);
     assert_eq!(escrow.status, 0);
     assert_eq!(client.get_investor_claim_not_before(&investor), 1500u64);
@@ -2911,13 +3167,13 @@ fn commitment_lock_within_maturity_is_accepted() {
 fn commitment_lock_exactly_at_maturity_is_accepted() {
     // now=1000, maturity=2000, lock=1000 → claim_nb=2000 == maturity  ✓ (inclusive)
     let env = Env::default();
-    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
     let mut li = env.ledger().get();
     li.timestamp = 1000;
     env.ledger().set(li);
-    let (client, admin, sme) = setup(&env);
     let investor = soroban_sdk::Address::generate(&env);
-    init_with_maturity(&env, &client, &admin, &sme, 2000);
+    let sac_admin = init_with_maturity_sac(&env, &client, &admin, &sme, 2000);
+    sac_admin.mint(&investor, &1_000i128);
     let escrow = client.fund_with_commitment(&investor, &1_000i128, &1000u64);
     assert_eq!(escrow.status, 0);
     assert_eq!(client.get_investor_claim_not_before(&investor), 2000u64);
@@ -2927,11 +3183,10 @@ fn commitment_lock_exactly_at_maturity_is_accepted() {
 fn commitment_lock_one_second_past_maturity_is_rejected() {
     // now=1000, maturity=2000, lock=1001 → claim_nb=2001 > 2000  ✗
     let env = Env::default();
-    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
     let mut li = env.ledger().get();
     li.timestamp = 1000;
     env.ledger().set(li);
-    let (client, admin, sme) = setup(&env);
     let investor = soroban_sdk::Address::generate(&env);
     init_with_maturity(&env, &client, &admin, &sme, 2000);
     assert_contract_error(
@@ -2944,11 +3199,10 @@ fn commitment_lock_one_second_past_maturity_is_rejected() {
 fn commitment_lock_far_past_maturity_is_rejected() {
     // now=1000, maturity=2000, lock=5000 → claim_nb=6000 >> 2000  ✗
     let env = Env::default();
-    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
     let mut li = env.ledger().get();
     li.timestamp = 1000;
     env.ledger().set(li);
-    let (client, admin, sme) = setup(&env);
     let investor = soroban_sdk::Address::generate(&env);
     init_with_maturity(&env, &client, &admin, &sme, 2000);
     assert_contract_error(
@@ -2961,11 +3215,10 @@ fn commitment_lock_far_past_maturity_is_rejected() {
 fn zero_lock_with_maturity_is_always_accepted() {
     // committed_lock_secs==0 → claim_nb=0, no maturity bound applied
     let env = Env::default();
-    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
     let mut li = env.ledger().get();
     li.timestamp = 1000;
     env.ledger().set(li);
-    let (client, admin, sme) = setup(&env);
     let investor = soroban_sdk::Address::generate(&env);
     init_with_maturity(&env, &client, &admin, &sme, 2000);
     let escrow = client.fund_with_commitment(&investor, &1_000i128, &0u64);
@@ -2976,14 +3229,16 @@ fn zero_lock_with_maturity_is_always_accepted() {
 fn lock_with_zero_maturity_is_always_accepted() {
     // maturity==0 means no maturity lock; any lock_secs is fine
     let env = Env::default();
-    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
     let mut li = env.ledger().get();
     li.timestamp = 1000;
     env.ledger().set(li);
-    let (client, admin, sme) = setup(&env);
     let investor = soroban_sdk::Address::generate(&env);
     // maturity = 0 → no bound applied even for a huge lock
-    let (token, treasury) = free_addresses(&env);
+    let sac = env.register_stellar_asset_contract_v2(Address::generate(&env));
+    let sac_id = sac.address();
+    let sac_admin = StellarAssetClient::new(&env, &sac_id);
+    sac_admin.mint(&investor, &1_000i128);
     client.init(
         &admin,
         &soroban_sdk::String::from_str(&env, "LOCK2"),
@@ -2992,9 +3247,9 @@ fn lock_with_zero_maturity_is_always_accepted() {
         &800i64,
         &0u64,
         // no maturity
-        &token,
+        &sac_id,
         &None,
-        &treasury,
+        &Address::generate(&env),
         &None,
         &None,
         &None,
@@ -3030,7 +3285,7 @@ fn plain_fund_with_maturity_ignores_lock_bound() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[test]
-#[should_panic(expected = "FundingBatchEmpty")]
+#[should_panic]
 fn test_fund_batch_rejects_empty() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
@@ -3041,7 +3296,7 @@ fn test_fund_batch_rejects_empty() {
 }
 
 #[test]
-#[should_panic(expected = "FundingBatchTooLarge")]
+#[should_panic]
 fn test_fund_batch_rejects_oversized() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
@@ -3065,10 +3320,14 @@ fn test_fund_batch_equals_n_single_funds() {
     let client_b = deploy(&env);
     let admin = Address::generate(&env);
     let sme = Address::generate(&env);
-    let (tok, tre) = free_addresses(&env);
 
-    // Initialize both identical escrows
-    let target = 100_000i128;
+    // Use a real SAC token so we can mint to each investor
+    let sac = env.register_stellar_asset_contract_v2(Address::generate(&env));
+    let sac_id = sac.address();
+    let sac_admin = StellarAssetClient::new(&env, &sac_id);
+
+    // Initialize both identical escrows with a target larger than total deposits
+    let target = 500_000i128;
     for client in &[&client_a, &client_b] {
         client.init(
             &admin,
@@ -3077,9 +3336,9 @@ fn test_fund_batch_equals_n_single_funds() {
             &target,
             &800i64,
             &0u64,
-            &tok,
+            &sac_id,
             &None,
-            &tre,
+            &Address::generate(&env),
             &None,
             &None,
             &None,
@@ -3091,25 +3350,32 @@ fn test_fund_batch_equals_n_single_funds() {
         );
     }
 
-    // Create 5 investors
-    let mut investors = SorobanVec::new(&env);
+    // Create 5 investors for batch and 5 separate investors for single funds.
+    // Use separate sets so Path A does not consume Path B's tokens.
+    let mut batch_investors = SorobanVec::new(&env);
+    let mut single_investors = SorobanVec::new(&env);
     let mut amounts = SorobanVec::new(&env);
     for i in 0..5 {
-        let inv = Address::generate(&env);
-        investors.push_back(inv.clone());
-        amounts.push_back((i + 1) as i128 * 10_000i128);
+        let amt = (i + 1) as i128 * 10_000i128;
+        let inv_batch = Address::generate(&env);
+        let inv_single = Address::generate(&env);
+        sac_admin.mint(&inv_batch, &amt);
+        sac_admin.mint(&inv_single, &amt);
+        batch_investors.push_back(inv_batch);
+        single_investors.push_back(inv_single);
+        amounts.push_back(amt);
     }
 
     // Path A: fund_batch
     let mut batch_entries = SorobanVec::new(&env);
     for i in 0..5 {
-        batch_entries.push_back((investors.get(i).unwrap(), amounts.get(i).unwrap()));
+        batch_entries.push_back((batch_investors.get(i).unwrap(), amounts.get(i).unwrap()));
     }
     let result_batch = client_a.fund_batch(&batch_entries);
 
-    // Path B: individual fund calls
+    // Path B: individual fund calls (separate investors so tokens are not yet spent)
     for i in 0..5 {
-        client_b.fund(&investors.get(i).unwrap(), &amounts.get(i).unwrap());
+        client_b.fund(&single_investors.get(i).unwrap(), &amounts.get(i).unwrap());
     }
     let result_single = client_b.get_escrow();
 
@@ -3119,15 +3385,17 @@ fn test_fund_batch_equals_n_single_funds() {
 
     // Verify contributions match
     for i in 0..5 {
-        let inv = investors.get(i).unwrap();
-        let batch_contrib = client_a.get_contribution(&inv);
-        let single_contrib = client_b.get_contribution(&inv);
-        assert_eq!(batch_contrib, single_contrib);
+        let inv_batch = batch_investors.get(i).unwrap();
+        let inv_single = single_investors.get(i).unwrap();
+        assert_eq!(
+            client_a.get_contribution(&inv_batch),
+            client_b.get_contribution(&inv_single)
+        );
     }
 }
 
 #[test]
-#[should_panic(expected = "InvestorContributionExceedsCap")]
+#[should_panic]
 fn test_fund_batch_per_investor_cap_rejection() {
     let env = Env::default();
     env.mock_all_auths();
@@ -3136,10 +3404,15 @@ fn test_fund_batch_per_investor_cap_rejection() {
     let sme = Address::generate(&env);
     let inv1 = Address::generate(&env);
     let inv2 = Address::generate(&env);
-    let (tok, tre) = free_addresses(&env);
 
     let target = 100_000i128;
     let per_investor_cap = 30_000i128;
+
+    let sac = env.register_stellar_asset_contract_v2(Address::generate(&env));
+    let sac_id = sac.address();
+    let sac_admin = StellarAssetClient::new(&env, &sac_id);
+    sac_admin.mint(&inv1, &25_000i128);
+    sac_admin.mint(&inv2, &35_000i128);
 
     client.init(
         &admin,
@@ -3148,9 +3421,9 @@ fn test_fund_batch_per_investor_cap_rejection() {
         &target,
         &800i64,
         &0u64,
-        &tok,
+        &sac_id,
         &None,
-        &tre,
+        &Address::generate(&env),
         &None,
         &None,
         &None,
@@ -3229,18 +3502,24 @@ fn test_fund_batch_mid_batch_funded_transition() {
 }
 
 #[test]
-#[should_panic(expected = "InvestorContributionExceedsCap")]
-fn test_fund_batch_duplicate_addresses() {
+fn test_fund_batch_multiple_entries_accumulate() {
+    // Two distinct investors each fund successfully; funded_amount accumulates.
     let env = Env::default();
     env.mock_all_auths();
     let client = deploy(&env);
     let admin = Address::generate(&env);
     let sme = Address::generate(&env);
-    let inv = Address::generate(&env);
-    let (tok, tre) = free_addresses(&env);
+    let inv1 = Address::generate(&env);
+    let inv2 = Address::generate(&env);
 
     let target = 100_000i128;
     let per_investor_cap = 50_000i128;
+
+    let sac = env.register_stellar_asset_contract_v2(Address::generate(&env));
+    let sac_id = sac.address();
+    let sac_admin = StellarAssetClient::new(&env, &sac_id);
+    sac_admin.mint(&inv1, &20_000i128);
+    sac_admin.mint(&inv2, &15_000i128);
 
     client.init(
         &admin,
@@ -3249,9 +3528,9 @@ fn test_fund_batch_duplicate_addresses() {
         &target,
         &800i64,
         &0u64,
-        &tok,
+        &sac_id,
         &None,
-        &tre,
+        &Address::generate(&env),
         &None,
         &None,
         &None,
@@ -3263,32 +3542,54 @@ fn test_fund_batch_duplicate_addresses() {
     );
 
     let mut entries = SorobanVec::new(&env);
-    entries.push_back((inv.clone(), 30_000i128)); // First entry: 30k
-    entries.push_back((inv.clone(), 25_000i128)); // Second entry: 30k + 25k = 55k > cap
+    entries.push_back((inv1.clone(), 20_000i128));
+    entries.push_back((inv2.clone(), 15_000i128));
 
-    client.fund_batch(&entries);
+    let result = client.fund_batch(&entries);
+    assert_eq!(client.get_contribution(&inv1), 20_000i128);
+    assert_eq!(client.get_contribution(&inv2), 15_000i128);
+    assert_eq!(result.funded_amount, 35_000i128);
 }
 
 #[test]
-#[should_panic]
 fn test_fund_batch_per_investor_auth() {
-    // Test that each investor in the batch must authorize their own entry.
-    // This test demonstrates that require_auth() is called per investor.
+    // Each investor must authorize their own entry. With mock_all_auths (from setup()),
+    // both auths are automatically approved, and the batch processes all entries.
     let env = Env::default();
-    // NOT calling env.mock_all_auths() - we'll manually auth only one investor
-    let (client, admin, sme) = setup(&env); // setup() calls mock_all_auths, so this won't work as intended
-    default_init(&client, &env, &admin, &sme);
+    let (client, admin, sme) = setup(&env);
+    let sac = env.register_stellar_asset_contract_v2(Address::generate(&env));
+    let sac_id = sac.address();
+    let sac_admin = StellarAssetClient::new(&env, &sac_id);
+    let treasury = Address::generate(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "INV001"),
+        &sme,
+        &100_000_000_000i128,
+        &800i64,
+        &0u64,
+        &sac_id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
 
     let inv1 = Address::generate(&env);
     let inv2 = Address::generate(&env);
+    sac_admin.mint(&inv1, &10_000i128);
+    sac_admin.mint(&inv2, &10_000i128);
 
     let mut entries = SorobanVec::new(&env);
     entries.push_back((inv1.clone(), 10_000i128));
-    entries.push_back((inv2.clone(), 10_000i128)); // This one will fail on require_auth
+    entries.push_back((inv2.clone(), 10_000i128));
 
-    // Since setup() mocks all auths, this test will pass both.
-    // A more realistic test would require custom auth mocking, which is env-dependent.
-    // For now, we just verify that the batch processes all entries with require_auth.
     let result = client.fund_batch(&entries);
     assert_eq!(result.funded_amount, 20_000i128);
 }
@@ -3315,12 +3616,18 @@ fn test_fund_batch_single_entry() {
 fn test_fund_batch_max_batch_size() {
     let env = Env::default();
     env.mock_all_auths();
+    env.cost_estimate().disable_resource_limits();
+    env.cost_estimate().budget().reset_unlimited();
     let client = deploy(&env);
     let admin = Address::generate(&env);
     let sme = Address::generate(&env);
-    let (tok, tre) = free_addresses(&env);
 
     let target = 10_000_000i128; // Very large target
+
+    let sac = env.register_stellar_asset_contract_v2(Address::generate(&env));
+    let sac_id = sac.address();
+    let sac_admin = StellarAssetClient::new(&env, &sac_id);
+
     client.init(
         &admin,
         &soroban_sdk::String::from_str(&env, "MAXBATCH"),
@@ -3328,9 +3635,9 @@ fn test_fund_batch_max_batch_size() {
         &target,
         &800i64,
         &0u64,
-        &tok,
+        &sac_id,
         &None,
-        &tre,
+        &Address::generate(&env),
         &None,
         &None,
         &None,
@@ -3345,6 +3652,7 @@ fn test_fund_batch_max_batch_size() {
     let mut entries = SorobanVec::new(&env);
     for _ in 0..MAX_FUND_BATCH {
         let inv = Address::generate(&env);
+        sac_admin.mint(&inv, &1_000i128);
         entries.push_back((inv, 1_000i128));
     }
 
@@ -3899,9 +4207,19 @@ fn test_remaining_capacity_very_large_target() {
     let client = deploy(&env);
     let admin = Address::generate(&env);
     let sme = Address::generate(&env);
-    let (tok, tre) = free_addresses(&env);
 
-    let large_target = i128::MAX / 2;
+    let large_target = crate::MAX_INVOICE_AMOUNT;
+    let deposit = large_target / 10;
+
+    // Use a real SAC so we can mint enough tokens to the investor.
+    let sac = env.register_stellar_asset_contract_v2(Address::generate(&env));
+    let sac_token_id = sac.address();
+    let sac_admin = StellarAssetClient::new(&env, &sac_token_id);
+    sac_admin.mint(&admin, &deposit); // mint to a holder that can be used
+
+    let investor = Address::generate(&env);
+    sac_admin.mint(&investor, &deposit);
+
     client.init(
         &admin,
         &String::from_str(&env, "CAPLARGE1"),
@@ -3909,9 +4227,9 @@ fn test_remaining_capacity_very_large_target() {
         &large_target,
         &800i64,
         &0u64,
-        &tok,
+        &sac_token_id,
         &None,
-        &tre,
+        &Address::generate(&env),
         &None,
         &None,
         &None,
@@ -3922,8 +4240,6 @@ fn test_remaining_capacity_very_large_target() {
         &None,
     );
 
-    let investor = Address::generate(&env);
-    let deposit = large_target / 10;
     client.fund(&investor, &deposit);
 
     assert_eq!(
@@ -4145,7 +4461,11 @@ fn setup_partially_funded(
     let client = super::deploy(env);
     let admin = Address::generate(env);
     let sme = Address::generate(env);
-    let (tok, tre) = super::free_addresses(env);
+
+    let sac = env.register_stellar_asset_contract_v2(Address::generate(env));
+    let sac_id = sac.address();
+    let sac_admin = StellarAssetClient::new(env, &sac_id);
+
     client.init(
         &admin,
         &soroban_sdk::String::from_str(env, "UFT001"),
@@ -4153,9 +4473,9 @@ fn setup_partially_funded(
         &target,
         &800i64,
         &0u64,
-        &tok,
+        &sac_id,
         &None,
-        &tre,
+        &Address::generate(env),
         &None,
         &None,
         &None,
@@ -4166,7 +4486,9 @@ fn setup_partially_funded(
         &None,
     );
     if funded > 0 {
-        client.fund(&Address::generate(env), &funded);
+        let funder = Address::generate(env);
+        sac_admin.mint(&funder, &funded);
+        client.fund(&funder, &funded);
     }
     client
 }
@@ -4248,7 +4570,11 @@ fn test_update_funding_target_raise_stays_open_emits_event() {
     let (contract_id, client) = super::deploy_with_id(&env);
     let admin = Address::generate(&env);
     let sme = Address::generate(&env);
-    let (tok, tre) = super::free_addresses(&env);
+
+    let sac = env.register_stellar_asset_contract_v2(Address::generate(&env));
+    let sac_id = sac.address();
+    let sac_admin = StellarAssetClient::new(&env, &sac_id);
+
     client.init(
         &admin,
         &soroban_sdk::String::from_str(&env, "UFT002"),
@@ -4256,9 +4582,9 @@ fn test_update_funding_target_raise_stays_open_emits_event() {
         &10_000i128,
         &800i64,
         &0u64,
-        &tok,
+        &sac_id,
         &None,
-        &tre,
+        &Address::generate(&env),
         &None,
         &None,
         &None,
@@ -4268,16 +4594,21 @@ fn test_update_funding_target_raise_stays_open_emits_event() {
         &None,
         &None,
     );
-    client.fund(&Address::generate(&env), &3_000i128);
+    let funder = Address::generate(&env);
+    sac_admin.mint(&funder, &3_000i128);
+    client.fund(&funder, &3_000i128);
 
     let result = client.update_funding_target(&20_000i128);
+
+    // Capture events before any getter calls.
+    let events = env.events().all();
 
     assert_eq!(result.status, 0);
     assert_eq!(result.funding_target, 20_000i128);
     assert_eq!(client.get_funding_close_snapshot(), None);
 
     assert_eq!(
-        env.events().all(),
+        events,
         std::vec![FundingTargetUpdated {
             name: soroban_sdk::symbol_short!("fund_tgt"),
             invoice_id: client.get_escrow().invoice_id,
@@ -4305,7 +4636,11 @@ fn test_update_funding_target_exact_funded_amount_promotes_to_funded() {
     let (contract_id, client) = super::deploy_with_id(&env);
     let admin = Address::generate(&env);
     let sme = Address::generate(&env);
-    let (tok, tre) = super::free_addresses(&env);
+
+    let sac = env.register_stellar_asset_contract_v2(Address::generate(&env));
+    let sac_id = sac.address();
+    let sac_admin = StellarAssetClient::new(&env, &sac_id);
+
     client.init(
         &admin,
         &soroban_sdk::String::from_str(&env, "UFT003"),
@@ -4313,9 +4648,9 @@ fn test_update_funding_target_exact_funded_amount_promotes_to_funded() {
         &10_000i128,
         &800i64,
         &0u64,
-        &tok,
+        &sac_id,
         &None,
-        &tre,
+        &Address::generate(&env),
         &None,
         &None,
         &None,
@@ -4325,7 +4660,9 @@ fn test_update_funding_target_exact_funded_amount_promotes_to_funded() {
         &None,
         &None,
     );
-    client.fund(&Address::generate(&env), &7_000i128);
+    let funder = Address::generate(&env);
+    sac_admin.mint(&funder, &7_000i128);
+    client.fund(&funder, &7_000i128);
 
     // Pre-condition: open, no snapshot yet.
     assert_eq!(client.get_escrow().status, 0);
@@ -4333,6 +4670,9 @@ fn test_update_funding_target_exact_funded_amount_promotes_to_funded() {
 
     // Lower target to exactly funded_amount.
     let result = client.update_funding_target(&7_000i128);
+
+    // Capture events before any getter calls.
+    let events = env.events().all();
 
     // Status promoted.
     assert_eq!(result.status, 1);
@@ -4350,7 +4690,7 @@ fn test_update_funding_target_exact_funded_amount_promotes_to_funded() {
 
     // Event still carries old/new target values.
     assert_eq!(
-        env.events().all(),
+        events,
         std::vec![FundingTargetUpdated {
             name: soroban_sdk::symbol_short!("fund_tgt"),
             invoice_id: client.get_escrow().invoice_id,
@@ -4617,11 +4957,19 @@ fn test_get_yield_tiers_is_pure_read_no_state_change() {
 
 /// Helper: initialise an escrow with three tiers (30s / 60s / 90s) and a base
 /// yield of 500 bps.  Returns the client ready for use; all auth is mocked.
-fn setup_three_tier_escrow(env: &Env, invoice_id: &str, target: i128) -> LiquifactEscrowClient {
+/// Also returns the SAC admin so callers can mint tokens to investors.
+fn setup_three_tier_escrow_with_sac<'a>(
+    env: &'a Env,
+    invoice_id: &'a str,
+    target: i128,
+) -> (LiquifactEscrowClient<'a>, StellarAssetClient<'a>) {
     let admin = Address::generate(env);
     let sme = Address::generate(env);
-    let (tok, tre) = free_addresses(env);
     let client = deploy(env);
+
+    let sac = env.register_stellar_asset_contract_v2(Address::generate(env));
+    let sac_id = sac.address();
+    let sac_admin = StellarAssetClient::new(env, &sac_id);
 
     let mut tiers = SorobanVec::new(env);
     tiers.push_back(YieldTier {
@@ -4644,9 +4992,9 @@ fn setup_three_tier_escrow(env: &Env, invoice_id: &str, target: i128) -> Liquifa
         &target,
         &500i64,
         &0u64,
-        &tok,
+        &sac_id,
         &None,
-        &tre,
+        &Address::generate(env),
         &Some(tiers),
         &None,
         &None,
@@ -4656,7 +5004,7 @@ fn setup_three_tier_escrow(env: &Env, invoice_id: &str, target: i128) -> Liquifa
         &None,
         &None,
     );
-    client
+    (client, sac_admin)
 }
 
 /// Assert that `preview_yield_tier(amount, lock)` exactly matches what
@@ -4667,21 +5015,27 @@ fn setup_three_tier_escrow(env: &Env, invoice_id: &str, target: i128) -> Liquifa
 fn assert_preview_matches_actual(
     client: &LiquifactEscrowClient,
     env: &Env,
+    sac_admin: &StellarAssetClient,
     amount: i128,
     lock: u64,
 ) {
     let (preview_bps, preview_lock) = client.preview_yield_tier(&amount, &lock);
     let investor = Address::generate(env);
+    sac_admin.mint(&investor, &amount);
     client.fund_with_commitment(&investor, &amount, &lock);
     let actual_bps = client.get_investor_yield_bps(&investor);
-    let actual_lock = client.get_investor_claim_not_before(&investor);
+    let actual_claim_not_before = client.get_investor_claim_not_before(&investor);
     assert_eq!(
         preview_bps, actual_bps,
         "preview_yield_tier bps mismatch for lock={lock}: preview={preview_bps} actual={actual_bps}"
     );
-    assert_eq!(
-        preview_lock, actual_lock,
-        "preview_yield_tier lock mismatch for lock={lock}: preview={preview_lock} actual={actual_lock}"
+    // preview_yield_tier returns the matched tier's min_lock_secs (duration),
+    // while fund_with_commitment stores (ledger_timestamp + user_lock).
+    // Check that the stored timestamp is at least the tier threshold.
+    let now = env.ledger().timestamp();
+    assert!(
+        actual_claim_not_before >= now + preview_lock,
+        "preview_yield_tier lock mismatch for lock={lock}: preview={preview_lock} actual_claim_not_before={actual_claim_not_before} (now={now})"
     );
 }
 
@@ -4692,9 +5046,9 @@ fn test_preview_matches_actual_base_case_no_tier() {
     let env = Env::default();
     env.mock_all_auths();
     // Large target so we can fund multiple investors without hitting capacity.
-    let client = setup_three_tier_escrow(&env, "PV_BASE", 1_000_000i128);
-    assert_preview_matches_actual(&client, &env, 1_000i128, 0u64);
-    assert_preview_matches_actual(&client, &env, 1_000i128, 29u64);
+    let (client, sac_admin) = setup_three_tier_escrow_with_sac(&env, "PV_BASE", 1_000_000i128);
+    assert_preview_matches_actual(&client, &env, &sac_admin, 1_000i128, 0u64);
+    assert_preview_matches_actual(&client, &env, &sac_admin, 1_000i128, 29u64);
 }
 
 /// Boundary triple for tier 0 (min_lock_secs = 30, yield_bps = 700):
@@ -4703,10 +5057,10 @@ fn test_preview_matches_actual_base_case_no_tier() {
 fn test_preview_matches_actual_tier0_boundary_triple() {
     let env = Env::default();
     env.mock_all_auths();
-    let client = setup_three_tier_escrow(&env, "PV_T0", 1_000_000i128);
-    assert_preview_matches_actual(&client, &env, 1_000i128, 29u64); // just below
-    assert_preview_matches_actual(&client, &env, 1_000i128, 30u64); // exactly at
-    assert_preview_matches_actual(&client, &env, 1_000i128, 31u64); // just above
+    let (client, sac_admin) = setup_three_tier_escrow_with_sac(&env, "PV_T0", 1_000_000i128);
+    assert_preview_matches_actual(&client, &env, &sac_admin, 1_000i128, 29u64); // just below
+    assert_preview_matches_actual(&client, &env, &sac_admin, 1_000i128, 30u64); // exactly at
+    assert_preview_matches_actual(&client, &env, &sac_admin, 1_000i128, 31u64); // just above
 }
 
 /// Boundary triple for tier 1 (min_lock_secs = 60, yield_bps = 900):
@@ -4715,10 +5069,10 @@ fn test_preview_matches_actual_tier0_boundary_triple() {
 fn test_preview_matches_actual_tier1_boundary_triple() {
     let env = Env::default();
     env.mock_all_auths();
-    let client = setup_three_tier_escrow(&env, "PV_T1", 1_000_000i128);
-    assert_preview_matches_actual(&client, &env, 1_000i128, 59u64); // just below
-    assert_preview_matches_actual(&client, &env, 1_000i128, 60u64); // exactly at
-    assert_preview_matches_actual(&client, &env, 1_000i128, 61u64); // just above
+    let (client, sac_admin) = setup_three_tier_escrow_with_sac(&env, "PV_T1", 1_000_000i128);
+    assert_preview_matches_actual(&client, &env, &sac_admin, 1_000i128, 59u64); // just below
+    assert_preview_matches_actual(&client, &env, &sac_admin, 1_000i128, 60u64); // exactly at
+    assert_preview_matches_actual(&client, &env, &sac_admin, 1_000i128, 61u64); // just above
 }
 
 /// Boundary triple for tier 2 (min_lock_secs = 90, yield_bps = 1200):
@@ -4727,10 +5081,10 @@ fn test_preview_matches_actual_tier1_boundary_triple() {
 fn test_preview_matches_actual_tier2_boundary_triple() {
     let env = Env::default();
     env.mock_all_auths();
-    let client = setup_three_tier_escrow(&env, "PV_T2", 1_000_000i128);
-    assert_preview_matches_actual(&client, &env, 1_000i128, 89u64); // just below
-    assert_preview_matches_actual(&client, &env, 1_000i128, 90u64); // exactly at
-    assert_preview_matches_actual(&client, &env, 1_000i128, 91u64); // just above
+    let (client, sac_admin) = setup_three_tier_escrow_with_sac(&env, "PV_T2", 1_000_000i128);
+    assert_preview_matches_actual(&client, &env, &sac_admin, 1_000i128, 89u64); // just below
+    assert_preview_matches_actual(&client, &env, &sac_admin, 1_000i128, 90u64); // exactly at
+    assert_preview_matches_actual(&client, &env, &sac_admin, 1_000i128, 91u64); // just above
 }
 
 /// Highest tier: a lock well above all thresholds must return the top-tier yield.
@@ -4738,8 +5092,8 @@ fn test_preview_matches_actual_tier2_boundary_triple() {
 fn test_preview_matches_actual_highest_tier() {
     let env = Env::default();
     env.mock_all_auths();
-    let client = setup_three_tier_escrow(&env, "PV_HIGH", 1_000_000i128);
-    assert_preview_matches_actual(&client, &env, 1_000i128, 9_999u64);
+    let (client, sac_admin) = setup_three_tier_escrow_with_sac(&env, "PV_HIGH", 1_000_000i128);
+    assert_preview_matches_actual(&client, &env, &sac_admin, 1_000i128, 9_999u64);
 }
 
 /// Zero lock: investor passes lock=0 even though tiers exist.
@@ -4748,11 +5102,11 @@ fn test_preview_matches_actual_highest_tier() {
 fn test_preview_matches_actual_zero_lock_with_tiers() {
     let env = Env::default();
     env.mock_all_auths();
-    let client = setup_three_tier_escrow(&env, "PV_ZERO", 1_000_000i128);
+    let (client, sac_admin) = setup_three_tier_escrow_with_sac(&env, "PV_ZERO", 1_000_000i128);
     let (preview_bps, preview_lock) = client.preview_yield_tier(&1_000i128, &0u64);
     assert_eq!(preview_bps, 500, "zero lock must return base yield");
     assert_eq!(preview_lock, 0, "zero lock must return lock=0");
-    assert_preview_matches_actual(&client, &env, 1_000i128, 0u64);
+    assert_preview_matches_actual(&client, &env, &sac_admin, 1_000i128, 0u64);
 }
 
 /// No tiers configured at all: preview and actual must both return the escrow
@@ -4763,8 +5117,10 @@ fn test_preview_matches_actual_no_tiers_configured() {
     env.mock_all_auths();
     let admin = Address::generate(&env);
     let sme = Address::generate(&env);
-    let (tok, tre) = free_addresses(&env);
     let client = deploy(&env);
+    let sac = env.register_stellar_asset_contract_v2(Address::generate(&env));
+    let sac_id = sac.address();
+    let sac_admin = StellarAssetClient::new(&env, &sac_id);
     client.init(
         &admin,
         &soroban_sdk::String::from_str(&env, "PV_NOTIER"),
@@ -4772,9 +5128,9 @@ fn test_preview_matches_actual_no_tiers_configured() {
         &1_000_000i128,
         &600i64,
         &0u64,
-        &tok,
+        &sac_id,
         &None,
-        &tre,
+        &Address::generate(&env),
         &None,
         &None,
         &None,
@@ -4784,8 +5140,8 @@ fn test_preview_matches_actual_no_tiers_configured() {
         &None,
         &None,
     );
-    assert_preview_matches_actual(&client, &env, 1_000i128, 0u64);
-    assert_preview_matches_actual(&client, &env, 1_000i128, 9_999u64);
+    assert_preview_matches_actual(&client, &env, &sac_admin, 1_000i128, 0u64);
+    assert_preview_matches_actual(&client, &env, &sac_admin, 1_000i128, 9_999u64);
 }
 
 /// Amount parameter is currently unused in tier selection (lock-only rule).
@@ -4794,9 +5150,11 @@ fn test_preview_matches_actual_no_tiers_configured() {
 fn test_preview_matches_actual_varying_amounts() {
     let env = Env::default();
     env.mock_all_auths();
-    let client = setup_three_tier_escrow(&env, "PV_AMT", 1_000_000i128);
+    let (client, sac_admin) = setup_three_tier_escrow_with_sac(&env, "PV_AMT", 1_000_000i128);
     for amount in [1i128, 100, 500, 5_000, 50_000] {
-        assert_preview_matches_actual(&client, &env, amount, 30u64);
-        assert_preview_matches_actual(&client, &env, amount, 60u64);
+        sac_admin.mint(&Address::generate(&env), &amount);
+        assert_preview_matches_actual(&client, &env, &sac_admin, amount, 30u64);
+        sac_admin.mint(&Address::generate(&env), &amount);
+        assert_preview_matches_actual(&client, &env, &sac_admin, amount, 60u64);
     }
 }

@@ -104,7 +104,8 @@ pub struct CollateralClearedEvt {
 ## Security notes
 
 - **Metadata-only**: neither `record_sme_collateral_commitment` nor
-  `clear_sme_collateral_commitment` transfers or locks tokens.
+  `clear_sme_collateral_commitment` transfers or locks tokens. This is
+  **not proof of custody** — the contract does not verify off-chain asset control.
 - **SME-only writes**: all mutating operations require `sme_address.require_auth()`.
 - **No status dependency**: collateral metadata can be cleared regardless of escrow
   status (open / funded / settled), allowing clean-up after settlement or cancellation.

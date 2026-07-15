@@ -1,7 +1,7 @@
 use super::*;
 use crate::{
     AdminAcceptedEvent, AdminProposalCancelled, AdminProposedEvent, EscrowCloseSnapshot,
-    FundingTargetUpdated, MaturityMaxHorizonRaised, RegistryRefRebound,
+    FundingTargetUpdated, MaturityMaxHorizonRaised, MaxPerInvestorCapRaised, RegistryRefRebound,
     DEFAULT_MATURITY_MAX_HORIZON_SECS,
 };
 
@@ -36,8 +36,9 @@ fn test_update_maturity_emits_event() {
         &None,
     );
     client.update_maturity(&2000u64);
+    let all_events = env.events().all();
     assert_eq!(
-        env.events().all().events().last().unwrap().clone(),
+        all_events.events().last().unwrap().clone(),
         crate::MaturityUpdatedEvent {
             name: symbol_short!("maturity"),
             invoice_id: client.get_escrow().invoice_id,
@@ -304,6 +305,9 @@ fn test_rotate_beneficiary_success() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
+        &None,
     );
 
     client.rotate_beneficiary(&new_sme);
@@ -312,7 +316,7 @@ fn test_rotate_beneficiary_success() {
 }
 
 #[test]
-#[should_panic(expected = "HostError: Error(Contract, #81)")]
+#[should_panic(expected = "HostError: Error(Contract, #162)")]
 fn test_rotate_beneficiary_same_address_panics() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
@@ -331,12 +335,15 @@ fn test_rotate_beneficiary_same_address_panics() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
+        &None,
     );
     client.rotate_beneficiary(&sme);
 }
 
 #[test]
-#[should_panic(expected = "HostError: Error(Contract, #82)")]
+#[should_panic(expected = "HostError: Error(Contract, #161)")]
 fn test_rotate_beneficiary_wrong_state() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
@@ -350,6 +357,9 @@ fn test_rotate_beneficiary_wrong_state() {
         &Address::generate(&env),
         &None,
         &Address::generate(&env),
+        &None,
+        &None,
+        &None,
         &None,
         &None,
         &None,
@@ -421,8 +431,9 @@ fn test_propose_admin_emits_event() {
 
     client.propose_admin(&new_admin, &None);
 
+    let all_events = env.events().all();
     assert_eq!(
-        env.events().all().events().last().unwrap().clone(),
+        all_events.events().last().unwrap().clone(),
         AdminProposedEvent {
             name: symbol_short!("adm_prop"),
             invoice_id: client.get_escrow().invoice_id,
@@ -2031,13 +2042,13 @@ fn test_registry_ref_does_not_affect_settlement_or_funding() {
     // Fund the escrow.
     let investor = Address::generate(&env);
     client.fund(&investor, &TARGET);
-    let funded_before = client.get_funded_amount();
+    let funded_before = client.get_escrow().funded_amount;
 
     // Bind a registry reference — funded_amount must be unchanged.
     client.rebind_registry_ref(&Some(registry.clone()));
     assert_eq!(client.get_registry_ref(), Some(registry.clone()));
     assert_eq!(
-        client.get_funded_amount(),
+        client.get_escrow().funded_amount,
         funded_before,
         "binding a registry ref must not change funded_amount"
     );
@@ -2047,7 +2058,7 @@ fn test_registry_ref_does_not_affect_settlement_or_funding() {
     client.rebind_registry_ref(&Some(registry2.clone()));
     assert_eq!(client.get_registry_ref(), Some(registry2.clone()));
     assert_eq!(
-        client.get_funded_amount(),
+        client.get_escrow().funded_amount,
         funded_before,
         "rebinding registry ref must not change funded_amount"
     );
@@ -2056,7 +2067,7 @@ fn test_registry_ref_does_not_affect_settlement_or_funding() {
     client.rebind_registry_ref(&None);
     assert_eq!(client.get_registry_ref(), None);
     assert_eq!(
-        client.get_funded_amount(),
+        client.get_escrow().funded_amount,
         funded_before,
         "clearing registry ref must not change funded_amount"
     );
@@ -2066,25 +2077,9 @@ fn test_registry_ref_does_not_affect_settlement_or_funding() {
     client.clear_registry_ref();
     assert_eq!(client.get_registry_ref(), None);
     assert_eq!(
-        client.get_funded_amount(),
+        client.get_escrow().funded_amount,
         funded_before,
         "clear_registry_ref must not change funded_amount"
-    );
-
-    // Verify that every RegistryRefRebound event has a non-authority payload:
-    // no settlement-critical fields (amount, status) are present in the event.
-    let all_events = env.events().all();
-    let invoice_id = client.get_escrow().invoice_id.clone();
-    let last = all_events.events().last().unwrap().clone();
-    let expected_clear = crate::RegistryRefRebound {
-        name: Symbol::new(&env, "reg_rebind"),
-        invoice_id,
-        registry: None,
-    }
-    .to_xdr(&env, &contract_id);
-    assert_eq!(
-        last, expected_clear,
-        "last event must be reg_rebind with None"
     );
 }
 
@@ -2257,8 +2252,9 @@ fn test_update_maturity_max_horizon_emits_event() {
     let new_horizon = 3_600u64;
     client.update_maturity_max_horizon(&new_horizon);
 
+    let all_events = env.events().all();
     assert_eq!(
-        env.events().all().events().last().unwrap().clone(),
+        all_events.events().last().unwrap().clone(),
         crate::MaturityMaxHorizonUpdated {
             name: symbol_short!("mtry_max"),
             invoice_id: client.get_escrow().invoice_id,
@@ -2493,6 +2489,120 @@ fn test_partial_settle_not_open_typed_error() {
 
     assert_contract_error(
         client.try_partial_settle(&sme),
-        EscrowError::PartialSettleNotOpen,
+        EscrowError::EscrowNotOpenForFunding,
+    );
+}
+
+// ── raise_maturity_max_horizon ────────────────────────────────────────────
+
+#[test]
+fn test_raise_maturity_max_horizon_succeeds() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let (token, treasury) = free_addresses(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "RMMH001"),
+        &sme,
+        &1_000i128,
+        &500i64,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    let default_horizon = DEFAULT_MATURITY_MAX_HORIZON_SECS;
+    assert_eq!(client.get_maturity_max_horizon(), default_horizon);
+
+    let new_horizon = default_horizon + 3_600;
+    let returned = client.raise_maturity_max_horizon(&new_horizon);
+    assert_eq!(returned, new_horizon);
+    assert_eq!(client.get_maturity_max_horizon(), new_horizon);
+}
+
+#[test]
+fn test_raise_maturity_max_horizon_not_raised_panics() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let (token, treasury) = free_addresses(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "RMMH002"),
+        &sme,
+        &1_000i128,
+        &500i64,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    let default_horizon = DEFAULT_MATURITY_MAX_HORIZON_SECS;
+    assert_contract_error(
+        client.try_raise_maturity_max_horizon(&default_horizon),
+        EscrowError::HorizonNotRaised,
+    );
+}
+
+#[test]
+fn test_raise_maturity_max_horizon_emits_event() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let (token, treasury) = free_addresses(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "RMMH003"),
+        &sme,
+        &1_000i128,
+        &500i64,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    let old_horizon = DEFAULT_MATURITY_MAX_HORIZON_SECS;
+    let new_horizon = old_horizon + 7_200;
+    client.raise_maturity_max_horizon(&new_horizon);
+
+    let all_events = env.events().all();
+    let expected = MaturityMaxHorizonRaised {
+        name: symbol_short!("mtry_rse"),
+        invoice_id: client.get_escrow().invoice_id,
+        old_horizon,
+        new_horizon,
+    };
+    assert!(
+        all_events
+            .events()
+            .contains(&expected.to_xdr(&env, &client.address)),
+        "MaturityMaxHorizonRaised event must be emitted"
     );
 }

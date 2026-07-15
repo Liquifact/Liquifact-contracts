@@ -55,12 +55,13 @@ fn test_bind_primary_hash_stores_and_reads() {
     let (client, _) = setup_with_init(&env);
     let d = digest(&env, 0xAB);
     client.bind_primary_attestation_hash(&d);
-    assert_eq!(client.get_primary_attestation_hash(), Some(d.clone()));
-
-    // Assert the `att_bind` event was emitted
-    let events = env.events().all().filter_by_contract(&client.address);
-    let last_event = events.events().last().unwrap();
+    // Assert the `att_bind` event was emitted (capture before additional calls)
+    let all_events = env.events().all();
+    let all_events_list = all_events.events();
+    let last_event = all_events_list.last().unwrap();
     let contract_id = client.address.clone();
+
+    assert_eq!(client.get_primary_attestation_hash(), Some(d.clone()));
     let invoice_id = client.get_escrow().invoice_id;
     assert_eq!(
         last_event.clone(),
@@ -138,9 +139,11 @@ fn test_append_log_empty_before_first_append() {
 fn test_attestation_log_stats_empty_before_first_append() {
     let env = Env::default();
     let (client, _) = setup_with_init(&env);
-    let (used, remaining) = client.get_attestation_log_stats();
-    assert_eq!(used, 0);
-    assert_eq!(remaining, MAX_ATTESTATION_APPEND_ENTRIES);
+    let summary = client.get_escrow_summary();
+    assert_eq!(summary.attestation_log_length, 0);
+}
+fn remaining_attestation_slots(client: &LiquifactEscrowClient<'_>) -> u32 {
+    MAX_ATTESTATION_APPEND_ENTRIES - client.get_escrow_summary().attestation_log_length
 }
 
 /// The stats view tracks partially filled logs without reading the full vector contents.
@@ -151,9 +154,12 @@ fn test_attestation_log_stats_tracks_partial_fill() {
     for i in 0u8..5 {
         client.append_attestation_digest(&digest(&env, i));
     }
-    let (used, remaining) = client.get_attestation_log_stats();
+    let used = client.get_escrow_summary().attestation_log_length;
     assert_eq!(used, 5);
-    assert_eq!(remaining, MAX_ATTESTATION_APPEND_ENTRIES - 5);
+    assert_eq!(
+        remaining_attestation_slots(&client),
+        MAX_ATTESTATION_APPEND_ENTRIES - 5
+    );
 }
 
 /// The stats view reports full capacity and remains consistent after the capacity error path.
@@ -164,16 +170,16 @@ fn test_attestation_log_stats_full_and_after_capacity_error() {
     for i in 0u8..(MAX_ATTESTATION_APPEND_ENTRIES as u8) {
         client.append_attestation_digest(&digest(&env, i));
     }
-    let (used, remaining) = client.get_attestation_log_stats();
+    let used = client.get_escrow_summary().attestation_log_length;
     assert_eq!(used, MAX_ATTESTATION_APPEND_ENTRIES);
-    assert_eq!(remaining, 0);
+    assert_eq!(remaining_attestation_slots(&client), 0);
 
     let result = client.try_append_attestation_digest(&digest(&env, 0xFF));
     assert_contract_error(result, EscrowError::AttestationAppendLogCapacityReached);
 
-    let (used, remaining) = client.get_attestation_log_stats();
+    let used = client.get_escrow_summary().attestation_log_length;
     assert_eq!(used, MAX_ATTESTATION_APPEND_ENTRIES);
-    assert_eq!(remaining, 0);
+    assert_eq!(remaining_attestation_slots(&client), 0);
 }
 
 /// Single append is stored at index 0.
@@ -418,11 +424,12 @@ fn test_unrevoke_emits_event() {
     client.append_attestation_digest(&d);
     client.revoke_attestation_digest(&0);
 
-    let invoice_id = client.get_escrow().invoice_id;
     client.unrevoke_attestation_digest(&0);
 
+    let all_events = env.events().all();
+    let invoice_id = client.get_escrow().invoice_id;
     assert_eq!(
-        env.events().all().events().last().unwrap().clone(),
+        all_events.events().last().unwrap().clone(),
         AttestationDigestUnrevoked {
             name: symbol_short!("att_unrev"),
             invoice_id,

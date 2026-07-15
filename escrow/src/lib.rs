@@ -207,6 +207,10 @@ pub const MAX_INVOICE_AMOUNT: i128 = i128::MAX / 10_000;
 /// Mirrors the spirit of `MAX_ATTESTATION_APPEND_ENTRIES` to limit per-call work.
 pub const MAX_FUND_BATCH: u32 = 50;
 
+/// Upper bound on [`LiquifactEscrow::refund_batch`] entries to keep storage/CPU bounded.
+/// Mirrors [`MAX_FUND_BATCH`] for consistent batch-size expectations.
+pub const MAX_REFUND_BATCH: u32 = 50;
+
 /// Upper bound on [`LiquifactEscrow::set_investors_allowlisted`] batch size.
 pub const MAX_INVESTOR_ALLOWLIST_BATCH: u32 = 32;
 
@@ -430,6 +434,10 @@ pub enum EscrowError {
     RefundNotCancelled = 142,
     /// [`LiquifactEscrow::refund`] for an address with zero contribution.
     NoContributionToRefund = 143,
+    /// [`LiquifactEscrow::refund_batch`] received an empty investors vector.
+    RefundBatchEmpty = 144,
+    /// [`LiquifactEscrow::refund_batch`] exceeded [`MAX_REFUND_BATCH`].
+    RefundBatchTooLarge = 145,
 
     /// `clear_legal_hold` was called without a prior `request_legal_hold_clear`.
     LegalHoldClearRequestMissing = 150,
@@ -477,19 +485,19 @@ pub enum EscrowError {
     LegalHoldBlocksPartialSettle = 201,
     /// [`LiquifactEscrow::partial_settle`] called while escrow is not in open status (`status != 0`).
     PartialSettleNotOpen = 202,
-    MaxPerInvestorCapNotConfigured = 24, // new
-    MaxPerInvestorCapNotRaised = 25,     // new
+    MaxPerInvestorCapNotConfigured = 24,
+    MaxPerInvestorCapNotRaised = 25,
+    /// [`LiquifactEscrow::fund`] etc. blocked while the operational pause is active.
+    PausedBlocksFunding = 26,
+    /// [`LiquifactEscrow::settle`] blocked while the operational pause is active.
+    PausedBlocksSettlement = 27,
+    /// [`LiquifactEscrow::withdraw`] blocked while the operational pause is active.
+    PausedBlocksWithdrawal = 28,
+    /// [`LiquifactEscrow::claim_investor_payout`] blocked while the operational pause is active.
+    PausedBlocksInvestorClaims = 29,
     /// [`LiquifactEscrow::raise_maturity_max_horizon`] received a `new_horizon` that is
     /// not strictly greater than the current stored horizon.
-    HorizonNotRaised = 210,
-    /// [`LiquifactEscrow::fund`] blocked while operational pause is active.
-    PausedBlocksFunding = 211,
-    /// [`LiquifactEscrow::settle`] blocked while operational pause is active.
-    PausedBlocksSettlement = 212,
-    /// [`LiquifactEscrow::withdraw`] blocked while operational pause is active.
-    PausedBlocksWithdrawal = 213,
-    /// [`LiquifactEscrow::claim_investor_payout`] blocked while operational pause is active.
-    PausedBlocksInvestorClaims = 214,
+    HorizonNotRaised = 203,
 }
 
 #[inline(always)]
@@ -3046,7 +3054,14 @@ impl LiquifactEscrow {
             .instance()
             .remove(&DataKey::LegalHoldClearableAt);
 
-        Self::set_legal_hold(env, false);
+        env.storage().instance().set(&DataKey::LegalHold, &false);
+
+        LegalHoldChanged {
+            name: symbol_short!("legal_h"),
+            invoice_id: escrow.invoice_id,
+            active: 0,
+        }
+        .publish(&env);
     }
     /// Cancel a pending legal-hold clear request.
     ///
@@ -3689,8 +3704,7 @@ impl LiquifactEscrow {
         // be populated without post-write storage reads.
         let investor_effective_yield_bps: i64;
 
-        let tier_lock_secs: u64 = if simple_fund {
-            // Non-tiered deposits never carry a commitment lock.
+        if simple_fund {
             if prev == 0 {
                 investor_effective_yield_bps = escrow.yield_bps;
                 Self::set_persistent_investor_effective_yield(
@@ -4830,6 +4844,58 @@ impl LiquifactEscrow {
         .publish(&env);
     }
 
+    /// Batch refund entrypoint: refund multiple investors in a single call.
+    ///
+    /// Each address is processed sequentially with per-investor [`Address::require_auth()`].
+    /// All existing [`LiquifactEscrow::refund`] invariants (cancelled-status gate, non-zero
+    /// contribution, checks-effects-interactions, liability-floor accounting) are enforced
+    /// per entry.
+    ///
+    /// Already-refunded entries (where [`DataKey::InvestorRefunded`] is already `true`) are
+    /// **skipped** without failing the batch — this makes the entrypoint idempotent and
+    /// allows relayer-style retry without needing to prune the list.
+    ///
+    /// # Parameters
+    /// - `investors`: `Vec<Address>` of investor addresses to refund.
+    ///
+    /// # Errors
+    /// - [`EscrowError::RefundBatchEmpty`] if `investors` is empty
+    /// - [`EscrowError::RefundBatchTooLarge`] if `investors.len() > [`MAX_REFUND_BATCH`]
+    ///
+    /// Per-entry errors (non-cancelled status, zero contribution, auth failure) are **not**
+    /// silently skipped — they terminate the entire batch. Only already-refunded entries
+    /// (where [`DataKey::InvestorRefunded`] is `true`) are safely skipped.
+    ///
+    /// # Events
+    /// One [`InvestorRefundedEvt`] per newly-refunded investor.
+    pub fn refund_batch(env: Env, investors: Vec<Address>) {
+        let n = investors.len();
+
+        ensure(&env, n > 0, EscrowError::RefundBatchEmpty);
+        ensure(
+            &env,
+            n <= MAX_REFUND_BATCH,
+            EscrowError::RefundBatchTooLarge,
+        );
+
+        for i in 0..n {
+            let investor = investors.get(i).unwrap();
+
+            // Skip already-refunded entries without failing.
+            if env
+                .storage()
+                .instance()
+                .get(&DataKey::InvestorRefunded(investor.clone()))
+                .unwrap_or(false)
+            {
+                continue;
+            }
+
+            // Apply identical per-investor gates as single refund().
+            Self::refund(env.clone(), investor);
+        }
+    }
+
     /// Whether an investor has already received a refund in a cancelled escrow.
     pub fn is_investor_refunded(env: Env, investor: Address) -> bool {
         env.storage()
@@ -4950,7 +5016,7 @@ pub struct DefaultMockToken;
 impl DefaultMockToken {
     pub fn balance(env: soroban_sdk::Env, addr: soroban_sdk::Address) -> i128 {
         let key = soroban_sdk::symbol_short!("balances");
-        let mut balances: soroban_sdk::Map<soroban_sdk::Address, i128> = env
+        let balances: soroban_sdk::Map<soroban_sdk::Address, i128> = env
             .storage()
             .instance()
             .get(&key)
@@ -4992,6 +5058,6 @@ fn register_mock_token_if_needed(env: &Env, token_addr: &Address) {
         let _ = client.balance(&token_clone);
     }));
     if result.is_err() {
-        env.register_contract(token_addr, DefaultMockToken);
+        env.register_at(token_addr, DefaultMockToken, ());
     }
 }

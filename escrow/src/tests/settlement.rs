@@ -1427,11 +1427,12 @@ fn test_claim_marker_all_investors_independent() {
 #[test]
 fn investor_contribution_readable_after_withdraw() {
     let env = Env::default();
-    let (client, sme, sac_admin) = setup_funded_with_token(&env);
+    let (client, token, _contract_id, _treasury) =
+        setup_claim_env(&env, "INV_WTHD", TARGET, 800i64);
 
     let investor = Address::generate(&env);
     let contribution: i128 = TARGET;
-    sac_admin.mint(&investor, &contribution);
+    token.stellar.mint(&investor, &contribution);
     client.fund(&investor, &contribution);
     client.withdraw();
 
@@ -1446,14 +1447,15 @@ fn investor_contribution_readable_after_withdraw() {
 #[test]
 fn multi_investor_contributions_preserved_after_withdraw() {
     let env = Env::default();
-    let (client, sme, sac_admin) = setup_funded_with_token(&env);
+    let (client, token, _contract_id, _treasury) =
+        setup_claim_env(&env, "INV_MULTI", TARGET, 800i64);
 
     // Fund with two investors reaching target collectively.
     let inv_a = Address::generate(&env);
     let inv_b = Address::generate(&env);
     let half = TARGET / 2;
-    sac_admin.mint(&inv_a, &half);
-    sac_admin.mint(&inv_b, &(TARGET - half));
+    token.stellar.mint(&inv_a, &half);
+    token.stellar.mint(&inv_b, &(TARGET - half));
     client.fund(&inv_a, &half);
     client.fund(&inv_b, &(TARGET - half));
     client.withdraw();
@@ -1913,8 +1915,10 @@ fn test_is_settleable_created_never_funded() {
 fn test_is_settleable_funded_before_maturity() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, admin, sme) = setup(&env);
     let token = install_stellar_asset_token(&env);
+    let (contract_id, client) = deploy_with_id(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
     let treasury = Address::generate(&env);
     let maturity: u64 = 5_000;
     client.init(
@@ -1933,8 +1937,12 @@ fn test_is_settleable_funded_before_maturity() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
-    fund_to_target(&client, &env);
+    let investor = Address::generate(&env);
+    token.stellar.mint(&investor, &TARGET);
+    client.fund(&investor, &TARGET);
     env.ledger().with_mut(|l| l.timestamp = maturity - 1);
     assert!(
         !client.is_settleable(),
@@ -1946,8 +1954,10 @@ fn test_is_settleable_funded_before_maturity() {
 fn test_is_settleable_funded_exact_maturity() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, admin, sme) = setup(&env);
     let token = install_stellar_asset_token(&env);
+    let (contract_id, client) = deploy_with_id(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
     let treasury = Address::generate(&env);
     let maturity: u64 = 5_000;
     client.init(
@@ -1966,8 +1976,12 @@ fn test_is_settleable_funded_exact_maturity() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
-    fund_to_target(&client, &env);
+    let investor = Address::generate(&env);
+    token.stellar.mint(&investor, &TARGET);
+    client.fund(&investor, &TARGET);
     env.ledger().with_mut(|l| l.timestamp = maturity);
     assert!(
         client.is_settleable(),
@@ -1979,8 +1993,10 @@ fn test_is_settleable_funded_exact_maturity() {
 fn test_is_settleable_funded_after_maturity() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, admin, sme) = setup(&env);
     let token = install_stellar_asset_token(&env);
+    let (contract_id, client) = deploy_with_id(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
     let treasury = Address::generate(&env);
     let maturity: u64 = 5_000;
     client.init(
@@ -1999,8 +2015,12 @@ fn test_is_settleable_funded_after_maturity() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
     );
-    fund_to_target(&client, &env);
+    let investor = Address::generate(&env);
+    token.stellar.mint(&investor, &TARGET);
+    client.fund(&investor, &TARGET);
     env.ledger().with_mut(|l| l.timestamp = maturity + 100);
     assert!(
         client.is_settleable(),

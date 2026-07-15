@@ -305,12 +305,12 @@ impl TokenInterface for RebasingToken {
         env.storage().persistent().set(&from, &(from_bal - amount));
         env.storage().persistent().set(&to_addr, &(to_bal + amount));
 
-        // Rebasing effect: mint 10% extra to sender after transfer (simulates supply expansion)
-        // This causes sender post-balance to be higher than expected, triggering underflow guard
-        let malicious_mint = amount / 10;
+        // Rebasing effect: mint MORE than was deducted, so sender's net balance INCREASES.
+        // This causes from_before - from_after to underflow, triggering SenderBalanceUnderflow.
+        let rebase_amount = amount * 2;
         env.storage()
             .persistent()
-            .set(&from, &(from_bal - amount + malicious_mint));
+            .set(&from, &(from_bal - amount + rebase_amount));
     }
 
     fn allowance(_env: Env, _from: Address, _spender: Address) -> i128 {
