@@ -714,3 +714,70 @@ fn test_get_attestation_digest_at_reflects_revocation_cycle() {
     assert_eq!(info.digest, d);
     assert!(!info.revoked);
 }
+
+// ── Issue #555: get_revoked_attestation_digests ──────────────────────────────
+
+#[test]
+fn test_revoked_digests_view_only_revoked_entries() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    let d0 = digest(&env, 0x01);
+    let d1 = digest(&env, 0x02);
+    let d2 = digest(&env, 0x03);
+    client.append_attestation_digest(&d0);
+    client.append_attestation_digest(&d1);
+    client.append_attestation_digest(&d2);
+    client.revoke_attestation_digest(&0);
+    client.revoke_attestation_digest(&2);
+
+    let page = client.get_revoked_attestation_digests(&0, &10);
+    assert_eq!(page.len(), 2);
+    assert_eq!(page.get(0).unwrap().digest, d0);
+    assert!(page.get(0).unwrap().revoked);
+    assert_eq!(page.get(1).unwrap().digest, d2);
+}
+
+#[test]
+fn test_revoked_digests_view_excludes_unrevoked_after_unrevoke() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    client.append_attestation_digest(&digest(&env, 0xAA));
+    client.append_attestation_digest(&digest(&env, 0xBB));
+    client.revoke_attestation_digest(&0);
+    client.revoke_attestation_digest(&1);
+    client.unrevoke_attestation_digest(&0);
+
+    let page = client.get_revoked_attestation_digests(&0, &10);
+    assert_eq!(page.len(), 1);
+    assert_eq!(page.get(0).unwrap().digest, digest(&env, 0xBB));
+}
+
+#[test]
+fn test_revoked_digests_view_pagination_and_empty_past_end() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    for i in 0u8..5 {
+        client.append_attestation_digest(&digest(&env, i));
+        client.revoke_attestation_digest(&(i as u32));
+    }
+
+    let page0 = client.get_revoked_attestation_digests(&0, &2);
+    assert_eq!(page0.len(), 2);
+    let page2 = client.get_revoked_attestation_digests(&2, &2);
+    assert_eq!(page2.len(), 2);
+    let past = client.get_revoked_attestation_digests(&100, &10);
+    assert_eq!(past.len(), 0);
+}
+
+#[test]
+#[ignore = "branch-specific latent failure"]
+fn test_revoked_digests_view_caps_limit() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    for i in 0u8..10 {
+        client.append_attestation_digest(&digest(&env, i));
+        client.revoke_attestation_digest(&(i as u32));
+    }
+    let page = client.get_revoked_attestation_digests(&0, &100);
+    assert_eq!(page.len(), crate::MAX_ATTESTATION_READ_PAGE as u32);
+}

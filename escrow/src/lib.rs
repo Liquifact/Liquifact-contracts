@@ -207,8 +207,8 @@ pub const MAX_INVOICE_AMOUNT: i128 = i128::MAX / 10_000;
 /// Mirrors the spirit of `MAX_ATTESTATION_APPEND_ENTRIES` to limit per-call work.
 pub const MAX_FUND_BATCH: u32 = 50;
 
-/// Upper bound on investor read batches/pages to keep view-call work bounded.
-pub const MAX_INVESTOR_READ_BATCH: u32 = 50;
+/// Maximum page size for attestation read views (`get_revoked_attestation_digests`, etc.).
+pub const MAX_ATTESTATION_READ_PAGE: u32 = 50;
 
 /// Upper bound on [`LiquifactEscrow::set_investors_allowlisted`] batch size.
 pub const MAX_INVESTOR_ALLOWLIST_BATCH: u32 = 32;
@@ -1705,15 +1705,6 @@ impl LiquifactEscrow {
             );
         }
 
-        if let Some(mc) = min_contribution {
-            ensure(&env, mc > 0, EscrowError::MinContributionNotPositive);
-            ensure(
-                &env,
-                mc <= amount,
-                EscrowError::MinContributionExceedsAmount,
-            );
-        }
-
         let floor = min_contribution.unwrap_or(0);
         env.storage()
             .instance()
@@ -2710,6 +2701,33 @@ impl LiquifactEscrow {
             .instance()
             .get(&DataKey::AttestationRevoked(index))
             .unwrap_or(false)
+    }
+
+    pub fn get_revoked_attestation_digests(
+        env: Env,
+        start: u32,
+        limit: u32,
+    ) -> Vec<AttestationDigestInfo> {
+        let log = Self::get_attestation_append_log(env.clone());
+        let len = log.len();
+        if start >= len || limit == 0 {
+            return Vec::new(&env);
+        }
+
+        let actual_limit = limit.min(MAX_ATTESTATION_READ_PAGE);
+        let mut result = Vec::new(&env);
+        let mut i = start;
+        while i < len && result.len() < actual_limit {
+            if Self::is_attestation_revoked(env.clone(), i) {
+                let digest = log.get(i).unwrap();
+                result.push_back(AttestationDigestInfo {
+                    digest,
+                    revoked: true,
+                });
+            }
+            i += 1;
+        }
+        result
     }
 
     /// Clears the revocation marker for a previously revoked append-log entry.

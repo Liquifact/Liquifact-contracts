@@ -6,8 +6,6 @@ tokenized invoices until settlement.
 
 ---
 
-
-
 ## Prerequisites
 
 - Rust 1.70+ (stable)
@@ -156,18 +154,14 @@ liquifact-contracts/
 
 | Entrypoint | Auth Role | Description |
 |---|---|---|
-| `init` | Admin (implicit) | Create an invoice escrow (invoice id, SME, amount, yield bps, maturity). Optional immutable `protocol_fee_bps` (`0..=10_000`, default `0`) splits the SME disbursement at `withdraw`. |
+| `init` | Admin (implicit) | Create an invoice escrow (invoice id, SME, amount, yield bps, maturity). |
 | `fund` | Investor | Record investor principal and atomically pull the funding token from the investor; marks escrow funded when target is met. |
 | `fund_with_commitment` | Investor | First deposit with optional lock period (atomically pulling the funding token); selects tiered yield. |
-| `fund_batch` | Investor | Batch-fund up to `MAX_FUND_BATCH` investor/amount pairs in a single call. |
 | `settle` | SME | Mark a funded escrow as settled (SME auth required; maturity enforced). |
 | `partial_settle` | SME | SME marks a portion of the escrow as settled before full settlement. |
-| `withdraw` | SME | SME pulls funded liquidity, **net of the immutable protocol fee**: `fee = funded_amount * protocol_fee_bps / 10_000` goes to the treasury, the remainder to the SME. |
-| `get_protocol_fee_bps` | — | Read the immutable protocol fee in basis points (defaults to `0`). |
+| `withdraw` | SME | SME pulls funded liquidity (accounting record). |
 | `cancel_funding` | Admin | Admin cancels an open escrow (transitions status 0 → 4). |
-| `extend_funding_deadline` | Admin | Extend an existing funding deadline while the escrow is open; rejects no-op/shorter deadlines, elapsed windows, and deadlines at or after maturity. Emits `FundingDeadlineExtended`. |
 | `refund` | Investor | Investor pulls contributed liquidity from a cancelled escrow. Increments `DistributedPrincipal` liability. |
-| `refund_batch` | Investor | Batch-refund up to `MAX_REFUND_BATCH` investors in a single call. Already-refunded entries are skipped. |
 | `claim_investor_payout` | Investor | Investor records a payout claim after settlement. |
 | `claim_payouts_batch` | Investor / Any | Batch-record payout claims for up to `MAX_CLAIM_BATCH` investors in one transaction. |
 | `sweep_terminal_dust` | Treasury | Treasury sweeps rounding residue from a terminal escrow. |
@@ -188,9 +182,9 @@ liquifact-contracts/
 | `cancel_pending_admin` | Admin | Admin withdraws an unaccepted proposal. |
 | `get_escrow` | — | Read current escrow state. |
 | `get_version` | — | Read stored `DataKey::Version`. |
-| `get_pending_admin_remaining_secs` | — | Read the pending admin proposal's remaining validity seconds; returns `None` when no proposal exists and `Some(0)` at/after expiry. |
 | `get_remaining_investor_slots` | — | Read remaining unique investor capacity before reaching the cap. |
 | `get_reconciliation` | — | Read solvency position: live token balance, outstanding liability, and surplus/deficit. See [`docs/escrow-read-api.md`](docs/escrow-read-api.md). |
+| `get_revoked_attestation_digests` | — | Paginated list of currently revoked attestation digests. |
 
 | `rebind_registry_ref` | Admin | Set or update the off-chain registry hint (`DataKey::RegistryRef`). Emits `RegistryRefRebound`. |
 | `clear_registry_ref` | Admin | Convenience alias for `rebind_registry_ref(None)`. Clears the registry pointer. |
@@ -310,7 +304,7 @@ fee-on-transfer, rebasing, hook, and lying token behaviors at the host-call boun
 
 ## SME collateral metadata
 
-See [`docs/escrow-sme-collateral.md`](docs/escrow-sme-collateral.md) for the risk-team handling rules for `record_sme_collateral_commitment`, `clear_sme_collateral_commitment`, `CollateralRecordedEvt`, and `CollateralClearedEvt`. The record is SME-reported metadata only; it is not proof of custody, token movement, or an enforceable on-chain claim.
+See [`docs/escrow-sme-collateral.md`](docs/escrow-sme-collateral.md) for the risk-team handling rules for `record_sme_collateral_commitment` and `CollateralRecordedEvt`. The record is SME-reported metadata only; it is not proof of custody, token movement, or an enforceable on-chain claim.
 
 ## Investor allowlist
 
@@ -331,42 +325,11 @@ The escrow supports cancellation by the admin under specific criteria, unlocking
 - Residual dust sweeping and the liability floor protecting un-refunded investors
 - A worked execution sequence with multiple investors
 
-## Protocol fee on SME withdrawal
-
-An **immutable** protocol fee can be configured at `init` via the optional
-`protocol_fee_bps: Option<i64>` parameter (basis points, validated to `0..=10_000`, default `0`)
-and stored under `DataKey::ProtocolFeeBps`. On `withdraw`, the funded principal is split:
-
-```text
-fee        = funded_amount * protocol_fee_bps / 10_000   (integer floor, checked)
-sme_payout = funded_amount - fee
-```
-
-`fee` is routed to the immutable `DataKey::Treasury`; `sme_payout` to `sme_address`. Key
-properties:
-
-- **Conservation:** `sme_payout + fee == funded_amount` (no principal created or destroyed).
-- **Floor rounding:** sub-`10_000` residue stays with the SME; the treasury is never over-credited.
-- **Backward compatible:** `protocol_fee_bps == 0` (or omitted) makes no treasury transfer and the
-  SME receives the full `funded_amount` — byte-for-byte the pre-fee behavior.
-- **Overflow-safe:** the fee multiplication/division and the net subtraction use checked
-  arithmetic, with typed errors `WithdrawFeeArithmeticOverflow` and
-  `WithdrawNetArithmeticUnderflow`; out-of-range `init` values fail with `ProtocolFeeBpsOutOfRange`.
-- **Depends on on-chain disbursement:** the fee is only taken on the on-chain `withdraw` path, not
-  on off-chain `settle`, investor `refund`, or `claim_investor_payout`.
-- **Event:** `SmeWithdrew` is extended append-only with `fee`; its `amount` is the net SME payout.
-
-See [`docs/escrow-numeric-model.md`](docs/escrow-numeric-model.md) for the authoritative math and
-[`docs/ESCROW_SME_WITHDRAWAL.MD`](docs/ESCROW_SME_WITHDRAWAL.MD) for the disbursement interaction.
-
 ## Security notes
 
 - **Typed errors:** stable numeric [`EscrowError`](docs/escrow-error-messages.md) codes are
   append-only; SDKs must branch on `ContractError(code)`, not panic strings. See
   [`docs/escrow-error-messages.md`](docs/escrow-error-messages.md) for the full reference.
-- **Protocol fee:** immutable `protocol_fee_bps` split at `withdraw` conserves principal
-  (`sme_payout + fee == funded_amount`), floors rounding toward the SME, and uses checked
-  arithmetic on the fee multiplication and net subtraction.
 - **Auth:** state-changing entrypoints use `require_auth()` for the
   appropriate role (admin, SME, investor, **treasury** for dust sweep).
 - **Legal hold:** governance-controlled; misuse risk is mitigated by using a
