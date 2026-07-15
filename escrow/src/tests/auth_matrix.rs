@@ -55,3 +55,36 @@ fn setup_inited(
     );
     (client, admin, sme, treasury, token)
 }
+
+/// Assert a call panics with no auth at all.
+macro_rules! assert_no_auth_panics {
+    ($env:expr, $call:expr) => {{
+        $env.mock_auths(&[]);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| $call));
+        assert!(
+            result.is_err(),
+            "expected panic with no auth, but call succeeded"
+        );
+    }};
+}
+
+/// Assert a call panics when signed by `wrong_signer` only.
+macro_rules! assert_wrong_auth_panics {
+    ($env:expr, $wrong:expr, $contract_id:expr, $fn_name:expr, $args:expr, $call:expr) => {{
+        $env.mock_auths(&[MockAuth {
+            address: &$wrong,
+            invoke: &MockAuthInvoke {
+                contract: &$contract_id,
+                fn_name: $fn_name,
+                args: $args,
+                sub_invokes: &[],
+            },
+        }]);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| $call));
+        assert!(
+            result.is_err(),
+            "expected panic with wrong signer on {}, but call succeeded",
+            $fn_name
+        );
+    }};
+}

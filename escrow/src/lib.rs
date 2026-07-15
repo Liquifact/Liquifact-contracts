@@ -528,6 +528,18 @@ pub enum EscrowError {
     PartialSettleNotOpen = 202,
     MaxPerInvestorCapNotConfigured = 24, // new
     MaxPerInvestorCapNotRaised = 25,     // new
+    /// [`LiquifactEscrow::raise_maturity_max_horizon`] received a `new_horizon` that is
+    /// not strictly greater than the current stored horizon.
+    HorizonNotRaised = 214,
+
+    /// [`LiquifactEscrow::fund`] blocked while operational pause is active.
+    PausedBlocksFunding = 210,
+    /// [`LiquifactEscrow::settle`] blocked while operational pause is active.
+    PausedBlocksSettlement = 211,
+    /// [`LiquifactEscrow::withdraw`] blocked while operational pause is active.
+    PausedBlocksWithdrawal = 212,
+    /// [`LiquifactEscrow::claim_investor_payout`] blocked while operational pause is active.
+    PausedBlocksInvestorClaims = 213,
 }
 
 #[inline(always)]
@@ -1683,6 +1695,15 @@ impl LiquifactEscrow {
             env.storage()
                 .instance()
                 .set(&DataKey::YieldTierTable, tiers);
+        }
+
+        if let Some(mc) = min_contribution {
+            ensure(&env, mc > 0, EscrowError::MinContributionNotPositive);
+            ensure(
+                &env,
+                mc <= amount,
+                EscrowError::MinContributionExceedsAmount,
+            );
         }
 
         let floor = min_contribution.unwrap_or(0);
@@ -3874,14 +3895,11 @@ impl LiquifactEscrow {
                     escrow.yield_bps,
                 );
                 Self::set_persistent_investor_claim_not_before(&env, investor.clone(), 0u64);
-                (escrow.yield_bps, 0u64)
             } else {
                 // Returning investor: yield was set on first deposit; read it for the event.
                 (
                     Self::get_persistent_investor_effective_yield(&env, investor.clone())
-                        .unwrap_or(escrow.yield_bps),
-                    0u64,
-                )
+                        .unwrap_or(escrow.yield_bps);
             }
             // If prev > 0, preserve existing effective yield and claim lock
         } else {
@@ -4018,7 +4036,7 @@ impl LiquifactEscrow {
             EscrowError::PartialSettleUnauthorizedCaller,
         );
 
-        require_funding_open(&env, escrow.status);
+        guard_status_eq(&env, escrow.status, 0, EscrowError::PartialSettleNotOpen);
 
         // Transition to funded status early.
         escrow.status = 1;

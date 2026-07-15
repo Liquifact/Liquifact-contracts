@@ -54,7 +54,7 @@ fn setup_open(
 }
 
 /// Move the escrow to cancelled status (status == 4).
-fn cancel(client: &LiquifactEscrowClient<'_>, admin: &Address) {
+fn cancel(client: &LiquifactEscrowClient<'_>, _admin: &Address) {
     client.cancel_funding();
 }
 
@@ -131,8 +131,6 @@ fn test_lower_max_unique_investors_rejects_when_cancelled() {
         &None,
         &tre,
         &None,
-        &None,
-        &Some(10u32), // max_unique_investors cap
         &None,
         &Some(10u32), // max_unique_investors cap
         &None,
