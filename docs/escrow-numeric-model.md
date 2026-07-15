@@ -66,7 +66,8 @@ This contract’s funding accounting and state transitions are intended to obey 
 - **Status transition:** `escrow.status` must flip from `0` (open) to `1` (funded) **exactly at the first call** where `funded_amount >= funding_target` becomes true.
 - **FundingCloseSnapshot semantics:** on the funded transition, `FundingCloseSnapshot` is written once with `total_principal == escrow.funded_amount` (including over-funding), and it must remain immutable across later reads.
 
-These invariants are validated with randomized property tests in `escrow/src/tests/properties.rs`.
+These invariants are validated with property tests in `escrow/src/tests/properties.rs`, including randomized orderings across multiple investors and mixed `fund` / `fund_with_commitment` sequences.
+
 
 ## Integration Guidance
 
