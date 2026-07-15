@@ -56,6 +56,7 @@ The current contract defines 36 event structs.
 | `EscrowSettled` | `escrow_sd` | `settle` |
 | `FundingCancelled` | `fund_can` | `cancel_funding` |
 | `FundingTargetUpdated` | `fund_tgt` | `update_funding_target` |
+| `FundingDeadlineExtended` | `fund_ext` | `extend_funding_deadline` |
 | `InvestorAllowlistChanged` | `al_set` | `set_investor_allowlisted`, `set_investors_allowlisted` |
 | `InvestorAllowlistBatchApplied` | `al_batch` | `set_investors_allowlisted` |
 | `InvestorPayoutClaimed` | `inv_claim` | `claim_investor_payout` |
@@ -409,9 +410,27 @@ Data:
 | Field | Type |
 |---|---|
 | `invoice_id` | `Symbol` |
-| `recipient` | `Address` | Treasury address that received the sweep |
 | `token` | `Address` |
-| `amount` | `i128` | Effective swept amount (after balance/floor capping) |
+| `amount` | `i128` |
+
+### `FundingDeadlineExtended`
+
+Emitted after successful `extend_funding_deadline`.
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `funding_deadline_extended` |
+| 1 | `name` | `Symbol` | `fund_ext` |
+| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
+
+Data:
+
+| Field | Type |
+|---|---|
+| `old_deadline` | `u64` |
+| `new_deadline` | `u64` |
 
 ### `PrimaryAttestationBound`
 

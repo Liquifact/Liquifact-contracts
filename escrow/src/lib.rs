@@ -486,10 +486,12 @@ pub enum EscrowError {
     PayoutZero = 170,
     /// `update_funding_deadline` was called on a non-open escrow (status != 0).
     FundingDeadlineUpdateNotOpen = 171,
-    /// [`LiquifactEscrow::refund_batch`] received an empty investors vector.
-    RefundBatchEmpty = 206,
-    /// [`LiquifactEscrow::refund_batch`] exceeded [`MAX_REFUND_BATCH`].
-    RefundBatchTooLarge = 207,
+    /// [`LiquifactEscrow::extend_funding_deadline`] did not strictly extend the stored deadline.
+    FundingDeadlineNotExtended = 203,
+    /// [`LiquifactEscrow::extend_funding_deadline`] would place the deadline at or beyond maturity.
+    FundingDeadlineBeyondMaturity = 204,
+    /// [`LiquifactEscrow::extend_funding_deadline`] called when no funding deadline is configured.
+    FundingDeadlineNotSet = 205,
 
     /// [`LiquifactEscrow::lower_min_contribution_floor`] called while escrow is not open.
     FloorLowerNotOpen = 173,
@@ -1109,10 +1111,8 @@ pub struct FundingTargetUpdated {
     pub new_target: i128,
 }
 
-/// Emitted when the admin extends an existing funding deadline while the escrow is open.
-///
-/// This additive event lets indexers refresh off-chain funding countdowns without
-/// polling [`DataKey::FundingDeadline`] after every admin transaction.
+/// Emitted by [\LiquifactEscrow::extend_funding_deadline\] when the admin pushes the
+/// funding deadline forward while the escrow is open.
 #[contractevent]
 pub struct FundingDeadlineExtended {
     #[topic]
@@ -1740,16 +1740,13 @@ impl LiquifactEscrow {
         }
 
         if let Some(deadline) = funding_deadline {
-            ensure(
-                &env,
-                env.ledger().timestamp() <= deadline,
-                EscrowError::FundingDeadlinePassed,
-            );
+            let now = env.ledger().timestamp();
+            ensure(&env, deadline > now, EscrowError::FundingDeadlinePassed);
             if maturity > 0 {
                 ensure(
                     &env,
                     deadline < maturity,
-                    EscrowError::FundingDeadlineAtOrAfterMaturity,
+                    EscrowError::FundingDeadlineBeyondMaturity,
                 );
             }
             env.storage()
@@ -2138,6 +2135,55 @@ impl LiquifactEscrow {
         } else {
             false
         }
+    }
+
+    pub fn extend_funding_deadline(env: Env, new_deadline: u64) -> u64 {
+        let escrow = Self::load_escrow_require_admin(&env);
+        guard_status_eq(
+            &env,
+            escrow.status,
+            0,
+            EscrowError::FundingDeadlineUpdateNotOpen,
+        );
+
+        let current: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::FundingDeadline)
+            .unwrap_or_else(|| fail(&env, EscrowError::FundingDeadlineNotSet));
+
+        ensure(
+            &env,
+            new_deadline > current,
+            EscrowError::FundingDeadlineNotExtended,
+        );
+
+        if escrow.maturity > 0 {
+            ensure(
+                &env,
+                new_deadline < escrow.maturity,
+                EscrowError::FundingDeadlineBeyondMaturity,
+            );
+        }
+
+        env.storage()
+            .instance()
+            .set(&DataKey::FundingDeadline, &new_deadline);
+
+        env.storage().instance().extend_ttl(
+            INSTANCE_TTL_MIN_EXTENSION_LEDGERS,
+            INSTANCE_TTL_MIN_EXTENSION_LEDGERS,
+        );
+
+        FundingDeadlineExtended {
+            name: symbol_short!("fund_ext"),
+            invoice_id: escrow.invoice_id.clone(),
+            old_deadline: current,
+            new_deadline,
+        }
+        .publish(&env);
+
+        new_deadline
     }
 
     /// Whether a compliance/legal hold is active (defaults to `false` if unset).
