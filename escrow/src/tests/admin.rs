@@ -2762,3 +2762,57 @@ fn test_raise_maturity_max_horizon_emits_event() {
         "MaturityMaxHorizonRaised event must be emitted"
     );
 }
+// ── Issue #552: get_pending_admin_remaining_secs ─────────────────────────────
+
+#[test]
+fn test_pending_admin_remaining_none_without_proposal() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    assert!(client.get_pending_admin_remaining_secs().is_none());
+}
+
+#[test]
+fn test_pending_admin_remaining_positive_before_expiry() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    let new_admin = Address::generate(&env);
+    let window = 3600u64;
+    client.propose_admin(&new_admin, &Some(window));
+    assert_eq!(client.get_pending_admin_remaining_secs(), Some(window));
+}
+
+#[test]
+fn test_pending_admin_remaining_zero_at_and_after_expiry() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    let new_admin = Address::generate(&env);
+    let window = 100u64;
+    client.propose_admin(&new_admin, &Some(window));
+    let expiry = client.get_pending_admin_expiry().unwrap();
+    env.ledger().with_mut(|l| l.timestamp = expiry);
+    assert_eq!(client.get_pending_admin_remaining_secs(), Some(0));
+    // accept_admin still succeeds at expiry (inclusive bound)
+    client.accept_admin();
+    env.ledger().with_mut(|l| l.timestamp = expiry + 1);
+    assert_eq!(client.get_pending_admin_remaining_secs(), None);
+}
+
+#[test]
+fn test_pending_admin_remaining_consistent_with_accept_admin() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    let new_admin = Address::generate(&env);
+    client.propose_admin(&new_admin, &Some(10));
+    let expiry = client.get_pending_admin_expiry().unwrap();
+    env.ledger().with_mut(|l| l.timestamp = expiry + 1);
+    assert_eq!(client.get_pending_admin_remaining_secs(), Some(0));
+    assert_contract_error(client.try_accept_admin(), EscrowError::AdminProposalExpired);
+}

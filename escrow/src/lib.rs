@@ -1898,24 +1898,23 @@ impl LiquifactEscrow {
         env.storage().instance().get(&DataKey::PendingAdminExpiry)
     }
 
-    /// Returns the remaining validity window, in seconds, for the pending admin proposal.
-    ///
-    /// This is a pure read: it performs no authorization, storage writes, or TTL bumps.
-    /// It returns [`None`] when no pending admin proposal is active. When a proposal is
-    /// active, it subtracts the current ledger timestamp from [`DataKey::PendingAdminExpiry`]
-    /// with saturating arithmetic, so both exactly-at-expiry and already-expired proposals
-    /// report `Some(0)`.
-    ///
-    /// Boundary semantics match [`LiquifactEscrow::accept_admin`]: `now == expiry` reports
-    /// zero seconds remaining but is still accepted by `accept_admin`; `now > expiry` also
-    /// reports zero and `accept_admin` rejects with [`EscrowError::AdminProposalExpired`].
     pub fn get_pending_admin_remaining_secs(env: Env) -> Option<u64> {
-        let _pending: Address = env.storage().instance().get(&DataKey::PendingAdmin)?;
-
-        env.storage()
+        let pending: Option<Address> = env.storage().instance().get(&DataKey::PendingAdmin);
+        #[allow(clippy::question_mark)]
+        if pending.is_none() {
+            return None;
+        }
+        let expiry: u64 = env
+            .storage()
             .instance()
-            .get::<DataKey, u64>(&DataKey::PendingAdminExpiry)
-            .map(|expiry| expiry.saturating_sub(env.ledger().timestamp()))
+            .get(&DataKey::PendingAdminExpiry)
+            .unwrap_or(0);
+        let now = env.ledger().timestamp();
+        if now >= expiry {
+            Some(0)
+        } else {
+            Some(expiry.saturating_sub(now))
+        }
     }
 
     /// Return whether this escrow has a configured maturity time lock.
