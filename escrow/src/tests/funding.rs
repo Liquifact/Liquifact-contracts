@@ -918,8 +918,12 @@ fn test_tier_selection_edges_base_vs_high_bucket() {
     assert_eq!(client.get_investor_yield_bps(&i_long), 850);
 }
 
+/// A second `fund_with_commitment` from the same investor (who already has a
+/// non-zero contribution from a prior tiered deposit with a tier table configured)
+/// must fail with `EscrowError::TieredSecondDeposit` (code 108).
+///
+/// The test verifies the typed error contract, not a raw panic string.
 #[test]
-#[should_panic]
 fn test_fund_with_commitment_twice_panics() {
     let env = Env::default();
     env.mock_all_auths();
@@ -953,11 +957,19 @@ fn test_fund_with_commitment_twice_panics() {
         &None,
     );
     client.fund_with_commitment(&inv, &5_000i128, &10u64);
-    client.fund_with_commitment(&inv, &5_000i128, &10u64);
+    // Second call on the same investor must emit TieredSecondDeposit (108), not a raw panic.
+    assert_contract_error(
+        client.try_fund_with_commitment(&inv, &5_000i128, &10u64),
+        EscrowError::TieredSecondDeposit,
+    );
 }
 
+/// After a plain `fund()` first deposit, calling `fund_with_commitment` on the same
+/// investor must fail with `EscrowError::TieredSecondDeposit` (code 108).
+///
+/// The tier/lock selection window is permanently closed after the first deposit leg
+/// regardless of which entrypoint established the position.
 #[test]
-#[should_panic]
 fn test_fund_then_fund_with_commitment_panics() {
     let env = Env::default();
     env.mock_all_auths();
@@ -986,7 +998,11 @@ fn test_fund_then_fund_with_commitment_panics() {
         &None,
     );
     client.fund(&inv, &5_000i128);
-    client.fund_with_commitment(&inv, &5_000i128, &10u64);
+    // fund() established the position; commitment entrypoint must emit TieredSecondDeposit (108).
+    assert_contract_error(
+        client.try_fund_with_commitment(&inv, &5_000i128, &10u64),
+        EscrowError::TieredSecondDeposit,
+    );
 }
 
 #[test]
@@ -5156,5 +5172,247 @@ fn test_preview_matches_actual_varying_amounts() {
         assert_preview_matches_actual(&client, &env, &sac_admin, amount, 30u64);
         sac_admin.mint(&Address::generate(&env), &amount);
         assert_preview_matches_actual(&client, &env, &sac_admin, amount, 60u64);
+    }
+}
+
+// ─── TieredSecondDeposit typed error (issue: harden fund_with_commitment) ────
+//
+// These tests ensure the `TieredSecondDeposit` (code 108) guard is emitted as a
+// stable numeric ContractError on every re-entry path into fund_with_commitment
+// after an investor has already established a contribution, and that follow-on
+// fund() deposits continue to work correctly.
+
+/// Tiered first deposit, then a follow-on fund_with_commitment with a DIFFERENT
+/// lock duration — must still fail with TieredSecondDeposit (108).
+/// The guard fires on prev != 0, regardless of whether the lock would match
+/// a different tier.
+#[test]
+fn test_tiered_second_deposit_different_lock_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let inv = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
+    let mut tiers = SorobanVec::new(&env);
+    tiers.push_back(YieldTier {
+        min_lock_secs: 100,
+        yield_bps: 900,
+    });
+    tiers.push_back(YieldTier {
+        min_lock_secs: 500,
+        yield_bps: 1100,
+    });
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "T2D_DIF"),
+        &sme,
+        &20_000i128,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &Some(tiers),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    // First leg with tier-1 lock → effective yield 900.
+    client.fund_with_commitment(&inv, &5_000i128, &100u64);
+    assert_eq!(client.get_investor_yield_bps(&inv), 900);
+
+    // Attempting to upgrade to tier-2 via another fund_with_commitment must fail.
+    assert_contract_error(
+        client.try_fund_with_commitment(&inv, &5_000i128, &500u64),
+        EscrowError::TieredSecondDeposit,
+    );
+
+    // Effective yield must be unchanged after the rejected call.
+    assert_eq!(
+        client.get_investor_yield_bps(&inv),
+        900,
+        "effective yield must not change after a rejected TieredSecondDeposit"
+    );
+}
+
+/// Tiered first deposit, then a follow-on fund_with_commitment with ZERO lock —
+/// even a lock of zero (which would fall back to base yield) is rejected.
+/// The discipline is: use fund() for all additional principal.
+#[test]
+fn test_tiered_second_deposit_zero_lock_also_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let inv = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
+    let mut tiers = SorobanVec::new(&env);
+    tiers.push_back(YieldTier {
+        min_lock_secs: 50,
+        yield_bps: 850,
+    });
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "T2D_ZLK"),
+        &sme,
+        &20_000i128,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &Some(tiers),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    // First leg at tier threshold.
+    client.fund_with_commitment(&inv, &5_000i128, &50u64);
+    assert_eq!(client.get_investor_yield_bps(&inv), 850);
+
+    // Re-entry with lock=0 (base-yield fallback) must also be rejected.
+    assert_contract_error(
+        client.try_fund_with_commitment(&inv, &5_000i128, &0u64),
+        EscrowError::TieredSecondDeposit,
+    );
+}
+
+/// TieredSecondDeposit guard is per-investor: Investor B calling
+/// fund_with_commitment for the first time is not affected by Investor A
+/// having already deposited.
+#[test]
+fn test_tiered_second_deposit_guard_is_per_investor() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let inv_a = Address::generate(&env);
+    let inv_b = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
+    let mut tiers = SorobanVec::new(&env);
+    tiers.push_back(YieldTier {
+        min_lock_secs: 100,
+        yield_bps: 900,
+    });
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "T2D_PER"),
+        &sme,
+        &20_000i128,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &Some(tiers),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    // Investor A makes first deposit.
+    client.fund_with_commitment(&inv_a, &5_000i128, &100u64);
+
+    // Investor B's first fund_with_commitment must succeed.
+    client.fund_with_commitment(&inv_b, &5_000i128, &100u64);
+    assert_eq!(client.get_investor_yield_bps(&inv_b), 900);
+
+    // Investor A's second fund_with_commitment must be rejected.
+    assert_contract_error(
+        client.try_fund_with_commitment(&inv_a, &3_000i128, &100u64),
+        EscrowError::TieredSecondDeposit,
+    );
+
+    // But Investor A can still use fund() for follow-on principal.
+    client.fund(&inv_a, &3_000i128);
+    assert_eq!(
+        client.get_investor_yield_bps(&inv_a),
+        900,
+        "follow-on fund() must preserve Investor A's tiered yield"
+    );
+}
+
+/// After a tiered first deposit (fund_with_commitment), the investor's follow-on
+/// deposits via fund() are accepted, the contribution accumulates, and effective
+/// yield and claim-not-before are both preserved unchanged.
+#[test]
+fn test_follow_on_fund_after_tiered_commitment_preserves_all_state() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let inv = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
+    let mut tiers = SorobanVec::new(&env);
+    tiers.push_back(YieldTier {
+        min_lock_secs: 200,
+        yield_bps: 950,
+    });
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "T2D_FOL"),
+        &sme,
+        &30_000i128,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &Some(tiers),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    // First leg via fund_with_commitment — selects tier at lock=200.
+    client.fund_with_commitment(&inv, &10_000i128, &200u64);
+    let yield_after_first = client.get_investor_yield_bps(&inv);
+    let claim_nb_after_first = client.get_investor_claim_not_before(&inv);
+    assert_eq!(yield_after_first, 950, "tier yield must be set after first leg");
+
+    // Three follow-on fund() calls — all must succeed and preserve tier state.
+    for _ in 0..3 {
+        client.fund(&inv, &5_000i128);
+        assert_eq!(
+            client.get_investor_yield_bps(&inv),
+            yield_after_first,
+            "effective yield must be unchanged by follow-on fund()"
+        );
+        assert_eq!(
+            client.get_investor_claim_not_before(&inv),
+            claim_nb_after_first,
+            "InvestorClaimNotBefore must be unchanged by follow-on fund()"
+        );
     }
 }
