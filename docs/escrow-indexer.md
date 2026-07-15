@@ -36,6 +36,7 @@ Contract event names (`symbol_short`) emitted by `escrow/src/lib.rs`:
 - `maturity` - maturity updated
 - `fund_tgt` - funding target updated
 - `coll_rec` - SME collateral commitment recorded
+- `coll_clr` - SME collateral commitment cleared, including the cleared asset, amount, and original record timestamp
 - `att_bind` - primary attestation hash bound
 - `att_app` - attestation append-log updated
 - `al_ena` - allowlist mode enabled/disabled

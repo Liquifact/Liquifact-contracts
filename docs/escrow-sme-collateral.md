@@ -86,6 +86,14 @@ pub struct CollateralClearedEvt {
     pub invoice_id: Symbol,
     pub amount: i128,   // carried from the pledge at the time of removal
 }
+
+pub struct CollateralCommitmentCleared {
+    pub name: Symbol,   // coll_clr
+    pub invoice_id: Symbol,
+    pub asset: Symbol,
+    pub amount: i128,
+    pub recorded_at: u64,
+}
 ```
 
 ---
@@ -126,4 +134,5 @@ SME calls record_sme_collateral_commitment(5_000_0000000)
 SME calls clear_sme_collateral_commitment()
   → DataKey::SmeCollateralPledge removed
   → CollateralClearedEvt { invoice_id: "INV001", amount: 5_000_0000000 } emitted
+  → CollateralCommitmentCleared { name: coll_clr, invoice_id: "INV001", asset: "USDC", amount: 5_000_0000000, recorded_at } emitted
 ```

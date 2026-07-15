@@ -1,14 +1,10 @@
 ﻿use crate::{
-    AdminAcceptedEvent, AdminProposalCancelled, AdminProposedEvent, AdminTransferredEvent, AllowlistEnabledChanged,
-    AttestationDigestAppended, AttestationDigestRevoked, BeneficiaryRotated,
-    CollateralClearedEvt, CollateralCommitmentSnapshot, CollateralRecordedEvt, DataKey,
-    EscrowCloseSnapshot, EscrowError, EscrowFunded, EscrowInitialized, EscrowPartialSettle,
-    EscrowSettled, FundingCancelled, FundingTargetUpdated, InvestorAllowlistChanged,
-    InvestorPayoutClaimed, InvestorRefundedEvt, LegalHoldChanged, LegalHoldClearCancelled,
-    LegalHoldClearRequested, LiquifactEscrow, LiquifactEscrowClient, MaturityUpdatedEvent,
-    MaxPerInvestorCapRaised, MaxUniqueInvestorsCapLowered, PausedChanged, PrimaryAttestationBound,
-    RegistryRefRebound, SmeWithdrew, TreasuryDustSwept, YieldTier,
-    DEFAULT_MATURITY_MAX_HORIZON_SECS, MAX_ATTESTATION_APPEND_ENTRIES, SCHEMA_VERSION,
+    AttestationDigestAppended, CollateralClearedEvt, CollateralCommitmentCleared,
+    CollateralCommitmentSnapshot, CollateralRecordedEvt, DataKey, EscrowCloseSnapshot,
+    EscrowError, FundingCancelled,
+    InvestorRefundedEvt, LiquifactEscrow, LiquifactEscrowClient, PrimaryAttestationBound,
+    RegistryRefRebound, TreasuryDustSwept, YieldTier, DEFAULT_MATURITY_MAX_HORIZON_SECS,
+    MAX_ATTESTATION_APPEND_ENTRIES, SCHEMA_VERSION,
 };
 use soroban_sdk::{
     symbol_short,
@@ -4573,14 +4569,35 @@ fn test_event_collateral_cleared_struct() {
     );
 
     let asset = Symbol::new(&env, "USDC");
-    client.record_sme_collateral_commitment(&asset, &5000);
+    let commitment = client.record_sme_collateral_commitment(&asset, &5000);
     client.clear_sme_collateral_commitment();
 
-    // CollateralClearedEvt has no name topic ÔÇö only invoice_id as #[topic].
-    // Verify the event exists by checking topic[0].
+    let invoice_id = client.get_escrow().invoice_id;
+    let legacy = CollateralClearedEvt {
+        invoice_id: invoice_id.clone(),
+        amount: 5000,
+    };
+    let detailed = CollateralCommitmentCleared {
+        name: symbol_short!("coll_clr"),
+        invoice_id,
+        asset,
+        amount: 5000,
+        recorded_at: commitment.recorded_at,
+    };
+
     let events = env.events().all();
     let all_events = events.events();
-    assert!(!all_events.is_empty(), "must emit at least one event");
+    assert!(
+        all_events
+            .iter()
+            .any(|event| *event == legacy.to_xdr(&env, &contract_id)),
+        "legacy CollateralClearedEvt must still be emitted"
+    );
+    assert_eq!(
+        all_events.last().unwrap().clone(),
+        detailed.to_xdr(&env, &contract_id),
+        "CollateralCommitmentCleared must emit symbol 'coll_clr' with the cleared commitment identity"
+    );
 }
 
 // ÔöÇÔöÇ SmeWithdrew ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
@@ -5449,20 +5466,20 @@ fn test_all_event_symbols_are_unique_across_struct_types() {
         "escrow_ii", "inv_cap", "raise_cap", "floor_lo", "funded", "ben_rot",
         "part_set", "escrow_sd", "maturity", "admin", "adm_acc", "adm_prop",
         "adm_can", "depr_xfer", "fund_tgt", "legalhld", "lh_req", "coll_rec",
-        "sme_wd", "inv_claim", "fund_can", "refunded", "reg_rebnd", "dust_sw",
-        "att_bind", "att_app", "att_rev", "att_unrev", "mtry_max", "al_ena",
-        "al_set", "lh_cancel", "upgrade",
+        "coll_clr", "sme_wd", "inv_claim", "fund_can", "refunded", "reg_rebind",
+        "dust_sw", "att_bind", "att_app", "att_rev", "att_unrev", "mtry_max",
+        "al_ena", "al_set", "lh_cancel", "upgrade",
     ]
     .iter()
     .cloned()
     .collect();
 
-    // 33 unique symbols across 36 defined event structs.
+    // 34 unique symbols across 37 defined event structs.
     // CollateralClearedEvt has no name field, LegalHoldClearDelayUpdated has no hardcoded symbol,
     // and inv_cap is shared by MaxUniqueInvestorsCapLowered and MaxPerInvestorCapRaised.
     assert_eq!(
         symbols.len(),
-        33,
+        34,
         "each event struct must have a unique name symbol"
     );
 }
@@ -5487,6 +5504,10 @@ fn test_event_topic0_follows_snake_case_convention() {
         ("AttestationDigestUnrevoked", "attestation_digest_unrevoked"),
         ("BeneficiaryRotated", "beneficiary_rotated"),
         ("CollateralClearedEvt", "collateral_cleared_evt"),
+        (
+            "CollateralCommitmentCleared",
+            "collateral_commitment_cleared",
+        ),
         ("CollateralRecordedEvt", "collateral_recorded_evt"),
         ("ContractUpgraded", "contract_upgraded"),
         ("DeprecatedTransferAdminUsed", "deprecated_transfer_admin_used"),

@@ -1171,14 +1171,23 @@ pub struct CollateralClearedEvt {
     pub amount: i128,
 }
 
-/// Emitted by [`LiquifactEscrow::withdraw`] when the SME pulls funded liquidity.
+/// Emitted after [`LiquifactEscrow::clear_sme_collateral_commitment`] removes
+/// the SME-reported collateral metadata.
 ///
-/// **Append-only schema:** the `fee` field was appended after the original
-/// `(name, invoice_id, amount, recipient)` layout. `amount` is the **net** principal
-/// routed to `recipient` (the SME); `fee` is the protocol fee routed to
-/// [`DataKey::Treasury`]. Conservation holds: `amount + fee == funded_amount`.
-/// Indexers reading the legacy layout still see the SME payout as `amount`; new
-/// indexers should add `fee` to reconstruct the gross disbursed `funded_amount`.
+/// This supplements [`CollateralClearedEvt`] with a short event name and the
+/// full cleared commitment identity so indexers can reconstruct the
+/// record-to-clear lifecycle without a storage read after removal.
+#[contractevent]
+pub struct CollateralCommitmentCleared {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    pub asset: Symbol,
+    pub amount: i128,
+    pub recorded_at: u64,
+}
+
 #[contractevent]
 pub struct SmeWithdrew {
     #[topic]
@@ -2474,6 +2483,15 @@ impl LiquifactEscrow {
         CollateralClearedEvt {
             invoice_id: escrow.invoice_id.clone(),
             amount: commitment.amount,
+        }
+        .publish(&env);
+
+        CollateralCommitmentCleared {
+            name: symbol_short!("coll_clr"),
+            invoice_id: escrow.invoice_id.clone(),
+            asset: commitment.asset.clone(),
+            amount: commitment.amount,
+            recorded_at: commitment.recorded_at,
         }
         .publish(&env);
     }
