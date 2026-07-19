@@ -3723,3 +3723,298 @@ fn test_state_machine_illegal_transitions_rejected() {
 // NOTE: `InvestorAllowlistBatchApplied` (`al_batch`) is documented in
 // `EVENT_SCHEMA.md` but the `#[contractevent]` struct and emission code
 // have not yet been implemented.  A future PR should add this event.
+
+// =============================================================================
+// Refactored-shared-gate-helper parity tests (issue #626)
+//
+// Asserts that each risk-bearing entrypoint still emits the **exact** legal-hold
+// error variant it emitted before the refactor — i.e. that `guard_not_legal_hold`,
+// `is_terminal_status`, and `is_pre_settlement_status` are byte-for-byte
+// behaviour-preserving replacements for the inline checks that previously
+// appeared in `sweep_terminal_dust`, `rotate_beneficiary`, `fund`,
+// `partial_settle`, `settle`, `withdraw`, `claim_investor_payout`, and
+// `cancel_funding`.
+// =============================================================================
+
+/// Helper for the parity tests: init a fresh escrow (status 0 = open, no
+/// funding yet) with a free-form label so cross-test storage collisions
+/// cannot happen. Returns client + admin + sme.
+///
+/// `init` takes 18 params in escrow v6: admin, invoice_id, sme_address, amount,
+/// yield_bps (i64), maturity (u64), funding_token, registry, treasury,
+/// yield_tiers, min_contribution, max_unique_investors, max_per_investor,
+/// legal_hold_clear_delay, maturity_max_horizon, funding_deadline,
+/// allowlist_active, protocol_fee_bps.
+fn init_open<'a>(
+    env: &'a Env,
+    label: &str,
+) -> (super::LiquifactEscrowClient<'a>, Address, Address) {
+    let admin = Address::generate(env);
+    let sme = Address::generate(env);
+    let client = super::deploy(env);
+    let (token, treasury) = super::free_addresses(env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(env, label),
+        &sme,
+        &100i128,
+        &0i64,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+    (client, admin, sme)
+}
+
+/// Confirms `is_terminal_status` and `is_pre_settlement_status` correctly
+/// partition the existing status codes (`0..=4`). This is a pure-function
+/// test and exercises no contract state.
+#[test]
+fn refactor_gate_helpers_status_predicate_truth_table() {
+    // (status, expected_is_terminal, expected_is_pre_settlement)
+    let truth: [(u32, bool, bool); 5] = [
+        (0, false, true),  // open       → pre-settlement only
+        (1, false, true),  // funded     → pre-settlement only
+        (2, true, false),  // settled    → terminal only
+        (3, true, false),  // withdrawn  → terminal only
+        (4, true, false),  // cancelled  → terminal only
+    ];
+    for (status, expected_terminal, expected_pre_settle) in truth {
+        assert_eq!(
+            crate::is_terminal_status(status),
+            expected_terminal,
+            "is_terminal_status({status})"
+        );
+        assert_eq!(
+            crate::is_pre_settlement_status(status),
+            expected_pre_settle,
+            "is_pre_settlement_status({status})"
+        );
+    }
+    // Out-of-range statuses are not terminal or pre-settlement.
+    assert!(!crate::is_terminal_status(5));
+    assert!(!crate::is_terminal_status(7));
+    assert!(!crate::is_pre_settlement_status(5));
+    assert!(!crate::is_pre_settlement_status(99));
+}
+
+/// Confirms each refactored entrypoint still emits its documented
+/// `LegalHoldBlocks*` variant when the legal hold is active, **without**
+/// regression through the new `guard_not_legal_hold` helper.
+///
+/// This is the regression-protection test for issue #626: if the helper
+/// ever swallowed the per-entrypoint variant or panicked earlier in the
+/// gate sequence (e.g. before `require_auth`), this test fails.
+#[test]
+fn refactor_gate_helpers_hold_active_emits_per_entrypoint_variant() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    // --- sweep_terminal_dust
+    let (sweep, _a, _s) = init_open(&env, "LH_SWP");
+    sweep.set_legal_hold(&true);
+    assert_contract_error(
+        sweep.try_sweep_terminal_dust(&1i128),
+        EscrowError::LegalHoldBlocksTreasuryDustSweep,
+    );
+
+    // --- rotate_beneficiary
+    let (rot, _a, _sme) = init_open(&env, "LH_ROT");
+    rot.set_legal_hold(&true);
+    let new_sme = Address::generate(&env);
+    assert_contract_error(
+        rot.try_rotate_beneficiary(&new_sme),
+        EscrowError::LegalHoldBlocksBeneficiaryRotation,
+    );
+
+    // --- fund
+    let (fund_c, _a, _s) = init_open(&env, "LH_FND");
+    let _investor = Address::generate(&env);
+    fund_c.set_legal_hold(&true);
+    assert_contract_error(
+        fund_c.try_fund(&_investor, &10i128),
+        EscrowError::LegalHoldBlocksFunding,
+    );
+
+    // --- partial_settle (admin authority)
+    let (ps_c, ps_admin, _ps_sme) = init_open(&env, "LH_PS");
+    ps_c.set_legal_hold(&true);
+    assert_contract_error(
+        ps_c.try_partial_settle(&ps_admin),
+        EscrowError::LegalHoldBlocksPartialSettle,
+    );
+
+    // --- settle, withdraw, claim_investor_payout: drive escrow to status 1
+    // first via a real token, then re-enable legal hold and assert the typed
+    // error from each refactored gate preserves the per-entrypoint variant.
+    let token = install_stellar_asset_token(&env);
+    let funder = Address::generate(&env);
+    let admin_f = Address::generate(&env);
+    let sme_f = Address::generate(&env);
+    let (treasury_f, _t_free) = super::free_addresses(&env);
+    let funded = super::deploy(&env);
+    funded.init(
+        &admin_f,
+        &soroban_sdk::String::from_str(&env, "LH_FUNDED"),
+        &sme_f,
+        &100i128,
+        &0i64,
+        &0u64,
+        &token.id,
+        &None,
+        &treasury_f,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+    token.stellar.mint(&funder, &100i128);
+    funded.fund(&funder, &100i128);
+    funded.set_legal_hold(&true);
+    assert_contract_error(funded.try_settle(), EscrowError::LegalHoldBlocksSettlement);
+    assert_contract_error(
+        funded.try_withdraw(),
+        EscrowError::LegalHoldBlocksWithdrawal,
+    );
+    assert_contract_error(
+        funded.try_claim_investor_payout(&funder),
+        EscrowError::LegalHoldBlocksInvestorClaims,
+    );
+
+    // --- cancel_funding
+    let (cancel_c, _ca, _cs) = init_open(&env, "LH_CAN");
+    cancel_c.set_legal_hold(&true);
+    assert_contract_error(
+        cancel_c.try_cancel_funding(),
+        EscrowError::LegalHoldBlocksCancelFunding,
+    );
+
+    // Silence unused-variable warnings for symmetry with sibling tests.
+    let _ = (_t_free, new_sme);
+}
+
+/// Confirms `require_funding_open` (`guard_status_eq` specialised) still
+/// gates open-window entrypoints identically: a funded-then-settled escrow
+/// rejects further `fund` calls with `EscrowNotOpenForFunding`, AND the
+/// settled status satisfies both terminal-status and open-status predicates
+/// in the documented way.
+#[test]
+fn refactor_gate_helpers_open_funding_window_preserved() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let token = install_stellar_asset_token(&env);
+    let investor = Address::generate(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let treasury = Address::generate(&env);
+    let client = super::deploy(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "OPEN_W"),
+        &sme,
+        &100i128,
+        &0i64,
+        &0u64,
+        &token.id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+    token.stellar.mint(&investor, &100i128);
+    client.fund(&investor, &100i128);
+    client.settle();
+
+    // Open-window guard rejects `fund` post-settlement with the same typed
+    // error as pre-refactor (regression lock).
+    assert_contract_error(
+        client.try_fund(&investor, &1i128),
+        EscrowError::EscrowNotOpenForFunding,
+    );
+    // Settled status = 2 must satisfy is_terminal_status but NOT
+    // is_pre_settlement_status — ensures predicate partitioning.
+    assert_eq!(client.get_escrow().status, 2);
+    assert!(crate::is_terminal_status(2));
+    assert!(!crate::is_pre_settlement_status(2));
+}
+
+/// Confirms `sweep_terminal_dust`'s terminal-status helper rejects a fresh
+/// escrow (status == 0 = open) with `DustSweepNotTerminal` — exercising both
+/// the legal-hold helper and the terminal-status predicate together.
+#[test]
+fn refactor_gate_helpers_sweep_blocked_on_open_by_terminal_status() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _a, _s) = init_open(&env, "TERMINAL_GATE");
+    // No legal hold set, so legal-hold gate passes; terminal-status gate
+    // must still reject because status == 0 is open, not terminal.
+    assert_contract_error(
+        client.try_sweep_terminal_dust(&1i128),
+        EscrowError::DustSweepNotTerminal,
+    );
+}
+
+/// Confirms `rotate_beneficiary`'s pre-settlement helper rejects a settled
+/// escrow with `RotationNotOpen` — exercising the new `is_pre_settlement_status`
+/// predicate at a call site.
+#[test]
+fn refactor_gate_helpers_rotate_blocked_post_settlement() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let token = install_stellar_asset_token(&env);
+    let funder = Address::generate(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let treasury = Address::generate(&env);
+    let new_sme = Address::generate(&env);
+    let client = super::deploy(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "ROT_POST"),
+        &sme,
+        &100i128,
+        &0i64,
+        &0u64,
+        &token.id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+    token.stellar.mint(&funder, &100i128);
+    client.fund(&funder, &100i128);
+    client.settle();
+    assert_contract_error(
+        client.try_rotate_beneficiary(&new_sme),
+        EscrowError::RotationNotOpen,
+    );
+}

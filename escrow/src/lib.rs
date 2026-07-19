@@ -590,6 +590,84 @@ pub(crate) fn require_funding_open(env: &Env, status: u32) {
     guard_status_eq(env, status, 0, EscrowError::EscrowNotOpenForFunding);
 }
 
+/// Shared guard: assert that no legal/compliance hold is currently active.
+///
+/// Replaces the repeated inline pattern
+/// `ensure(&env, !Self::legal_hold_active(&env), EscrowError::LegalHoldBlocks*)` that previously
+/// appeared at every risk-bearing entrypoint — `sweep_terminal_dust`, `rotate_beneficiary`,
+/// `fund_impl`, `partial_settle`, `settle`, `withdraw`, `claim_investor_payout`, and
+/// `cancel_funding`. By centralising the read of [`DataKey::LegalHold`] and the negation we
+/// guarantee that adding a new risk-bearing entrypoint cannot accidentally forget the hold
+/// check or pick the wrong `LegalHoldBlocks*` variant — the caller passes the typed error
+/// variant that documents which entrypoint was blocked.
+///
+/// # Errors
+/// Panics with the caller-supplied `error` (one of the `EscrowError::LegalHoldBlocks*`
+/// variants) when [`DataKey::LegalHold`] is `true`.
+///
+/// # Security notes
+/// - Read-only: performs a single instance-storage read with `unwrap_or(false)` (no panic on
+///   missing key). Does not write or delete any storage key.
+/// - This helper is **not** an authorization check. Callers must still call
+///   `Address::require_auth()` for the entrypoint's bound role before any storage mutation
+///   or token transfer, per [ADR-002](docs/adr/ADR-002-auth-boundaries.md).
+/// - The `LegalHold` flag is independent of the operational pause ([`DataKey::Paused`]); an
+///   entrypoint that needs both gates must compose `guard_not_legal_hold` with
+///   `ensure(!paused_active(env), PausedBlocks*)` itself.
+#[inline(always)]
+pub(crate) fn guard_not_legal_hold(env: &Env, error: EscrowError) {
+    ensure(env, !LiquifactEscrow::legal_hold_active(env), error);
+}
+
+/// Predicate: `true` when `status` is one of the **terminal** escrow states
+/// (`2` = settled, `3` = withdrawn, `4` = cancelled).
+///
+/// Used to gate entries that only make sense after the escrow has reached a final
+/// disposition — e.g. [`LiquifactEscrow::sweep_terminal_dust`], which sweeps
+/// rounding-residue / stray-transfer balances only in terminal states, or liability-floor
+/// checks that must only run when no further principal inbound is possible.
+///
+/// Centralising this predicate keeps the `settled | withdrawn | cancelled` set definitionally
+/// identical across every call site — adding a new status code (e.g. a future
+/// `claimed` state) only requires editing this helper and a single call-site comment.
+///
+/// # Notes
+/// Pure function: no storage access, no token interaction. Safe to call from
+/// any context where a `status: u32` value is in hand (entrypoint, view function, test).
+///
+/// # Security notes
+/// This is a **predicate**, not a guard — callers that need to *enforce* the terminal
+/// precondition must wrap the call in `ensure(&env, is_terminal_status(status), error)`.
+/// Mixing predicates and guards deliberately: predicates let view helpers and tests reuse
+/// the definition without hiding a panic, while `guard_status_eq` /
+/// `guard_status_in` keep the call-site `ensure` self-documenting at entrypoints.
+#[inline(always)]
+pub(crate) fn is_terminal_status(status: u32) -> bool {
+    matches!(status, 2 | 3 | 4)
+}
+
+/// Predicate: `true` when `status` is one of the **pre-settlement** escrow states
+/// (`0` = open, `1` = funded).
+///
+/// Used by entrypoints that must run after funding closed but before settlement
+/// finalised — e.g. [`LiquifactEscrow::rotate_beneficiary`], which lets the SME/admin
+/// re-point the payout destination only while the escrow is still open or funded.
+///
+/// Centralising the predicate keeps the `open | funded` set definitionally identical across
+/// every call site.
+///
+/// # Notes
+/// Pure function: no storage access, no token interaction.
+///
+/// # Security notes
+/// This is a **predicate**, not a guard. Callers that need to *enforce* the pre-settlement
+/// precondition must wrap it in
+/// `ensure(&env, is_pre_settlement_status(status), error)`.
+#[inline(always)]
+pub(crate) fn is_pre_settlement_status(status: u32) -> bool {
+    matches!(status, 0 | 1)
+}
+
 pub(crate) fn validate_maturity_bounds(env: &Env, maturity: u64, max_horizon: u64) {
     if maturity == 0 {
         return;
@@ -1952,11 +2030,7 @@ impl LiquifactEscrow {
     /// missing initialized addresses, empty balances, liability floor violation, and token
     /// transfer invariant failures.
     pub fn sweep_terminal_dust(env: Env, amount: i128) -> i128 {
-        ensure(
-            &env,
-            !Self::legal_hold_active(&env),
-            EscrowError::LegalHoldBlocksTreasuryDustSweep,
-        );
+        guard_not_legal_hold(&env, EscrowError::LegalHoldBlocksTreasuryDustSweep);
         ensure(&env, amount > 0, EscrowError::SweepAmountNotPositive);
         ensure(
             &env,
@@ -1966,10 +2040,9 @@ impl LiquifactEscrow {
 
         // env.clone(): env is used again after this call for treasury/token reads and publish.
         let escrow = Self::get_escrow(env.clone());
-        guard_status_in(
+        ensure(
             &env,
-            escrow.status,
-            &[2, 3, 4],
+            is_terminal_status(escrow.status),
             EscrowError::DustSweepNotTerminal,
         );
 
@@ -2050,18 +2123,14 @@ impl LiquifactEscrow {
     /// | `new_sme_address == current SME` | [`EscrowError::NewSmeSameAsCurrent`] |
     pub fn rotate_beneficiary(env: Env, new_sme_address: Address) -> InvoiceEscrow {
         // Legal-hold gate (read-only).
-        ensure(
-            &env,
-            !Self::legal_hold_active(&env),
-            EscrowError::LegalHoldBlocksBeneficiaryRotation,
-        );
+        guard_not_legal_hold(&env, EscrowError::LegalHoldBlocksBeneficiaryRotation);
 
         let mut escrow = Self::get_escrow(env.clone());
 
         // Only permitted in pre-settlement states (open or funded).
         ensure(
             &env,
-            escrow.status == 0 || escrow.status == 1,
+            is_pre_settlement_status(escrow.status),
             EscrowError::RotationNotOpen,
         );
 
@@ -3884,11 +3953,7 @@ impl LiquifactEscrow {
         // Legal hold check is intentionally after the escrow read: the escrow is needed for
         // status and yield_bps regardless, and hoisting the hold check before the escrow read
         // would not reduce storage operations (both keys are always read on this path).
-        ensure(
-            &env,
-            !Self::legal_hold_active(&env),
-            EscrowError::LegalHoldBlocksFunding,
-        );
+        guard_not_legal_hold(&env, EscrowError::LegalHoldBlocksFunding);
         require_funding_open(&env, escrow.status);
 
         // Check funding deadline
@@ -4089,11 +4154,7 @@ impl LiquifactEscrow {
     pub fn partial_settle(env: Env, caller: Address) -> InvoiceEscrow {
         caller.require_auth();
 
-        ensure(
-            &env,
-            !Self::legal_hold_active(&env),
-            EscrowError::LegalHoldBlocksPartialSettle,
-        );
+        guard_not_legal_hold(&env, EscrowError::LegalHoldBlocksPartialSettle);
 
         let mut escrow = Self::get_escrow(env.clone());
 
@@ -4140,11 +4201,7 @@ impl LiquifactEscrow {
             !Self::paused_active(&env),
             EscrowError::PausedBlocksSettlement,
         );
-        ensure(
-            &env,
-            !Self::legal_hold_active(&env),
-            EscrowError::LegalHoldBlocksSettlement,
-        );
+        guard_not_legal_hold(&env, EscrowError::LegalHoldBlocksSettlement);
 
         // env.clone(): env is used again after this call for ledger timestamp, storage set, and publish.
         let mut escrow = Self::load_escrow_require_sme(&env);
@@ -4220,11 +4277,7 @@ impl LiquifactEscrow {
             !Self::paused_active(&env),
             EscrowError::PausedBlocksWithdrawal,
         );
-        ensure(
-            &env,
-            !Self::legal_hold_active(&env),
-            EscrowError::LegalHoldBlocksWithdrawal,
-        );
+        guard_not_legal_hold(&env, EscrowError::LegalHoldBlocksWithdrawal);
 
         let mut escrow = Self::load_escrow_require_sme(&env);
 
@@ -4354,11 +4407,7 @@ impl LiquifactEscrow {
             !Self::paused_active(&env),
             EscrowError::PausedBlocksInvestorClaims,
         );
-        ensure(
-            &env,
-            !Self::legal_hold_active(&env),
-            EscrowError::LegalHoldBlocksInvestorClaims,
-        );
+        guard_not_legal_hold(&env, EscrowError::LegalHoldBlocksInvestorClaims);
 
         investor.require_auth();
 
@@ -5102,11 +5151,7 @@ impl LiquifactEscrow {
     /// Emits typed [`EscrowError`] codes when legal hold is active, the escrow is uninitialized,
     /// or the escrow is not in status 0 (open).
     pub fn cancel_funding(env: Env) -> InvoiceEscrow {
-        ensure(
-            &env,
-            !Self::legal_hold_active(&env),
-            EscrowError::LegalHoldBlocksCancelFunding,
-        );
+        guard_not_legal_hold(&env, EscrowError::LegalHoldBlocksCancelFunding);
 
         let mut escrow = Self::load_escrow_require_admin(&env);
 

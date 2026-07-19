@@ -310,3 +310,28 @@ See the canonical compliance test section in [`escrow/src/tests/admin.rs`](file:
 | `record_sme_collateral_commitment`, `rotate_beneficiary` | `escrow/src/tests/admin.rs` § `auth_audit_*` |
 
 This comprehensive matrix enforces the guard bounds described in ADR-002, ensuring that any missing `require_auth` results in a direct test failure.
+
+### Shared gate helpers (issue #626)
+
+The repeated pre-`require_auth` checks for legal hold and escrow status are centralised
+into private, `#[inline(always)]` helpers at the top of `escrow/src/lib.rs`. The
+helpers preserve the ADR-002 canonical sequence (read-only preconditions →
+`Address::require_auth()` → storage writes / token transfers) and emit the exact
+`EscrowError` variant documented in §1's per-entrypoint error tables:
+
+- `guard_not_legal_hold(env, error)` — asserts no legal hold; panics with the supplied
+  `LegalHoldBlocks*` variant if active. Replaces inline patterns at
+  `sweep_terminal_dust`, `rotate_beneficiary`, `fund_impl`, `partial_settle`, `settle`,
+  `withdraw`, `claim_investor_payout`, `cancel_funding`.
+- `guard_status_eq(env, status, expected, error)` — asserts `status == expected`.
+- `guard_status_in(env, status, &[allowed], error)` — asserts `status ∈ allowed`.
+- `require_funding_open(env, status)` — `guard_status_eq` specialised to
+  `EscrowNotOpenForFunding` for `status == 0`.
+- `is_terminal_status(status)` / `is_pre_settlement_status(status)` — pure predicates
+  for the `(2 | 3 | 4)` and `(0 | 1)` sets, with companion const slices
+  `TERMINAL_STATUSES` / `PRE_SETTLEMENT_STATUSES` for `guard_status_in` reuse.
+
+These helpers are **not** authentication checks — they validate state only.
+Each entrypoint still performs its own `Address::require_auth()` before any storage
+write or token transfer. Behavioural parity (same error code at every site, same
+gate ordering) is locked in by `escrow/src/tests/coverage.rs` § `refactor_gate_helpers_*`.
