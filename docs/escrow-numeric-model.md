@@ -11,6 +11,27 @@ This contract uses Soroban host values and Rust integer types directly. It does 
 - Per-investor `InvestorContribution(Address)` is accumulated with `checked_add`. If `prev_contribution + amount` exceeds `i128::MAX`, the contract panics with `investor contribution overflow` and the Soroban invocation aborts.
 - The contract does not saturate, clamp, or intentionally wrap funding totals.
 
+### Init amount upper bound: `MAX_INVOICE_AMOUNT`
+
+`LiquifactEscrow::init` rejects `amount > MAX_INVOICE_AMOUNT` with [`EscrowError::AmountExceedsMax`](../escrow/src/lib.rs) (code 14) to prevent overflow in settlement-time payout arithmetic. This is a **constructor-time guard** — no valid init can produce an escrow where `compute_investor_payout` overflows.
+
+**Value:** `MAX_INVOICE_AMOUNT = (1 << 63) - 1 = 9_223_372_036_854_775_807` (i.e. `floor(√(i128::MAX / 2))`).
+
+**Derivation** (see the constant's doc comment in [`escrow/src/lib.rs`](../escrow/src/lib.rs)):
+
+```text
+coupon       = total_principal × yield_bps / 10_000  (floor)   (1)
+settle_pool  = total_principal + coupon                        (2)
+gross_payout = contribution × settle_pool / total_principal    (3)
+```
+
+The tightest constraint is step (3): with worst-case `yield_bps = 10_000` and a single investor (`contribution = total_principal`), the intermediate product is `total_principal × 2 × total_principal = 2 × total_principal²`. Requiring this to stay within `i128` yields `total_principal ≤ floor(√(i128::MAX / 2)) = 2⁶³ − 1`. This is stricter than both the step (1) bound (`i128::MAX / 10_000`) and the step (2) bound (`i128::MAX / 2`).
+
+**Tests:**
+- `test_cost_baseline_init_max_amount` — accepting exactly `MAX_INVOICE_AMOUNT`
+- `test_init_amount_exceeds_max_rejected` — rejecting `MAX_INVOICE_AMOUNT + 1` with `AmountExceedsMax`
+- `test_max_bound_funded_escrow_compute_investor_payout_no_overflow` — full funding + settlement with `yield_bps = 10_000` at the bound
+
 ## Commitment locks: `u64`
 
 - Ledger timestamps and lock durations use `u64` seconds from `Env::ledger().timestamp()`.

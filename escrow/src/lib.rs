@@ -185,23 +185,47 @@ pub const DEFAULT_MATURITY_MAX_HORIZON_SECS: u64 = 157_680_000; // ~5 years (365
 /// `compute_investor_payout` uses this integer math (see docs/escrow-pro-rata.md):
 ///
 /// ```text
-/// coupon       = total_principal × yield_bps / 10_000  (floor)
-/// settle_pool  = total_principal + coupon
-/// gross_payout = contribution × settle_pool / total_principal
+/// coupon       = total_principal × yield_bps / 10_000  (floor)   (1)
+/// settle_pool  = total_principal + coupon                        (2)
+/// gross_payout = contribution × settle_pool / total_principal    (3)
 /// ```
 ///
-/// With `yield_bps ∈ [0, 10_000]`, we require that for worst-case
-/// `yield_bps = 10_000`:
-/// - `coupon = total_principal × 10_000 / 10_000 = total_principal`
-/// - `total_principal × 10_000` fits in `i128`
-/// - `settle_pool = 2 × total_principal` fits in `i128`
-/// - `contribution × settle_pool` fits in `i128` (with `contribution ≤ total_principal`)
+/// Each step uses `checked_*` arithmetic on `i128`. We need the tightest
+/// bound that keeps all three steps overflow-free for every valid
+/// `yield_bps ∈ [0, 10_000]` and every `contribution ∈ (0, total_principal]`.
 ///
-/// Setting `MAX_INVOICE_AMOUNT = i128::MAX / 10_000` is sufficient because it implies:
-/// - `amount × 10_000 ≤ i128::MAX`
-/// - `2 × amount ≤ 2 × (i128::MAX / 10_000) < i128::MAX` for 10_000-bps coupon,
-///   and all intermediate `checked_*` operations are overflow-free by construction.
-pub const MAX_INVOICE_AMOUNT: i128 = i128::MAX / 10_000;
+/// **Step (1)** — `total_principal × 10_000 ≤ i128::MAX` ⇒
+/// `total_principal ≤ i128::MAX / 10_000` (≈ 1.7×10³⁴).
+///
+/// **Step (2)** — worst-case coupon is `total_principal` (when
+/// `yield_bps = 10_000` and division is exact), so
+/// `settle_pool = 2 × total_principal ≤ i128::MAX` ⇒
+/// `total_principal ≤ i128::MAX / 2` (≈ 8.5×10³⁷).
+///
+/// **Step (3)** — the tightest gate: `contribution × settle_pool`
+/// must not overflow. Maximise the product by setting
+/// `contribution = total_principal` (single investor) and
+/// `yield_bps = 10_000` so that `settle_pool = 2 × total_principal`.
+/// Then
+///
+/// ```text
+/// contribution × settle_pool = total_principal × 2 × total_principal
+///                            = 2 × total_principal²
+/// ```
+///
+/// Requiring `2 × total_principal² ≤ i128::MAX` gives
+///
+/// ```text
+/// total_principal ≤ floor(√(i128::MAX / 2))
+///                 = floor(√(2¹²⁷ − 1) / 2)
+///                 = 2⁶³ − 1
+///                 = 9_223_372_036_854_775_807
+/// ```
+///
+/// This is the limiting constraint: it is tighter than both (1) and (2)
+/// by many orders of magnitude. All intermediate `checked_*` operations
+/// are overflow-free by construction for every valid init.
+pub const MAX_INVOICE_AMOUNT: i128 = (1i128 << 63) - 1; // floor(√(i128::MAX / 2))
 
 /// Upper bound on [`LiquifactEscrow::fund_batch`] entries to keep storage/CPU bounded.
 /// Mirrors the spirit of `MAX_ATTESTATION_APPEND_ENTRIES` to limit per-call work.

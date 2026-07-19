@@ -241,6 +241,114 @@ fn test_cost_baseline_init_max_amount() {
     );
 }
 
+/// Verify that an invoice amount one above [`crate::MAX_INVOICE_AMOUNT`] is
+/// rejected with [`EscrowError::AmountExceedsMax`] (code 14) at init time.
+///
+/// This guards against overflow-prone configs where settlement-time payout
+/// arithmetic (`compute_investor_payout`) would revert with
+/// `ComputePayoutArithmeticOverflow` for every investor.
+#[test]
+fn test_init_amount_exceeds_max_rejected() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let (token, treasury) = free_addresses(&env);
+    assert_contract_error(
+        client.try_init(
+            &admin,
+            &soroban_sdk::String::from_str(&env, "INV103"),
+            &sme,
+            &(crate::MAX_INVOICE_AMOUNT + 1),
+            &800i64,
+            &1000u64,
+            &token,
+            &None,
+            &treasury,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+        ),
+        EscrowError::AmountExceedsMax,
+    );
+}
+
+/// Validate that a fully-funded escrow initialised exactly at
+/// [`crate::MAX_INVOICE_AMOUNT`] with worst-case `yield_bps = 10_000` (100%)
+/// produces an overflow-free `compute_investor_payout` for its sole investor.
+///
+/// # Rationale
+///
+/// The payout formula is:
+/// ```text
+/// coupon       = total_principal × yield_bps / 10_000  (floor)
+/// settle_pool  = total_principal + coupon
+/// gross_payout = contribution × settle_pool / total_principal
+/// ```
+/// With `yield_bps = 10_000` and `contribution == total_principal`,
+/// `settle_pool = 2 × total_principal` and the investor is owed the full pool.
+/// All intermediate `checked_*` operations must stay within `i128`.
+#[test]
+fn test_max_bound_funded_escrow_compute_investor_payout_no_overflow() {
+    use soroban_sdk::token::StellarAssetClient;
+
+    let env = Env::default();
+    env.mock_all_auths();
+
+    // Install a real SEP-41 token so funding + settlement work with real token balances.
+    let sac = env.register_stellar_asset_contract_v2(Address::generate(&env));
+    let token_id = sac.address();
+    let sac_admin = StellarAssetClient::new(&env, &token_id);
+
+    let client = deploy(&env);
+    let contract_id = client.address.clone();
+
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let treasury = Address::generate(&env);
+
+    // Init with MAX_INVOICE_AMOUNT at worst-case yield (10_000 bps = 100%).
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "INV104"),
+        &sme,
+        &crate::MAX_INVOICE_AMOUNT,
+        &10_000i64,
+        &0u64, // no maturity lock
+        &token_id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    // Fund with a single investor contributing the full amount.
+    let investor = Address::generate(&env);
+
+    // Mint tokens to the investor so fund()'s SEP-41 transfer_from succeeds.
+    // (Balance must exist before the fund call; mock_all_auths only mocks auth.)
+    sac_admin.mint(&investor, &crate::MAX_INVOICE_AMOUNT);
+    client.fund(&investor, &crate::MAX_INVOICE_AMOUNT);
+
+    // Settle: no maturity lock means immediate settlement.
+    client.settle();
+
+    // compute_investor_payout must return a non-zero value without panicking.
+    // With yield_bps = 10_000, the investor gets their principal × 2 back.
+    let payout = client.compute_investor_payout(&investor);
+    assert!(payout > 0, "payout must be positive; got {}", payout);
+    assert_eq!(payout, crate::MAX_INVOICE_AMOUNT * 2, "payout must equal 2× principal");
+}
+
 #[test]
 #[should_panic]
 fn test_init_invoice_id_empty_string_panics() {
