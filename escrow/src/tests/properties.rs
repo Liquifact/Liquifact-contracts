@@ -341,7 +341,7 @@ fn prop_status_transitions_open_to_funded_only() {
         &None,
         &None,
         &None,
-    );
+    &None::<i64>,);
 
     let initial = client.get_escrow();
     assert_eq!(initial.status, 0, "status must start at 0");
@@ -382,7 +382,7 @@ fn prop_status_settle_transition() {
         &None,
         &None,
         &None,
-    );
+    &None::<i64>,);
 
     client.fund(&investor, &target);
 
@@ -422,7 +422,7 @@ fn prop_status_withdraw_transition() {
         &None,
         &None,
         &None,
-    );
+    &None::<i64>,);
 
     token.stellar.mint(&investor, &target);
     client.fund(&investor, &target);
@@ -466,7 +466,7 @@ fn prop_no_regression_from_funded_status() {
         &None,
         &None,
         &None,
-    );
+    &None::<i64>,);
 
     client.fund(&investor, &target);
 
@@ -508,7 +508,7 @@ fn prop_no_regression_after_withdraw() {
         &None,
         &None,
         &None,
-    );
+    &None::<i64>,);
 
     token.stellar.mint(&investor, &target);
     client.fund(&investor, &target);
@@ -548,7 +548,7 @@ fn prop_settled_is_terminal_for_settle() {
         &None,
         &None,
         &None,
-    );
+    &None::<i64>,);
 
     client.fund(&investor, &target);
     client.settle();
@@ -586,7 +586,7 @@ fn prop_withdrawn_is_terminal_for_withdraw() {
         &None,
         &None,
         &None,
-    );
+    &None::<i64>,);
 
     token.stellar.mint(&investor, &target);
     client.fund(&investor, &target);
@@ -624,7 +624,7 @@ fn prop_status_invariant_all_states_valid_range() {
         &None,
         &None,
         &None,
-    );
+    &None::<i64>,);
 
     assert!(client.get_escrow().status == 0);
 
@@ -667,7 +667,7 @@ fn prop_funded_amount_sum_of_contributions() {
         &None,
         &None,
         &None,
-    );
+    &None::<i64>,);
 
     let inv1 = Address::generate(&env);
     let inv2 = Address::generate(&env);
@@ -720,7 +720,7 @@ fn prop_funded_amount_respects_funding_target() {
         &None,
         &None,
         &None,
-    );
+    &None::<i64>,);
 
     let fund_amount = target + excess;
     let after = client.fund(&investor, &fund_amount);
@@ -761,7 +761,7 @@ fn prop_funded_amount_non_decreasing_across_multiple_funders() {
         &None,
         &None,
         &None,
-    );
+    &None::<i64>,);
 
     let amt1: i128 = 50_000_000_000i128;
     let amt2: i128 = 100_000_000_000i128;
@@ -816,7 +816,7 @@ fn prop_funded_amount_equals_contribution_sum_for_funded_escrow() {
         &None,
         &None,
         &None,
-    );
+    &None::<i64>,);
 
     let amounts: [i128; 3] = [50_000_000_000i128, 100_000_000_000i128, 50_000_000_000i128];
     let mut total_contributed: i128 = 0;
@@ -937,7 +937,7 @@ fn fuzz_multi_investor_fund_ordering_snapshot_once_only() {
             &None,
             &None,
             &None,
-        );
+        &None::<i64>,);
 
         // Randomize investor count/order and positive amounts. Keep the sequence small so
         // runtime stays within budget and shrinking isn't required to debug failures.
@@ -1164,7 +1164,7 @@ fn funded_and_settled_escrow<'a>(
         &None,
         &None,
         &None,
-    );
+    &None::<i64>,);
 
     for (investor, amount) in contributions {
         client.fund(investor, amount);
@@ -1540,7 +1540,7 @@ fn cancelled_escrow<'a>(
         &None,
         &None,
         &None,
-    );
+    &None::<i64>,);
     for (investor, amount) in contributions {
         client.fund(investor, amount);
     }
@@ -1697,7 +1697,7 @@ fn tiered_funded_and_settled_escrow<'a>(
         &None,
         &None,
         &None,
-    );
+    &None::<i64>,);
 
     for (investor, amount, lock_secs) in contributions {
         if *lock_secs == 0 {
@@ -2142,7 +2142,7 @@ fn slots_no_cap_is_none_after_multiple_funds() {
         &None,
         &None,
         &None,
-    );
+    &None::<i64>,);
 
     assert_eq!(
         client.get_remaining_investor_slots(),
@@ -2200,7 +2200,7 @@ proptest! {
             &None,
             &None,
             &None,
-        );
+        &None::<i64>,);
 
         // Verify invariant on fresh contract.
         assert_slots_invariant(&client, "initial");
@@ -2290,7 +2290,7 @@ fn slots_repeat_deposit_does_not_decrement_remaining() {
         &None,
         &None,
         &None,
-    );
+    &None::<i64>,);
 
     let investor = Address::generate(&env);
 
@@ -2359,7 +2359,7 @@ fn slots_lower_cap_mid_sequence_invariant() {
         &None,
         &None,
         &None,
-    );
+    &None::<i64>,);
 
     // Fund 3 distinct investors.
     let inv1 = Address::generate(&env);
@@ -2440,7 +2440,7 @@ fn slots_fund_batch_conservation() {
         &None,
         &None,
         &None,
-    );
+    &None::<i64>,);
 
     assert_slots_invariant(&client, "pre-batch");
 
@@ -2538,7 +2538,7 @@ proptest! {
             &None,
             &None,
             &None,
-        );
+        &None::<i64>,);
 
         let investors: Vec<Address> = (0..n_investors)
             .map(|_| Address::generate(&env))
@@ -2721,7 +2721,7 @@ fn slots_cap_exactly_hit_remaining_is_zero() {
         &None,
         &None,
         &None,
-    );
+    &None::<i64>,);
 
     let investors: Vec<Address> = (0..cap as usize).map(|_| Address::generate(&env)).collect();
 

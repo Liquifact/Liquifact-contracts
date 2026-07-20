@@ -60,7 +60,7 @@ fn test_legal_hold_midflow_blocks_and_resumes_with_ordered_events() {
         &None,
         &None,
         &None,
-    );
+    &None::<i64>,);
 
     // We will not fund or settle — just exercise legal hold at multiple points.
     // The contract id is derived from the deploy_and_init sequence, so we
@@ -176,7 +176,7 @@ fn test_escrow_gold_standard_happy_path_open_overfund_snapshot_settle_claim() {
         &None,
         &None,
         &None,
-    );
+    &None::<i64>,);
 
     let initial_escrow = client.get_escrow();
     assert_eq!(
@@ -408,7 +408,7 @@ fn test_escrow_tiered_yield_with_commitment_locks() {
         &None,
         &None,
         &None,
-    );
+    &None::<i64>,);
 
     let investor_base = Address::generate(&env);
     let investor_tier1 = Address::generate(&env);
@@ -537,7 +537,7 @@ fn test_collateral_record_is_metadata_only_and_does_not_invoke_token_contract() 
         &None,
         &None,
         &None,
-    );
+    &None::<i64>,);
 
     let commitment = client.record_sme_collateral_commitment(&symbol_short!("USDC"), &5_000i128);
     assert_eq!(commitment.asset, symbol_short!("USDC"));
@@ -772,7 +772,7 @@ fn test_legal_hold_midflow_blocks_then_resumes_with_ordered_events() {
         &None,
         &None,
         &None,
-    );
+    &None::<i64>,);
 
     // Initial funding succeeds while hold is off.
     let open_state = client.fund(&investor, &4_000i128);
@@ -898,7 +898,7 @@ fn setup_withdraw_with_token<'a>(
         &None,
         &None,
         &None,
-    );
+    &None::<i64>,);
 
     let investor = soroban_sdk::Address::generate(env);
     sac_admin.mint(&investor, &target);
@@ -1017,7 +1017,7 @@ fn withdraw_rejected_wrong_status_open() {
         &None,
         &None,
         &None,
-    );
+    &None::<i64>,);
     // No funding — status is 0.
     client.withdraw(); // must panic: WithdrawalNotFunded
 }
@@ -1061,7 +1061,7 @@ fn withdraw_rejected_insufficient_contract_balance() {
         &None,
         &None,
         &None,
-    );
+    &None::<i64>,);
 
     let investor = soroban_sdk::Address::generate(&env);
     client.fund(&investor, &target);
@@ -1163,7 +1163,7 @@ fn test_cancellation_refund_sweep_lifecycle() {
         &None,
         &None,
         &None,
-    );
+    &None::<i64>,);
 
     let alice = soroban_sdk::Address::generate(&env);
     let bob = soroban_sdk::Address::generate(&env);
@@ -1260,7 +1260,7 @@ fn test_refund_batch_matches_individual_refunds() {
         &None,
         &None,
         &None,
-    );
+    &None::<i64>,);
 
     let inv_a = Address::generate(&env);
     let inv_b = Address::generate(&env);
@@ -1322,7 +1322,7 @@ fn test_refund_batch_skips_already_refunded() {
         &None,
         &None,
         &None,
-    );
+    &None::<i64>,);
     let inv = Address::generate(&env);
     token.stellar.mint(&inv, &10_000i128);
     token.stellar.approve(

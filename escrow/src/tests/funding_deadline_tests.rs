@@ -43,7 +43,7 @@ mod tests {
         &None,
         &None,
         &None,
-        );
+        &None::<i64>,);
         assert_contract_error(result, EscrowError::FundingDeadlinePassed);
     }
 

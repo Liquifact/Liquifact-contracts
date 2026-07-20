@@ -213,6 +213,12 @@ pub const MAX_REFUND_BATCH: u32 = 50;
 /// Upper bound on [`LiquifactEscrow::set_investors_allowlisted`] batch size.
 pub const MAX_INVESTOR_ALLOWLIST_BATCH: u32 = 32;
 
+/// Upper bound on [`LiquifactEscrow::get_contributions`] / investor read batch size.
+pub const MAX_INVESTOR_READ_BATCH: u32 = 50;
+
+/// Upper bound on attestation digest read page size.
+pub const MAX_ATTESTATION_READ_PAGE: u32 = 20;
+
 /// Upper bound on [`LiquifactEscrow::sweep_terminal_dust`] per call (base units of the funding token).
 ///
 /// Caps blast radius if instrumentation mis-estimates “dust”; tune per asset decimals off-chain.
@@ -487,7 +493,7 @@ pub enum EscrowError {
     /// `update_funding_deadline` was called on a non-open escrow (status != 0).
     FundingDeadlineUpdateNotOpen = 171,
     /// [`LiquifactEscrow::extend_funding_deadline`] did not strictly extend the stored deadline.
-    FundingDeadlineNotExtended = 203,
+    FundingDeadlineNotExtended = 206,
     /// [`LiquifactEscrow::extend_funding_deadline`] would place the deadline at or beyond maturity.
     FundingDeadlineBeyondMaturity = 204,
     /// [`LiquifactEscrow::extend_funding_deadline`] called when no funding deadline is configured.
@@ -499,17 +505,6 @@ pub enum EscrowError {
     NewFloorNotLower = 174,
     /// [`LiquifactEscrow::lower_min_contribution_floor`] received a non-positive floor.
     NewFloorNotPositive = 175,
-    /// Funding is blocked while the operational pause is active.
-    PausedBlocksFunding = 177,
-    /// Settlement is blocked while the operational pause is active.
-    PausedBlocksSettlement = 178,
-    /// SME withdrawal is blocked while the operational pause is active.
-    PausedBlocksWithdrawal = 179,
-    /// Investor claims are blocked while the operational pause is active.
-    PausedBlocksInvestorClaims = 180,
-    /// [`LiquifactEscrow::raise_maturity_max_horizon`] received a `new_horizon` that is
-    /// not strictly greater than the current stored horizon.
-    HorizonNotRaised = 181,
     /// Caller is not authorized to perform partial settlement.
     /// Only the escrow's `sme_address` or `admin` may call [`LiquifactEscrow::partial_settle`].
     PartialSettleUnauthorizedCaller = 200,
@@ -531,6 +526,15 @@ pub enum EscrowError {
     PausedBlocksWithdrawal = 212,
     /// [`LiquifactEscrow::claim_investor_payout`] blocked while operational pause is active.
     PausedBlocksInvestorClaims = 213,
+
+    /// [`LiquifactEscrow::init`] rejected `protocol_fee_bps` outside `0..=10_000`.
+    ProtocolFeeBpsOutOfRange = 215,
+    /// Arithmetic overflow computing protocol fee at [`LiquifactEscrow::withdraw`].
+    WithdrawFeeArithmeticOverflow = 216,
+    /// Arithmetic underflow computing net SME payout at [`LiquifactEscrow::withdraw`].
+    WithdrawNetArithmeticUnderflow = 217,
+    /// [`LiquifactEscrow::init`] rejected a `funding_deadline` at or after maturity.
+    FundingDeadlineAtOrAfterMaturity = 218,
 }
 
 #[inline(always)]
@@ -1484,6 +1488,21 @@ impl LiquifactEscrow {
             .unwrap_or_else(|| fail(env, EscrowError::FundingTokenNotSet))
     }
 
+    /// Returns the contract's current funding-token balance for on-chain custody reconciliation.
+    ///
+    /// Reads [`DataKey::FundingToken`] and queries the token contract for the live balance
+    /// held by the escrow contract address.
+    ///
+    /// # Errors
+    /// Panics with [`EscrowError::FundingTokenNotSet`] if called before [`LiquifactEscrow::init`].
+    ///
+    /// **Pure read** — no authorization required, no state mutation.
+    pub fn get_token_balance(env: Env) -> i128 {
+        let token_addr = Self::funding_token_or_fail(&env);
+        let this = env.current_contract_address();
+        TokenClient::new(&env, &token_addr).balance(&this)
+    }
+
     /// Read the immutable treasury address, failing with [`EscrowError::TreasuryNotSet`]
     /// when the escrow has not been initialized.
     fn treasury_or_fail(env: &Env) -> Address {
@@ -2135,55 +2154,6 @@ impl LiquifactEscrow {
         } else {
             false
         }
-    }
-
-    pub fn extend_funding_deadline(env: Env, new_deadline: u64) -> u64 {
-        let escrow = Self::load_escrow_require_admin(&env);
-        guard_status_eq(
-            &env,
-            escrow.status,
-            0,
-            EscrowError::FundingDeadlineUpdateNotOpen,
-        );
-
-        let current: u64 = env
-            .storage()
-            .instance()
-            .get(&DataKey::FundingDeadline)
-            .unwrap_or_else(|| fail(&env, EscrowError::FundingDeadlineNotSet));
-
-        ensure(
-            &env,
-            new_deadline > current,
-            EscrowError::FundingDeadlineNotExtended,
-        );
-
-        if escrow.maturity > 0 {
-            ensure(
-                &env,
-                new_deadline < escrow.maturity,
-                EscrowError::FundingDeadlineBeyondMaturity,
-            );
-        }
-
-        env.storage()
-            .instance()
-            .set(&DataKey::FundingDeadline, &new_deadline);
-
-        env.storage().instance().extend_ttl(
-            INSTANCE_TTL_MIN_EXTENSION_LEDGERS,
-            INSTANCE_TTL_MIN_EXTENSION_LEDGERS,
-        );
-
-        FundingDeadlineExtended {
-            name: symbol_short!("fund_ext"),
-            invoice_id: escrow.invoice_id.clone(),
-            old_deadline: current,
-            new_deadline,
-        }
-        .publish(&env);
-
-        new_deadline
     }
 
     /// Whether a compliance/legal hold is active (defaults to `false` if unset).
@@ -3962,11 +3932,14 @@ impl LiquifactEscrow {
                     escrow.yield_bps,
                 );
                 Self::set_persistent_investor_claim_not_before(&env, investor.clone(), 0u64);
+                (escrow.yield_bps, 0u64)
             } else {
                 // Returning investor: yield was set on first deposit; read it for the event.
                 (
                     Self::get_persistent_investor_effective_yield(&env, investor.clone())
-                        .unwrap_or(escrow.yield_bps);
+                        .unwrap_or(escrow.yield_bps),
+                    0u64,
+                )
             }
             // If prev > 0, preserve existing effective yield and claim lock
         } else {
@@ -5139,31 +5112,6 @@ impl LiquifactEscrow {
     /// token-balance invariants.
     pub fn refund(env: Env, investor: Address) {
         Self::refund_impl(&env, investor, false);
-    }
-
-    /// Batch refund for a cancelled escrow: returns principal to multiple investors in one call.
-    ///
-    /// Bounded by [`MAX_REFUND_BATCH`]. Each entry requires per-investor authorization and passes
-    /// the same gates as [`LiquifactEscrow::refund`]. Already-refunded investors (zero contribution)
-    /// are skipped without failing the batch.
-    ///
-    /// Emits one [`InvestorRefundedEvt`] per newly refunded investor.
-    pub fn refund_batch(env: Env, investors: Vec<Address>) {
-        let n = investors.len();
-        ensure(&env, n > 0, EscrowError::RefundBatchEmpty);
-        ensure(
-            &env,
-            n <= MAX_REFUND_BATCH,
-            EscrowError::RefundBatchTooLarge,
-        );
-
-        let escrow = Self::get_escrow(env.clone());
-        guard_status_eq(&env, escrow.status, 4, EscrowError::RefundNotCancelled);
-
-        for i in 0..n {
-            let investor = investors.get(i).unwrap();
-            Self::refund_impl(&env, investor, true);
-        }
     }
 
     /// Core refund logic shared by [`LiquifactEscrow::refund`] and [`LiquifactEscrow::refund_batch`].
