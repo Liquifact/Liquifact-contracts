@@ -60,6 +60,7 @@ fn test_legal_hold_midflow_blocks_and_resumes_with_ordered_events() {
         &None,
         &None,
         &None,
+        &None::<i64>,
     );
 
     // We will not fund or settle — just exercise legal hold at multiple points.
@@ -176,6 +177,7 @@ fn test_escrow_gold_standard_happy_path_open_overfund_snapshot_settle_claim() {
         &None,
         &None,
         &None,
+        &None::<i64>,
     );
 
     let initial_escrow = client.get_escrow();
@@ -408,6 +410,7 @@ fn test_escrow_tiered_yield_with_commitment_locks() {
         &None,
         &None,
         &None,
+        &None::<i64>,
     );
 
     let investor_base = Address::generate(&env);
@@ -537,6 +540,7 @@ fn test_collateral_record_is_metadata_only_and_does_not_invoke_token_contract() 
         &None,
         &None,
         &None,
+        &None::<i64>,
     );
 
     let commitment = client.record_sme_collateral_commitment(&symbol_short!("USDC"), &5_000i128);
@@ -772,6 +776,7 @@ fn test_legal_hold_midflow_blocks_then_resumes_with_ordered_events() {
         &None,
         &None,
         &None,
+        &None::<i64>,
     );
 
     // Initial funding succeeds while hold is off.
@@ -898,6 +903,7 @@ fn setup_withdraw_with_token<'a>(
         &None,
         &None,
         &None,
+        &None::<i64>,
     );
 
     let investor = soroban_sdk::Address::generate(env);
@@ -1017,6 +1023,7 @@ fn withdraw_rejected_wrong_status_open() {
         &None,
         &None,
         &None,
+        &None::<i64>,
     );
     // No funding — status is 0.
     client.withdraw(); // must panic: WithdrawalNotFunded
@@ -1061,6 +1068,7 @@ fn withdraw_rejected_insufficient_contract_balance() {
         &None,
         &None,
         &None,
+        &None::<i64>,
     );
 
     let investor = soroban_sdk::Address::generate(&env);
@@ -1163,6 +1171,7 @@ fn test_cancellation_refund_sweep_lifecycle() {
         &None,
         &None,
         &None,
+        &None::<i64>,
     );
 
     let alice = soroban_sdk::Address::generate(&env);
@@ -1260,6 +1269,7 @@ fn test_refund_batch_matches_individual_refunds() {
         &None,
         &None,
         &None,
+        &None::<i64>,
     );
 
     let inv_a = Address::generate(&env);
@@ -1322,6 +1332,7 @@ fn test_refund_batch_skips_already_refunded() {
         &None,
         &None,
         &None,
+        &None::<i64>,
     );
     let inv = Address::generate(&env);
     token.stellar.mint(&inv, &10_000i128);

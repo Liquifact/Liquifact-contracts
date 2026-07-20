@@ -52,6 +52,7 @@ fn setup_inited(
         &None,
         &None,
         &None,
+        &None::<i64>,
     );
     (client, admin, sme, treasury, token)
 }
