@@ -2066,8 +2066,123 @@ fn test_rotate_beneficiary_then_withdraw_goes_to_new_sme() {
 
 // ── cancel_pending_admin ──────────────────────────────────────────────────────
 
-/// Happy path: propose then cancel — `get_pending_admin` returns `None` and current
-/// admin is unchanged.
+/// Happy path: propose then cancel — `get_pending_admin` returns `None` and the
+/// cancelled address is returned to the caller.
+#[test]
+fn test_cancel_pending_admin_propose_then_cancel_clears_pending() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let new_admin = Address::generate(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    client.propose_admin(&new_admin, &None);
+    let cancelled = client.cancel_pending_admin();
+
+    assert_eq!(cancelled, new_admin);
+    assert_eq!(client.get_pending_admin(), None);
+    assert_eq!(client.get_pending_admin_remaining_secs(), None);
+    // Current admin is unchanged after cancel
+    assert_eq!(client.get_escrow().admin, admin);
+}
+
+/// accept_admin after cancel_pending_admin must fail with NoPendingAdmin.
+#[test]
+fn test_cancel_pending_admin_accept_after_cancel_fails() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let new_admin = Address::generate(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    client.propose_admin(&new_admin, &None);
+    client.cancel_pending_admin();
+
+    assert_contract_error(client.try_accept_admin(), EscrowError::NoPendingAdmin);
+}
+
+/// Calling cancel_pending_admin without a prior proposal must fail with NoPendingAdmin.
+#[test]
+fn test_cancel_pending_admin_without_proposal_rejected() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    assert_contract_error(
+        client.try_cancel_pending_admin(),
+        EscrowError::NoPendingAdmin,
+    );
+}
+
+/// A non-admin caller cannot cancel a pending admin proposal.
+#[test]
+#[should_panic]
+fn test_cancel_pending_admin_non_admin_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let new_admin = Address::generate(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    client.propose_admin(&new_admin, &None);
+    env.mock_auths(&[]);
+    client.cancel_pending_admin();
+}
+
+/// Cancel then re-propose a different admin — the new proposal is accepted.
+#[test]
+fn test_cancel_pending_admin_cancel_then_repropose_succeeds() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let first = Address::generate(&env);
+    let second = Address::generate(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    // Propose first, then cancel
+    client.propose_admin(&first, &None);
+    client.cancel_pending_admin();
+    assert_eq!(client.get_pending_admin(), None);
+
+    // Propose second, then accept
+    client.propose_admin(&second, &None);
+    let updated = client.accept_admin();
+    assert_eq!(updated.admin, second);
+    assert_eq!(client.get_pending_admin(), None);
+}
+
+/// Cancel on an uninitialized escrow must panic (no escrow to load).
+#[test]
+#[should_panic]
+fn test_cancel_pending_admin_uninitialized_panics() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    client.cancel_pending_admin();
+}
+
+/// Verify that cancel_pending_admin emits AdminProposalCancelled event.
+#[test]
+fn test_cancel_pending_admin_emits_event() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let contract_id = client.address.clone();
+    let new_admin = Address::generate(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    client.propose_admin(&new_admin, &None);
+    client.cancel_pending_admin();
+
+    let all_events = env.events().all();
+    assert_eq!(
+        all_events.events().last().unwrap().clone(),
+        AdminProposalCancelled {
+            name: symbol_short!("adm_can"),
+            invoice_id: client.get_escrow().invoice_id,
+            cancelled_pending: new_admin,
+        }
+        .to_xdr(&env, &contract_id)
+    );
+}
 #[test]
 fn test_rebind_registry_ref_sets_and_clears() {
     use soroban_sdk::testutils::Events as _;
