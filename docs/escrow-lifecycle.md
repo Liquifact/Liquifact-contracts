@@ -76,6 +76,9 @@ reducing transaction overhead for primary issuance workflows.
 - Batch size must be `> 0` and `<= MAX_FUND_BATCH` (50 entries)
 - Empty batch panics with `EscrowError::FundingBatchEmpty`
 - Oversized batch panics with `EscrowError::FundingBatchTooLarge`
+- Every investor address must be unique within the batch; a repeated address panics with
+  `EscrowError::FundingBatchDuplicateInvestor` (code 84). The entire batch is rejected
+  atomically before any state mutation.
 
 **Funded-target snapshot:**
 - If any entry causes the escrow to transition to **funded** (status `0 → 1`),
@@ -122,6 +125,12 @@ let result = fund_batch(entries); // All three processed; status = 1
 | Over-funding across two entries; snapshot correct | `test_fund_batch_overfunding_across_two_entries_snapshot_correct` |
 | Per-investor `require_auth` recorded for each entry | `test_fund_batch_investor_auth_recorded_for_each_entry` |
 | Event count == entry count | `test_fund_batch_event_count_matches_entry_count` |
+| Adjacent duplicate → `FundingBatchDuplicateInvestor` (code 84) | `test_fund_batch_rejects_adjacent_duplicate` |
+| Non-adjacent duplicate → `FundingBatchDuplicateInvestor` (code 84) | `test_fund_batch_rejects_non_adjacent_duplicate` |
+| Single-element batch (no duplicates possible) succeeds | `test_fund_batch_single_element_succeeds` |
+| All-unique batch succeeds | `test_fund_batch_all_unique_succeeds` |
+| MAX_FUND_BATCH (50) unique entries succeed | `test_fund_batch_max_unique_batch_succeeds` |
+| Duplicate batch leaves no partial state | `test_fund_batch_duplicate_leaves_no_partial_state` |
 
 ---
 

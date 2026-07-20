@@ -368,6 +368,11 @@ pub enum EscrowError {
     FundingBatchEmpty = 82,
     /// [`LiquifactEscrow::fund_batch`] exceeded [`MAX_FUND_BATCH`].
     FundingBatchTooLarge = 83,
+    /// [`LiquifactEscrow::fund_batch`] contains two or more entries with the same investor address.
+    ///
+    /// Every investor address in the batch must be unique. Duplicate addresses indicate a
+    /// malformed batch and the entire call is rejected atomically before any state mutation.
+    FundingBatchDuplicateInvestor = 84,
     /// [`LiquifactEscrow::get_contributions`] exceeded [`MAX_INVESTOR_READ_BATCH`].
     ContributionReadBatchTooLarge = 203,
     /// [`LiquifactEscrow::update_funding_target`] received a non-positive target.
@@ -3860,6 +3865,26 @@ impl LiquifactEscrow {
             }
         }
 
+        // ── Duplicate-address guard (issue #643) ──────────────────────────────
+        // Reject the entire batch atomically if any two entries share an investor address.
+        // Each investor must appear at most once per call; duplicates suggest a malformed
+        // batch and could incorrectly accumulate principal or consume unique-investor slots.
+        //
+        // Algorithm: O(n²) pairwise comparison, bounded by MAX_FUND_BATCH = 50 (≤ 2 500
+        // iterations). No heap allocation required; `soroban_sdk` does not expose a set
+        // type, so we do an explicit nested scan over the already-validated entries.
+        for i in 0..n {
+            let (addr_i, _) = entries.get(i).unwrap();
+            for j in (i + 1)..n {
+                let (addr_j, _) = entries.get(j).unwrap();
+                ensure(
+                    &env,
+                    addr_i != addr_j,
+                    EscrowError::FundingBatchDuplicateInvestor,
+                );
+            }
+        }
+
         let mut escrow = Self::get_escrow(env.clone());
 
         for i in 0..n {
@@ -3986,13 +4011,12 @@ impl LiquifactEscrow {
                     escrow.yield_bps,
                 );
                 Self::set_persistent_investor_claim_not_before(&env, investor.clone(), 0u64);
-            } else {
-                // Returning investor: yield was set on first deposit; read it for the event.
-                (
-                    Self::get_persistent_investor_effective_yield(&env, investor.clone())
-                        .unwrap_or(escrow.yield_bps);
             }
-            // If prev > 0, preserve existing effective yield and claim lock
+            // If prev > 0, preserve existing effective yield and claim lock.
+            // Read stored yield for the event (falls back to escrow default for new investors).
+            let eff = Self::get_persistent_investor_effective_yield(&env, investor.clone())
+                .unwrap_or(escrow.yield_bps);
+            (eff, 0u64)
         } else {
             ensure(&env, prev == 0, EscrowError::TieredSecondDeposit);
             let (eff, lock) =
