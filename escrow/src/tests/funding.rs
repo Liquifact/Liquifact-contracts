@@ -4307,65 +4307,7 @@ fn test_fund_batch_mid_batch_funded_transition() {
     assert_eq!(snap.unwrap().total_principal, 105_000i128);
 }
 
-#[test]
-#[should_panic(expected = "HostError: Error(Contract, #106)")]
-#[ignore = "upstream latent: escrow API/test drift"]
-fn test_fund_batch_duplicate_addresses() {
-    let env = Env::default();
-
-    env.mock_all_auths();
-
-    let client = deploy(&env);
-
-    let admin = Address::generate(&env);
-
-    let sme = Address::generate(&env);
-
-    let inv = Address::generate(&env);
-
-    let (tok, tre) = free_addresses(&env);
-
-    let target = 100_000i128;
-
-    let per_investor_cap = 50_000i128;
-
-    let sac = env.register_stellar_asset_contract_v2(Address::generate(&env));
-    let sac_id = sac.address();
-    let sac_admin = StellarAssetClient::new(&env, &sac_id);
-    sac_admin.mint(&inv1, &20_000i128);
-    sac_admin.mint(&inv2, &15_000i128);
-
-    client.init(
-        &admin,
-        &soroban_sdk::String::from_str(&env, "DUP001"),
-        &sme,
-        &target,
-        &800i64,
-        &0u64,
-        &sac_id,
-        &None,
-        &Address::generate(&env),
-        &None,
-        &None,
-        &None,
-        &Some(per_investor_cap),
-        &None,
-        &None,
-        &None,
-        &None,
-    );
-
-    let mut entries = SorobanVec::new(&env);
-
-    entries.push_back((inv.clone(), 30_000i128)); // First entry: 30k
-
-    entries.push_back((inv.clone(), 25_000i128)); // Second entry: 30k + 25k = 55k > cap
-
-    let result = client.fund_batch(&entries);
-    assert_eq!(client.get_contribution(&inv1), 20_000i128);
-    assert_eq!(client.get_contribution(&inv2), 15_000i128);
-    assert_eq!(result.funded_amount, 35_000i128);
-}
+// Replaced by test_fund_batch_duplicate_adjacent and friends below (issue #643).
 
 #[test]
 #[should_panic]
@@ -4550,7 +4492,176 @@ fn test_fund_batch_preserves_event_semantics() {
     // (Detailed event field verification depends on EscrowFunded structure)
 }
 
-// ─── get_remaining_funding_capacity tests (issue tracking funding capacity) ─────
+// ─────────────────────────────────────────────────────────────────────────────
+// Tests for fund_batch duplicate investor address rejection (Issue #643)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Adjacent duplicate (positions 0 and 1): the batch must be rejected with
+/// `FundingBatchDuplicateInvestor` (error #84) and leave no partial state.
+#[test]
+#[should_panic(expected = "HostError: Error(Contract, #84)")]
+fn test_fund_batch_duplicate_adjacent_rejected() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    let inv = Address::generate(&env);
+    let mut entries = SorobanVec::new(&env);
+    entries.push_back((inv.clone(), 10_000i128));
+    entries.push_back((inv.clone(), 10_000i128)); // same address immediately after
+
+    client.fund_batch(&entries);
+}
+
+/// Non-adjacent duplicate (positions 0 and 2 in a 3-entry batch): the batch must be
+/// rejected with `FundingBatchDuplicateInvestor` (error #84).
+#[test]
+#[should_panic(expected = "HostError: Error(Contract, #84)")]
+fn test_fund_batch_duplicate_non_adjacent_rejected() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    let inv_a = Address::generate(&env);
+    let inv_b = Address::generate(&env);
+    let mut entries = SorobanVec::new(&env);
+    entries.push_back((inv_a.clone(), 10_000i128));
+    entries.push_back((inv_b.clone(), 10_000i128)); // unique in the middle
+    entries.push_back((inv_a.clone(), 10_000i128)); // duplicate of position 0
+
+    client.fund_batch(&entries);
+}
+
+/// Duplicate at the last position (positions 0 and MAX_FUND_BATCH-1): ensures the
+/// scan reaches the end of a maximum-length batch.
+#[test]
+#[should_panic(expected = "HostError: Error(Contract, #84)")]
+fn test_fund_batch_duplicate_last_position_rejected() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    let dup_inv = Address::generate(&env);
+    let mut entries = SorobanVec::new(&env);
+    entries.push_back((dup_inv.clone(), 1_000i128)); // will be duplicated at the end
+
+    // Fill positions 1 .. MAX_FUND_BATCH-1 with unique addresses
+    for _ in 1..(MAX_FUND_BATCH as usize - 1) {
+        entries.push_back((Address::generate(&env), 1_000i128));
+    }
+
+    // Duplicate at the final position
+    entries.push_back((dup_inv.clone(), 1_000i128));
+
+    client.fund_batch(&entries);
+}
+
+/// Verify that a duplicate-containing batch leaves zero state: after the rejected
+/// call, `funded_amount` must still be 0 and no contribution must be recorded.
+#[test]
+fn test_fund_batch_duplicate_no_partial_state() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    let inv = Address::generate(&env);
+    let mut entries = SorobanVec::new(&env);
+    entries.push_back((inv.clone(), 20_000i128));
+    entries.push_back((inv.clone(), 20_000i128));
+
+    let result = client.try_fund_batch(&entries);
+    assert_contract_error(result, EscrowError::FundingBatchDuplicateInvestor);
+
+    // No state must have been mutated
+    let escrow = client.get_escrow();
+    assert_eq!(escrow.funded_amount, 0, "funded_amount must be 0 after rejected duplicate batch");
+    assert_eq!(
+        client.get_contribution(&inv),
+        0,
+        "investor contribution must be 0 after rejected duplicate batch"
+    );
+}
+
+/// A fully unique batch of two investors must succeed normally.
+#[test]
+fn test_fund_batch_all_unique_succeeds() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    let inv_a = Address::generate(&env);
+    let inv_b = Address::generate(&env);
+    let mut entries = SorobanVec::new(&env);
+    entries.push_back((inv_a.clone(), 30_000i128));
+    entries.push_back((inv_b.clone(), 40_000i128));
+
+    let result = client.fund_batch(&entries);
+    assert_eq!(result.funded_amount, 70_000i128);
+    assert_eq!(client.get_contribution(&inv_a), 30_000i128);
+    assert_eq!(client.get_contribution(&inv_b), 40_000i128);
+}
+
+/// A single-element batch is trivially unique and must succeed.
+#[test]
+fn test_fund_batch_single_entry_unique_by_definition() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    let inv = Address::generate(&env);
+    let mut entries = SorobanVec::new(&env);
+    entries.push_back((inv.clone(), 25_000i128));
+
+    let result = client.fund_batch(&entries);
+    assert_eq!(result.funded_amount, 25_000i128);
+    assert_eq!(client.get_contribution(&inv), 25_000i128);
+}
+
+/// After a rejected duplicate batch the escrow remains open (status == 0),
+/// so a subsequent correctly-formed batch must succeed.
+#[test]
+fn test_fund_batch_duplicate_then_valid_batch_succeeds() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    let inv = Address::generate(&env);
+
+    // First call: duplicate batch — rejected
+    let mut dup_entries = SorobanVec::new(&env);
+    dup_entries.push_back((inv.clone(), 10_000i128));
+    dup_entries.push_back((inv.clone(), 10_000i128));
+    let dup_result = client.try_fund_batch(&dup_entries);
+    assert_contract_error(dup_result, EscrowError::FundingBatchDuplicateInvestor);
+
+    // Second call: valid batch with the same investor appearing only once
+    let inv2 = Address::generate(&env);
+    let mut ok_entries = SorobanVec::new(&env);
+    ok_entries.push_back((inv.clone(), 10_000i128));
+    ok_entries.push_back((inv2.clone(), 15_000i128));
+    let result = client.fund_batch(&ok_entries);
+    assert_eq!(result.funded_amount, 25_000i128);
+}
+
+/// Duplicate detection fires before the positivity and floor checks: a batch with
+/// both a duplicate address and a zero amount must be rejected with
+/// `FundingBatchDuplicateInvestor`, not `FundingAmountNotPositive`.
+#[test]
+fn test_fund_batch_duplicate_check_before_amount_check() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    let inv = Address::generate(&env);
+    let mut entries = SorobanVec::new(&env);
+    entries.push_back((inv.clone(), 0i128));   // also invalid amount
+    entries.push_back((inv.clone(), 10_000i128)); // duplicate
+
+    let result = client.try_fund_batch(&entries);
+    assert_contract_error(result, EscrowError::FundingBatchDuplicateInvestor);
+}
+
+
 
 /// Verify that `get_remaining_funding_capacity` returns the full funding target
 

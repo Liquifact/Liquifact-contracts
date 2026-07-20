@@ -344,6 +344,13 @@ pub enum EscrowError {
     FundingBatchEmpty = 82,
     /// [`LiquifactEscrow::fund_batch`] exceeded [`MAX_FUND_BATCH`].
     FundingBatchTooLarge = 83,
+    /// [`LiquifactEscrow::fund_batch`] received a batch containing a duplicate investor address.
+    ///
+    /// Each address may appear **at most once** per batch call. Repeat deposits for the same
+    /// investor must be submitted as separate single [`LiquifactEscrow::fund`] calls, consistent
+    /// with the tiered second-deposit discipline enforced by [`LiquifactEscrow::fund_with_commitment`].
+    /// Duplicate detection is performed before any state mutation so the batch is rejected atomically.
+    FundingBatchDuplicateInvestor = 84,
     /// [`LiquifactEscrow::get_contributions`] exceeded [`MAX_INVESTOR_READ_BATCH`].
     ContributionReadBatchTooLarge = 203,
     /// [`LiquifactEscrow::update_funding_target`] received a non-positive target.
@@ -3792,6 +3799,10 @@ impl LiquifactEscrow {
     /// # Errors
     /// - [`EscrowError::FundingBatchEmpty`] if entries is empty
     /// - [`EscrowError::FundingBatchTooLarge`] if entries.len() > [`MAX_FUND_BATCH`]
+    /// - [`EscrowError::FundingBatchDuplicateInvestor`] if any investor address appears more than
+    ///   once in the batch. Duplicate detection is performed before any state mutation so the
+    ///   entire batch is rejected atomically. Repeat deposits for the same investor must be
+    ///   submitted as separate single [`LiquifactEscrow::fund`] calls.
     /// - Per-entry: all errors from [`LiquifactEscrow::fund`] for that investor/amount pair
     ///
     /// # Events
@@ -3819,6 +3830,28 @@ impl LiquifactEscrow {
         //
         // Stateful per-entry guards (per-investor cap, unique-investor cap, overflow)
         // remain enforced inside `fund_impl` against the running accumulated state.
+
+        // ── Duplicate investor guard (issue #643) ─────────────────────────────
+        // Reject any batch where the same investor address appears more than once.
+        // Checked here — before any state mutation — so the batch is either fully
+        // accepted or fully rejected. Repeat deposits for one investor must be
+        // submitted as separate single `fund` calls, matching the tiered
+        // second-deposit discipline enforced by `fund_with_commitment`.
+        //
+        // Scan is O(n²) over at most MAX_FUND_BATCH = 50 entries, so the worst-case
+        // work is bounded at (50 * 49) / 2 = 1225 address comparisons per call.
+        for i in 0..n {
+            let (addr_i, _) = entries.get(i).unwrap();
+            for j in (i + 1)..n {
+                let (addr_j, _) = entries.get(j).unwrap();
+                ensure(
+                    &env,
+                    addr_i != addr_j,
+                    EscrowError::FundingBatchDuplicateInvestor,
+                );
+            }
+        }
+
         let floor: i128 = env
             .storage()
             .instance()
@@ -3841,8 +3874,8 @@ impl LiquifactEscrow {
         for i in 0..n {
             let (investor, amount) = entries.get(i).unwrap();
 
-            // Each entry is now known to satisfy positivity and the floor; remaining
-            // per-entry invariants (auth, caps, overflow) are enforced inside fund_impl.
+            // Each entry is now known to satisfy positivity, the floor, and uniqueness;
+            // remaining per-entry invariants (auth, caps, overflow) are enforced inside fund_impl.
             escrow = Self::fund_impl(env.clone(), investor, amount, true, 0);
         }
 

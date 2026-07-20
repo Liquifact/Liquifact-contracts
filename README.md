@@ -157,6 +157,7 @@ liquifact-contracts/
 | `init` | Admin (implicit) | Create an invoice escrow (invoice id, SME, amount, yield bps, maturity). |
 | `fund` | Investor | Record investor principal and atomically pull the funding token from the investor; marks escrow funded when target is met. |
 | `fund_with_commitment` | Investor | First deposit with optional lock period (atomically pulling the funding token); selects tiered yield. |
+| `fund_batch` | Investor | Batch up to `MAX_FUND_BATCH` (50) `(investor, amount)` entries in a single call. Each entry is processed identically to a single `fund` call. Batches containing a **duplicate investor address** are rejected atomically with `FundingBatchDuplicateInvestor` (error 84) before any state mutation — repeat deposits for one investor must use separate `fund` calls. |
 | `settle` | SME | Mark a funded escrow as settled (SME auth required; maturity enforced). |
 | `partial_settle` | SME | SME marks a portion of the escrow as settled before full settlement. |
 | `withdraw` | SME | SME pulls funded liquidity (accounting record). |

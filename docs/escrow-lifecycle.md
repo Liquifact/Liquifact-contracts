@@ -71,11 +71,17 @@ reducing transaction overhead for primary issuance workflows.
 - One `EscrowFunded` event is emitted per entry
 - If any entry fails its invariants, the call returns an error **without corrupting prior entries**
   (Soroban's transaction atomicity ensures consistent state)
+- **Duplicate addresses are rejected:** each investor address must appear at most once per batch.
+  Duplicate detection is performed before any state mutation so the entire batch is rejected
+  atomically (`FundingBatchDuplicateInvestor`, error code 84). Repeat deposits for one investor
+  must be submitted as separate single [`fund()`] calls, matching the tiered second-deposit
+  discipline enforced by `fund_with_commitment`.
 
 **Capacity:**
 - Batch size must be `> 0` and `<= MAX_FUND_BATCH` (50 entries)
 - Empty batch panics with `EscrowError::FundingBatchEmpty`
 - Oversized batch panics with `EscrowError::FundingBatchTooLarge`
+- Duplicate address panics with `EscrowError::FundingBatchDuplicateInvestor`
 
 **Funded-target snapshot:**
 - If any entry causes the escrow to transition to **funded** (status `0 → 1`),
@@ -122,6 +128,14 @@ let result = fund_batch(entries); // All three processed; status = 1
 | Over-funding across two entries; snapshot correct | `test_fund_batch_overfunding_across_two_entries_snapshot_correct` |
 | Per-investor `require_auth` recorded for each entry | `test_fund_batch_investor_auth_recorded_for_each_entry` |
 | Event count == entry count | `test_fund_batch_event_count_matches_entry_count` |
+| Adjacent duplicate → `FundingBatchDuplicateInvestor` (#84) | `test_fund_batch_duplicate_adjacent_rejected` |
+| Non-adjacent duplicate → `FundingBatchDuplicateInvestor` (#84) | `test_fund_batch_duplicate_non_adjacent_rejected` |
+| Duplicate at last position → `FundingBatchDuplicateInvestor` (#84) | `test_fund_batch_duplicate_last_position_rejected` |
+| Rejected duplicate batch leaves zero state (no partial mutation) | `test_fund_batch_duplicate_no_partial_state` |
+| All-unique batch succeeds normally | `test_fund_batch_all_unique_succeeds` |
+| Single-entry batch is trivially unique | `test_fund_batch_single_entry_unique_by_definition` |
+| Rejected duplicate batch; subsequent valid batch succeeds | `test_fund_batch_duplicate_then_valid_batch_succeeds` |
+| Duplicate check fires before amount check | `test_fund_batch_duplicate_check_before_amount_check` |
 
 ---
 

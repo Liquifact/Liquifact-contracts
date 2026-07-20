@@ -36,7 +36,7 @@ Codes are grouped by domain so SDKs can map coarse categories without parsing va
 | Admin validation | 70–81 | Allowlist batch, funding target, investor cap, maturity, admin handover | 70, 81 |
 | Schema migration | 90–92 | `migrate` version checks | 90, 92 |
 | Funding | 100–111 | Investor deposits, batch funding, and contribution limits | 100, 111 |
-| Funding batch | 82–83 | [`fund_batch`] entry count bounds | 82, 83 |
+| Funding batch | 82–84 | [`fund_batch`] entry count bounds and duplicate address rejection | 82, 84 |
 | Settlement / payout | 120–129 | Settle, withdraw, investor claims, payout math | 120, 129 |
 | Cancel / refund | 140–143 | Cancel funding and investor refunds | 140, 143 |
 | Legal-hold clear (two-phase) | 150–152 | Delayed compliance-hold lift workflow | 150, 152 |
@@ -105,6 +105,7 @@ See also [`docs/escrow-legal-hold.md`](escrow-legal-hold.md),
 | 81 | `MaturityUnchanged` | `update_maturity` | `new_maturity == old_maturity` | Use a different maturity | typed |
 | 82 | `FundingBatchEmpty` | `fund_batch` | `entries.len() == 0` | Pass at least one `(investor, amount)` pair | typed |
 | 83 | `FundingBatchTooLarge` | `fund_batch` | `entries.len() > MAX_FUND_BATCH` | Split into smaller batches | typed |
+| 84 | `FundingBatchDuplicateInvestor` | `fund_batch` | batch contains a repeated investor address | Each address must appear at most once per batch; use separate `fund` calls for repeat deposits | typed |
 | 90 | `MigrationVersionMismatch` | `migrate` | stored version `!= from_version` | Pass matching `from_version` | typed |
 | 91 | `AlreadyCurrentSchemaVersion` | `migrate` | `from_version >= SCHEMA_VERSION` | No migration needed | typed |
 | 92 | `NoMigrationPath` | `migrate` | `from_version < SCHEMA_VERSION` and no transform implemented | Redeploy or extend `migrate` | typed |
@@ -210,6 +211,7 @@ See also [`docs/escrow-legal-hold.md`](escrow-legal-hold.md),
 | 81 | `New maturity must differ from current maturity` |
 | 82 | `fund_batch entries vector must be non-empty` |
 | 83 | `fund_batch entries vector length exceeds MAX_FUND_BATCH` |
+| 84 | `fund_batch batch contains duplicate investor address` |
 | 90 | `from_version does not match stored version` |
 | 91 | `Already at current schema version` |
 | 92 | `No migration path from version 0 - extend migrate or redeploy` |
@@ -262,7 +264,7 @@ Recommended SDK category mappings:
 | 30–42 | Dust sweep or token integration failure |
 | 50–56 | Attestation failure |
 | 60–62 | Collateral metadata failure |
-| 70–83 | Administrative validation or batch-funding bounds failure |
+| 70–84 | Administrative validation or batch-funding bounds failure |
 | 90–92 | Migration failure |
 | 100–111 | Funding failure |
 | 163–164 | Funding deadline or contract balance failure |
