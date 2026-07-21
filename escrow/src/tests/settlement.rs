@@ -2253,6 +2253,7 @@ fn test_settle_pool_principal_plus_coupon() {
         &None,
         &None,
         &None,
+        &None::<bool>,
         &None::<i64>,
     );
 
@@ -2310,6 +2311,7 @@ fn test_settle_pool_zero_yield() {
         &None,
         &None,
         &None,
+        &None::<bool>,
         &None::<i64>,
     );
 
@@ -2365,6 +2367,7 @@ fn test_settle_pool_rounding_floor() {
         &None,
         &None,
         &None,
+        &None::<bool>,
         &None::<i64>,
     );
 
@@ -2423,6 +2426,7 @@ fn test_settle_pool_large_principal() {
         &None,
         &None,
         &None,
+        &None::<bool>,
         &None::<i64>,
     );
 
@@ -2479,6 +2483,7 @@ fn test_settle_pool_max_yield() {
         &None,
         &None,
         &None,
+        &None::<bool>,
         &None::<i64>,
     );
 
@@ -2535,6 +2540,7 @@ fn test_settle_pool_no_maturity() {
         &None,
         &None,
         &None,
+        &None::<bool>,
         &None::<i64>,
     );
 
