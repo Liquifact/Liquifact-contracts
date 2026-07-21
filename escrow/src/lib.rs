@@ -4090,13 +4090,9 @@ impl LiquifactEscrow {
                 (escrow.yield_bps, 0u64)
             } else {
                 // Returning investor: yield was set on first deposit; read it for the event.
-                // If prev > 0, preserve existing effective yield and claim lock.
-                // Read stored yield for the event (falls back to escrow default for new investors).
-                (
-                    Self::get_persistent_investor_effective_yield(&env, investor.clone())
-                        .unwrap_or(escrow.yield_bps),
-                    0u64,
-                )
+                let eff = Self::get_persistent_investor_effective_yield(&env, investor.clone())
+                    .unwrap_or(escrow.yield_bps);
+                (eff, 0u64)
             }
         } else {
             ensure(&env, prev == 0, EscrowError::TieredSecondDeposit);
