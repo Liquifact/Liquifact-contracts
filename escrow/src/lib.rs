@@ -598,6 +598,7 @@ pub(crate) fn guard_status_eq(
 /// Used for terminal-state checks where multiple valid statuses apply (e.g. sweep dust
 /// is allowed in settled/withdrawn/cancelled).
 #[inline(always)]
+#[allow(dead_code)]
 pub(crate) fn guard_status_in(env: &Env, actual_status: u32, allowed: &[u32], error: EscrowError) {
     ensure(env, allowed.contains(&actual_status), error);
 }
@@ -676,7 +677,7 @@ pub(crate) fn guard_not_legal_hold(env: &Env, error: EscrowError) {
 /// `guard_status_in` keep the call-site `ensure` self-documenting at entrypoints.
 #[inline(always)]
 pub(crate) fn is_terminal_status(status: u32) -> bool {
-    matches!(status, 2 | 3 | 4)
+    matches!(status, 2..=4)
 }
 
 /// Predicate: `true` when `status` is one of the **pre-settlement** escrow states
