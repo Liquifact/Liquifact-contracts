@@ -7217,3 +7217,595 @@ fn test_fund_batch_duplicate_leaves_no_partial_state() {
         "inv_b contribution must be zero after duplicate rejection"
     );
 }
+
+// ── unfund entrypoint tests ───────────────────────────────────────────────────
+
+/// Helper: init with a real SAC token and return (client, contract_id, sac_admin, token_id, investor).
+/// The escrow is open (status 0); the investor is funded with `amount` but the escrow
+/// target is `TARGET` so status stays 0.  Tokens are minted to the investor and pulled
+/// by `fund`.  The escrow contract address is also seeded with `amount` so that `unfund`
+/// can push them back.
+fn init_open_with_real_token<'a>(
+    env: &'a Env,
+    amount: i128,
+) -> (
+    LiquifactEscrowClient<'a>,
+    Address, // contract_id
+    crate::tests::StellarTestToken<'a>,
+    Address, // investor
+) {
+    use soroban_sdk::token::StellarAssetClient;
+    let token = install_stellar_asset_token(env);
+    let escrow_id = env.register(LiquifactEscrow, ());
+    let client = LiquifactEscrowClient::new(env, &escrow_id);
+    let admin = Address::generate(env);
+    let sme = Address::generate(env);
+    let treasury = Address::generate(env);
+    client.init(
+        &admin,
+        &String::from_str(env, "UNFUND01"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &token.id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+    let investor = Address::generate(env);
+    // Mint tokens to the investor so fund() can pull them.
+    token.stellar.mint(&investor, &amount);
+    client.fund(&investor, &amount);
+    // Also ensure the escrow contract has enough balance to return the tokens on unfund.
+    // (fund already pulled `amount` into the contract, so the balance is already there.)
+    (client, escrow_id, token, investor)
+}
+
+#[test]
+fn test_unfund_partial() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "UF001"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    client.fund(&investor, &(TARGET / 4));
+    assert_eq!(client.get_escrow().status, 0);
+
+    let result = client.unfund(&investor, &(TARGET / 8));
+
+    assert_eq!(client.get_contribution(&investor), TARGET / 8);
+    assert_eq!(result.funded_amount, TARGET / 8);
+    assert_eq!(client.get_unique_funder_count(), 1);
+    assert_eq!(result.status, 0);
+}
+
+#[test]
+fn test_unfund_full() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "UF002"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    client.fund(&investor, &(TARGET / 4));
+    let result = client.unfund(&investor, &(TARGET / 4));
+
+    assert_eq!(client.get_contribution(&investor), 0);
+    assert_eq!(result.funded_amount, 0);
+    assert_eq!(client.get_unique_funder_count(), 0);
+    assert_eq!(result.status, 0);
+}
+
+#[test]
+fn test_unfund_funder_count_floor() {
+    // Inject UniqueFunderCount=0 manually and verify saturating_sub does not underflow.
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let contract_id = client.address.clone();
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let investor = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "UF003"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    client.fund(&investor, &1i128);
+
+    // Force UniqueFunderCount to 0 (simulating corruption / undercount).
+    env.as_contract(&contract_id, || {
+        env.storage()
+            .instance()
+            .set(&DataKey::UniqueFunderCount, &0u32);
+    });
+
+    // Unfund full contribution — saturating_sub must keep it at 0, not wrap.
+    client.unfund(&investor, &1i128);
+
+    assert_eq!(client.get_unique_funder_count(), 0);
+}
+
+#[test]
+fn test_unfund_over_withdrawal() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "UF004"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    client.fund(&investor, &1_000i128);
+
+    assert_contract_error(
+        client.try_unfund(&investor, &1_001i128),
+        EscrowError::OverWithdrawal,
+    );
+}
+
+#[test]
+fn test_unfund_wrong_status_funded() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "UF005"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    // Fund to TARGET — transitions to status 1.
+    client.fund(&investor, &TARGET);
+    assert_eq!(client.get_escrow().status, 1);
+
+    assert_contract_error(
+        client.try_unfund(&investor, &1i128),
+        EscrowError::UnfundEscrowNotOpen,
+    );
+}
+
+#[test]
+fn test_unfund_wrong_status_settled() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "UF006"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    client.fund(&investor, &TARGET); // status = 1
+    client.settle(); // status = 2
+
+    assert_contract_error(
+        client.try_unfund(&investor, &1i128),
+        EscrowError::UnfundEscrowNotOpen,
+    );
+}
+
+#[test]
+fn test_unfund_wrong_status_withdrawn() {
+    // Uses a real token so withdraw() can actually transfer.
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _escrow_id, sme) = init_and_fund_with_real_token(&env, TARGET, "UF007");
+
+    client.settle();
+    client.withdraw(); // status = 3
+
+    assert_contract_error(
+        client.try_unfund(&Address::generate(&env), &1i128),
+        EscrowError::UnfundEscrowNotOpen,
+    );
+}
+
+#[test]
+fn test_unfund_wrong_status_cancelled() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "UF008"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    client.fund(&investor, &(TARGET / 2));
+    client.cancel_funding(); // status = 4
+
+    assert_contract_error(
+        client.try_unfund(&investor, &1i128),
+        EscrowError::UnfundEscrowNotOpen,
+    );
+}
+
+#[test]
+fn test_unfund_legal_hold_blocked() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "UF009"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    client.fund(&investor, &(TARGET / 4));
+    client.set_legal_hold(&true);
+
+    assert_contract_error(
+        client.try_unfund(&investor, &1i128),
+        EscrowError::UnfundLegalHoldActive,
+    );
+}
+
+#[test]
+fn test_unfund_requires_investor_auth() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "UF010"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    client.fund(&investor, &(TARGET / 4));
+    client.unfund(&investor, &(TARGET / 8));
+
+    // Verify that investor auth was required.
+    let auths = env.auths();
+    let investor_authed = auths.iter().any(|(addr, _)| *addr == investor);
+    assert!(investor_authed, "investor auth was not recorded for unfund");
+}
+
+#[test]
+fn test_unfund_no_underflow() {
+    // Exact-boundary: unfund the precise contribution amount — must succeed cleanly.
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "UF011"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    client.fund(&investor, &1_000i128);
+    client.unfund(&investor, &1_000i128);
+
+    assert_eq!(client.get_contribution(&investor), 0);
+}
+
+#[test]
+fn test_unfund_multiple_investors_isolation() {
+    // Unfunding one investor must not affect another investor's contribution.
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let inv_a = Address::generate(&env);
+    let inv_b = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "UF012"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    client.fund(&inv_a, &30_000i128);
+    client.fund(&inv_b, &50_000i128);
+
+    // Partially unfund inv_a.
+    let result = client.unfund(&inv_a, &10_000i128);
+
+    assert_eq!(
+        client.get_contribution(&inv_a),
+        20_000i128,
+        "inv_a contribution wrong"
+    );
+    assert_eq!(
+        client.get_contribution(&inv_b),
+        50_000i128,
+        "inv_b contribution must be unchanged"
+    );
+    assert_eq!(result.funded_amount, 70_000i128, "funded_amount wrong");
+}
+
+#[test]
+fn test_unfund_then_fund_again() {
+    // After partially unfunding, the investor can fund again.
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "UF013"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    client.fund(&investor, &20_000i128);
+    client.unfund(&investor, &10_000i128);
+    client.fund(&investor, &5_000i128);
+
+    assert_eq!(client.get_contribution(&investor), 15_000i128);
+    assert_eq!(client.get_escrow().funded_amount, 15_000i128);
+}
+
+#[test]
+fn test_unfund_event_emitted() {
+    // Deploy and fund with a real SAC so `unfund` can actually transfer tokens.
+    // Verify that EscrowUnfunded is emitted with correct fields.
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, client) = deploy_with_id(&env);
+
+    let token = install_stellar_asset_token(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let treasury = Address::generate(&env);
+    let investor = Address::generate(&env);
+
+    let invoice_id = soroban_sdk::Symbol::new(&env, "UF014");
+    let fund_amount = 20_000i128;
+    let unfund_amount = 8_000i128;
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "UF014"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &token.id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    token.stellar.mint(&investor, &fund_amount);
+    client.fund(&investor, &fund_amount);
+
+    // Clear events from init/fund so we can isolate the unfund event.
+    let _ = env.events().all();
+
+    client.unfund(&investor, &unfund_amount);
+
+    let all_events = env.events().all();
+    let events_list = all_events.events();
+
+    // The last event must be our EscrowUnfunded.
+    let last = events_list
+        .last()
+        .expect("expected at least one event after unfund");
+
+    let expected = EscrowUnfunded {
+        name: symbol_short!("unfunded"),
+        invoice_id,
+        investor: investor.clone(),
+        amount: unfund_amount,
+        remaining_contribution: fund_amount - unfund_amount,
+        new_funded_amount: fund_amount - unfund_amount,
+        timestamp: env.ledger().timestamp(),
+    };
+
+    assert_eq!(*last, expected.to_xdr(&env, &contract_id));
+}
