@@ -353,7 +353,11 @@ fn test_max_bound_funded_escrow_compute_investor_payout_no_overflow() {
     // With yield_bps = 10_000, the investor gets their principal × 2 back.
     let payout = client.compute_investor_payout(&investor);
     assert!(payout > 0, "payout must be positive; got {}", payout);
-    assert_eq!(payout, crate::MAX_INVOICE_AMOUNT * 2, "payout must equal 2× principal");
+    assert_eq!(
+        payout,
+        crate::MAX_INVOICE_AMOUNT * 2,
+        "payout must equal 2× principal"
+    );
 }
 
 #[test]
