@@ -1,8 +1,8 @@
 use super::*;
 use crate::{
     AdminAcceptedEvent, AdminProposalCancelled, AdminProposalSuperseded, AdminProposedEvent,
-    EscrowCloseSnapshot, FundingTargetUpdated, MaturityMaxHorizonRaised, RegistryRefRebound,
-    DEFAULT_MATURITY_MAX_HORIZON_SECS,
+    DeprecatedTransferAdminUsed, EscrowCloseSnapshot, FundingTargetUpdated,
+    MaturityMaxHorizonRaised, RegistryRefRebound, DEFAULT_MATURITY_MAX_HORIZON_SECS,
 };
 
 use soroban_sdk::Event;
@@ -560,6 +560,86 @@ fn test_propose_admin_emits_event() {
             invoice_id: client.get_escrow().invoice_id,
             current_admin: admin,
             pending_admin: new_admin,
+        }
+        .to_xdr(&env, &contract_id)
+    );
+}
+
+/// `propose_admin` must emit ONLY `AdminProposedEvent` — no `DeprecatedTransferAdminUsed`.
+#[test]
+fn test_propose_admin_emits_only_admin_proposed_event() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let contract_id = client.address.clone();
+    let new_admin = Address::generate(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    client.propose_admin(&new_admin, &None);
+
+    let events = env.events().all();
+    assert_eq!(
+        events.events().len(),
+        1,
+        "propose_admin must emit exactly one event"
+    );
+    assert_eq!(
+        events.events().last().unwrap().clone(),
+        AdminProposedEvent {
+            name: symbol_short!("adm_prop"),
+            invoice_id: client.get_escrow().invoice_id,
+            current_admin: admin,
+            pending_admin: new_admin,
+        }
+        .to_xdr(&env, &contract_id)
+    );
+}
+
+/// `transfer_admin` must emit BOTH `AdminProposedEvent` (from the underlying
+/// `propose_admin` delegation) AND `DeprecatedTransferAdminUsed` (the shim's
+/// own observability event), in that order.
+#[test]
+#[allow(deprecated)]
+fn test_transfer_admin_emits_both_admin_proposed_and_deprecated_events() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let contract_id = client.address.clone();
+    let new_admin = Address::generate(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    client.transfer_admin(&new_admin);
+
+    let events = env.events().all();
+    assert_eq!(
+        events.events().len(),
+        2,
+        "transfer_admin must emit exactly two events: AdminProposedEvent then DeprecatedTransferAdminUsed"
+    );
+
+    let invoice_id = client.get_escrow().invoice_id;
+
+    // First event: AdminProposedEvent from the propose_admin delegation
+    assert_eq!(
+        events.events().get(0).unwrap().clone(),
+        AdminProposedEvent {
+            name: symbol_short!("adm_prop"),
+            invoice_id: invoice_id.clone(),
+            current_admin: admin,
+            pending_admin: new_admin.clone(),
+        }
+        .to_xdr(&env, &contract_id)
+    );
+
+    // Second event: DeprecatedTransferAdminUsed from the shim itself
+    assert_eq!(
+        events.events().get(1).unwrap().clone(),
+        DeprecatedTransferAdminUsed {
+            name: symbol_short!("depr_xfer"),
+            invoice_id,
+            proposed_address: new_admin,
         }
         .to_xdr(&env, &contract_id)
     );
