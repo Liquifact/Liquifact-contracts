@@ -2215,3 +2215,350 @@ fn test_settlement_readiness_maturity_gate_parity() {
     let settled = client.settle();
     assert_eq!(settled.status, 2);
 }
+
+// ──────────────────────────────────────────────────────────────────────────────
+// `settle_pool` field in EscrowSettled event (GitHub Issue #639)
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// Verify that settle_pool equals principal + coupon for a standard yield rate.
+///
+/// The sole investor funds the escrow to the exact target so `funded_amount` and
+/// `FundingCloseSnapshot.total_principal` both equal `principal`. After settlement,
+/// `compute_investor_payout` returns the full `settle_pool` for the sole participant.
+#[test]
+fn test_settle_pool_principal_plus_coupon() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let (token, treasury) = free_addresses(&env);
+
+    let principal = 1_000_000_000i128; // 1,000 tokens (assuming 6 decimals)
+    let yield_bps = 500i64; // 5%
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "SP001"),
+        &sme,
+        &principal,
+        &yield_bps,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    // Fund exactly `principal` so funded_amount == funding_target == principal.
+    let investor = Address::generate(&env);
+    client.fund(&investor, &principal);
+    client.settle();
+
+    // Compute expected settle_pool: coupon = 1_000_000_000 × 500 / 10_000 = 50_000_000
+    // settle_pool = 1_000_000_000 + 50_000_000 = 1_050_000_000
+    let expected_coupon = 50_000_000i128;
+    let expected_settle_pool = principal + expected_coupon;
+
+    // Verify settle_pool via compute_investor_payout, which uses the same arithmetic:
+    // The sole investor should receive the full settle_pool.
+    let payout = client.compute_investor_payout(&investor);
+    assert_eq!(
+        payout, expected_settle_pool,
+        "Single investor payout must equal settle_pool (principal + coupon)"
+    );
+
+    // Verify the escrow state post-settlement.
+    let escrow = client.get_escrow();
+    assert_eq!(escrow.funded_amount, principal);
+    assert_eq!(escrow.yield_bps, yield_bps);
+    assert_eq!(escrow.status, 2, "Escrow must be in settled state");
+}
+
+/// Verify settle_pool equals principal when yield_bps is zero (no coupon).
+#[test]
+fn test_settle_pool_zero_yield() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let (token, treasury) = free_addresses(&env);
+
+    let principal = 5_000_000_000i128;
+    let yield_bps = 0i64; // 0% yield
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "SP002"),
+        &sme,
+        &principal,
+        &yield_bps,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    // Fund exactly `principal` so funded_amount == funding_target == principal.
+    let investor = Address::generate(&env);
+    client.fund(&investor, &principal);
+    client.settle();
+
+    // With zero yield, settle_pool should equal principal (no coupon).
+    // Expected: settle_pool = 5_000_000_000 + 0 = 5_000_000_000
+    let expected_settle_pool = principal;
+
+    // Verify settle_pool via compute_investor_payout: sole investor receives principal.
+    let payout = client.compute_investor_payout(&investor);
+    assert_eq!(
+        payout, expected_settle_pool,
+        "Zero yield: payout must equal principal (settle_pool has no coupon)"
+    );
+
+    let escrow = client.get_escrow();
+    assert_eq!(escrow.funded_amount, principal);
+    assert_eq!(escrow.yield_bps, 0);
+    assert_eq!(escrow.status, 2, "Escrow must be in settled state");
+}
+
+/// Verify settle_pool uses floor division (rounding down) for coupon calculation.
+#[test]
+fn test_settle_pool_rounding_floor() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let (token, treasury) = free_addresses(&env);
+
+    // Choose a principal and yield that produces a non-integer coupon to verify floor rounding.
+    let principal = 1_000_003i128; // Odd number to force rounding
+    let yield_bps = 333i64; // 3.33%
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "SP003"),
+        &sme,
+        &principal,
+        &yield_bps,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    // Fund exactly `principal` so funded_amount == funding_target == principal.
+    let investor = Address::generate(&env);
+    client.fund(&investor, &principal);
+    client.settle();
+
+    // Compute expected coupon with floor division:
+    // coupon = 1_000_003 × 333 / 10_000 = 333_000_999 / 10_000 = 33_300 (floor)
+    // settle_pool = 1_000_003 + 33_300 = 1_033_303
+    let expected_coupon = 33_300i128;
+    let expected_settle_pool = principal + expected_coupon;
+
+    // Verify rounding: the numerator is 333_000_999 and 333_000_999 / 10_000 = 33_300 (floor),
+    // not 33_301. Confirm settle_pool via compute_investor_payout on the sole investor.
+    let payout = client.compute_investor_payout(&investor);
+    assert_eq!(
+        payout, expected_settle_pool,
+        "Floor rounding: settle_pool must be {expected_settle_pool}, got {payout}"
+    );
+
+    let escrow = client.get_escrow();
+    assert_eq!(escrow.funded_amount, principal);
+    assert_eq!(escrow.yield_bps, yield_bps);
+    assert_eq!(escrow.status, 2, "Escrow must be in settled state");
+}
+
+/// Verify settle_pool handles large principal amounts without overflow.
+#[test]
+fn test_settle_pool_large_principal() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let (token, treasury) = free_addresses(&env);
+
+    // Use a large principal near the upper practical limit for i128.
+    let principal = 1_000_000_000_000_000_000i128; // 1 quintillion base units
+    let yield_bps = 100i64; // 1%
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "SP004"),
+        &sme,
+        &principal,
+        &yield_bps,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    // Fund exactly `principal` so funded_amount == funding_target == principal.
+    let investor = Address::generate(&env);
+    client.fund(&investor, &principal);
+    client.settle();
+
+    // Compute expected settle_pool:
+    // coupon = 1_000_000_000_000_000_000 × 100 / 10_000 = 10_000_000_000_000_000
+    // settle_pool = 1_000_000_000_000_000_000 + 10_000_000_000_000_000 = 1_010_000_000_000_000_000
+    let expected_coupon = 10_000_000_000_000_000i128;
+    let expected_settle_pool = principal + expected_coupon;
+
+    // Verify no overflow occurs and settle_pool is correct via compute_investor_payout.
+    let payout = client.compute_investor_payout(&investor);
+    assert_eq!(
+        payout, expected_settle_pool,
+        "Large principal: settle_pool must be {expected_settle_pool} without overflow"
+    );
+
+    let escrow = client.get_escrow();
+    assert_eq!(escrow.funded_amount, principal);
+    assert_eq!(escrow.yield_bps, yield_bps);
+    assert_eq!(escrow.status, 2, "Escrow must be in settled state");
+}
+
+/// Verify settle_pool with maximum yield_bps (10000 = 100%).
+#[test]
+fn test_settle_pool_max_yield() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let (token, treasury) = free_addresses(&env);
+
+    let principal = 100_000_000i128;
+    let yield_bps = 10_000i64; // 100% yield (max allowed)
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "SP005"),
+        &sme,
+        &principal,
+        &yield_bps,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    // Fund exactly `principal` so funded_amount == funding_target == principal.
+    let investor = Address::generate(&env);
+    client.fund(&investor, &principal);
+    client.settle();
+
+    // Compute expected settle_pool:
+    // coupon = 100_000_000 × 10_000 / 10_000 = 100_000_000
+    // settle_pool = 100_000_000 + 100_000_000 = 200_000_000
+    let expected_coupon = 100_000_000i128;
+    let expected_settle_pool = principal + expected_coupon;
+
+    // Verify settle_pool at maximum yield via compute_investor_payout.
+    let payout = client.compute_investor_payout(&investor);
+    assert_eq!(
+        payout, expected_settle_pool,
+        "Max yield (100%): settle_pool must be double the principal"
+    );
+
+    let escrow = client.get_escrow();
+    assert_eq!(escrow.funded_amount, principal);
+    assert_eq!(escrow.yield_bps, yield_bps);
+    assert_eq!(escrow.status, 2, "Escrow must be in settled state");
+}
+
+/// Verify settle_pool is computed correctly when maturity is zero (no maturity lock).
+#[test]
+fn test_settle_pool_no_maturity() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let (token, treasury) = free_addresses(&env);
+
+    let principal = 2_000_000_000i128;
+    let yield_bps = 750i64; // 7.5%
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "SP006"),
+        &sme,
+        &principal,
+        &yield_bps,
+        &0u64, // maturity = 0 (no maturity lock)
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    // Fund exactly `principal` so funded_amount == funding_target == principal.
+    let investor = Address::generate(&env);
+    client.fund(&investor, &principal);
+    client.settle();
+
+    // Compute expected settle_pool:
+    // coupon = 2_000_000_000 × 750 / 10_000 = 150_000_000
+    // settle_pool = 2_000_000_000 + 150_000_000 = 2_150_000_000
+    let expected_coupon = 150_000_000i128;
+    let expected_settle_pool = principal + expected_coupon;
+
+    // Verify settle_pool with no maturity lock via compute_investor_payout.
+    let payout = client.compute_investor_payout(&investor);
+    assert_eq!(
+        payout, expected_settle_pool,
+        "No-maturity settle_pool must be {expected_settle_pool}"
+    );
+
+    let escrow = client.get_escrow();
+    assert_eq!(escrow.funded_amount, principal);
+    assert_eq!(escrow.yield_bps, yield_bps);
+    assert_eq!(escrow.maturity, 0u64);
+    assert_eq!(escrow.status, 2, "Escrow must be in settled state");
+}

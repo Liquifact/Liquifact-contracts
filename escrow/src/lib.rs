@@ -1122,6 +1122,11 @@ pub struct EscrowSettled {
     pub maturity: u64,
     /// Ledger timestamp at which the settlement occurred.
     pub settled_at_ledger_timestamp: u64,
+    /// Total settlement pool (principal + coupon) at settlement time.
+    /// Computed using the same checked arithmetic and floor rounding as
+    /// [`LiquifactEscrow::compute_investor_payout`]: `coupon = funded_amount × yield_bps / 10_000` (floor),
+    /// then `settle_pool = funded_amount + coupon`.
+    pub settle_pool: i128,
 }
 
 #[contractevent]
@@ -4243,6 +4248,21 @@ impl LiquifactEscrow {
             );
         }
 
+        // Compute settle_pool using the same arithmetic as compute_investor_payout.
+        // coupon = funded_amount × yield_bps / 10_000  (floor)
+        // settle_pool = funded_amount + coupon
+        let coupon = escrow
+            .funded_amount
+            .checked_mul(escrow.yield_bps as i128)
+            .unwrap_or_else(|| fail(&env, EscrowError::ComputePayoutArithmeticOverflow))
+            .checked_div(10_000)
+            .unwrap_or_else(|| fail(&env, EscrowError::ComputePayoutArithmeticOverflow));
+
+        let settle_pool = escrow
+            .funded_amount
+            .checked_add(coupon)
+            .unwrap_or_else(|| fail(&env, EscrowError::ComputePayoutArithmeticOverflow));
+
         escrow.status = 2;
 
         env.storage().instance().set(&DataKey::SettledAt, &now);
@@ -4255,6 +4275,7 @@ impl LiquifactEscrow {
             yield_bps: escrow.yield_bps,
             maturity: escrow.maturity,
             settled_at_ledger_timestamp: now,
+            settle_pool,
         }
         .publish(&env);
 
