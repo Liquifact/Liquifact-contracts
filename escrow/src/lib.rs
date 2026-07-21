@@ -4051,14 +4051,6 @@ impl LiquifactEscrow {
                     escrow.yield_bps,
                 );
                 Self::set_persistent_investor_claim_not_before(&env, investor.clone(), 0u64);
-                (escrow.yield_bps, 0u64)
-            } else {
-                // Returning investor: yield was set on first deposit; read it for the event.
-                (
-                    Self::get_persistent_investor_effective_yield(&env, investor.clone())
-                        .unwrap_or(escrow.yield_bps),
-                    0u64,
-                )
             }
             // If prev > 0, preserve existing effective yield and claim lock.
             // Read stored yield for the event (falls back to escrow default for new investors).
@@ -4111,11 +4103,6 @@ impl LiquifactEscrow {
         }
 
         Self::set_persistent_investor_contribution(&env, investor.clone(), new_contribution);
-
-        if simple_fund && prev == 0 {
-            Self::set_persistent_investor_effective_yield(&env, investor.clone(), escrow.yield_bps);
-            Self::set_persistent_investor_claim_not_before(&env, investor.clone(), 0u64);
-        }
 
         if prev == 0 {
             env.storage()
