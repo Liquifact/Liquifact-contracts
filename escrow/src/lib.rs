@@ -564,6 +564,18 @@ pub enum EscrowError {
     WithdrawNetArithmeticUnderflow = 217,
     /// [`LiquifactEscrow::init`] rejected a `funding_deadline` at or after maturity.
     FundingDeadlineAtOrAfterMaturity = 218,
+
+    /// [`LiquifactEscrow::unfund`] called when [`InvoiceEscrow::status`] is not 0 (open).
+    /// Unfunding is only valid while the escrow is still accepting contributions.
+    UnfundEscrowNotOpen = 220,
+
+    /// [`LiquifactEscrow::unfund`] requested amount exceeds the investor's recorded contribution.
+    /// Never withdraw more than was contributed; checked via [`i128::checked_sub`].
+    OverWithdrawal = 221,
+
+    /// [`LiquifactEscrow::unfund`] blocked because a compliance/legal hold is active.
+    /// No fund movement is permitted until the hold is cleared by the admin.
+    UnfundLegalHoldActive = 222,
 }
 
 #[inline(always)]
@@ -597,6 +609,7 @@ pub(crate) fn guard_status_eq(
 ///
 /// Used for terminal-state checks where multiple valid statuses apply (e.g. sweep dust
 /// is allowed in settled/withdrawn/cancelled).
+#[allow(dead_code)]
 #[inline(always)]
 pub(crate) fn guard_status_in(env: &Env, actual_status: u32, allowed: &[u32], error: EscrowError) {
     ensure(env, allowed.contains(&actual_status), error);
@@ -676,7 +689,7 @@ pub(crate) fn guard_not_legal_hold(env: &Env, error: EscrowError) {
 /// `guard_status_in` keep the call-site `ensure` self-documenting at entrypoints.
 #[inline(always)]
 pub(crate) fn is_terminal_status(status: u32) -> bool {
-    matches!(status, 2 | 3 | 4)
+    matches!(status, 2..=4)
 }
 
 /// Predicate: `true` when `status` is one of the **pre-settlement** escrow states
@@ -1390,6 +1403,29 @@ pub struct InvestorRefundedEvt {
     #[topic]
     pub invoice_id: Symbol,
     pub amount: i128,
+}
+
+/// Emitted after a successful [`LiquifactEscrow::unfund`] call.
+///
+/// The investor partially or fully exits their principal position while the escrow
+/// remains open (status 0). Carries the withdrawal amount, the investor's remaining
+/// contribution, the escrow's updated `funded_amount`, and the ledger timestamp.
+#[contractevent]
+pub struct EscrowUnfunded {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    #[topic]
+    pub investor: Address,
+    /// Amount withdrawn in this call.
+    pub amount: i128,
+    /// Investor's remaining contribution after this withdrawal.
+    pub remaining_contribution: i128,
+    /// Escrow's total funded_amount after this withdrawal.
+    pub new_funded_amount: i128,
+    /// Ledger timestamp at which the withdrawal occurred.
+    pub timestamp: u64,
 }
 
 #[contractevent]
@@ -4049,17 +4085,14 @@ impl LiquifactEscrow {
                 (escrow.yield_bps, 0u64)
             } else {
                 // Returning investor: yield was set on first deposit; read it for the event.
+                // If prev > 0, preserve existing effective yield and claim lock.
+                // Read stored yield for the event (falls back to escrow default for new investors).
                 (
                     Self::get_persistent_investor_effective_yield(&env, investor.clone())
                         .unwrap_or(escrow.yield_bps),
                     0u64,
                 )
             }
-            // If prev > 0, preserve existing effective yield and claim lock.
-            // Read stored yield for the event (falls back to escrow default for new investors).
-            let eff = Self::get_persistent_investor_effective_yield(&env, investor.clone())
-                .unwrap_or(escrow.yield_bps);
-            (eff, 0u64)
         } else {
             ensure(&env, prev == 0, EscrowError::TieredSecondDeposit);
             let (eff, lock) =
@@ -5318,6 +5351,109 @@ impl LiquifactEscrow {
             // Apply identical per-investor gates as single refund().
             Self::refund(env.clone(), investor);
         }
+    }
+
+    /// Allow an investor to partially or fully withdraw their principal while the escrow
+    /// remains open (status 0).
+    ///
+    /// An investor may call `unfund` any number of times before the escrow transitions out
+    /// of the open state. Each call decrements the investor's recorded contribution and the
+    /// escrow's `funded_amount` by `amount`, then transfers `amount` tokens back to the
+    /// investor via the SEP-41 balance-delta wrapper.
+    ///
+    /// When the investor's contribution reaches zero the `DataKey::UniqueFunderCount` is
+    /// decremented by one (floor: 0, via saturating arithmetic). Status always remains 0;
+    /// `unfund` never triggers a state transition in either direction.
+    ///
+    /// # Parameters
+    /// - `investor`: The address whose contribution is being reduced. Must match `require_auth`.
+    /// - `amount`: The positive amount to withdraw (must be ≤ recorded contribution).
+    ///
+    /// # Errors
+    /// - [`EscrowError::UnfundEscrowNotOpen`] if `status != 0`.
+    /// - [`EscrowError::UnfundLegalHoldActive`] if a compliance hold is currently active.
+    /// - [`EscrowError::OverWithdrawal`] if `amount` exceeds the investor's contribution.
+    ///
+    /// # Events
+    /// Emits [`EscrowUnfunded`] on success.
+    pub fn unfund(env: Env, investor: Address, amount: i128) -> InvoiceEscrow {
+        // 1. Status guard (read-only; checked before auth to fail fast).
+        let mut escrow = Self::get_escrow(env.clone());
+        ensure(&env, escrow.status == 0, EscrowError::UnfundEscrowNotOpen);
+
+        // 2. Legal-hold guard (read-only; checked before auth to fail fast).
+        ensure(
+            &env,
+            !Self::legal_hold_active(&env),
+            EscrowError::UnfundLegalHoldActive,
+        );
+
+        // 3. Investor auth.
+        investor.require_auth();
+
+        // 4. Over-withdrawal guard: contribution - amount must not underflow.
+        let contribution: i128 = Self::get_persistent_investor_contribution(&env, investor.clone());
+        let remaining_contribution = contribution
+            .checked_sub(amount)
+            .unwrap_or_else(|| fail(&env, EscrowError::OverWithdrawal));
+
+        // Guard: amount must be > 0 (a zero amount would pass checked_sub but is nonsensical).
+        // checked_sub on a negative amount would yield a value > contribution — still caught
+        // above — but a zero withdrawal is explicitly rejected here for clarity.
+        if amount <= 0 {
+            fail(&env, EscrowError::OverWithdrawal);
+        }
+
+        // 5. funded_amount decrement.
+        let new_funded_amount = escrow
+            .funded_amount
+            .checked_sub(amount)
+            .unwrap_or_else(|| fail(&env, EscrowError::OverWithdrawal));
+
+        // 6. Effects — update contribution (checks-effects-interactions).
+        Self::set_persistent_investor_contribution(&env, investor.clone(), remaining_contribution);
+
+        // 7. Decrement UniqueFunderCount when contribution reaches zero.
+        if remaining_contribution == 0 {
+            let cur: u32 = env
+                .storage()
+                .instance()
+                .get(&DataKey::UniqueFunderCount)
+                .unwrap_or(0);
+            env.storage()
+                .instance()
+                .set(&DataKey::UniqueFunderCount, &cur.saturating_sub(1));
+        }
+
+        // 8. Persist updated escrow.
+        escrow.funded_amount = new_funded_amount;
+        env.storage().instance().set(&DataKey::Escrow, &escrow);
+
+        // 9. Token transfer (interactions last — checks-effects-interactions pattern).
+        let token_addr = Self::funding_token_or_fail(&env);
+        let this = env.current_contract_address();
+        external_calls::transfer_funding_token_with_balance_checks(
+            &env,
+            &token_addr,
+            &this,
+            &investor,
+            amount,
+        );
+
+        // 10. Event emission.
+        let timestamp = env.ledger().timestamp();
+        EscrowUnfunded {
+            name: symbol_short!("unfunded"),
+            invoice_id: escrow.invoice_id.clone(),
+            investor: investor.clone(),
+            amount,
+            remaining_contribution,
+            new_funded_amount,
+            timestamp,
+        }
+        .publish(&env);
+
+        escrow
     }
 
     /// Whether an investor has already received a refund in a cancelled escrow.
