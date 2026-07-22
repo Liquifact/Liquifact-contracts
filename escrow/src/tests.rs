@@ -61,6 +61,7 @@ mod integration;
 mod integration_status_guards;
 mod legal_hold;
 mod migration_errors;
+mod pause;
 mod properties;
 mod settlement;
 
