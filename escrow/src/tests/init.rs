@@ -278,6 +278,7 @@ fn test_init_amount_exceeds_max_rejected() {
             &None,
             &None,
             &None,
+            &None::<i64>,
         ),
         EscrowError::AmountExceedsMax,
     );
@@ -336,6 +337,7 @@ fn test_max_bound_funded_escrow_compute_investor_payout_no_overflow() {
         &None,
         &None,
         &None,
+        &None::<i64>,
     );
 
     // Fund with a single investor contributing the full amount.
@@ -531,8 +533,24 @@ fn test_init_invoice_id_embedded_null_panics() {
     let s = soroban_sdk::String::from_bytes(&env, &bytes[..]);
 
     client.init(
-        &admin, &s, &sme, &1000i128, &500i64, &0u64, &t, &None, &tr, &None, &None, &None, &None,
-        &None, &None, &None, &None,
+        &admin,
+        &s,
+        &sme,
+        &1000i128,
+        &500i64,
+        &0u64,
+        &t,
+        &None,
+        &tr,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
     );
 }
 
@@ -639,66 +657,72 @@ fn test_init_min_contribution_floor_defaults_to_zero() {
 
 /// `min_contribution = Some(0)` is accepted (init stores the floor without validation).
 #[test]
-fn test_init_min_contribution_zero_accepted() {
+fn test_init_min_contribution_zero_rejected() {
     let env = Env::default();
     env.mock_all_auths();
     let client = deploy(&env);
     let admin = Address::generate(&env);
     let sme = Address::generate(&env);
     let (tok, tre) = free_addresses(&env);
-    client.init(
-        &admin,
-        &soroban_sdk::String::from_str(&env, "FLOOR03"),
-        &sme,
-        &10_000i128,
-        &500i64,
-        &0u64,
-        &tok,
-        &None,
-        &tre,
-        &None,
-        &Some(0i128),
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None::<i64>,
+    // A min_contribution floor of 0 is non-positive and must be rejected at init.
+    assert_contract_error(
+        client.try_init(
+            &admin,
+            &soroban_sdk::String::from_str(&env, "FLOOR03"),
+            &sme,
+            &10_000i128,
+            &500i64,
+            &0u64,
+            &tok,
+            &None,
+            &tre,
+            &None,
+            &Some(0i128),
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None::<i64>,
+        ),
+        EscrowError::MinContributionNotPositive,
     );
-    assert_eq!(client.get_min_contribution_floor(), 0i128);
 }
 
 /// `min_contribution` exceeding the invoice amount is accepted (init stores the floor without validation).
 #[test]
-fn test_init_min_contribution_exceeds_amount_accepted() {
+fn test_init_min_contribution_exceeds_amount_rejected() {
     let env = Env::default();
     env.mock_all_auths();
     let client = deploy(&env);
     let admin = Address::generate(&env);
     let sme = Address::generate(&env);
     let (tok, tre) = free_addresses(&env);
-    client.init(
-        &admin,
-        &soroban_sdk::String::from_str(&env, "FLOOR04"),
-        &sme,
-        &1_000i128,
-        &500i64,
-        &0u64,
-        &tok,
-        &None,
-        &tre,
-        &None,
-        &Some(1_001i128),
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None::<i64>,
+    // A floor above the invoice amount is unsatisfiable and must be rejected at init.
+    assert_contract_error(
+        client.try_init(
+            &admin,
+            &soroban_sdk::String::from_str(&env, "FLOOR04"),
+            &sme,
+            &1_000i128,
+            &500i64,
+            &0u64,
+            &tok,
+            &None,
+            &tre,
+            &None,
+            &Some(1_001i128),
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None::<i64>,
+        ),
+        EscrowError::MinContributionExceedsAmount,
     );
-    assert_eq!(client.get_min_contribution_floor(), 1_001i128);
 }
 
 /// Floor equal to the invoice amount is the boundary — must be accepted.
@@ -1340,7 +1364,6 @@ fn test_init_maturity_at_horizon_boundary_accepted() {
 }
 
 #[test]
-#[should_panic(expected = "HostError: Error(Contract, #167)")]
 fn test_init_maturity_beyond_horizon_rejected() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
@@ -1365,13 +1388,13 @@ fn test_init_maturity_beyond_horizon_rejected() {
             &None,
             &None,
             &None,
+            &None::<i64>,
         ),
         EscrowError::MaturityExceedsMaxHorizon,
     );
 }
 
 #[test]
-#[should_panic(expected = "HostError: Error(Contract, #166)")]
 fn test_init_maturity_in_past_rejected() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
@@ -1396,6 +1419,7 @@ fn test_init_maturity_in_past_rejected() {
             &None,
             &None,
             &None,
+            &None::<i64>,
         ),
         EscrowError::MaturityInPast,
     );
@@ -1527,7 +1551,6 @@ fn test_update_maturity_at_horizon_boundary_accepted() {
 }
 
 #[test]
-#[should_panic(expected = "HostError: Error(Contract, #167)")]
 fn test_update_maturity_beyond_horizon_rejected() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
@@ -1560,7 +1583,6 @@ fn test_update_maturity_beyond_horizon_rejected() {
 }
 
 #[test]
-#[should_panic(expected = "HostError: Error(Contract, #166)")]
 fn test_update_maturity_in_past_rejected() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
@@ -1635,7 +1657,6 @@ fn test_update_maturity_max_horizon_by_admin() {
 }
 
 #[test]
-#[should_panic(expected = "HostError: Error(Contract, #167)")]
 fn test_update_maturity_honors_reduced_horizon() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);

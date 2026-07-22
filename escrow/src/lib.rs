@@ -611,7 +611,6 @@ pub(crate) fn guard_status_eq(
 /// is allowed in settled/withdrawn/cancelled).
 #[allow(dead_code)]
 #[inline(always)]
-#[allow(dead_code)]
 pub(crate) fn guard_status_in(env: &Env, actual_status: u32, allowed: &[u32], error: EscrowError) {
     ensure(env, allowed.contains(&actual_status), error);
 }
@@ -5408,8 +5407,12 @@ impl LiquifactEscrow {
         // 3. Investor auth.
         investor.require_auth();
 
-        // 4. Over-withdrawal guard: contribution - amount must not underflow.
+        // 4. Over-withdrawal guard: the withdrawn amount must not exceed the
+        // investor's recorded contribution. `checked_sub` alone is insufficient
+        // because `contribution - amount` stays a valid (negative) i128 when
+        // `amount > contribution`; an explicit bound is required.
         let contribution: i128 = Self::get_persistent_investor_contribution(&env, investor.clone());
+        ensure(&env, amount <= contribution, EscrowError::OverWithdrawal);
         let remaining_contribution = contribution
             .checked_sub(amount)
             .unwrap_or_else(|| fail(&env, EscrowError::OverWithdrawal));
@@ -5580,7 +5583,8 @@ mod tests;
 /// enough that ordinary test escrow amounts never accidentally overdraw an account,
 /// while still being representable in a signed 64-bit integer.  Defined once here so
 /// that `balance` and `transfer` stay in sync and a single edit suffices to change the
-/// test-harness funding level.
+/// test-harness funding level.  Large-principal tests that fund above this ceiling must
+/// provision balances via a real Stellar asset token (see `install_stellar_asset_token`).
 #[cfg(any(test, feature = "testutils"))]
 pub const MOCK_TOKEN_DEFAULT_BALANCE: i128 = 100_000_000_000_000i128;
 

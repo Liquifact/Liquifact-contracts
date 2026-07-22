@@ -2253,7 +2253,6 @@ fn test_settle_pool_principal_plus_coupon() {
         &None,
         &None,
         &None,
-        &None::<bool>,
         &None::<i64>,
     );
 
@@ -2311,7 +2310,6 @@ fn test_settle_pool_zero_yield() {
         &None,
         &None,
         &None,
-        &None::<bool>,
         &None::<i64>,
     );
 
@@ -2367,7 +2365,6 @@ fn test_settle_pool_rounding_floor() {
         &None,
         &None,
         &None,
-        &None::<bool>,
         &None::<i64>,
     );
 
@@ -2402,7 +2399,12 @@ fn test_settle_pool_large_principal() {
     let env = Env::default();
     env.mock_all_auths();
     let (client, admin, sme) = setup(&env);
-    let (token, treasury) = free_addresses(&env);
+    // A real Stellar asset token is required: the principal here exceeds the
+    // default mock-token balance, so the investor must be explicitly minted funds
+    // to clear the pre-transfer balance guard in `fund`.
+    let sac = install_stellar_asset_token(&env);
+    let token = sac.id.clone();
+    let treasury = Address::generate(&env);
 
     // Use a large principal near the upper practical limit for i128.
     let principal = 1_000_000_000_000_000_000i128; // 1 quintillion base units
@@ -2426,12 +2428,12 @@ fn test_settle_pool_large_principal() {
         &None,
         &None,
         &None,
-        &None::<bool>,
         &None::<i64>,
     );
 
     // Fund exactly `principal` so funded_amount == funding_target == principal.
     let investor = Address::generate(&env);
+    sac.stellar.mint(&investor, &principal);
     client.fund(&investor, &principal);
     client.settle();
 
@@ -2483,7 +2485,6 @@ fn test_settle_pool_max_yield() {
         &None,
         &None,
         &None,
-        &None::<bool>,
         &None::<i64>,
     );
 
@@ -2540,7 +2541,6 @@ fn test_settle_pool_no_maturity() {
         &None,
         &None,
         &None,
-        &None::<bool>,
         &None::<i64>,
     );
 

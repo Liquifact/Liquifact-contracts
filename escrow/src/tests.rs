@@ -197,9 +197,13 @@ pub fn init_and_fund_with_real_token<'a>(
     );
 
     let investor = Address::generate(env);
+    // The investor must actually hold the principal so the pre-transfer balance
+    // guard in `fund` passes and tokens really move into the escrow.
+    sac_admin.mint(&investor, &target);
     client.fund(&investor, &target);
 
-    // Mint funded_amount into the escrow so withdraw() can actually transfer tokens.
+    // Mint the coupon headroom into the escrow (on top of the principal already
+    // transferred in by `fund`) so withdraw() can transfer principal + yield.
     sac_admin.mint(&escrow_id, &target);
 
     (client, escrow_id, sme)

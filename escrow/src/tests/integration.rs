@@ -59,7 +59,6 @@ fn test_legal_hold_midflow_blocks_and_resumes_with_ordered_events() {
         &None,
         &None,
         &None,
-        &None,
         &None::<i64>,
     );
 
@@ -171,7 +170,6 @@ fn test_escrow_gold_standard_happy_path_open_overfund_snapshot_settle_claim() {
         &None, // No yield tiers for simplicity
         &None, // No min contribution floor
         &None, // No max investors cap
-        &None,
         &None,
         &None,
         &None,
@@ -409,7 +407,6 @@ fn test_escrow_tiered_yield_with_commitment_locks() {
         &None,
         &None,
         &None,
-        &None,
         &None::<i64>,
     );
 
@@ -531,7 +528,6 @@ fn test_collateral_record_is_metadata_only_and_does_not_invoke_token_contract() 
         &funding,
         &None,
         &treasury,
-        &None,
         &None,
         &None,
         &None,
@@ -775,7 +771,6 @@ fn test_legal_hold_midflow_blocks_then_resumes_with_ordered_events() {
         &None,
         &None,
         &None,
-        &None,
         &None::<i64>,
     );
 
@@ -894,7 +889,6 @@ fn setup_withdraw_with_token<'a>(
         &token_id,
         &None,
         &treasury,
-        &None,
         &None,
         &None,
         &None,
@@ -1022,7 +1016,6 @@ fn withdraw_rejected_wrong_status_open() {
         &None,
         &None,
         &None,
-        &None,
         &None::<i64>,
     );
     // No funding — status is 0.
@@ -1059,7 +1052,6 @@ fn withdraw_rejected_insufficient_contract_balance() {
         &token_id,
         &None,
         &soroban_sdk::Address::generate(&env),
-        &None,
         &None,
         &None,
         &None,
@@ -1162,7 +1154,6 @@ fn test_cancellation_refund_sweep_lifecycle() {
         &token_id,
         &None,
         &treasury,
-        &None,
         &None,
         &None,
         &None,

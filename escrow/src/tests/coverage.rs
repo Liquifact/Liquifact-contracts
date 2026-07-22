@@ -50,6 +50,7 @@ fn typed_error_codes_cover_basic_escrow_guards() {
             &None,
             &None,
             &None,
+            &None::<i64>,
         ),
         EscrowError::AmountMustBePositive,
     );
@@ -2262,6 +2263,7 @@ fn test_init_yield_out_of_range() {
 }
 
 #[test]
+#[should_panic(expected = "HostError: Error(Contract, #6)")]
 fn test_init_min_contribution_zero() {
     let env = Env::default();
     env.mock_all_auths();

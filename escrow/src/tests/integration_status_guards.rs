@@ -55,8 +55,8 @@ fn setup_open(
 }
 
 /// Move the escrow to cancelled status (status == 4).
-fn cancel(client: &LiquifactEscrowClient<'_>, admin: &Address) {
-    client.cancel_funding(admin);
+fn cancel(client: &LiquifactEscrowClient<'_>, _admin: &Address) {
+    client.cancel_funding();
 }
 
 // ---------------------------------------------------------------------------
@@ -132,8 +132,8 @@ fn test_lower_max_unique_investors_rejects_when_cancelled() {
         &None,
         &tre,
         &None,
-        &Some(10u32), // max_unique_investors cap
         &None,
+        &Some(10u32), // max_unique_investors cap
         &None,
         &None,
         &None,
@@ -166,8 +166,8 @@ fn test_lower_min_contribution_floor_rejects_when_cancelled() {
         &tok,
         &None,
         &tre,
-        &Some(100i128), // min_contribution floor
         &None,
+        &Some(100i128), // min_contribution floor
         &None,
         &None,
         &None,
@@ -191,7 +191,7 @@ fn test_cancel_funding_rejects_when_already_cancelled() {
     let env = make_env();
     let (client, admin, _sme, _tok, _tre) = setup_open(&env);
     cancel(&client, &admin);
-    let result = client.try_cancel_funding(&admin);
+    let result = client.try_cancel_funding();
     assert_contract_error(result, EscrowError::CancelFundingNotOpen);
 }
 
@@ -238,8 +238,8 @@ fn test_lower_max_unique_investors_succeeds_when_open() {
         &None,
         &tre,
         &None,
-        &Some(10u32),
         &None,
+        &Some(10u32),
         &None,
         &None,
         &None,

@@ -34,9 +34,6 @@ fn test_update_maturity_emits_event() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-        &None,
         &None::<i64>,
     );
     client.update_maturity(&2000u64);
@@ -76,9 +73,6 @@ fn test_update_maturity_unchanged_panics() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-        &None,
         &None::<i64>,
     );
     client.update_maturity(&2000u64);
@@ -98,9 +92,6 @@ fn test_update_maturity_success() {
         &Address::generate(&env),
         &None,
         &Address::generate(&env),
-        &None,
-        &None,
-        &None,
         &None,
         &None,
         &None,
@@ -514,9 +505,12 @@ fn test_propose_admin_supersede_emits_distinct_event() {
     client.propose_admin(&first, &None);
     client.propose_admin(&second, &None);
 
-    let invoice_id = client.get_escrow().invoice_id;
+    // Snapshot events immediately: `env.events().all()` only retains the most
+    // recent invocation's events, so any intervening read (e.g. get_escrow)
+    // would clear the supersede/proposed pair emitted by the second call.
     let events = env.events().all();
     let event_list = events.events();
+    let invoice_id = client.get_escrow().invoice_id;
     let superseded = AdminProposalSuperseded {
         name: symbol_short!("adm_sup"),
         invoice_id: invoice_id.clone(),
@@ -2928,7 +2922,7 @@ fn test_partial_settle_not_open_typed_error() {
 
     assert_contract_error(
         client.try_partial_settle(&sme),
-        EscrowError::EscrowNotOpenForFunding,
+        EscrowError::PartialSettleNotOpen,
     );
 }
 

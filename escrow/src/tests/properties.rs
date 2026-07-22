@@ -34,7 +34,8 @@ proptest! {
             &None,
             &None,
         &None,
-        &None);
+        &None,
+        &None::<i64>);
 
         let before = client.get_escrow().funded_amount;
         client.fund(&investor1, &amount1);
@@ -77,7 +78,8 @@ proptest! {
             &None,
             &None,
         &None,
-        &None);
+        &None,
+        &None::<i64>);
         prop_assert_eq!(escrow.status, 0);
 
         let after_fund = client.fund(&investor, &amount);
@@ -163,7 +165,8 @@ proptest! {
             &None,
             &None,
         &None,
-        &None);
+        &None,
+        &None::<i64>);
 
         let investors: Vec<Address> = (0..investor_count)
             .map(|_| Address::generate(&env))
@@ -2268,7 +2271,11 @@ proptest! {
             prop_assert_eq!(
                 count + remaining,
                 cap,
-                "step {step}: count({count}) + remaining({remaining}) != cap({cap})"
+                "step {step}: count({count}) + remaining({remaining}) != cap({cap})",
+                step = step,
+                count = count,
+                remaining = remaining,
+                cap = cap
             );
         }
     }
@@ -2622,14 +2629,19 @@ proptest! {
                     prop_assert_eq!(
                         count + remaining,
                         current_cap,
-                        "step {step} (fund): count({count}) + remaining({remaining}) != cap({current_cap})"
+                        "step {step} (fund): count({count}) + remaining({remaining}) != cap({current_cap})",
+                        step = step,
+                        count = count,
+                        remaining = remaining,
+                        current_cap = current_cap
                     );
 
                     // Invariant C: repeat funder must not change remaining.
                     if !is_new {
                         prop_assert_eq!(
                             remaining, remaining_before,
-                            "step {step}: repeat deposit changed remaining slots"
+                            "step {step}: repeat deposit changed remaining slots",
+                            step = step
                         );
                     }
                 }
@@ -2679,7 +2691,11 @@ proptest! {
                     prop_assert_eq!(
                         count + remaining,
                         current_cap,
-                        "step {step} (batch): count({count}) + remaining({remaining}) != cap({current_cap})"
+                        "step {step} (batch): count({count}) + remaining({remaining}) != cap({current_cap})",
+                        step = step,
+                        count = count,
+                        remaining = remaining,
+                        current_cap = current_cap
                     );
                 }
                 // ── Lower cap ─────────────────────────────────────────
@@ -2701,7 +2717,11 @@ proptest! {
                     prop_assert_eq!(
                         count2 + remaining,
                         current_cap,
-                        "step {step} (lower_cap): count({count2}) + remaining({remaining}) != cap({current_cap})"
+                        "step {step} (lower_cap): count({count2}) + remaining({remaining}) != cap({current_cap})",
+                        step = step,
+                        count2 = count2,
+                        remaining = remaining,
+                        current_cap = current_cap
                     );
                 }
             }

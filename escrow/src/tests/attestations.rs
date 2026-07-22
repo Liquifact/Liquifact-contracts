@@ -49,6 +49,12 @@ fn attestation_log_stats(client: &LiquifactEscrowClient<'_>) -> (u32, u32) {
     (used, MAX_ATTESTATION_APPEND_ENTRIES.saturating_sub(used))
 }
 
+/// The number of free attestation append-log slots remaining.
+fn remaining_attestation_slots(client: &LiquifactEscrowClient<'_>) -> u32 {
+    let used = client.get_attestation_append_log().len();
+    MAX_ATTESTATION_APPEND_ENTRIES.saturating_sub(used)
+}
+
 // ---------------------------------------------------------------------------
 // bind_primary_attestation_hash — single-set invariant
 // ---------------------------------------------------------------------------
@@ -129,12 +135,6 @@ fn test_bind_primary_hash_non_admin_fails() {
 }
 
 // ---------------------------------------------------------------------------
-
-fn attestation_log_stats(client: &LiquifactEscrowClient<'_>) -> (u32, u32) {
-    let used = client.get_attestation_append_log().len();
-    (used, MAX_ATTESTATION_APPEND_ENTRIES.saturating_sub(used))
-}
-
 // append_attestation_digest — bounded log invariant
 // ---------------------------------------------------------------------------
 
