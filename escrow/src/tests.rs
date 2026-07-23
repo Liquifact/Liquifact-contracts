@@ -10,8 +10,8 @@
 use super::{
     AttestationDigestAppended, AttestationDigestRevoked, AttestationDigestUnrevoked,
     CollateralRecordedEvt, ContractUpgraded, DataKey, DeprecatedTransferAdminUsed, EscrowError,
-    EscrowFunded, EscrowInitialized, FundingCancelled, FundingTargetUpdated, InvestorRefundedEvt,
-    LiquifactEscrow, LiquifactEscrowClient, MaturityMaxHorizonUpdated,
+    EscrowFunded, EscrowInitialized, EscrowUnfunded, FundingCancelled, FundingTargetUpdated,
+    InvestorRefundedEvt, LiquifactEscrow, LiquifactEscrowClient, MaturityMaxHorizonUpdated,
     MaxUniqueInvestorsCapLowered, PrimaryAttestationBound, RegistryRefRebound, TreasuryDustSwept,
     YieldTier, MAX_ATTESTATION_APPEND_ENTRIES, MAX_DUST_SWEEP_AMOUNT, MAX_FUND_BATCH,
     SCHEMA_VERSION,
@@ -62,6 +62,7 @@ mod integration_status_guards;
 mod legal_hold;
 mod migration_errors;
 mod properties;
+mod protocol_fees;
 mod settlement;
 
 /// Registers a new escrow contract instance and returns its contract id.

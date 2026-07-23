@@ -230,8 +230,13 @@ fn escrow_error_discriminants_match_canonical_table() {
         (EscrowError::FloorLowerNotOpen, 173),
         (EscrowError::NewFloorNotLower, 174),
         (EscrowError::NewFloorNotPositive, 175),
+        (EscrowError::ProtocolFeeNotLower, 219),
+        (EscrowError::ProtocolFeeLowerNotAllowed, 220),
+        (EscrowError::EscrowNotOpen, 221),
+        (EscrowError::OverWithdrawal, 222),
+        (EscrowError::LegalHoldActive, 223),
     ];
-    assert_eq!(TABLE.len(), 89);
+    assert_eq!(TABLE.len(), 94);
     for (variant, code) in TABLE {
         assert_eq!(*variant as u32, *code, "discriminant drift for code {code}");
     }

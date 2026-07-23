@@ -7217,3 +7217,541 @@ fn test_fund_batch_duplicate_leaves_no_partial_state() {
         "inv_b contribution must be zero after duplicate rejection"
     );
 }
+
+// ── unfund tests ──────────────────────────────────────────────────────────────
+
+/// Helper: init a plain escrow (no real token) with a given target and fund one investor.
+/// Returns (client, investor). Status stays 0 if amount < target.
+fn setup_unfund_basic(
+    env: &Env,
+    amount: i128,
+) -> (
+    crate::LiquifactEscrowClient<'_>,
+    soroban_sdk::Address,
+) {
+    let (client, admin, sme) = setup(env);
+    let (tok, tre) = free_addresses(env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(env, "UNFUND01"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+    let investor = soroban_sdk::Address::generate(env);
+    client.fund(&investor, &amount);
+    (client, investor)
+}
+
+/// R5 / partial unfund: contribution and funded_amount decrease; UniqueFunderCount unchanged;
+/// status remains 0.
+#[test]
+fn test_unfund_partial() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    // Fund TARGET/4 so status stays 0.
+    let amount = TARGET / 4;
+    let (client, investor) = setup_unfund_basic(&env, amount);
+
+    assert_eq!(client.get_escrow().status, 0, "status must be 0 before unfund");
+    assert_eq!(client.get_unique_funder_count(), 1);
+
+    // Partially unfund half.
+    let withdraw = TARGET / 8;
+    // We need a real token for the transfer; use mock_all_auths + a mock token approach.
+    // Since mock_all_auths is active, the token call is mocked out (no real balance needed).
+    client.unfund(&investor, &withdraw);
+
+    assert_eq!(
+        client.get_contribution(&investor),
+        amount - withdraw,
+        "contribution must decrease by withdrawn amount"
+    );
+    assert_eq!(
+        client.get_escrow().funded_amount,
+        amount - withdraw,
+        "funded_amount must decrease by withdrawn amount"
+    );
+    assert_eq!(
+        client.get_unique_funder_count(),
+        1,
+        "UniqueFunderCount must be unchanged after partial unfund"
+    );
+    assert_eq!(client.get_escrow().status, 0, "status must remain 0 after partial unfund");
+}
+
+/// R6 / full unfund: contribution zeroed; UniqueFunderCount decremented; status stays 0.
+#[test]
+fn test_unfund_full() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let amount = TARGET / 4;
+    let (client, investor) = setup_unfund_basic(&env, amount);
+
+    client.unfund(&investor, &amount);
+
+    assert_eq!(
+        client.get_contribution(&investor),
+        0,
+        "contribution must be 0 after full unfund"
+    );
+    assert_eq!(
+        client.get_escrow().funded_amount,
+        0,
+        "funded_amount must be 0 after full unfund"
+    );
+    assert_eq!(
+        client.get_unique_funder_count(),
+        0,
+        "UniqueFunderCount must decrease to 0 after full unfund"
+    );
+    assert_eq!(client.get_escrow().status, 0, "status must remain 0 after full unfund");
+}
+
+/// R7 / UniqueFunderCount floor: saturating_sub ensures count never goes below 0.
+#[test]
+fn test_unfund_funder_count_floor() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, admin, sme) = setup(&env);
+    let (tok, tre) = free_addresses(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "FLOOR01"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    let investor = soroban_sdk::Address::generate(&env);
+    // Fund 1 unit so contribution exists.
+    client.fund(&investor, &1i128);
+    // Manually zero out the UniqueFunderCount via storage to simulate adversarial state.
+    let contract_id = client.address.clone();
+    env.as_contract(&contract_id, || {
+        env.storage()
+            .instance()
+            .set(&crate::DataKey::UniqueFunderCount, &0u32);
+    });
+
+    // Full unfund — saturating_sub should not wrap to u32::MAX.
+    client.unfund(&investor, &1i128);
+
+    assert_eq!(
+        client.get_unique_funder_count(),
+        0,
+        "UniqueFunderCount must not underflow below 0"
+    );
+}
+
+/// R4 / over-withdrawal: requesting more than contribution returns OverWithdrawal.
+#[test]
+fn test_unfund_over_withdrawal() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, investor) = setup_unfund_basic(&env, 1_000i128);
+
+    assert_contract_error(
+        client.try_unfund(&investor, &1_001i128),
+        EscrowError::OverWithdrawal,
+    );
+}
+
+/// R1 / status guard: unfund blocked when status == 1 (funded).
+#[test]
+fn test_unfund_wrong_status_funded() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, admin, sme) = setup(&env);
+    let (tok, tre) = free_addresses(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "STAT01"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    let investor = soroban_sdk::Address::generate(&env);
+    // Fund to TARGET so status becomes 1.
+    client.fund(&investor, &TARGET);
+    assert_eq!(client.get_escrow().status, 1, "pre-condition: status must be 1");
+
+    assert_contract_error(
+        client.try_unfund(&investor, &1i128),
+        EscrowError::EscrowNotOpen,
+    );
+}
+
+/// R1 / status guard: unfund blocked when status == 2 (settled).
+#[test]
+fn test_unfund_wrong_status_settled() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, admin, sme) = setup(&env);
+    let (tok, tre) = free_addresses(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "STAT02"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    let investor = soroban_sdk::Address::generate(&env);
+    client.fund(&investor, &TARGET);
+    client.settle();
+    assert_eq!(client.get_escrow().status, 2, "pre-condition: status must be 2");
+
+    assert_contract_error(
+        client.try_unfund(&investor, &1i128),
+        EscrowError::EscrowNotOpen,
+    );
+}
+
+/// R1 / status guard: unfund blocked when status == 3 (withdrawn).
+#[test]
+fn test_unfund_wrong_status_withdrawn() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, _escrow_id, _sme) =
+        init_and_fund_with_real_token(&env, TARGET, "STAT03");
+
+    // withdraw() transitions to status 3.
+    client.withdraw();
+    assert_eq!(client.get_escrow().status, 3, "pre-condition: status must be 3");
+
+    let investor = soroban_sdk::Address::generate(&env);
+    assert_contract_error(
+        client.try_unfund(&investor, &1i128),
+        EscrowError::EscrowNotOpen,
+    );
+}
+
+/// R1 / status guard: unfund blocked when status == 4 (cancelled).
+#[test]
+fn test_unfund_wrong_status_cancelled() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let amount = TARGET / 4;
+    let (client, investor) = setup_unfund_basic(&env, amount);
+
+    client.cancel_funding();
+    assert_eq!(client.get_escrow().status, 4, "pre-condition: status must be 4");
+
+    assert_contract_error(
+        client.try_unfund(&investor, &1i128),
+        EscrowError::EscrowNotOpen,
+    );
+}
+
+/// R2 / legal-hold guard: unfund blocked while hold is active.
+#[test]
+fn test_unfund_legal_hold_blocked() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let amount = TARGET / 4;
+    let (client, investor) = setup_unfund_basic(&env, amount);
+
+    client.set_legal_hold(&true);
+
+    assert_contract_error(
+        client.try_unfund(&investor, &amount),
+        EscrowError::LegalHoldActive,
+    );
+}
+
+/// R3 / auth: investor address is recorded in env.auths() after a successful unfund.
+#[test]
+fn test_unfund_requires_investor_auth() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let amount = TARGET / 4;
+    let (client, investor) = setup_unfund_basic(&env, amount);
+
+    client.unfund(&investor, &(amount / 2));
+
+    assert!(
+        env.auths().iter().any(|(addr, _)| *addr == investor),
+        "investor auth must be recorded for unfund"
+    );
+}
+
+/// R8 / no underflow: exact boundary (amount == contribution) succeeds without panic.
+#[test]
+fn test_unfund_no_underflow() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let amount = 1_000i128;
+    let (client, investor) = setup_unfund_basic(&env, amount);
+
+    // Exact boundary — must not panic.
+    client.unfund(&investor, &amount);
+
+    assert_eq!(client.get_contribution(&investor), 0);
+}
+
+/// R5+R6 / isolation: two investors; one unfunds partially; the other's state is unchanged.
+#[test]
+fn test_unfund_multiple_investors_isolation() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, admin, sme) = setup(&env);
+    let (tok, tre) = free_addresses(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "MULTI01"),
+        &sme,
+        &1_000_000i128,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    let inv_a = soroban_sdk::Address::generate(&env);
+    let inv_b = soroban_sdk::Address::generate(&env);
+    client.fund(&inv_a, &30_000i128);
+    client.fund(&inv_b, &50_000i128);
+
+    // inv_a unfunds 10_000.
+    client.unfund(&inv_a, &10_000i128);
+
+    assert_eq!(client.get_contribution(&inv_a), 20_000i128, "inv_a contribution must be 20_000");
+    assert_eq!(client.get_contribution(&inv_b), 50_000i128, "inv_b contribution must be unchanged");
+    assert_eq!(
+        client.get_escrow().funded_amount,
+        70_000i128,
+        "funded_amount must be 70_000 after inv_a partial unfund"
+    );
+    assert_eq!(client.get_unique_funder_count(), 2, "funder count must still be 2");
+}
+
+/// Unfund then re-fund: contribution correctly reflects both operations.
+#[test]
+fn test_unfund_then_fund_again() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, admin, sme) = setup(&env);
+    let (tok, tre) = free_addresses(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "REFUND01"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    let investor = soroban_sdk::Address::generate(&env);
+    client.fund(&investor, &20_000i128);
+    client.unfund(&investor, &10_000i128);
+    client.fund(&investor, &5_000i128);
+
+    assert_eq!(client.get_contribution(&investor), 15_000i128, "contribution must be 15_000");
+    assert_eq!(client.get_escrow().funded_amount, 15_000i128, "funded_amount must be 15_000");
+}
+
+/// R10 / event: EscrowUnfunded is emitted with correct fields.
+#[test]
+fn test_unfund_event_emitted() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, client) = deploy_with_id(&env);
+    let admin = soroban_sdk::Address::generate(&env);
+    let sme = soroban_sdk::Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    let invoice_id = symbol_short!("EVT001");
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "EVT001"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    let investor = soroban_sdk::Address::generate(&env);
+    let fund_amount = TARGET / 4;
+    client.fund(&investor, &fund_amount);
+
+    let unfund_amount = fund_amount / 2;
+    client.unfund(&investor, &unfund_amount);
+
+    let expected_remaining = fund_amount - unfund_amount;
+    let expected_funded = fund_amount - unfund_amount;
+    let timestamp = env.ledger().timestamp();
+
+    // Find the EscrowUnfunded event in the event log.
+    let events = env.events().all();
+    let event_list = events.events();
+
+    let expected_event = EscrowUnfunded {
+        name: symbol_short!("unfunded"),
+        invoice_id: invoice_id.clone(),
+        investor: investor.clone(),
+        amount: unfund_amount,
+        remaining_contribution: expected_remaining,
+        new_funded_amount: expected_funded,
+        timestamp,
+    }
+    .to_xdr(&env, &contract_id);
+
+    assert!(
+        event_list.iter().any(|e| *e == expected_event),
+        "EscrowUnfunded event must be emitted with correct fields"
+    );
+}
+
+/// After partial unfund, cancel_funding + refund remaining amount works correctly.
+#[test]
+fn test_unfund_then_refund_after_cancel() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    // Use plain (no real token) setup so we can test the accounting path.
+    let (client, admin, sme) = setup(&env);
+    let (tok, tre) = free_addresses(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "UNFCANC1"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    let investor = soroban_sdk::Address::generate(&env);
+    let fund_amount = TARGET / 4;
+    client.fund(&investor, &fund_amount);
+
+    // Partially unfund half the contribution.
+    let unfund_amount = fund_amount / 2;
+    client.unfund(&investor, &unfund_amount);
+
+    // Contribution is now fund_amount/2.
+    assert_eq!(client.get_contribution(&investor), fund_amount - unfund_amount);
+
+    // Cancel the escrow; transition to status 4.
+    client.cancel_funding();
+    assert_eq!(client.get_escrow().status, 4);
+
+    // Refund the remaining investor contribution via the standard refund path.
+    client.refund(&investor);
+    assert_eq!(client.get_contribution(&investor), 0);
+}

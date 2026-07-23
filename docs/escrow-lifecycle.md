@@ -22,8 +22,8 @@ forbidden regressions, and interaction rules between `withdraw` vs `settle` path
 ```text
                 ┌─────────────┐
                 │   (init)    │
-                │  status = 0 │
-                │    open      │
+                │  status = 0 │◄──── unfund(investor, amount) [investor]
+                │    open     │      (partial or full; status stays 0)
                 └──────┬──────┘
                        │
          ┌─────────────┼──────────────────────┐
@@ -136,12 +136,13 @@ let result = fund_batch(entries); // All three processed; status = 1
 
 ## Valid transitions
 
-| From | To | Trigger | Auth required |
-|------|----|---------|--------------|
-| `0` (open) | `1` (funded) | `fund()`, `fund_with_commitment()`, or `fund_batch()` when `funded_amount >= funding_target` | Investor auth (per-investor for batch) |
-| `0` (open) | `4` (cancelled) | `cancel_funding()` | Admin auth; legal hold must be inactive |
-| `1` (funded) | `2` (settled) | `settle()` | SME auth; legal hold must be inactive; if `maturity > 0`, ledger timestamp must be >= maturity |
-| `1` (funded) | `3` (withdrawn) | `withdraw()` | SME auth; legal hold must be inactive |
+| From | To | Trigger | Auth required | Notes |
+|------|----|---------|--------------|-------|
+| `0` (open) | `1` (funded) | `fund()`, `fund_with_commitment()`, or `fund_batch()` when `funded_amount >= funding_target` | Investor auth (per-investor for batch) | |
+| `0` (open) | `0` (open) | `unfund(investor, amount)` | Investor auth; legal hold must be inactive | Partial unfund: funded_amount decreases, status stays 0. Full unfund (contribution → 0): UniqueFunderCount decrements, status stays 0 |
+| `0` (open) | `4` (cancelled) | `cancel_funding()` | Admin auth; legal hold must be inactive | |
+| `1` (funded) | `2` (settled) | `settle()` | SME auth; legal hold must be inactive; if `maturity > 0`, ledger timestamp must be >= maturity | |
+| `1` (funded) | `3` (withdrawn) | `withdraw()` | SME auth; legal hold must be inactive | |
 
 ---
 
@@ -206,6 +207,46 @@ their principal:
 
 ---
 
+## Investor unfund path (status 0 — open)
+
+While an escrow is open, investors may reduce or fully exit their principal position
+without requiring admin cancellation:
+
+1. Investor calls `unfund(investor, amount)` — decrements `DataKey::InvestorContribution`
+   and `InvoiceEscrow::funded_amount` by `amount`.
+2. If contribution reaches zero: `DataKey::InvestorContribution` entry is zeroed,
+   `DataKey::UniqueFunderCount` is decremented (floor: 0).
+3. Status remains 0 (open) in all cases — `unfund` never transitions status.
+4. Tokens are returned to the investor via `external_calls::transfer_funding_token_with_balance_checks`
+   (SEP-41 balance-delta invariants enforced).
+5. `EscrowUnfunded` is emitted with the investor, amount, remaining contribution,
+   new funded_amount, and ledger timestamp.
+
+### Invariants
+
+- Investor can only unfund their own contribution; no third-party unfunding.
+- `unfund` is blocked while a legal hold is active (`EscrowError::LegalHoldActive`, code 223).
+- `unfund` is blocked in any state other than open (0) (`EscrowError::EscrowNotOpen`, code 221).
+- `amount` must be ≤ `DataKey::InvestorContribution[investor]` (`EscrowError::OverWithdrawal`, code 222 otherwise).
+- `funded_amount` never goes negative (checked arithmetic).
+- `UniqueFunderCount` never goes negative (saturating_sub).
+
+### Events emitted
+
+| Event | When |
+|-------|------|
+| `EscrowUnfunded` | `unfund()` succeeds |
+
+### On-chain vs off-chain custody
+
+`unfund` mirrors `refund` — it always calls
+`transfer_funding_token_with_balance_checks`. For on-chain custody escrows, tokens are
+returned immediately. For off-chain custody setups, the contract's token balance must
+cover outstanding unfund requests, or operators must integrate a separate settlement
+layer. This behavior is the same as `refund`.
+
+---
+
 ## SME auth vs admin role
 
 | Function | Role |
@@ -230,12 +271,13 @@ Legal hold blocks all risk-bearing operations regardless of status:
 
 | Function | Blocked by legal hold |
 |----------|----------------------|
+| `cancel_funding()` | Yes |
+| `claim_investor_payout()` | Yes |
 | `fund()` | Yes |
 | `settle()` | Yes |
-| `withdraw()` | Yes |
-| `claim_investor_payout()` | Yes |
-| `cancel_funding()` | Yes |
 | `sweep_terminal_dust()` | Yes |
+| `unfund()` | Yes |
+| `withdraw()` | Yes |
 
 Once legal hold is cleared, normal state transitions resume.
 
