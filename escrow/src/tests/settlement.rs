@@ -25,7 +25,7 @@ use crate::{
     EscrowError, EscrowSettled, InvoiceEscrow, LiquifactEscrow, SettlementReadiness, YieldTier,
 };
 use soroban_sdk::{
-    testutils::{Address as _, Events, Ledger as _},
+    testutils::{Address as _, Events, Ledger as _, MockAuth, MockAuthInvoke},
     token::StellarAssetClient,
     Address, Env, Event, String, Vec as SorobanVec,
 };
@@ -695,14 +695,7 @@ fn settle_one_second_before_maturity_traps_and_preserves_state() {
     let snapshot_before = client.get_funding_close_snapshot();
 
     env.ledger().with_mut(|l| l.timestamp = maturity - 1);
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        client.settle();
-    }));
-
-    assert!(
-        result.is_err(),
-        "settle must trap before the inclusive maturity boundary"
-    );
+    assert_contract_error(client.try_settle(), EscrowError::MaturityNotReached);
     assert_eq!(
         client.get_escrow().status,
         1,
@@ -722,6 +715,7 @@ fn settle_at_maturity_succeeds() {
     env.mock_all_auths();
 
     let client = deploy(&env);
+    let contract_id = client.address.clone();
     let admin = Address::generate(&env);
     let sme = Address::generate(&env);
     let (token, treasury) = free_addresses(&env);
@@ -757,21 +751,114 @@ fn settle_at_maturity_succeeds() {
     fund_to_target(&client, &env);
     env.ledger().with_mut(|l| l.timestamp = maturity);
     let settled = client.settle();
+    let settle_events = env.events().all();
     assert_eq!(settled.status, 2);
     assert_eq!(settled.maturity, maturity);
+    assert_eq!(
+        settle_events,
+        std::vec![EscrowSettled {
+            name: soroban_sdk::symbol_short!("escrow_sd"),
+            invoice_id: soroban_sdk::Symbol::new(&env, "INV_MAT_002"),
+            funded_amount: TARGET,
+            yield_bps: 800,
+            maturity,
+            settled_at_ledger_timestamp: maturity,
+            settle_pool: TARGET + (TARGET * 800i128 / 10_000i128),
+        }
+        .to_xdr(&env, &contract_id)]
+    );
 }
 
-/// `settle` must panic if SME auth is not provided.
+/// `settle` with `maturity > 0` also succeeds one second after maturity and
+/// records the validator-observed settlement timestamp in the event payload.
 #[test]
-#[should_panic]
+fn settle_one_second_after_maturity_succeeds_and_emits_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let client = deploy(&env);
+    let contract_id = client.address.clone();
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (token, treasury) = free_addresses(&env);
+
+    let maturity: u64 = 20_000;
+    client.init(
+        &admin,
+        &String::from_str(&env, "INV_MAT_004"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &maturity,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    fund_to_target(&client, &env);
+    let settled_at = maturity + 1;
+    env.ledger().with_mut(|l| l.timestamp = settled_at);
+    let settled = client.settle();
+    let settle_events = env.events().all();
+
+    assert_eq!(settled.status, 2);
+    assert_eq!(settled.maturity, maturity);
+    assert_eq!(
+        settle_events,
+        std::vec![EscrowSettled {
+            name: soroban_sdk::symbol_short!("escrow_sd"),
+            invoice_id: soroban_sdk::Symbol::new(&env, "INV_MAT_004"),
+            funded_amount: TARGET,
+            yield_bps: 800,
+            maturity,
+            settled_at_ledger_timestamp: settled_at,
+            settle_pool: TARGET + (TARGET * 800i128 / 10_000i128),
+        }
+        .to_xdr(&env, &contract_id)]
+    );
+}
+
+/// `settle` must reject a non-SME signer and preserve the funded state.
+#[test]
 fn settle_requires_sme_auth() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
     default_init(&client, &env, &admin, &sme);
     fund_to_target(&client, &env);
 
-    env.mock_auths(&[]); // clear mocks — auth will fail
-    client.settle();
+    let wrong_signer = Address::generate(&env);
+    env.mock_auths(&[MockAuth {
+        address: &wrong_signer,
+        invoke: &MockAuthInvoke {
+            contract: &client.address,
+            fn_name: "settle",
+            args: SorobanVec::new(&env),
+            sub_invokes: &[],
+        },
+    }]);
+
+    assert_eq!(
+        client.try_settle(),
+        Err(Ok(soroban_sdk::Error::from_type_and_code(
+            soroban_sdk::xdr::ScErrorType::Context,
+            soroban_sdk::xdr::ScErrorCode::InvalidAction,
+        ))),
+        "settle must reject authorization from a non-SME signer with the exact auth error"
+    );
+    assert_eq!(
+        client.get_escrow().status,
+        1,
+        "unauthorized settlement attempt must leave escrow funded"
+    );
 }
 
 /// `settle` on open (status 0) escrow must panic.
