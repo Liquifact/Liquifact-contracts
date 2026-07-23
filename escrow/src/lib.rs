@@ -938,6 +938,18 @@ pub struct YieldTier {
     pub yield_bps: i64,
 }
 
+/// Represents a single allowlist entry with the investor address and their associated yield tier.
+///
+/// Returned by [`LiquifactEscrow::get_allowlist_page`] for paginated enumeration of the allowlist.
+/// The `tier` field represents the 0-based tier index from the yield tier table, or `0` if the
+/// investor is using the base yield (no tier selected or no tiers configured).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AllowlistEntry {
+    pub investor: Address,
+    pub tier: u32,
+}
+
 /// Captured exactly once at the first ledger transition to **funded** so settlement and claims can
 /// use a stable total principal and target. If the threshold-crossing deposit overshoots
 /// [`InvoiceEscrow::funding_target`], [`FundingCloseSnapshot::total_principal`] records the full
@@ -3369,6 +3381,155 @@ impl LiquifactEscrow {
             }
         }
         count
+    }
+
+    /// Returns a paginated list of active allowlist entries with their associated yield tiers.
+    ///
+    /// This function enumerates allowlisted investors and their corresponding yield tier indices
+    /// for off-chain UIs and reconciliation tools. It provides bounded, paginated access to the
+    /// allowlist to prevent unbounded gas usage.
+    ///
+    /// # Tier Resolution Logic
+    /// - If the investor has funded and has a stored `InvestorEffectiveYield`, the function
+    ///   matches that yield against the yield tier table to determine the tier index (0-based).
+    /// - If the investor has not funded yet or is using the base yield, `tier` is set to `0`.
+    /// - If no yield tier table is configured, all investors return `tier = 0`.
+    ///
+    /// # Arguments
+    /// * `start` - The starting index (0-based) in the allowlist index for pagination.
+    /// * `limit` - The maximum number of entries to return (capped at [`MAX_INVESTOR_READ_BATCH`]).
+    ///
+    /// # Returns
+    /// A `Vec<AllowlistEntry>` containing `(investor, tier)` pairs for active allowlisted
+    /// investors within the requested page. Returns an empty vector if `start >= len` or `limit == 0`.
+    ///
+    /// # Behavior
+    /// - Respects the existing pagination pattern used by `get_investors` and `get_allowlisted_investors`.
+    /// - Only includes investors where `InvestorAllowlisted(addr)` is `true`.
+    /// - Never panics: querying beyond bounds or an empty allowlist returns an empty vector.
+    /// - Strictly read-only: no storage writes or token transfers occur.
+    ///
+    /// # Examples
+    /// ```ignore
+    /// // Get first 10 allowlist entries
+    /// let page1 = client.get_allowlist_page(&0, &10);
+    ///
+    /// // Get next 10 entries
+    /// let page2 = client.get_allowlist_page(&10, &10);
+    /// ```
+    pub fn get_allowlist_page(env: Env, start: u32, limit: u32) -> Vec<AllowlistEntry> {
+        let index: Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&DataKey::AllowlistIndex)
+            .unwrap_or_else(|| Vec::new(&env));
+
+        let len = index.len();
+        if start >= len || limit == 0 {
+            return Vec::new(&env);
+        }
+
+        let actual_limit = limit.min(MAX_INVESTOR_READ_BATCH);
+        let end = (start + actual_limit).min(len);
+
+        // Load yield tier table once (if configured)
+        let tier_table: Option<Vec<YieldTier>> = env
+            .storage()
+            .instance()
+            .get(&DataKey::YieldTierTable);
+
+        // Load base yield once
+        let escrow: InvoiceEscrow = env
+            .storage()
+            .instance()
+            .get(&DataKey::Escrow)
+            .unwrap_or_else(|| {
+                panic_with_error!(&env, EscrowError::EscrowNotInitialized)
+            });
+        let base_yield = escrow.yield_bps;
+
+        let mut result = Vec::new(&env);
+        for i in start..end {
+            let addr = index.get(i).unwrap();
+            
+            // Only include if still actively allowlisted
+            let is_al: bool = env
+                .storage()
+                .persistent()
+                .get(&DataKey::InvestorAllowlisted(addr.clone()))
+                .unwrap_or(false);
+            
+            if !is_al {
+                continue;
+            }
+
+            // Determine tier index based on effective yield
+            let tier_index = Self::get_tier_index_for_investor(
+                &env,
+                &addr,
+                base_yield,
+                &tier_table,
+            );
+
+            result.push_back(AllowlistEntry {
+                investor: addr,
+                tier: tier_index,
+            });
+        }
+        result
+    }
+
+    /// Helper function to determine the tier index for an investor based on their effective yield.
+    ///
+    /// # Arguments
+    /// * `env` - The contract environment.
+    /// * `investor` - The investor address.
+    /// * `base_yield` - The base yield_bps from the escrow.
+    /// * `tier_table` - Optional yield tier table.
+    ///
+    /// # Returns
+    /// * `0` if the investor has no effective yield (hasn't funded) or is using base yield.
+    /// * `1..n` representing the 1-based tier index if the investor's effective yield matches a tier.
+    /// * `0` if no tier table is configured.
+    fn get_tier_index_for_investor(
+        env: &Env,
+        investor: &Address,
+        base_yield: i64,
+        tier_table: &Option<Vec<YieldTier>>,
+    ) -> u32 {
+        // Get the investor's effective yield (if they've funded)
+        let effective_yield: Option<i64> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::InvestorEffectiveYield(investor.clone()));
+
+        // If no effective yield stored or matches base yield, return 0
+        let eff_yield = match effective_yield {
+            Some(y) => {
+                if y == base_yield {
+                    return 0;
+                }
+                y
+            }
+            None => return 0,
+        };
+
+        // If no tier table configured, return 0
+        let tiers = match tier_table {
+            Some(t) => t,
+            None => return 0,
+        };
+
+        // Find matching tier by yield_bps (1-based index)
+        for i in 0..tiers.len() {
+            let tier = tiers.get(i).unwrap();
+            if tier.yield_bps == eff_yield {
+                return i + 1; // Return 1-based tier index
+            }
+        }
+
+        // No matching tier found, return 0 (base yield)
+        0
     }
 
     /// Convenience alias for [`LiquifactEscrow::set_legal_hold`] with `active = false`.
