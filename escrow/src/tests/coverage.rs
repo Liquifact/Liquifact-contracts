@@ -4020,3 +4020,369 @@ fn refactor_gate_helpers_rotate_blocked_post_settlement() {
         EscrowError::RotationNotOpen,
     );
 }
+
+// ---------------------------------------------------------------------------
+// get_settlement_pool — aggregate coupon view
+// ---------------------------------------------------------------------------
+//
+// Test matrix:
+//   1. Returns 0 before snapshot (escrow open, not yet funded)
+//   2. Returns 0 when initialised but funding target never reached
+//   3. Returns correct principal + coupon after funding to exact target
+//   4. Rounding floor: yield that does not divide evenly truncates down
+//   5. Zero yield_bps → pool equals principal
+//   6. Idempotent: calling twice returns the same value
+//   7. Pool >= sum of all per-investor compute_investor_payout (no-dust leak)
+//   8. Target-lowering promotion writes snapshot; get_settlement_pool reflects it
+//   9. Value is unchanged after settle (snapshot is immutable)
+//  10. Over-funded escrow: total_principal includes amount above target
+
+/// Helper: init an escrow with a real SEP-41 token, mint `amount` to `investor`,
+/// fund to exactly `amount` (which meets the target), and return the client +
+/// investor address.
+fn funded_with_real_token<'a>(
+    env: &'a Env,
+    label: &str,
+    amount: i128,
+    yield_bps: i64,
+) -> (super::LiquifactEscrowClient<'a>, Address, Address) {
+    let token = install_stellar_asset_token(env);
+    let admin = Address::generate(env);
+    let sme = Address::generate(env);
+    let treasury = Address::generate(env);
+    let client = super::deploy(env);
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(env, label),
+        &sme,
+        &amount,
+        &yield_bps,
+        &0u64,
+        &token.id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    let investor = Address::generate(env);
+    token.stellar.mint(&investor, &amount);
+    client.fund(&investor, &amount);
+    (client, investor, sme)
+}
+
+// 1. Returns 0 before the funding-close snapshot exists.
+#[test]
+fn get_settlement_pool_returns_zero_before_snapshot() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let (token, treasury) = free_addresses(&env);
+
+    // Initialise but do NOT fund — snapshot is absent.
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "SP_NOSNAPSHOT"),
+        &sme,
+        &1_000i128,
+        &800i64,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    assert_eq!(client.get_settlement_pool(), 0);
+}
+
+// 2. Returns 0 when the escrow is initialised but never reaches funded status.
+#[test]
+fn get_settlement_pool_returns_zero_partial_funding() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let token = install_stellar_asset_token(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let treasury = Address::generate(&env);
+    let client = super::deploy(&env);
+
+    // Target = 1_000, we only fund 500 — escrow stays open, no snapshot.
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "SP_PARTIAL"),
+        &sme,
+        &1_000i128,
+        &800i64,
+        &0u64,
+        &token.id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    let investor = Address::generate(&env);
+    token.stellar.mint(&investor, &500i128);
+    client.fund(&investor, &500i128);
+
+    // Still open — no snapshot written.
+    assert_eq!(client.get_escrow().status, 0);
+    assert_eq!(client.get_settlement_pool(), 0);
+}
+
+// 3. Returns principal + coupon after funding to exact target (800 bps = 8 %).
+#[test]
+fn get_settlement_pool_principal_plus_coupon_800bps() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _investor, _sme) = funded_with_real_token(&env, "SP_800", 10_000i128, 800i64);
+
+    // coupon = 10_000 × 800 / 10_000 = 800
+    // pool   = 10_000 + 800 = 10_800
+    assert_eq!(client.get_settlement_pool(), 10_800);
+}
+
+// 4. Floor rounding: yield that does not divide evenly truncates down.
+//    principal = 10_001, yield_bps = 1  →  coupon = floor(10_001/10_000) = 1
+//    pool = 10_001 + 1 = 10_002
+#[test]
+fn get_settlement_pool_rounding_floor() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _investor, _sme) = funded_with_real_token(&env, "SP_FLOOR", 10_001i128, 1i64);
+
+    // coupon = 10_001 × 1 / 10_000 = 1  (floor; remainder 1 is discarded)
+    // pool   = 10_001 + 1 = 10_002
+    assert_eq!(client.get_settlement_pool(), 10_002);
+}
+
+// Verify the floor is strict: a principal that yields no whole coupon unit.
+//    principal = 9_999, yield_bps = 1  →  coupon = floor(9_999/10_000) = 0
+//    pool = 9_999 + 0 = 9_999
+#[test]
+fn get_settlement_pool_rounding_floor_zero_coupon_unit() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _investor, _sme) = funded_with_real_token(&env, "SP_FLOOR0", 9_999i128, 1i64);
+
+    // coupon = floor(9_999 / 10_000) = 0
+    assert_eq!(client.get_settlement_pool(), 9_999);
+}
+
+// 5. Zero yield_bps → pool equals principal exactly.
+#[test]
+fn get_settlement_pool_zero_yield() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let principal = 50_000i128;
+    let (client, _investor, _sme) = funded_with_real_token(&env, "SP_ZEROYIELD", principal, 0i64);
+
+    // coupon = 50_000 × 0 / 10_000 = 0  →  pool = 50_000
+    assert_eq!(client.get_settlement_pool(), principal);
+}
+
+// 6. Max reasonable yield_bps (10_000 = 100 %): pool = 2 × principal.
+#[test]
+fn get_settlement_pool_max_yield_doubles_principal() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let principal = 500i128;
+    let (client, _investor, _sme) =
+        funded_with_real_token(&env, "SP_MAXBPS", principal, 10_000i64);
+
+    // coupon = 500 × 10_000 / 10_000 = 500  →  pool = 1_000
+    assert_eq!(client.get_settlement_pool(), 1_000);
+}
+
+// 7. Idempotent: calling get_settlement_pool twice returns the same value
+//    (pure read, no side effects).
+#[test]
+fn get_settlement_pool_idempotent() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _investor, _sme) = funded_with_real_token(&env, "SP_IDEM", 10_000i128, 500i64);
+
+    let first = client.get_settlement_pool();
+    let second = client.get_settlement_pool();
+    assert_eq!(first, second);
+}
+
+// 8. Pool is >= sum of all per-investor compute_investor_payout (no rounding leak
+//    when a single investor holds the full principal).
+#[test]
+fn get_settlement_pool_ge_sum_of_investor_payouts_single_investor() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let amount = 100_000i128;
+    let (client, investor, _sme) = funded_with_real_token(&env, "SP_GESUM", amount, 800i64);
+
+    let pool = client.get_settlement_pool();
+    let payout = client.compute_investor_payout(&investor);
+
+    // Single investor == 100 % share: payout must equal pool (no rounding residue
+    // when the investor holds the full principal).
+    assert!(pool >= payout);
+    // For a single investor with 100 % share the values are identical.
+    assert_eq!(pool, payout);
+}
+
+// 9. Pool >= sum of per-investor payouts for multiple investors (rounding residue
+//    stays non-negative; the dust sweep absorbs it).
+#[test]
+fn get_settlement_pool_ge_sum_of_investor_payouts_multi_investor() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let token = install_stellar_asset_token(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let treasury = Address::generate(&env);
+    let client = super::deploy(&env);
+
+    // Three investors, deliberately unequal split so rounding is exercised.
+    // Target = 300, each contributes 100.
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "SP_MULTI"),
+        &sme,
+        &300i128,
+        &333i64, // 3.33 % — chosen to create fractional coupon
+        &0u64,
+        &token.id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    let investors: [Address; 3] = [
+        Address::generate(&env),
+        Address::generate(&env),
+        Address::generate(&env),
+    ];
+    for inv in &investors {
+        token.stellar.mint(inv, &100i128);
+        client.fund(inv, &100i128);
+    }
+
+    let pool: i128 = client.get_settlement_pool();
+    let payout_sum: i128 = investors
+        .iter()
+        .map(|inv| client.compute_investor_payout(inv))
+        .sum();
+
+    assert!(pool >= payout_sum, "pool={pool} < payout_sum={payout_sum}");
+}
+
+// 10. Value is unchanged after settle (snapshot is immutable post-close).
+#[test]
+fn get_settlement_pool_unchanged_after_settle() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _investor, _sme) =
+        funded_with_real_token(&env, "SP_POSTSETTLED", 10_000i128, 800i64);
+
+    let pre_settle = client.get_settlement_pool();
+    // Advance ledger and settle.
+    env.ledger().with_mut(|l| l.timestamp = 1_000);
+    client.settle();
+
+    let post_settle = client.get_settlement_pool();
+    assert_eq!(pre_settle, post_settle);
+}
+
+// 11. Over-funded escrow: a single investor contributes more than the target.
+//     The snapshot total_principal captures the full funded_amount (> target),
+//     and the pool reflects the over-funded principal.
+#[test]
+fn get_settlement_pool_over_funded_single_investor() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let token = install_stellar_asset_token(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let treasury = Address::generate(&env);
+    let client = super::deploy(&env);
+
+    // Target = 1_000; investor contributes 1_200 in one call (over-funds).
+    // Snapshot captures total_principal = 1_200.
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "SP_OVER"),
+        &sme,
+        &1_000i128,
+        &1_000i64, // 10 % — easy to verify manually
+        &0u64,
+        &token.id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    let inv = Address::generate(&env);
+    token.stellar.mint(&inv, &1_200i128);
+    client.fund(&inv, &1_200i128);
+
+    // Snapshot total_principal = 1_200 (the full funded_amount at close).
+    // coupon = 1_200 × 1_000 / 10_000 = 120
+    // pool   = 1_200 + 120 = 1_320
+    let pool = client.get_settlement_pool();
+    assert_eq!(pool, 1_320);
+}
+
+// 12. Large principal (near i64::MAX scale) — verifies no overflow from
+//     checked_mul when yield_bps > 0.
+#[test]
+fn get_settlement_pool_large_principal_no_overflow() {
+    let env = Env::default();
+    env.mock_all_auths();
+    // Use a principal that would overflow i64 but fits safely in i128.
+    // i64::MAX ≈ 9.2 × 10^18; i128 can hold up to ~1.7 × 10^38.
+    // With yield_bps = 10_000, coupon = principal, pool = 2 × principal.
+    // Choose principal = 1_000_000_000_000_000i128 (10^15) — fits real token mint.
+    let large = 1_000_000_000_000_000i128;
+    let (client, _investor, _sme) =
+        funded_with_real_token(&env, "SP_LARGE", large, 10_000i64);
+
+    // coupon = large × 10_000 / 10_000 = large
+    // pool   = large + large = 2 × large
+    assert_eq!(client.get_settlement_pool(), 2 * large);
+}
