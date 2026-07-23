@@ -1233,8 +1233,8 @@ fn read_view_error_on_absent_before_init() {
     let (client, _admin, _sme) = setup(&env);
     let (funding_token, treasury) = free_addresses(&env);
 
-    // get_escrow ÔåÆ EscrowNotInitialized (20)
-    assert_contract_error(client.try_get_escrow(), EscrowError::EscrowNotInitialized);
+    // try_get_escrow returns None before init
+    assert_eq!(client.try_get_escrow(), None, "try_get_escrow must return None before init");
     // get_funding_token ÔåÆ FundingTokenNotSet (21)
     assert_contract_error(
         client.try_get_funding_token(),
@@ -1270,6 +1270,82 @@ fn read_view_error_on_absent_before_init() {
     &None::<i64>,);
     assert_eq!(client.get_version(), SCHEMA_VERSION);
     assert_eq!(client.get_funding_token(), funding_token);
+    // try_get_escrow returns Some after init
+    assert!(client.try_get_escrow().is_some(), "try_get_escrow must return Some after init");
+    // Verify the returned value matches get_escrow
+    let escrow_via_try = client.try_get_escrow().unwrap();
+    let escrow_via_get = client.get_escrow();
+    assert_eq!(escrow_via_try, escrow_via_get, "try_get_escrow must return same value as get_escrow after init");
+}
+
+/// try_get_escrow provides O(1) read view without mutating storage.
+#[test]
+fn try_get_escrow_read_view() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let (token, treasury) = free_addresses(&env);
+
+    // Before init: returns None (sensible default, no panic)
+    assert_eq!(
+        client.try_get_escrow(),
+        None,
+        "try_get_escrow must return None before initialization"
+    );
+
+    // Initialize the escrow
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "READ_VIEW_TEST"),
+        &sme,
+        &1000i128,
+        &500i64,
+        &100u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    // After init: returns Some with the escrow state
+    let escrow_opt = client.try_get_escrow();
+    assert!(
+        escrow_opt.is_some(),
+        "try_get_escrow must return Some after initialization"
+    );
+
+    let escrow = escrow_opt.unwrap();
+    assert_eq!(escrow.invoice_id, soroban_sdk::symbol_short!("READ_VIEW_TEST"));
+    assert_eq!(escrow.admin, admin);
+    assert_eq!(escrow.sme_address, sme);
+    assert_eq!(escrow.amount, 1000i128);
+    assert_eq!(escrow.funding_target, 1000i128);
+    assert_eq!(escrow.funded_amount, 0i128);
+    assert_eq!(escrow.yield_bps, 500i64);
+    assert_eq!(escrow.maturity, 100u64);
+    assert_eq!(escrow.status, 0u32); // open status
+
+    // Verify consistency with get_escrow (the panicking version)
+    let escrow_via_get = client.get_escrow();
+    assert_eq!(
+        escrow, escrow_via_get,
+        "try_get_escrow must return identical value to get_escrow when initialized"
+    );
+
+    // Verify it's a pure read: calling multiple times doesn't change state
+    let escrow_2nd_call = client.try_get_escrow().unwrap();
+    assert_eq!(
+        escrow, escrow_2nd_call,
+        "try_get_escrow must be idempotent (pure read)"
+    );
 }
 
 /// has_maturity_lock reflects the configured maturity.

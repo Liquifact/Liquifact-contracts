@@ -1961,6 +1961,14 @@ impl LiquifactEscrow {
             .unwrap_or_else(|| fail(&env, EscrowError::EscrowNotInitialized))
     }
 
+    /// Returns the full escrow snapshot ([`InvoiceEscrow`]) from [`DataKey::Escrow`] if initialized,
+    /// or [`None`] if called before [`LiquifactEscrow::init`].
+    ///
+    /// **Pure read** — no authorization required, no state mutation, no panic on unset storage.
+    pub fn try_get_escrow(env: Env) -> Option<InvoiceEscrow> {
+        env.storage().instance().get(&DataKey::Escrow)
+    }
+
     /// Returns the remaining funding capacity before the funding target is reached.
     ///
     /// Clamped to `0` via `saturating_sub` if the escrow is over-funded.
