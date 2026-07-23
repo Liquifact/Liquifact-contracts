@@ -730,6 +730,27 @@ pub(crate) fn validate_maturity_bounds(env: &Env, maturity: u64, max_horizon: u6
     );
 }
 
+/// Resolves the (start, end) window for a collection of `len` items.
+///
+/// Returns `Some((start, end))` when the requested window is non-empty,
+/// or `None` when `start >= len` or `limit == 0`.
+///
+/// The effective page size is capped at `max_batch`, and saturating
+/// arithmetic protects against overflow:
+///
+/// ```ignore
+/// let actual = min(limit, max_batch);
+/// let end    = min(start + actual, len);  // saturating add
+/// ```
+fn paginate(len: u32, start: u32, limit: u32, max_batch: u32) -> Option<(u32, u32)> {
+    if start >= len || limit == 0 {
+        return None;
+    }
+    let actual = limit.min(max_batch);
+    let end = start.saturating_add(actual).min(len);
+    Some((start, end))
+}
+
 // --- Storage keys ---
 
 #[contracttype]
@@ -2601,13 +2622,10 @@ impl LiquifactEscrow {
             .get(&DataKey::InvestorIndex)
             .unwrap_or_else(|| Vec::new(&env));
 
-        let len = index.len();
-        if start >= len || limit == 0 {
-            return Vec::new(&env);
-        }
-
-        let actual_limit = limit.min(MAX_INVESTOR_READ_BATCH);
-        let end = (start + actual_limit).min(len);
+        let (start, end) = match paginate(index.len(), start, limit, MAX_INVESTOR_READ_BATCH) {
+            Some(w) => w,
+            None => return Vec::new(&env),
+        };
 
         let mut result = Vec::new(&env);
         for i in start..end {
@@ -2859,15 +2877,14 @@ impl LiquifactEscrow {
         limit: u32,
     ) -> Vec<AttestationDigestInfo> {
         let log = Self::get_attestation_append_log(env.clone());
-        let len = log.len();
-        if start >= len || limit == 0 {
-            return Vec::new(&env);
-        }
+        let (start, end) = match paginate(log.len(), start, limit, MAX_ATTESTATION_READ_PAGE) {
+            Some(w) => w,
+            None => return Vec::new(&env),
+        };
 
-        let actual_limit = limit.min(MAX_ATTESTATION_READ_PAGE);
         let mut result = Vec::new(&env);
         let mut i = start;
-        while i < len && result.len() < actual_limit {
+        while i < end && result.len() < (end - start) {
             if Self::is_attestation_revoked(env.clone(), i) {
                 let digest = log.get(i).unwrap();
                 result.push_back(AttestationDigestInfo {
@@ -3321,18 +3338,14 @@ impl LiquifactEscrow {
             .get(&DataKey::AllowlistIndex)
             .unwrap_or_else(|| Vec::new(&env));
 
-        let len = index.len();
-        if start >= len || limit == 0 {
-            return Vec::new(&env);
-        }
-
-        let actual_limit = limit.min(50);
-        let end = (start + actual_limit).min(len);
+        let (start, end) = match paginate(index.len(), start, limit, MAX_INVESTOR_READ_BATCH) {
+            Some(w) => w,
+            None => return Vec::new(&env),
+        };
 
         let mut result = Vec::new(&env);
         for i in start..end {
             let addr = index.get(i).unwrap();
-            // Only include addresses that are still allowlisted
             let is_al: bool = env
                 .storage()
                 .persistent()

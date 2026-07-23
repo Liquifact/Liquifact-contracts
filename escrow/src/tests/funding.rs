@@ -5600,6 +5600,29 @@ fn test_get_investors_legacy_compatibility() {
     assert_eq!(investors.len(), 0);
 }
 
+#[test]
+fn test_get_investors_pagination_edge_cases() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    for _ in 0..3 {
+        client.fund(&Address::generate(&env), &1_000i128);
+    }
+
+    // Start past the end
+    let past = client.get_investors(&5, &10);
+    assert_eq!(past.len(), 0);
+
+    // Zero limit
+    let zero = client.get_investors(&0, &0);
+    assert_eq!(zero.len(), 0);
+
+    // Limit exceeding remaining items (start=2 with 3 total → 1 remaining)
+    let overflow = client.get_investors(&2, &100);
+    assert_eq!(overflow.len(), 1);
+}
+
 // ---------------------------------------------------------------------------
 
 // update_funding_target: rejection bounds and mid-update funded promotion

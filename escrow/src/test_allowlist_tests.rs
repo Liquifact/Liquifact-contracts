@@ -1,6 +1,6 @@
 use super::{
     AllowlistEnabledChanged, DataKey, EscrowError, InvestorAllowlistChanged, LiquifactEscrow,
-    LiquifactEscrowClient,
+    LiquifactEscrowClient, MAX_INVESTOR_READ_BATCH,
 };
 use soroban_sdk::Vec as SorobanVec;
 use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env, Error, Event, InvokeError};
@@ -918,4 +918,125 @@ fn gate_batch_revoke_blocks_all_revoked_members() {
     // Contributions remain at the pre-revocation values.
     assert_eq!(client.get_contribution(&a), 1_000i128);
     assert_eq!(client.get_contribution(&b), 1_000i128);
+}
+
+// ── get_allowlisted_investors pagination ──────────────────────────────────
+
+fn add_allowlisted(_env: &Env, client: &LiquifactEscrowClient<'_>, inv: Address) {
+    client.set_investor_allowlisted(&inv, &true);
+}
+
+fn add_allowlisted_n(
+    env: &Env,
+    client: &LiquifactEscrowClient<'_>,
+    n: u32,
+) -> std::vec::Vec<Address> {
+    let mut invs = std::vec::Vec::new();
+    for _ in 0..n {
+        let inv = Address::generate(env);
+        add_allowlisted(env, client, inv.clone());
+        invs.push(inv);
+    }
+    invs
+}
+
+#[test]
+fn test_get_allowlisted_investors_basic_pagination() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init(&env, &client);
+    client.set_allowlist_active(&true);
+
+    let invs = add_allowlisted_n(&env, &client, 5);
+
+    let page = client.get_allowlisted_investors(&0, &3);
+    assert_eq!(page.len(), 3);
+    assert_eq!(page.get(0).unwrap(), invs[0]);
+    assert_eq!(page.get(1).unwrap(), invs[1]);
+    assert_eq!(page.get(2).unwrap(), invs[2]);
+
+    let page2 = client.get_allowlisted_investors(&3, &3);
+    assert_eq!(page2.len(), 2);
+    assert_eq!(page2.get(0).unwrap(), invs[3]);
+    assert_eq!(page2.get(1).unwrap(), invs[4]);
+}
+
+#[test]
+fn test_get_allowlisted_investors_start_past_end() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init(&env, &client);
+    client.set_allowlist_active(&true);
+    add_allowlisted(&env, &client, Address::generate(&env));
+
+    let page = client.get_allowlisted_investors(&5, &10);
+    assert_eq!(page.len(), 0);
+}
+
+#[test]
+fn test_get_allowlisted_investors_zero_limit() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init(&env, &client);
+    client.set_allowlist_active(&true);
+    add_allowlisted(&env, &client, Address::generate(&env));
+
+    let page = client.get_allowlisted_investors(&0, &0);
+    assert_eq!(page.len(), 0);
+}
+
+#[test]
+fn test_get_allowlisted_investors_limit_exceeds_remaining() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init(&env, &client);
+    client.set_allowlist_active(&true);
+
+    let invs = add_allowlisted_n(&env, &client, 3);
+
+    let page = client.get_allowlisted_investors(&2, &100);
+    assert_eq!(page.len(), 1);
+    assert_eq!(page.get(0).unwrap(), invs[2]);
+}
+
+#[test]
+fn test_get_allowlisted_investors_filters_unallowlisted() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init(&env, &client);
+    client.set_allowlist_active(&true);
+
+    let a = Address::generate(&env);
+    let b = Address::generate(&env);
+    let c = Address::generate(&env);
+    add_allowlisted(&env, &client, a.clone());
+    add_allowlisted(&env, &client, b.clone());
+    add_allowlisted(&env, &client, c.clone());
+
+    // Revoke b from allowlist.
+    client.set_investor_allowlisted(&b, &false);
+
+    let page = client.get_allowlisted_investors(&0, &5);
+    assert_eq!(page.len(), 2);
+    assert_eq!(page.get(0).unwrap(), a);
+    assert_eq!(page.get(1).unwrap(), c);
+}
+
+#[test]
+fn test_get_allowlisted_investors_caps_at_max_batch() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init(&env, &client);
+    client.set_allowlist_active(&true);
+
+    add_allowlisted_n(&env, &client, MAX_INVESTOR_READ_BATCH + 5);
+
+    let page = client.get_allowlisted_investors(&0, &u32::MAX);
+    assert_eq!(page.len(), MAX_INVESTOR_READ_BATCH);
 }
