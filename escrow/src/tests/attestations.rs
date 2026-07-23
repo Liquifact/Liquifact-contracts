@@ -779,5 +779,5 @@ fn test_revoked_digests_view_caps_limit() {
         client.revoke_attestation_digest(&(i as u32));
     }
     let page = client.get_revoked_attestation_digests(&0, &100);
-    assert_eq!(page.len(), crate::MAX_ATTESTATION_READ_PAGE as u32);
+    assert_eq!(page.len(), crate::MAX_ATTESTATION_READ_PAGE);
 }

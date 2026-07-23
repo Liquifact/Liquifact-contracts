@@ -2,9 +2,19 @@
     unused_imports,
     unused_variables,
     dead_code,
+    unused_comparisons,
+    unused_doc_comments,
+    unused_macros,
+    unused_assignments,
     clippy::needless_borrow,
     clippy::len_zero,
-    clippy::explicit_counter_loop
+    clippy::explicit_counter_loop,
+    clippy::empty_line_after_doc_comments,
+    clippy::empty_line_after_outer_attr,
+    clippy::absurd_extreme_comparisons,
+    clippy::needless_range_loop,
+    clippy::mutable_key_type,
+    clippy::unusual_byte_groupings
 )]
 #[allow(unused_imports)]
 use super::{

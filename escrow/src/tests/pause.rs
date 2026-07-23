@@ -1,12 +1,6 @@
 use super::*;
-use crate::{
-    EscrowError, PausedChanged,
-};
-use soroban_sdk::{
-    token::StellarAssetClient,
-    testutils::Events,
-    Event,
-};
+use crate::{EscrowError, PausedChanged};
+use soroban_sdk::{testutils::Events, token::StellarAssetClient, Event};
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -567,10 +561,7 @@ fn settle_returns_typed_error_when_paused() {
     let investor = Address::generate(&env);
     init_funded(&client, &env, &admin, &sme, &investor, "PAU027");
     client.set_paused(&true);
-    assert_contract_error(
-        client.try_settle(),
-        EscrowError::PausedBlocksSettlement,
-    );
+    assert_contract_error(client.try_settle(), EscrowError::PausedBlocksSettlement);
 }
 
 #[test]
@@ -582,10 +573,7 @@ fn withdraw_returns_typed_error_when_paused() {
     let investor = Address::generate(&env);
     let (client, _escrow_id) = init_funded_with_real_token(&env, &admin, &sme, &investor, "PAU028");
     client.set_paused(&true);
-    assert_contract_error(
-        client.try_withdraw(),
-        EscrowError::PausedBlocksWithdrawal,
-    );
+    assert_contract_error(client.try_withdraw(), EscrowError::PausedBlocksWithdrawal);
 }
 
 #[test]

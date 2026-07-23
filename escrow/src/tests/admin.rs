@@ -617,7 +617,7 @@ fn test_transfer_admin_emits_both_admin_proposed_and_deprecated_events() {
 
     // First event: AdminProposedEvent from the propose_admin delegation
     assert_eq!(
-        events.events().get(0).unwrap().clone(),
+        events.events().first().unwrap().clone(),
         AdminProposedEvent {
             name: symbol_short!("adm_prop"),
             invoice_id: invoice_id.clone(),

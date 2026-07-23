@@ -99,7 +99,7 @@ proptest! {
 /// Generate a positive i128 amount bounded by `max`.
 fn gen_positive_amount(max: i128) -> impl Strategy<Value = i128> {
     // NatSpec style: guarantees amount > 0 for escrow entrypoints.
-    (1i128..=max)
+    1i128..=max
 }
 
 /// Generate an investment call sequence.
@@ -145,7 +145,7 @@ proptest! {
         let (token, treasury) = free_addresses(&env);
 
         let max_per_investor = if caps_present { Some(per_inv_cap.min(funding_target)) } else { None };
-        let max_unique_investors: Option<u32> = if caps_present { Some(uniq_cap.min(6) as u32) } else { None };
+        let max_unique_investors: Option<u32> = if caps_present { Some(uniq_cap.min(6)) } else { None };
 
         // Optional tiered yield is not required for these invariants; keep it off.
         client.init(
@@ -1945,7 +1945,7 @@ fn payout_many_small_investors_conservation() {
     let pairs: Vec<(Address, i128)> = investors
         .iter()
         .cloned()
-        .zip(std::iter::repeat(1i128).take(n))
+        .zip(std::iter::repeat_n(1i128, n))
         .collect();
 
     let client = funded_and_settled_escrow(&env, "MANY001", 1_250i64, &pairs);
