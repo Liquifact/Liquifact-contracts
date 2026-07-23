@@ -21,7 +21,9 @@ use super::{
     assert_contract_error, default_init, deploy, deploy_with_id, free_addresses,
     install_stellar_asset_token, setup, StellarTestToken, MAX_DUST_SWEEP_AMOUNT, TARGET,
 };
-use crate::{EscrowError, EscrowSettled, LiquifactEscrow, SettlementReadiness, YieldTier};
+use crate::{
+    EscrowError, EscrowSettled, InvoiceEscrow, LiquifactEscrow, SettlementReadiness, YieldTier,
+};
 use soroban_sdk::{
     testutils::{Address as _, Events, Ledger as _},
     token::StellarAssetClient,
@@ -2214,6 +2216,218 @@ fn test_settlement_readiness_maturity_gate_parity() {
     assert!(at.ready_now);
     let settled = client.settle();
     assert_eq!(settled.status, 2);
+}
+
+// ── get_settlement_readiness field-by-field parity with source predicates ──
+
+/// Assert that every field of [`SettlementReadiness`] matches the corresponding
+/// standalone predicate and that the invariant `ready_now == is_settleable`
+/// holds. Also verifies the struct never reports settleable/ready while a legal
+/// hold is active.
+fn assert_readiness_matches_predicates(env: &Env, client: &super::LiquifactEscrowClient<'_>) {
+    let r = client.get_settlement_readiness();
+    assert_eq!(
+        r.is_settleable,
+        client.is_settleable(),
+        "is_settleable must match standalone is_settleable()"
+    );
+    assert_eq!(
+        r.legal_hold_active,
+        client.get_legal_hold(),
+        "legal_hold_active must match standalone get_legal_hold()"
+    );
+    let maturity_reached_expected =
+        !client.has_maturity_lock() || env.ledger().timestamp() >= client.get_escrow().maturity;
+    assert_eq!(
+        r.maturity_reached, maturity_reached_expected,
+        "maturity_reached must match derived predicate from has_maturity_lock() + ledger timestamp"
+    );
+    assert_eq!(
+        r.ready_now, r.is_settleable,
+        "ready_now must equal is_settleable by construction"
+    );
+    assert!(
+        !(r.is_settleable && r.legal_hold_active),
+        "never settleable while legal hold is active"
+    );
+    assert!(
+        !(r.ready_now && r.legal_hold_active),
+        "never ready while legal hold is active"
+    );
+}
+
+/// Open (status=0, not-funded) escrow with maturity=0 (no maturity lock).
+#[test]
+fn test_readiness_fields_open_not_funded() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    assert_readiness_matches_predicates(&env, &client);
+}
+
+/// Funded escrow with maturity=0 and no legal hold: fully settleable.
+#[test]
+fn test_readiness_fields_funded_no_lock_no_hold() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    fund_to_target(&client, &env);
+    assert_readiness_matches_predicates(&env, &client);
+}
+
+/// Funded, maturity=0, legal hold active: the hold must block
+/// settleability even though maturity is vacuously reached.
+#[test]
+fn test_readiness_fields_funded_no_lock_with_hold() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    fund_to_target(&client, &env);
+    client.set_legal_hold(&true);
+    assert_readiness_matches_predicates(&env, &client);
+}
+
+/// Funded with a future maturity (no hold), ledger before maturity:
+/// `maturity_reached` and `is_settleable` are both false.
+#[test]
+fn test_readiness_fields_pre_maturity() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let token = install_stellar_asset_token(&env);
+    let (contract_id, client) = deploy_with_id(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let treasury = Address::generate(&env);
+    let maturity: u64 = 20_000;
+    client.init(
+        &admin,
+        &String::from_str(&env, "READY_PRE"),
+        &sme,
+        &TARGET,
+        &500i64,
+        &maturity,
+        &token.id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+    let investor = Address::generate(&env);
+    token.stellar.mint(&investor, &TARGET);
+    client.fund(&investor, &TARGET);
+    env.ledger().with_mut(|l| l.timestamp = maturity - 1);
+    assert_readiness_matches_predicates(&env, &client);
+}
+
+/// Funded at the exact maturity timestamp (no hold): all fields ready.
+#[test]
+fn test_readiness_fields_at_maturity() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let token = install_stellar_asset_token(&env);
+    let (contract_id, client) = deploy_with_id(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let treasury = Address::generate(&env);
+    let maturity: u64 = 20_000;
+    client.init(
+        &admin,
+        &String::from_str(&env, "READY_AT"),
+        &sme,
+        &TARGET,
+        &500i64,
+        &maturity,
+        &token.id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+    let investor = Address::generate(&env);
+    token.stellar.mint(&investor, &TARGET);
+    client.fund(&investor, &TARGET);
+    env.ledger().with_mut(|l| l.timestamp = maturity);
+    assert_readiness_matches_predicates(&env, &client);
+}
+
+/// Funded after maturity but with an active legal hold: the hold must
+/// override maturity; `is_settleable` / `ready_now` are false.
+#[test]
+fn test_readiness_fields_after_maturity_with_hold() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let token = install_stellar_asset_token(&env);
+    let (contract_id, client) = deploy_with_id(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let treasury = Address::generate(&env);
+    let maturity: u64 = 20_000;
+    client.init(
+        &admin,
+        &String::from_str(&env, "READY_HLD"),
+        &sme,
+        &TARGET,
+        &500i64,
+        &maturity,
+        &token.id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+    let investor = Address::generate(&env);
+    token.stellar.mint(&investor, &TARGET);
+    client.fund(&investor, &TARGET);
+    env.ledger().with_mut(|l| l.timestamp = maturity + 100);
+    client.set_legal_hold(&true);
+    assert_readiness_matches_predicates(&env, &client);
+}
+
+/// Already-settled escrow: terminal status makes `is_settleable` false.
+#[test]
+fn test_readiness_fields_already_settled() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    fund_to_target(&client, &env);
+    client.settle();
+    assert_readiness_matches_predicates(&env, &client);
+}
+
+/// Explicit zero-maturity case: `has_maturity_lock()` is false and
+/// `maturity_reached` is vacuously true.
+#[test]
+fn test_readiness_fields_zero_maturity_lock_false() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    assert!(
+        !client.has_maturity_lock(),
+        "maturity=0 → has_maturity_lock must be false"
+    );
+    fund_to_target(&client, &env);
+    assert_readiness_matches_predicates(&env, &client);
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
