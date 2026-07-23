@@ -1,5 +1,15 @@
 # Escrow — SME Collateral Commitment
 
+> **Note.** This document is a historical / supplemental reference. The
+> authoritative, comprehensive description of the collateral model,
+> including its data model, every invariant, entrypoint guard semantics,
+> and a worked example, lives in [`docs/collateral.md`](collateral.md).
+> When this document and `docs/collateral.md` disagree, `docs/collateral.md`
+> is authoritative.
+>
+> The data types and event symbols listed here have drifted since this
+> page was written; consult `docs/collateral.md` for the current source of truth.
+
 ## Overview
 
 The LiquiFact escrow contract supports **metadata-only** collateral pledge recording.

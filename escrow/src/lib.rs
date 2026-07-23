@@ -777,6 +777,9 @@ pub enum DataKey {
     LegalHoldClearDelay,
     /// Optional SME collateral commitment metadata (record-only — not an on-chain asset lock).
     /// Absent when no commitment has been recorded. Replaceable by the SME.
+    ///
+    /// See [`docs/collateral.md`](../docs/collateral.md) for the full data model,
+    /// invariants, and entrypoint semantics.
     SmeCollateralPledge,
     /// Set to `true` when an investor has exercised a claim after settlement.
     /// **Persistent** storage. Absent ⇒ `false`. Written once; a second claim returns without re-emitting.
@@ -914,6 +917,9 @@ pub struct InvoiceEscrow {
 /// - `asset`: The off-chain asset symbol (cannot be empty).
 /// - `amount`: The reported collateral amount (must be positive).
 /// - `recorded_at`: The Soroban ledger timestamp when this record was written.
+///
+/// See [`docs/collateral.md`](../docs/collateral.md) for the full data model, invariants, and
+/// entrypoint semantics.
 #[contracttype]
 #[derive(Clone, Debug, PartialEq)]
 /// SME collateral commitment metadata (record-only).
@@ -1312,6 +1318,9 @@ pub struct LegalHoldClearDelayUpdated {
 /// - `amount`: Newly recorded positive collateral amount.
 /// - `prior_amount`: Prior recorded collateral amount (or `0` if none existed).
 #[contractevent]
+// See [`docs/collateral.md`](../docs/collateral.md) for the full event-lifecycle table and
+// the invariant that exactly one event of this type is emitted per successful
+// [`LiquifactEscrow::record_sme_collateral_commitment`] call.
 pub struct CollateralRecordedEvt {
     #[topic]
     pub name: Symbol,
@@ -1337,6 +1346,10 @@ pub struct CollateralRecordedEvt {
 /// - `amount`: Cleared SME-reported amount.
 /// - `recorded_at`: Ledger timestamp from the original commitment record.
 #[contractevent]
+// See [`docs/collateral.md`](../docs/collateral.md) for the dual-event invariant of clear:
+// [`CollateralClearedEvt`] and [`CollateralCommitmentCleared`] share the same `coll_clr`
+// topic and identical data payload by design; indexers should fold them into one logical
+// clear record per (invoice_id, asset, amount, recorded_at) tuple.
 pub struct CollateralClearedEvt {
     #[topic]
     pub name: Symbol,
@@ -1356,6 +1369,11 @@ pub struct CollateralClearedEvt {
 /// This supplements [`CollateralClearedEvt`] with a short event name and the
 /// full cleared commitment identity so indexers can reconstruct the
 /// record-to-clear lifecycle without a storage read after removal.
+///
+/// See [`docs/collateral.md`](../docs/collateral.md) for the dual-event invariant
+/// of clear: this struct and [`CollateralClearedEvt`] are emitted together in the
+/// same transaction by design. Indexers must fold the two into one logical clear
+/// record per `(coll_clr, invoice_id, asset, amount, recorded_at)` tuple.
 #[contractevent]
 pub struct CollateralCommitmentCleared {
     #[topic]
@@ -2692,6 +2710,9 @@ impl LiquifactEscrow {
 
     /// Retrieve the currently recorded SME collateral commitment metadata from storage.
     /// Returns `None` if no commitment has been recorded yet.
+    ///
+    /// See [`docs/collateral.md`](../docs/collateral.md) for the full data model,
+    /// invariants, and entrypoint semantics.
     pub fn get_sme_collateral_commitment(env: Env) -> Option<SmeCollateralCommitment> {
         env.storage().instance().get(&DataKey::SmeCollateralPledge)
     }
@@ -2995,6 +3016,9 @@ impl LiquifactEscrow {
     /// [`CollateralRecordedEvt`]. It does not transfer tokens, reserve balances, verify custody,
     /// create an on-chain encumbrance, or block any contract flows (such as settlement, withdrawals,
     /// or claims).
+    ///
+    /// See [`docs/collateral.md`](../docs/collateral.md) for the full data model,
+    /// invariants, and entrypoint guard semantics.
     ///
     /// # Authorization
     /// - Requires the signature of the configured SME (`InvoiceEscrow::sme_address`). Enforced via
