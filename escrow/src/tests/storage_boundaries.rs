@@ -1148,17 +1148,17 @@ fn test_paused_defaults_to_false() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
     basic_init(&client, &env, &admin, &sme);
-    assert!(!client.get_paused());
+    assert!(!client.is_paused());
 }
 
-/// set_paused(true) stores true; get_paused returns true.
+/// set_paused(true) stores true; is_paused returns true.
 #[test]
 fn test_paused_stored_on_set() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
     basic_init(&client, &env, &admin, &sme);
     client.set_paused(&true);
-    assert!(client.get_paused());
+    assert!(client.is_paused());
 }
 
 /// set_paused(false) clears the flag and emits PausedChanged with active=0.
@@ -1170,7 +1170,7 @@ fn test_paused_cleared_emits_event() {
     basic_init(&client, &env, &admin, &sme);
     client.set_paused(&true);
     client.set_paused(&false);
-    assert!(!client.get_paused());
+    assert!(!client.is_paused());
     let events = env.events().all();
     let invoice_id = client.get_escrow().invoice_id;
     assert_eq!(
@@ -1311,12 +1311,12 @@ fn test_tier_yield_out_of_range_rejected() {
             &Address::generate(&env),
             &None,
             &Address::generate(&env),
+            &Some(tiers), // yield_tiers — position 10
             &None,
             &None,
             &None,
             &None,
             &None,
-            &Some(tiers),
             &None,
             &None,
             &None::<i64>,
@@ -1346,12 +1346,12 @@ fn test_tier_yield_below_base_rejected() {
             &Address::generate(&env),
             &None,
             &Address::generate(&env),
+            &Some(tiers), // yield_tiers — position 10
             &None,
             &None,
             &None,
             &None,
             &None,
-            &Some(tiers),
             &None,
             &None,
             &None::<i64>,
@@ -1385,12 +1385,12 @@ fn test_tier_lock_not_increasing_rejected() {
             &Address::generate(&env),
             &None,
             &Address::generate(&env),
+            &Some(tiers), // yield_tiers — position 10
             &None,
             &None,
             &None,
             &None,
             &None,
-            &Some(tiers),
             &None,
             &None,
             &None::<i64>,
@@ -1423,12 +1423,12 @@ fn test_valid_yield_tier_table_stored() {
         &Address::generate(&env),
         &None,
         &Address::generate(&env),
+        &Some(tiers), // yield_tiers — position 10
         &None,
         &None,
         &None,
         &None,
         &None,
-        &Some(tiers),
         &None,
         &None,
         &None::<i64>,
