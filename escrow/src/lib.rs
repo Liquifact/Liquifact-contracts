@@ -974,6 +974,33 @@ pub enum CollateralCommitmentSnapshot {
     Some(SmeCollateralCommitment),
 }
 
+/// Custom option-like enum to avoid blanket trait limitations on standard library
+/// `Option<u64>` inside `#[contracttype]` structs.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub enum SettledAtTimestamp {
+    /// No settlement timestamp recorded.
+    None,
+    /// Ledger timestamp recorded at settlement.
+    Some(u64),
+}
+
+/// Read-only snapshot of the escrow settlement state, returned by
+/// [`LiquifactEscrow::get_settlement_state`].
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct SettlementState {
+    /// Whether [`LiquifactEscrow::settle`] would succeed right now
+    /// (status == funded, no legal hold, maturity reached).
+    pub is_settleable: bool,
+    /// Ledger timestamp recorded at settlement, or [`SettledAtTimestamp::None`] when not yet
+    /// settled (reuses [`DataKey::SettledAt`] — no recomputation).
+    pub settled_at: SettledAtTimestamp,
+    /// True when status >= 2 (settled, withdrawn, or cancelled), i.e. the escrow
+    /// has passed the settlement decision point.
+    pub is_settled: bool,
+}
+
 /// Comprehensive summary of the escrow contract state.
 /// Bundles multiple read-only values to allow a single host invocation
 /// for off-chain indexers and client rendering.
@@ -2636,6 +2663,72 @@ impl LiquifactEscrow {
     /// - `None` — escrow is not yet settled, or is a legacy instance predating this key.
     pub fn get_settled_at(env: Env) -> Option<u64> {
         env.storage().instance().get(&DataKey::SettledAt)
+    }
+
+    /// Returns `true` when [`LiquifactEscrow::settle`] would succeed given the current
+    /// escrow status, legal-hold flag, and maturity gate.
+    ///
+    /// # Panics
+    ///
+    /// Panics with [`EscrowError::EscrowNotInitialized`] when no escrow has been initialised.
+    pub fn is_settleable(env: Env) -> bool {
+        let escrow = Self::get_escrow(env.clone());
+        if escrow.status != 1 {
+            return false;
+        }
+        if Self::legal_hold_active(&env) {
+            return false;
+        }
+        if escrow.maturity > 0 && env.ledger().timestamp() < escrow.maturity {
+            return false;
+        }
+        true
+    }
+
+    /// Read-only entrypoint returning the current settlement state without mutating storage.
+    ///
+    /// Returns a sensible default (all fields `false` / [`SettledAtTimestamp::None`]) when the
+    /// escrow is uninitialized — no panic. This allows callers to query settlement readiness in a
+    /// single O(1) invocation rather than reconstructing it from multiple getters.
+    ///
+    /// # Fields
+    /// - `is_settleable`: same as [`LiquifactEscrow::is_settleable`].
+    /// - `settled_at`: reuses [`DataKey::SettledAt`] (no recomputation).
+    /// - `is_settled`: `true` when escrow status >= 2.
+    pub fn get_settlement_state(env: Env) -> SettlementState {
+        // Sensible default when escrow is uninitialized.
+        let escrow = env
+            .storage()
+            .instance()
+            .get::<DataKey, InvoiceEscrow>(&DataKey::Escrow);
+        let Some(escrow) = escrow else {
+            return SettlementState {
+                is_settleable: false,
+                settled_at: SettledAtTimestamp::None,
+                is_settled: false,
+            };
+        };
+
+        let is_settleable = if escrow.status != 1 {
+            false
+        } else if Self::legal_hold_active(&env) {
+            false
+        } else if escrow.maturity > 0 && env.ledger().timestamp() < escrow.maturity {
+            false
+        } else {
+            true
+        };
+
+        let settled_at = match env.storage().instance().get(&DataKey::SettledAt) {
+            Some(ts) => SettledAtTimestamp::Some(ts),
+            None => SettledAtTimestamp::None,
+        };
+
+        SettlementState {
+            is_settleable,
+            settled_at,
+            is_settled: escrow.status >= 2,
+        }
     }
 
     /// Effective yield (bps) for this investor after their **first** deposit; later [`LiquifactEscrow::fund`]
