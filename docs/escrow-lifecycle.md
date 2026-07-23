@@ -306,7 +306,40 @@ this entrypoint.
 - `new_deadline` must be strictly greater than the stored deadline (`FundingDeadlineNotExtended`).
 - When `maturity > 0`, `new_deadline` must be strictly less than maturity (`FundingDeadlineBeyondMaturity`).
 
-**Events:** `FundingDeadlineExtended` carries `invoice_id`, `old_deadline`, and `new_deadline`.
+**Events:** `FundingDeadlineExtended` carries `invoice_id`, `old_deadline`, and `new_deadline`. 
+
+### General deadline setter
+
+`update_funding_deadline(new_deadline: Option<u64>)` is the general-purpose admin setter for
+the funding window, consistent with `update_funding_target()` and `update_maturity()`. It is a
+superset of `extend_funding_deadline()` and additionally supports setting a deadline where none
+was configured at `init`, moving an existing deadline backward while it stays in the future, and
+clearing the deadline entirely by passing `None`.
+
+| Status | `update_funding_deadline` result |
+|--------|----------------------------------|
+| 0 — Open | ✅ Allowed when `new_deadline` is `None`, or `Some(d)` with `d > now` and `d < maturity` (when maturity configured) |
+| 1 — Funded | ❌ `FundingDeadlineUpdateNotOpen` |
+| 2 — Settled | ❌ `FundingDeadlineUpdateNotOpen` |
+| 3 — Withdrawn | ❌ `FundingDeadlineUpdateNotOpen` |
+| 4 — Cancelled | ❌ `FundingDeadlineUpdateNotOpen` |
+
+**Validation rules** (mirroring the `funding_deadline` branch of `init`):
+
+- No prior deadline is required; `None` may be replaced with `Some(d)`.
+- When `new_deadline` is `Some(d)`, `d` must be strictly greater than the current ledger
+  timestamp (`FundingDeadlinePassed`).
+- When `maturity > 0`, `d` must be strictly less than maturity (`FundingDeadlineBeyondMaturity`).
+- Passing `None` removes the stored key, after which `is_funding_expired()` returns `false`.
+
+**Events:** `FundingDeadlineUpdated` carries `invoice_id`, `old_deadline`, and `new_deadline`.
+Either timestamp may be `None`: `old_deadline` is `None` when no deadline was previously set,
+and `new_deadline` is `None` when the admin cleared it.
+
+**Choosing between the two:** use `extend_funding_deadline()` when the intent is specifically a
+forward-only extension and the stricter guarantees (deadline must exist, must not have elapsed,
+must strictly increase) are wanted. Use `update_funding_deadline()` for general configuration.
+
 
 
 ---
