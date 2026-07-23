@@ -2927,9 +2927,9 @@ fn settlement_state_legal_hold_blocks_settleable() {
 fn settlement_state_maturity_gate() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, admin, sme) = setup(&env);
-    default_init(&client, &env, &admin, &sme);
-    // Override with a maturity-locked init.
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
     let maturity: u64 = 5_000;
     let (token, treasury) = free_addresses(&env);
     client.init(
@@ -2977,8 +2977,9 @@ fn settlement_state_maturity_gate() {
 fn settlement_state_partial_settle() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, admin, sme) = setup(&env);
-    default_init(&client, &env, &admin, &sme);
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
     let maturity: u64 = 5_000;
     let (token, treasury) = free_addresses(&env);
     client.init(
