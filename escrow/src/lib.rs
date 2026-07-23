@@ -714,6 +714,34 @@ pub(crate) fn is_pre_settlement_status(status: u32) -> bool {
     matches!(status, 0 | 1)
 }
 
+/// Predicate: `true` when maturity has been reached on the current ledger.
+///
+/// Replaces the duplicated inline comparison that previously appeared in both
+/// [`LiquifactEscrow::settleable_now`] (as the inverted guard `now < maturity`)
+/// and [`LiquifactEscrow::get_settlement_readiness`] (as the public
+/// `maturity_reached` flag). Centralising the rule guarantees that adding a
+/// new maturity gate cannot accidentally drift from the inclusive boundary
+/// (settle passes at exactly `now == maturity`).
+///
+/// # Semantics
+/// - `maturity == 0` ⇒ vacuously reached (no maturity lock).
+/// - `maturity > 0` and `now >= maturity` ⇒ reached (inclusive at exactly maturity).
+/// - `maturity > 0` and `now < maturity` ⇒ not reached (strict below).
+///
+/// # Notes
+/// Pure function: no storage access beyond the [`Env::ledger`] timestamp read
+/// required for the time comparison itself. Safe to call from any context
+/// where an `Env` and a `maturity: u64` value are in hand (entrypoint, view
+/// function, test).
+///
+/// # Security notes
+/// This is a **predicate**, not a guard — callers that need to *enforce* the
+/// precondition must wrap it in `ensure(&env, is_maturity_reached(env, m), error)`.
+#[inline(always)]
+pub(crate) fn is_maturity_reached(env: &Env, maturity: u64) -> bool {
+    maturity == 0 || env.ledger().timestamp() >= maturity
+}
+
 pub(crate) fn validate_maturity_bounds(env: &Env, maturity: u64, max_horizon: u64) {
     if maturity == 0 {
         return;
@@ -2940,7 +2968,7 @@ impl LiquifactEscrow {
         if escrow.status != 1 {
             return false;
         }
-        if escrow.maturity > 0 && env.ledger().timestamp() < escrow.maturity {
+        if !is_maturity_reached(env, escrow.maturity) {
             return false;
         }
         true
@@ -2976,7 +3004,7 @@ impl LiquifactEscrow {
     pub fn get_settlement_readiness(env: Env) -> SettlementReadiness {
         let legal_hold_active = Self::legal_hold_active(&env);
         let escrow = Self::get_escrow(env.clone());
-        let maturity_reached = escrow.maturity == 0 || env.ledger().timestamp() >= escrow.maturity;
+        let maturity_reached = is_maturity_reached(&env, escrow.maturity);
 
         // Reuse the single-source-of-truth gate so this view cannot drift from `settle`.
         let is_settleable = Self::settleable_now(&env);
