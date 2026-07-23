@@ -82,6 +82,9 @@ Key properties (invariant):
 
 - **Extension never shortens** an existing TTL.
 - **No state mutation beyond TTL extension**: `bump_ttl` only calls `extend_ttl(...)`.
+- **Batch size bounded**: `allowlisted` is capped at [`MAX_BUMP_TTL_BATCH`](../escrow/src/lib.rs) (32) to
+  limit per-call storage work. An empty vector is rejected with [`EscrowError::BumpTtlBatchEmpty`]
+  (223) and an oversized vector with [`EscrowError::BumpTtlBatchTooLarge`] (224).
 
 ### Thresholds
 

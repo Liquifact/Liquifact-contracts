@@ -42,6 +42,7 @@ Codes are grouped by domain so SDKs can map coarse categories without parsing va
 | Legal-hold clear (two-phase) | 150–152 | Delayed compliance-hold lift workflow | 150, 152 |
 | Beneficiary rotation | 160–162 | Governed SME address rotation | 160, 162 |
 | Funding deadline / balance | 163–164 | Post-deadline funding and contract balance sufficiency | 163, 164 |
+| TTL batch | 223–224 | `bump_ttl` batch bounds for permissionless TTL extension | 223, 224 |
 
 See also [`docs/escrow-legal-hold.md`](escrow-legal-hold.md),
 [`docs/ESCROW_BENEFICIARY_ROTATION.md`](ESCROW_BENEFICIARY_ROTATION.md), and
@@ -152,6 +153,8 @@ See also [`docs/escrow-legal-hold.md`](escrow-legal-hold.md),
 | 203 | `FundingDeadlineNotExtended` | `extend_funding_deadline` | `new_deadline <= current` | Pass a strictly later deadline | typed |
 | 204 | `FundingDeadlineBeyondMaturity` | `init`, `extend_funding_deadline` | deadline at or beyond maturity | Keep deadline before maturity | typed |
 | 205 | `FundingDeadlineNotSet` | `extend_funding_deadline` | no deadline configured | Set deadline at init first | typed |
+| 223 | `BumpTtlBatchEmpty` | `bump_ttl` | `allowlisted.len() == 0` | Pass at least one address | typed |
+| 224 | `BumpTtlBatchTooLarge` | `bump_ttl` | `allowlisted.len() > MAX_BUMP_TTL_BATCH` | Split into smaller batches | typed |
 
 ### Legacy panic strings (migration aid)
 
@@ -247,6 +250,8 @@ See also [`docs/escrow-legal-hold.md`](escrow-legal-hold.md),
 | 162 | `New SME address must differ from current beneficiary` |
 | 163 | `Funding deadline has passed` |
 | 164 | `Contract balance below funded amount` |
+| 223 | `bump_ttl allowlisted vector must be non-empty` |
+| 224 | `bump_ttl allowlisted vector length exceeds MAX_BUMP_TTL_BATCH` |
 
 ## Client Guidance
 
@@ -270,6 +275,7 @@ Recommended SDK category mappings:
 | 140–143 | Cancellation or refund failure |
 | 150–152 | Legal-hold clear workflow failure |
 | 160–162 | Beneficiary rotation failure |
+| 223–224 | TTL batch bounds failure |
 
 ## Security Notes
 
