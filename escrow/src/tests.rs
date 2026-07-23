@@ -63,9 +63,11 @@ mod auth_matrix;
 mod cap_validation;
 #[rustfmt::skip]
 mod coverage;
+mod coverage_boost_tests;
 mod external_calls;
 mod external_calls_mocked;
 mod funding;
+mod funding_boundary_tests;
 mod init;
 mod integration;
 mod integration_status_guards;

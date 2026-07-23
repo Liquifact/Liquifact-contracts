@@ -3294,6 +3294,10 @@ impl LiquifactEscrow {
             }
             .publish(&env);
         }
+
+        env.storage()
+            .instance()
+            .set(&DataKey::AllowlistIndex, &index);
     }
 
     pub fn is_investor_allowlisted(env: Env, investor: Address) -> bool {
@@ -5364,8 +5368,9 @@ impl LiquifactEscrow {
                 continue;
             }
 
-            // Apply identical per-investor gates as single refund().
-            Self::refund(env.clone(), investor);
+            // Apply identical per-investor gates as single refund(),
+            // but skip zero-contribution entries silently (batch mode).
+            Self::refund_impl(&env, investor, true);
         }
     }
 
