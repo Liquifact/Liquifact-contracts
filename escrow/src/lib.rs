@@ -1443,6 +1443,34 @@ pub struct RegistryRefRebound {
     pub registry: Option<Address>,
 }
 
+/// Emitted by [`LiquifactEscrow::set_registry_ref`] when the off-chain registry hint is updated
+/// or cleared. Carries the prior registry reference (if any) so indexers can track the mutation
+/// history without polling storage.
+///
+/// # Fields
+/// - `name`: hardcoded `reg_updated` symbol.
+/// - `invoice_id`: the escrow invoice identifier.
+/// - `prior_registry`: the registry hint that was stored before this call (`None` when it was unset).
+/// - `new_registry`: the new registry hint (`None` when clearing the pointer).
+///
+/// # Non-authority guarantee
+///
+/// This event does **not** signal any change in escrow authority, custody, or settlement state.
+/// The registry reference is a discoverability hint only. Rebinding does not migrate or revalidate
+/// any registry-side state. Integrators must verify registry membership by calling the registry
+/// contract directly.
+#[contractevent]
+pub struct RegistryRefUpdated {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    /// The prior registry hint stored under [`DataKey::RegistryRef`], or [`None`] when it was unset.
+    pub prior_registry: Option<Address>,
+    /// The new registry hint; [`None`] clears the stored value.
+    pub new_registry: Option<Address>,
+}
+
 /// Emitted after a successful [`LiquifactEscrow::sweep_terminal_dust`] transfer.
 ///
 /// Carries the **effective** swept amount (after balance and liability-floor capping),
@@ -2037,6 +2065,58 @@ impl LiquifactEscrow {
     /// Emits the same `RegistryRefRebound` event with `registry = None`.
     pub fn clear_registry_ref(env: Env) {
         Self::rebind_registry_ref(env, None);
+    }
+
+    /// Admin-only: set or clear the off-chain registry hint stored under [`DataKey::RegistryRef`].
+    ///
+    /// If the off-chain registry contract is redeployed or the address was set incorrectly at
+    /// [`LiquifactEscrow::init`], this entrypoint allows the admin to correct or clear the pointer
+    /// without redeploying the escrow.
+    ///
+    /// The registry reference is a **discoverability hint only** for off-chain indexers. It is
+    /// **not** an authority for this contract and must not be used on-chain as proof of registry
+    /// state. Rebinding does **not** migrate or revalidate any registry-side state — integrators
+    /// must verify registry membership by calling the registry contract directly.
+    ///
+    /// # Authorization
+    /// Requires the signature of the current [`InvoiceEscrow::admin`] (via
+    /// [`Self::load_escrow_require_admin`]), following ADR-002 guard ordering:
+    /// read escrow → admin `require_auth` → storage write.
+    ///
+    /// # Parameters
+    /// - `new_registry`: `Some(addr)` to store a new hint, or `None` to remove the key entirely.
+    ///
+    /// # Events
+    /// Emits [`RegistryRefUpdated`] carrying `invoice_id`, `prior_registry` (the value before
+    /// this call), and `new_registry`.
+    ///
+    /// # Security
+    /// - Admin-only: non-admin callers are rejected by `load_escrow_require_admin`.
+    /// - No impact on funds or status: the registry pointer is read nowhere in any entrypoint
+    ///   that moves tokens, changes escrow status, or authorizes a participant.
+    pub fn set_registry_ref(env: Env, new_registry: Option<Address>) {
+        let escrow = Self::load_escrow_require_admin(&env);
+
+        let prior_registry: Option<Address> = env.storage().instance().get(&DataKey::RegistryRef);
+
+        match &new_registry {
+            Some(_) => {
+                env.storage()
+                    .instance()
+                    .set(&DataKey::RegistryRef, &new_registry);
+            }
+            None => {
+                env.storage().instance().remove(&DataKey::RegistryRef);
+            }
+        }
+
+        RegistryRefUpdated {
+            name: Symbol::new(&env, "reg_updated"),
+            invoice_id: escrow.invoice_id,
+            prior_registry,
+            new_registry,
+        }
+        .publish(&env);
     }
 
     /// Returns the optional pending admin address waiting for [`LiquifactEscrow::accept_admin`],

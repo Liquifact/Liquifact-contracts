@@ -187,6 +187,7 @@ liquifact-contracts/
 | `get_remaining_investor_slots` | — | Read remaining unique investor capacity before reaching the cap. |
 | `get_reconciliation` | — | Read solvency position: live token balance, outstanding liability, and surplus/deficit. See [`docs/escrow-read-api.md`](docs/escrow-read-api.md). |
 
+| `set_registry_ref` | Admin | Set, update, or clear the off-chain registry hint (`DataKey::RegistryRef`). `Some(addr)` stores the hint, `None` removes it. Emits `RegistryRefUpdated` with prior and new values. |
 | `rebind_registry_ref` | Admin | Set or update the off-chain registry hint (`DataKey::RegistryRef`). Emits `RegistryRefRebound`. |
 | `clear_registry_ref` | Admin | Convenience alias for `rebind_registry_ref(None)`. Clears the registry pointer. |
 | `get_registry_ref` | — | Return the current registry hint, or `None` when unbound. |
@@ -197,8 +198,8 @@ liquifact-contracts/
 
 The escrow stores an optional `Option<Address>` under `DataKey::RegistryRef` as a
 **discoverability hint** for off-chain indexers. It is set at `init` (optional) and
-can be updated or cleared at any time by the admin via `rebind_registry_ref` /
-`clear_registry_ref`.
+can be updated or cleared at any time by the admin via `set_registry_ref` /
+`rebind_registry_ref` / `clear_registry_ref`.
 
 ### Non-authority guarantee
 
@@ -217,9 +218,10 @@ membership or as a security boundary.
 ### Mutation path
 
 Only the current escrow admin may call `rebind_registry_ref` or `clear_registry_ref`.
-Each call emits a `RegistryRefRebound` event (topic: `reg_rebind`) carrying the new
-`Option<Address>` value. Off-chain indexers should subscribe to this event to re-sync
-their cached pointer without polling.
+Each call emits a `RegistryRefUpdated` event (topic: `reg_updated`) carrying the `invoice_id`,
+`prior_registry`, and `new_registry` values, enabling indexers to track the full mutation history.
+The legacy `RegistryRefRebound` event (topic: `reg_rebind`) is also emitted by `rebind_registry_ref`.
+Off-chain indexers should subscribe to these events to re-sync their cached pointer without polling.
 
 ### Lifecycle summary
 
