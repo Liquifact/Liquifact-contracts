@@ -907,6 +907,62 @@ fn setup_withdraw_with_token<'a>(
     (client, escrow_id, token, sme)
 }
 
+/// Helper: same as `setup_withdraw_with_token`, but initializes the escrow with
+/// an explicit protocol fee and returns the treasury address for fee assertions.
+fn setup_withdraw_with_token_and_fee<'a>(
+    env: &'a Env,
+    target: i128,
+    invoice_id: &'a str,
+    protocol_fee_bps: i64,
+) -> (
+    LiquifactEscrowClient<'a>,
+    soroban_sdk::Address,
+    soroban_sdk::token::TokenClient<'a>,
+    soroban_sdk::Address,
+    soroban_sdk::Address,
+) {
+    use crate::LiquifactEscrow;
+    use soroban_sdk::token::{StellarAssetClient, TokenClient};
+
+    let sac = env.register_stellar_asset_contract_v2(soroban_sdk::Address::generate(env));
+    let token_id = sac.address();
+    let sac_admin = StellarAssetClient::new(env, &token_id);
+    let token = TokenClient::new(env, &token_id);
+
+    let escrow_id = env.register(LiquifactEscrow, ());
+    let client = LiquifactEscrowClient::new(env, &escrow_id);
+    let admin = soroban_sdk::Address::generate(env);
+    let sme = soroban_sdk::Address::generate(env);
+    let treasury = soroban_sdk::Address::generate(env);
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(env, invoice_id),
+        &sme,
+        &target,
+        &800i64,
+        &0u64,
+        &token_id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &Some(protocol_fee_bps),
+    );
+
+    let investor = soroban_sdk::Address::generate(env);
+    sac_admin.mint(&investor, &target);
+    client.fund(&investor, &target);
+
+    (client, escrow_id, token, sme, treasury)
+}
+
 /// SME receives exactly `funded_amount` tokens and the escrow contract balance
 /// drops to zero after a successful `withdraw`.
 #[test]
@@ -943,6 +999,86 @@ fn withdraw_transfers_funded_amount_to_sme() {
         client.get_escrow().status,
         3u32,
         "status must be 3 after withdraw"
+    );
+}
+
+/// `withdraw` emits a dedicated protocol-fee event when the computed treasury
+/// cut is non-zero.
+#[test]
+fn withdraw_emits_protocol_fee_event_when_fee_nonzero() {
+    use crate::ProtocolFeeWithdrawn;
+    use soroban_sdk::{symbol_short, testutils::Events};
+
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let target = 20_000_000i128;
+    let fee_bps = 250i64;
+    let expected_fee = 500_000i128;
+    let expected_net = 19_500_000i128;
+    let (client, escrow_id, token, sme, treasury) =
+        setup_withdraw_with_token_and_fee(&env, target, "WD_PF001", fee_bps);
+
+    client.withdraw();
+
+    let all_events = env.events().all().filter_by_contract(&escrow_id);
+    let escrow = client.get_escrow();
+
+    assert_eq!(token.balance(&treasury), expected_fee);
+    assert_eq!(token.balance(&sme), expected_net);
+
+    let expected_xdr = ProtocolFeeWithdrawn {
+        name: symbol_short!("prot_fee"),
+        invoice_id: escrow.invoice_id.clone(),
+        fee_amount: expected_fee,
+        fee_bps,
+        treasury,
+        sme_net_amount: expected_net,
+    }
+    .to_xdr(&env, &escrow_id);
+
+    assert!(
+        all_events.events().contains(&expected_xdr),
+        "ProtocolFeeWithdrawn must record treasury fee and SME net amount"
+    );
+}
+
+/// `withdraw` does not emit the protocol-fee event when floor rounding computes
+/// a zero fee, preserving the no-fee observable path.
+#[test]
+fn withdraw_skips_protocol_fee_event_when_computed_fee_zero() {
+    use crate::ProtocolFeeWithdrawn;
+    use soroban_sdk::{symbol_short, testutils::Events};
+
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let target = 99i128;
+    let fee_bps = 1i64;
+    let (client, escrow_id, token, sme, treasury) =
+        setup_withdraw_with_token_and_fee(&env, target, "WD_PF002", fee_bps);
+
+    client.withdraw();
+
+    let all_events = env.events().all().filter_by_contract(&escrow_id);
+    let escrow = client.get_escrow();
+
+    assert_eq!(token.balance(&treasury), 0);
+    assert_eq!(token.balance(&sme), target);
+
+    let unexpected_xdr = ProtocolFeeWithdrawn {
+        name: symbol_short!("prot_fee"),
+        invoice_id: escrow.invoice_id.clone(),
+        fee_amount: 0,
+        fee_bps,
+        treasury,
+        sme_net_amount: target,
+    }
+    .to_xdr(&env, &escrow_id);
+
+    assert!(
+        !all_events.events().contains(&unexpected_xdr),
+        "ProtocolFeeWithdrawn must be skipped when computed fee is zero"
     );
 }
 
