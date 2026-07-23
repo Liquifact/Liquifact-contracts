@@ -1399,6 +1399,44 @@ pub struct FundingCancelled {
     pub funded_amount: i128,
 }
 
+/// Emitted exactly once when the escrow transitions from **open** (status 0) to **funded**
+/// (status 1) — i.e. the first time `funded_amount >= funding_target`.
+///
+/// This event fires in two situations:
+/// 1. Inside [`LiquifactEscrow::fund`] / [`LiquifactEscrow::fund_with_commitment`] /
+///    [`LiquifactEscrow::fund_batch`] when a deposit crosses the funding threshold.
+/// 2. Inside [`LiquifactEscrow::update_funding_target`] when a target lowering promotes
+///    an already-funded principal to satisfy the new (lower) target.
+///
+/// The event is **always emitted after** the per-deposit [`EscrowFunded`] event (case 1)
+/// or the [`FundingTargetUpdated`] event (case 2) so indexers can correlate the
+/// threshold-crossing deposit or the target change with the state transition.
+///
+/// # Topics
+/// - `name`: hardcoded `fund_rchd` symbol (≤ 9 chars).
+/// - `invoice_id`: the escrow invoice identifier for efficient filtering.
+///
+/// # Data payload
+/// - `funded_amount`: total principal credited at the moment of transition.
+/// - `funding_target`: the effective target that was satisfied.
+/// - `ledger_timestamp`: `env.ledger().timestamp()` at the moment of promotion.
+/// - `ledger_sequence`: `env.ledger().sequence()` at the moment of promotion.
+#[contractevent]
+pub struct FundingReached {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    /// Total principal credited when the invoice crossed the funding threshold.
+    pub funded_amount: i128,
+    /// The funding target that was satisfied.
+    pub funding_target: i128,
+    /// Ledger timestamp at the moment of the 0→1 status transition.
+    pub ledger_timestamp: u64,
+    /// Ledger sequence number at the moment of the 0→1 status transition.
+    pub ledger_sequence: u32,
+}
+
 #[contractevent]
 pub struct InvestorRefundedEvt {
     #[topic]
@@ -3471,7 +3509,7 @@ impl LiquifactEscrow {
         // If lowering the target causes it to equal (or fall to) the already-funded
         // amount, promote the escrow to funded and capture the immutable close snapshot
         // exactly once — mirroring the promotion logic in `fund`/`fund_with_commitment`.
-        if escrow.funded_amount > 0
+        let promoted = if escrow.funded_amount > 0
             && escrow.funded_amount >= new_target
             && !env.storage().instance().has(&DataKey::FundingCloseSnapshot)
         {
@@ -3485,7 +3523,10 @@ impl LiquifactEscrow {
                     closed_at_ledger_sequence: env.ledger().sequence(),
                 },
             );
-        }
+            true
+        } else {
+            false
+        };
 
         env.storage().instance().set(&DataKey::Escrow, &escrow);
 
@@ -3496,6 +3537,20 @@ impl LiquifactEscrow {
             new_target,
         }
         .publish(&env);
+
+        // Emit the dedicated funding-state-change event when target lowering causes the
+        // 0→1 status promotion, mirroring the emission in `fund_impl`.
+        if promoted {
+            FundingReached {
+                name: symbol_short!("fund_rchd"),
+                invoice_id: escrow.invoice_id.clone(),
+                funded_amount: escrow.funded_amount,
+                funding_target: new_target,
+                ledger_timestamp: env.ledger().timestamp(),
+                ledger_sequence: env.ledger().sequence(),
+            }
+            .publish(&env);
+        }
 
         escrow
     }
@@ -4194,6 +4249,23 @@ impl LiquifactEscrow {
             tier_lock_secs,
         }
         .publish(&env);
+
+        // Emit a dedicated funding-state-change event exactly once when the escrow
+        // transitions from open (status 0) to funded (status 1).  The `EscrowFunded`
+        // event above is a per-deposit record; this event is a per-state-change record,
+        // allowing indexers to react to the threshold crossing without inspecting the
+        // `status` field of every deposit event.
+        if escrow.status == 1 {
+            FundingReached {
+                name: symbol_short!("fund_rchd"),
+                invoice_id: escrow.invoice_id.clone(),
+                funded_amount: escrow.funded_amount,
+                funding_target: escrow.funding_target,
+                ledger_timestamp: env.ledger().timestamp(),
+                ledger_sequence: env.ledger().sequence(),
+            }
+            .publish(&env);
+        }
 
         escrow
     }

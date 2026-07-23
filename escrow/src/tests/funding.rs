@@ -7607,3 +7607,769 @@ fn test_unfund_event_emitted() {
 
     assert_eq!(*last, expected.to_xdr(&env, &contract_id));
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FundingReached event tests (#692)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Helper: build a `FundingReached` expected XDR for comparison.
+///
+/// Reduces boilerplate in the tests below; every call site still names the
+/// fields explicitly so the assertion is self-documenting.
+fn expected_funding_reached_xdr(
+    env: &Env,
+    contract_id: &Address,
+    invoice_id: soroban_sdk::Symbol,
+    funded_amount: i128,
+    funding_target: i128,
+    ledger_timestamp: u64,
+    ledger_sequence: u32,
+) -> soroban_sdk::Val {
+    use crate::FundingReached;
+    FundingReached {
+        name: symbol_short!("fund_rchd"),
+        invoice_id,
+        funded_amount,
+        funding_target,
+        ledger_timestamp,
+        ledger_sequence,
+    }
+    .to_xdr(env, contract_id)
+}
+
+/// Verify that a single `fund` call which exactly hits the target emits both
+/// `EscrowFunded` (per-deposit) AND `FundingReached` (state-change), in that
+/// order, with correct field values.
+#[test]
+fn test_funding_reached_event_emitted_on_threshold_crossing_via_fund() {
+    use soroban_sdk::testutils::{Events as _, Ledger as _};
+
+    let env = Env::default();
+    env.mock_all_auths();
+
+    env.ledger().with_mut(|l| {
+        l.timestamp = 1_000;
+        l.sequence_number = 50;
+    });
+
+    let (contract_id, client) = deploy_with_id(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
+    let target = 10_000i128;
+    let invoice_id = symbol_short!("FR001");
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "FR001"),
+        &sme,
+        &target,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    let investor = Address::generate(&env);
+
+    // Fund exactly the target in one call.
+    client.fund(&investor, &target);
+
+    let all_events = env.events().all();
+    let events_list = all_events.events();
+
+    // There must be at least 2 events: EscrowFunded + FundingReached.
+    assert!(
+        events_list.len() >= 2,
+        "expected at least EscrowFunded and FundingReached events, got {}",
+        events_list.len()
+    );
+
+    // The second-to-last event is EscrowFunded; the last is FundingReached.
+    let funded_event = &events_list[events_list.len() - 2];
+    let reached_event = events_list.last().unwrap();
+
+    // Verify EscrowFunded is correct.
+    let expected_funded = EscrowFunded {
+        name: symbol_short!("funded"),
+        invoice_id: invoice_id.clone(),
+        investor: investor.clone(),
+        amount: target,
+        funded_amount: target,
+        status: 1,
+        investor_effective_yield_bps: 800,
+        tier_lock_secs: 0,
+    }
+    .to_xdr(&env, &contract_id);
+    assert_eq!(*funded_event, expected_funded, "EscrowFunded event mismatch");
+
+    // Verify FundingReached has the correct payload.
+    let expected_reached = expected_funding_reached_xdr(
+        &env,
+        &contract_id,
+        invoice_id.clone(),
+        target,
+        target,
+        1_000u64,
+        50u32,
+    );
+    assert_eq!(
+        *reached_event, expected_reached,
+        "FundingReached event mismatch"
+    );
+}
+
+/// Verify that `fund` calls which do NOT cross the threshold (funded_amount < target)
+/// do NOT emit a `FundingReached` event.
+#[test]
+fn test_funding_reached_not_emitted_when_threshold_not_crossed() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, client) = deploy_with_id(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
+    let target = 10_000i128;
+    let invoice_id = symbol_short!("FR002");
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "FR002"),
+        &sme,
+        &target,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    let investor = Address::generate(&env);
+
+    // Fund only half the target — status stays 0, no FundingReached.
+    client.fund(&investor, &(target / 2));
+
+    let all_events = env.events().all();
+    let events_list = all_events.events();
+
+    // Only one event: the per-deposit EscrowFunded.
+    assert_eq!(
+        events_list.len(),
+        1,
+        "expected only EscrowFunded, not FundingReached when threshold not crossed"
+    );
+
+    let expected_funded = EscrowFunded {
+        name: symbol_short!("funded"),
+        invoice_id: invoice_id.clone(),
+        investor: investor.clone(),
+        amount: target / 2,
+        funded_amount: target / 2,
+        status: 0,
+        investor_effective_yield_bps: 800,
+        tier_lock_secs: 0,
+    }
+    .to_xdr(&env, &contract_id);
+    assert_eq!(events_list[0], expected_funded);
+}
+
+/// Verify that the second of two deposits triggers `FundingReached` exactly once —
+/// only the deposit that crosses the threshold.
+#[test]
+fn test_funding_reached_emitted_only_on_crossing_deposit() {
+    use soroban_sdk::testutils::{Events as _, Ledger as _};
+
+    let env = Env::default();
+    env.mock_all_auths();
+
+    env.ledger().with_mut(|l| {
+        l.timestamp = 2_000;
+        l.sequence_number = 75;
+    });
+
+    let (contract_id, client) = deploy_with_id(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
+    let target = 10_000i128;
+    let invoice_id = symbol_short!("FR003");
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "FR003"),
+        &sme,
+        &target,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    let inv1 = Address::generate(&env);
+    let inv2 = Address::generate(&env);
+
+    // First deposit: partial, no FundingReached.
+    // events().all() returns events from the last invocation only.
+    client.fund(&inv1, &6_000i128);
+    let first_events = env.events().all();
+    assert_eq!(
+        first_events.events().len(),
+        1,
+        "first deposit must emit only EscrowFunded"
+    );
+
+    // Second deposit: crosses the threshold, FundingReached fires.
+    // events().all() again returns only THIS call's events: EscrowFunded + FundingReached.
+    client.fund(&inv2, &4_000i128);
+    let all_events = env.events().all();
+    let events_list = all_events.events();
+
+    // 2 events from the crossing call: EscrowFunded + FundingReached.
+    assert_eq!(
+        events_list.len(),
+        2,
+        "crossing deposit must emit EscrowFunded + FundingReached (2 events from this call)"
+    );
+
+    // Second event (index 1) is FundingReached.
+    let expected_reached = expected_funding_reached_xdr(
+        &env,
+        &contract_id,
+        invoice_id.clone(),
+        10_000i128, // funded_amount at crossing
+        target,
+        2_000u64,
+        75u32,
+    );
+    assert_eq!(
+        events_list[1], expected_reached,
+        "FundingReached must be the second event of the crossing deposit call"
+    );
+}
+
+/// Verify that `fund_with_commitment` crossing the funding threshold emits both
+/// `EscrowFunded` and `FundingReached`.
+#[test]
+fn test_funding_reached_emitted_via_fund_with_commitment() {
+    use soroban_sdk::testutils::{Events as _, Ledger as _};
+
+    let env = Env::default();
+    env.mock_all_auths();
+
+    env.ledger().with_mut(|l| {
+        l.timestamp = 5_000;
+        l.sequence_number = 200;
+    });
+
+    let (contract_id, client) = deploy_with_id(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
+    let target = 10_000i128;
+    let invoice_id = symbol_short!("FR004");
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "FR004"),
+        &sme,
+        &target,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    let investor = Address::generate(&env);
+
+    // fund_with_commitment hitting exactly the target; lock 0 → base yield.
+    client.fund_with_commitment(&investor, &target, &0u64);
+
+    let all_events = env.events().all();
+    let events_list = all_events.events();
+
+    // 2 events: EscrowFunded + FundingReached.
+    assert_eq!(
+        events_list.len(),
+        2,
+        "expected EscrowFunded + FundingReached from fund_with_commitment crossing"
+    );
+
+    let expected_reached = expected_funding_reached_xdr(
+        &env,
+        &contract_id,
+        invoice_id.clone(),
+        target,
+        target,
+        5_000u64,
+        200u32,
+    );
+    assert_eq!(
+        events_list[1], expected_reached,
+        "FundingReached must follow EscrowFunded from fund_with_commitment"
+    );
+}
+
+/// Verify that `fund_batch` emits one `EscrowFunded` per entry and exactly one
+/// `FundingReached` when the threshold is crossed during the batch.
+#[test]
+fn test_funding_reached_emitted_via_fund_batch() {
+    use soroban_sdk::testutils::{Events as _, Ledger as _};
+
+    let env = Env::default();
+    env.mock_all_auths();
+
+    env.ledger().with_mut(|l| {
+        l.timestamp = 3_000;
+        l.sequence_number = 120;
+    });
+
+    let (contract_id, client) = deploy_with_id(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
+    let target = 10_000i128;
+    let invoice_id = symbol_short!("FR005");
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "FR005"),
+        &sme,
+        &target,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    let inv1 = Address::generate(&env);
+    let inv2 = Address::generate(&env);
+    let inv3 = Address::generate(&env);
+
+    // Build a batch: inv1=4000, inv2=4000, inv3=2000 → crosses at inv3.
+    let mut entries = SorobanVec::new(&env);
+    entries.push_back((inv1.clone(), 4_000i128));
+    entries.push_back((inv2.clone(), 4_000i128));
+    entries.push_back((inv3.clone(), 2_000i128));
+
+    client.fund_batch(&entries);
+
+    let all_events = env.events().all();
+    let events_list = all_events.events();
+
+    // 3 EscrowFunded events + 1 FundingReached = 4 total.
+    assert_eq!(
+        events_list.len(),
+        4,
+        "expected 3×EscrowFunded + 1×FundingReached from fund_batch"
+    );
+
+    // Last event is FundingReached.
+    let expected_reached = expected_funding_reached_xdr(
+        &env,
+        &contract_id,
+        invoice_id.clone(),
+        10_000i128,
+        target,
+        3_000u64,
+        120u32,
+    );
+    assert_eq!(
+        *events_list.last().unwrap(),
+        expected_reached,
+        "FundingReached must be last event in fund_batch sequence"
+    );
+}
+
+/// Verify that `update_funding_target` which promotes an already-funded-amount
+/// escrow to status 1 emits both `FundingTargetUpdated` AND `FundingReached`.
+#[test]
+fn test_funding_reached_emitted_via_update_funding_target_promotion() {
+    use crate::FundingReached;
+    use soroban_sdk::testutils::{Events as _, Ledger as _};
+
+    let env = Env::default();
+    env.mock_all_auths();
+
+    env.ledger().with_mut(|l| {
+        l.timestamp = 8_000;
+        l.sequence_number = 300;
+    });
+
+    let (contract_id, client) = deploy_with_id(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
+    let original_target = 10_000i128;
+    let invoice_id = symbol_short!("FR006");
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "FR006"),
+        &sme,
+        &original_target,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    let investor = Address::generate(&env);
+
+    // Fund partially — escrow remains open.
+    client.fund(&investor, &7_000i128);
+    assert_eq!(client.get_escrow().status, 0);
+
+    // Lower target to match funded_amount → triggers promotion to status 1.
+    client.update_funding_target(&7_000i128);
+
+    // Capture all events (includes init-fund events too).
+    let all_events = env.events().all();
+    let events_list = all_events.events();
+
+    // The last event must be FundingReached (FundingTargetUpdated fires before it).
+    let last = events_list
+        .last()
+        .expect("expected at least one event after update_funding_target");
+
+    let expected_reached = FundingReached {
+        name: symbol_short!("fund_rchd"),
+        invoice_id: invoice_id.clone(),
+        funded_amount: 7_000i128,
+        funding_target: 7_000i128,
+        ledger_timestamp: 8_000u64,
+        ledger_sequence: 300u32,
+    }
+    .to_xdr(&env, &contract_id);
+
+    assert_eq!(
+        *last, expected_reached,
+        "FundingReached must be the last event after update_funding_target promotion"
+    );
+
+    // Also verify the second-to-last event is FundingTargetUpdated.
+    use crate::FundingTargetUpdated;
+    let second_to_last = &events_list[events_list.len() - 2];
+    let expected_target_updated = FundingTargetUpdated {
+        name: symbol_short!("fund_tgt"),
+        invoice_id: invoice_id.clone(),
+        old_target: original_target,
+        new_target: 7_000i128,
+    }
+    .to_xdr(&env, &contract_id);
+    assert_eq!(
+        *second_to_last, expected_target_updated,
+        "FundingTargetUpdated must precede FundingReached"
+    );
+}
+
+/// Verify that `update_funding_target` which does NOT cause a promotion (funded_amount < new_target)
+/// does NOT emit `FundingReached`.
+#[test]
+fn test_funding_reached_not_emitted_by_update_funding_target_no_promotion() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, client) = deploy_with_id(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
+    let invoice_id = symbol_short!("FR007");
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "FR007"),
+        &sme,
+        &10_000i128,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    let investor = Address::generate(&env);
+    client.fund(&investor, &5_000i128);
+
+    // Raise target to 20_000 — funded_amount (5_000) < new_target (20_000), no promotion.
+    client.update_funding_target(&20_000i128);
+
+    let all_events = env.events().all();
+    let events_list = all_events.events();
+
+    // Last event should be FundingTargetUpdated, not FundingReached.
+    let last = events_list.last().expect("expected at least one event");
+    use crate::FundingTargetUpdated;
+    let expected_tgt = FundingTargetUpdated {
+        name: symbol_short!("fund_tgt"),
+        invoice_id,
+        old_target: 10_000i128,
+        new_target: 20_000i128,
+    }
+    .to_xdr(&env, &contract_id);
+    assert_eq!(
+        *last, expected_tgt,
+        "last event must be FundingTargetUpdated (not FundingReached) when no promotion"
+    );
+}
+
+/// Verify the `fund_rchd` topic is distinct from all other known event topics, ensuring
+/// no topic collision with the existing event catalog.
+#[test]
+fn test_funding_reached_topic_no_collision() {
+    // All existing event name symbols from the catalog (docs/EVENT_SCHEMA.md).
+    let existing_topics: &[&str] = &[
+        "adm_acc",
+        "adm_can",
+        "adm_prop",
+        "admin",
+        "al_batch",
+        "al_ena",
+        "al_set",
+        "att_app",
+        "att_bind",
+        "att_rev",
+        "att_unrev",
+        "ben_rot",
+        "coll_rec",
+        "coll_clr",
+        "depr_xfer",
+        "dust_sw",
+        "escrow_ii",
+        "escrow_sd",
+        "fund_can",
+        "fund_ext",
+        "fund_tgt",
+        "funded",
+        "inv_cap",
+        "inv_claim",
+        "lh_cancel",
+        "lh_req",
+        "legal_h",
+        "legalhld",
+        "maturity",
+        "mtry_max",
+        "part_set",
+        "paused",
+        "raise_cap",
+        "floor_lo",
+        "reg_rebind",
+        "refunded",
+        "sme_wd",
+        "unfunded",
+        "upgrade",
+    ];
+
+    let new_topic = "fund_rchd";
+    assert!(
+        new_topic.len() <= 9,
+        "fund_rchd must be <= 9 chars (Soroban symbol_short! limit); len={}",
+        new_topic.len()
+    );
+
+    for &existing in existing_topics {
+        assert_ne!(
+            new_topic, existing,
+            "fund_rchd collides with existing topic '{existing}'"
+        );
+    }
+}
+
+/// Verify that `FundingReached` carries the over-funded amount correctly when a deposit
+/// pushes `funded_amount` above the target.
+#[test]
+fn test_funding_reached_payload_with_overfunding() {
+    use soroban_sdk::testutils::{Events as _, Ledger as _};
+
+    let env = Env::default();
+    env.mock_all_auths();
+
+    env.ledger().with_mut(|l| {
+        l.timestamp = 4_000;
+        l.sequence_number = 160;
+    });
+
+    let (contract_id, client) = deploy_with_id(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
+    let target = 10_000i128;
+    let invoice_id = symbol_short!("FR008");
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "FR008"),
+        &sme,
+        &target,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    let investor = Address::generate(&env);
+
+    // Fund 12_000 — 2_000 above target (over-funded).
+    let over_amount = 12_000i128;
+    client.fund(&investor, &over_amount);
+
+    let all_events = env.events().all();
+    let events_list = all_events.events();
+
+    // 2 events: EscrowFunded (with funded_amount=12_000, status=1) + FundingReached.
+    assert_eq!(events_list.len(), 2);
+
+    // FundingReached carries the actual funded_amount (12_000), not just the target.
+    let expected_reached = expected_funding_reached_xdr(
+        &env,
+        &contract_id,
+        invoice_id.clone(),
+        over_amount, // funded_amount = actual credited amount
+        target,      // funding_target = original target
+        4_000u64,
+        160u32,
+    );
+    assert_eq!(
+        events_list[1], expected_reached,
+        "FundingReached funded_amount must reflect the actual over-funded total"
+    );
+}
+
+/// Verify that after the escrow is already funded (status=1), further `fund` calls
+/// do NOT re-emit `FundingReached` (idempotency / single-fire guarantee).
+/// Note: additional principal can be added while status=1 is not possible since
+/// `require_funding_open` rejects it, so this test verifies the guard fires.
+#[test]
+fn test_funding_reached_not_emitted_after_already_funded() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
+    let target = 10_000i128;
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "FR009"),
+        &sme,
+        &target,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    let investor = Address::generate(&env);
+
+    // Fund to exactly the target → status=1.
+    client.fund(&investor, &target);
+    assert_eq!(client.get_escrow().status, 1);
+
+    // Any further fund attempt must fail with EscrowNotOpenForFunding (status guard).
+    let investor2 = Address::generate(&env);
+    let result = client.try_fund(&investor2, &1_000i128);
+    assert_contract_error(result, EscrowError::EscrowNotOpenForFunding);
+}
