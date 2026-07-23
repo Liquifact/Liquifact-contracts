@@ -60,6 +60,7 @@ re-implementing storage reads to guarantee identical semantics.
 - [get_attestation_append_log](#get_attestation_append_log--vecbytesn32)
 - [get_attestation_log_stats](#get_attestation_log_stats--u32-u32)
 - [is_attestation_revoked](#is_attestation_revokedindex-u32--bool)
+- [get_revoked_attestation_indices](#get_revoked_attestation_indices--vecu32)
 
 **Collateral Metadata:**
 - [get_sme_collateral_commitment](#get_sme_collateral_commitment--optionsmecollateralcommitment)
@@ -243,17 +244,36 @@ Returns the pending-admin proposal's remaining validity window computed against 
 
 ## `get_remaining_funding_capacity() → i128`
 
-**Storage key:** `DataKey::Escrow`
+**Storage key:** `DataKey::Escrow`  
+**Signature:** `pub fn get_remaining_funding_capacity(env: Env) -> i128`
 
-Returns the remaining funding capacity before the funding target is reached.
+Returns `max(0, funding_target − funded_amount)` — the headroom remaining before the funding
+target is reached. Saturating arithmetic ensures the result is **always non-negative**, even
+when the escrow has been over-funded past the target.
 
-- **Calculation**: `funding_target.saturating_sub(funded_amount)` clamped at `0` (via `.max(0)`) so it never goes negative when over-funded.
-- **Informational only**: This view is for frontend guidance. The `fund` method may still accept deposits that over-fund past the target while the escrow status is `0` (Open).
-- **No authorization**: Pure read; no auth or signature required.
-- **Complexity**:
-  - Time Complexity: $O(1)$ read from storage.
-  - Space Complexity: $O(1)$ in-memory calculation.
-- Panics with `"Escrow not initialized"` before `init`.
+**Informational only:** Front-ends should use this view to size deposit suggestions. The `fund`
+entrypoint does **not** use this value as a gate — it accepts deposits that push `funded_amount`
+past `funding_target` while `status == 0` (open). A return value of `0` means the target has
+already been met or exceeded; it does not mean further deposits are rejected.
+
+**Requires initialization:** Yes — emits [`EscrowError::EscrowNotInitialized`] (code 20) if
+called before `init`.
+
+**No authorization required.** Pure read; no state mutation.
+
+| Escrow state | Return value |
+|---|---|
+| No deposits yet | `funding_target` |
+| Partially funded | `funding_target − funded_amount` |
+| Exactly at target | `0` |
+| Over-funded | `0` (clamped, never negative) |
+
+**Complexity:** O(1) — single instance-storage read.
+
+**Security notes:**
+- The `.max(0)` clamp is redundant given `saturating_sub` but is retained explicitly for
+  auditor clarity.
+- Reads `DataKey::Escrow` directly; no side effects.
 
 ---
 
@@ -799,3 +819,50 @@ Returns the yield-tier ladder configured at `init`, or an empty `Vec` when no ti
 |-------|------|-------------|
 | `min_lock_secs` | `u64` | Minimum `committed_lock_secs` an investor must pass to qualify for this tier |
 | `yield_bps` | `i64` | Effective annualized yield in basis points for qualifying investors |
+
+---
+
+## `get_revoked_attestation_indices() → Vec<u32>`
+
+**Storage keys:** `DataKey::AttestationAppendLog`, `DataKey::AttestationRevoked(u32)`  
+**Signature:** `pub fn get_revoked_attestation_indices(env: Env) -> Vec<u32>`
+
+Returns the ordered set of indices in the attestation append-log that have been revoked.
+Scans `0..get_attestation_append_log().len()` and collects every index `i` where
+`DataKey::AttestationRevoked(i)` is set. The result is ascending (0-based) and its length
+is bounded by the log length, which is itself capped at `MAX_ATTESTATION_APPEND_ENTRIES` (32).
+
+**Requires initialization:** No  
+**No authorization required.** Pure read; no state mutation.
+
+**Relation to other attestation views:**
+
+| View | What it returns |
+|---|---|
+| `get_attestation_append_log()` | All digests (revoked and active) in insertion order |
+| `is_attestation_revoked(index)` | Revocation flag for a single index |
+| `get_revoked_attestation_indices()` | Ordered set of all revoked indices |
+
+**Alignment guarantee:** index `i` in the returned `Vec` corresponds to
+`get_attestation_append_log().get(i)` — the same ordering. Integrators can join
+the two views by position without secondary key lookups.
+
+**Legacy instances:** instances where no revocations have ever been recorded return an
+empty `Vec`. This is backward-compatible under the additive-key policy (ADR-007).
+
+| Log / revocation state | Return value |
+|---|---|
+| Empty log | `[]` |
+| Log with no revocations | `[]` |
+| Some indices revoked | Ascending list of revoked indices, e.g. `[0, 2, 4]` |
+| All indices revoked | `[0, 1, 2, …, log.len()-1]` |
+| After `unrevoke_attestation_digest(i)` | Index `i` no longer appears |
+
+**Complexity:** O(N) where N = `get_attestation_append_log().len()` ≤ 32. The scan and
+storage reads are bounded by `MAX_ATTESTATION_APPEND_ENTRIES`.
+
+**Security notes:**
+- Pure read — no authorization required, no state mutation.
+- Bounded scan — loops at most 32 times regardless of call context.
+- Reads `DataKey::AttestationAppendLog` once for log length, then probes
+  `DataKey::AttestationRevoked(i)` per slot; no writes occur.

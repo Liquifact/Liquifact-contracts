@@ -159,6 +159,29 @@ fat-finger revocation before indexers process the erroneous tombstone.
 storage mutation. This means range and state errors are surfaced even to unauthenticated
 callers, consistent with the existing revoke path.
 
+### `get_revoked_attestation_indices() → Vec<u32>`
+
+| Property | Value |
+|---|---|
+| Auth | None — pure read |
+| Storage keys | `DataKey::AttestationAppendLog`, `DataKey::AttestationRevoked(u32)` |
+| Mutation | None |
+| Bounded by | `MAX_ATTESTATION_APPEND_ENTRIES` (32) iterations |
+
+Returns the ordered set of indices in the append-log that have been revoked. Scans
+`0..get_attestation_append_log().len()` and collects every index `i` where
+`DataKey::AttestationRevoked(i)` is set. The result is ascending (0-based).
+
+**Use case:** auditors and indexers no longer need to probe all 32 slots individually via
+`is_attestation_revoked(i)` — this view returns the complete revoked-index set in a single
+host invocation.
+
+**Alignment:** index `i` in the result corresponds to `get_attestation_append_log().get(i)` —
+indices share the same 0-based ordering.
+
+**Legacy instances:** instances where no revocations have been recorded return an empty `Vec`
+(additive-key backward compatibility, ADR-007).
+
 The append log entry and its digest are unaffected. After a successful unrevoke,
 `is_attestation_revoked(index)` returns `false` and the entry is once again treated as
 active by indexers.
@@ -472,3 +495,31 @@ Attestation behavior is covered in [`escrow/src/tests/attestations.rs`](../escro
 | `test_batch_revoke_preserves_log_entries` | Append log contents unchanged after batch revocation |
 | `test_batch_revoke_emits_events` | Exactly one `att_rev` event per revoked index |
 | `test_batch_revoke_atomic_rollback` | Mid-batch failure rolls back all prior revocations |
+
+### Revoked-index enumeration (`get_revoked_attestation_indices`)
+
+| Test | What it proves |
+|---|---|
+| `test_get_revoked_attestation_indices_empty_log` | Empty log returns empty Vec |
+| `test_get_revoked_attestation_indices_none_revoked` | Non-empty log with no revocations returns empty Vec |
+| `test_get_revoked_attestation_indices_single_revoked` | Single revocation returns Vec with exactly that index |
+| `test_get_revoked_attestation_indices_some_revoked_ascending_order` | Partial revocations returned in ascending order |
+| `test_get_revoked_attestation_indices_all_revoked` | Full revocation: result length equals log length |
+| `test_get_revoked_attestation_indices_excludes_unrevoked` | Unrevoked index no longer appears after `unrevoke_attestation_digest` |
+| `test_get_revoked_attestation_indices_align_with_log_order` | Index `i` in result aligns with `get_attestation_append_log().get(i)` |
+| `test_get_revoked_attestation_indices_bounded_by_max_entries` | Full log with alternating revocations — result bounded and correct |
+| `test_get_revoked_attestation_indices_no_auth_required` | Pure read — succeeds with no auth mocks |
+
+### Revoked-index enumeration (`get_revoked_attestation_indices`)
+
+| Test | What it proves |
+|---|---|
+| `test_get_revoked_attestation_indices_empty_log` | Empty log returns empty Vec |
+| `test_get_revoked_attestation_indices_none_revoked` | Non-empty log with no revocations returns empty Vec |
+| `test_get_revoked_attestation_indices_single_revoked` | Single revocation returns Vec with exactly that index |
+| `test_get_revoked_attestation_indices_some_revoked_ascending_order` | Partial revocations returned in ascending order |
+| `test_get_revoked_attestation_indices_all_revoked` | Full revocation: result length equals log length |
+| `test_get_revoked_attestation_indices_excludes_unrevoked` | Unrevoked index no longer appears after `unrevoke_attestation_digest` |
+| `test_get_revoked_attestation_indices_align_with_log_order` | Index `i` in result aligns with `get_attestation_append_log().get(i)` |
+| `test_get_revoked_attestation_indices_bounded_by_max_entries` | Full log with alternating revocations — result bounded and correct |
+| `test_get_revoked_attestation_indices_no_auth_required` | Pure read — succeeds with no auth mocks |
