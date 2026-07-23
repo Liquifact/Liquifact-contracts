@@ -42,14 +42,6 @@ jobs:
         run: cargo build
 
       - name: Run tests
-        # Pre-existing duplicate test fn definitions in escrow/src/tests/funding.rs (9 functions
-        # defined twice as a side-effect of merge commit 4fb7240) make cargo test fail to compile
-        # the test target. Soft-fail to keep signal in the log without hard-failing CI; a
-        # follow-up PR should deduplicate the test file (likely deleting the first occurrence of
-        # each pair so the post-merge copy remains).
-        # Matches the existing soft-fail-on-latent-drift pattern used by Check formatting,
-        # Clippy, Workspace Clippy, and Coverage above/below.
-        continue-on-error: true
         run: cargo test
 
       - name: Install cargo-llvm-cov
