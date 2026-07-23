@@ -121,7 +121,7 @@ change without notice. Stable numeric codes allow SDK consumers to branch determ
 | Atomicity | Full batch rolls back on any per-index failure |
 | Duplicate policy | **Not pre-deduplicated** — second occurrence of the same index fails with `AttestationAlreadyRevoked` (53) |
 | Storage key | `DataKey::AttestationRevoked(u32)` per index |
-| Event | One `AttestationDigestRevoked { invoice_id, index }` per newly revoked index |
+| Event | One `AttestationDigestBatchRevoked { invoice_id, index }` per newly revoked index (topic `att_revb` — distinct from single-revoke `att_rev`) |
 
 Atomically revoke multiple attestation-digest indices in a single transaction. Each index
 undergoes the same validation as the single-index `revoke_attestation_digest`:
@@ -134,7 +134,7 @@ undergoes the same validation as the single-index `revoke_attestation_digest`:
 | index already revoked | 53 | `AttestationAlreadyRevoked` |
 
 If **any** per-index validation fails, the entire batch is rolled back — no partial
-revocation occurs. Off-chain indexers can safely consume the `att_rev` event stream
+revocation occurs. Off-chain indexers can safely consume the `att_revb` event stream
 knowing that a successful batch emitted exactly one event per intended index.
 
 ```typescript
@@ -470,5 +470,6 @@ Attestation behavior is covered in [`escrow/src/tests/attestations.rs`](../escro
 | `test_batch_revoke_duplicate_index_panics` | Duplicate index in batch: second occurrence hits `AttestationAlreadyRevoked` (53), entire batch rolls back |
 | `test_batch_revoke_non_admin_panics` | Non-admin batch revoke is rejected |
 | `test_batch_revoke_preserves_log_entries` | Append log contents unchanged after batch revocation |
-| `test_batch_revoke_emits_events` | Exactly one `att_rev` event per revoked index |
+| `test_batch_revoke_emits_events` | Exactly one `att_revb` event per revoked index |
 | `test_batch_revoke_atomic_rollback` | Mid-batch failure rolls back all prior revocations |
+| `test_batch_revoke_emits_distinct_topic` | Single revocation emits `att_rev`; batch revocation emits `att_revb` — topics are distinguishable |

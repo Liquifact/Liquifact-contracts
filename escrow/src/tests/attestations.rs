@@ -10,7 +10,7 @@
 //! off-chain verifiers can confirm the on-chain anchor matches their document set.
 
 use super::*;
-use soroban_sdk::{symbol_short, testutils::Events, BytesN, Error, InvokeError};
+use soroban_sdk::{symbol_short, testutils::Events, vec, BytesN, Error, InvokeError};
 use std::fmt::Debug;
 
 fn assert_contract_error<T, E>(
@@ -780,4 +780,273 @@ fn test_revoked_digests_view_caps_limit() {
     }
     let page = client.get_revoked_attestation_digests(&0, &100);
     assert_eq!(page.len(), crate::MAX_ATTESTATION_READ_PAGE);
+}
+
+// ---------------------------------------------------------------------------
+// revoke_attestation_digests — batch revocation
+// ---------------------------------------------------------------------------
+
+/// Happy path: revoke indices 0, 2, and 4 atomically.
+#[test]
+fn test_batch_revoke_happy_path() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    for i in 0u8..5 {
+        client.append_attestation_digest(&digest(&env, i));
+    }
+    client.revoke_attestation_digests(&vec![&env, 0u32, 2, 4]);
+    assert!(client.is_attestation_revoked(&0));
+    assert!(!client.is_attestation_revoked(&1));
+    assert!(client.is_attestation_revoked(&2));
+    assert!(!client.is_attestation_revoked(&3));
+    assert!(client.is_attestation_revoked(&4));
+}
+
+/// All entries can be revoked in a single batch.
+#[test]
+fn test_batch_revoke_all_entries() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    for i in 0u8..4 {
+        client.append_attestation_digest(&digest(&env, i));
+    }
+    client.revoke_attestation_digests(&vec![&env, 0u32, 1, 2, 3]);
+    for i in 0u32..4 {
+        assert!(client.is_attestation_revoked(&i));
+    }
+}
+
+/// Empty batch returns `AttestationBatchEmpty`.
+#[test]
+fn test_batch_revoke_empty_panics() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    client.append_attestation_digest(&digest(&env, 0x01));
+    assert_contract_error(
+        client.try_revoke_attestation_digests(&vec![&env]),
+        EscrowError::AttestationBatchEmpty,
+    );
+}
+
+/// Batch exceeding `MAX_ATTESTATION_REVOKE_BATCH` returns `AttestationBatchTooLarge`.
+#[test]
+fn test_batch_revoke_oversized_panics() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    // Append 3 entries (enough to have valid indices for the batch)
+    for i in 0u8..3 {
+        client.append_attestation_digest(&digest(&env, i));
+    }
+    // Build a batch with 33 indices — exceeds MAX_ATTESTATION_REVOKE_BATCH (32)
+    let mut indices = vec![&env];
+    for i in 1u32..34 {
+        indices.push_back(i);
+    }
+    assert_contract_error(
+        client.try_revoke_attestation_digests(&indices),
+        EscrowError::AttestationBatchTooLarge,
+    );
+}
+
+/// Batch at boundary (`MAX_ATTESTATION_REVOKE_BATCH`) succeeds.
+#[test]
+fn test_batch_revoke_max_size_succeeds() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    for i in 0u8..crate::MAX_ATTESTATION_REVOKE_BATCH as u8 {
+        client.append_attestation_digest(&digest(&env, i));
+    }
+    let mut indices = vec![&env, 0u32];
+    for i in 1u32..crate::MAX_ATTESTATION_REVOKE_BATCH {
+        indices.push_back(i);
+    }
+    client.revoke_attestation_digests(&indices);
+    for i in 0..crate::MAX_ATTESTATION_REVOKE_BATCH {
+        assert!(client.is_attestation_revoked(&i));
+    }
+}
+
+/// Out-of-range index in batch returns `AttestationIndexOutOfRange`.
+#[test]
+fn test_batch_revoke_out_of_range_panics() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    client.append_attestation_digest(&digest(&env, 0x01));
+    assert_contract_error(
+        client.try_revoke_attestation_digests(&vec![&env, 0u32, 99]),
+        EscrowError::AttestationIndexOutOfRange,
+    );
+}
+
+/// Already-revoked index in batch returns `AttestationAlreadyRevoked`.
+#[test]
+fn test_batch_revoke_already_revoked_panics() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    client.append_attestation_digest(&digest(&env, 0x01));
+    client.append_attestation_digest(&digest(&env, 0x02));
+    client.revoke_attestation_digest(&0);
+    assert_contract_error(
+        client.try_revoke_attestation_digests(&vec![&env, 0u32, 1]),
+        EscrowError::AttestationAlreadyRevoked,
+    );
+}
+
+/// Duplicate index in batch: second occurrence hits `AttestationAlreadyRevoked`, entire batch rolls back.
+#[test]
+fn test_batch_revoke_duplicate_index_panics() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    for i in 0u8..3 {
+        client.append_attestation_digest(&digest(&env, i));
+    }
+    assert_contract_error(
+        client.try_revoke_attestation_digests(&vec![&env, 0u32, 0]),
+        EscrowError::AttestationAlreadyRevoked,
+    );
+    // Ensure rollback — neither index should be revoked.
+    assert!(!client.is_attestation_revoked(&0));
+    assert!(!client.is_attestation_revoked(&1));
+}
+
+/// Non-admin batch revoke is rejected.
+#[test]
+fn test_batch_revoke_non_admin_panics() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    client.append_attestation_digest(&digest(&env, 0xFF));
+    env.mock_auths(&[]);
+    assert!(client
+        .try_revoke_attestation_digests(&vec![&env, 0u32])
+        .is_err());
+}
+
+/// Append log contents unchanged after batch revocation.
+#[test]
+fn test_batch_revoke_preserves_log_entries() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    let d0 = digest(&env, 0xAA);
+    let d1 = digest(&env, 0xBB);
+    let d2 = digest(&env, 0xCC);
+    client.append_attestation_digest(&d0);
+    client.append_attestation_digest(&d1);
+    client.append_attestation_digest(&d2);
+    client.revoke_attestation_digests(&vec![&env, 0u32, 2]);
+    let log = client.get_attestation_append_log();
+    assert_eq!(log.len(), 3);
+    assert_eq!(log.get(0).unwrap(), d0);
+    assert_eq!(log.get(1).unwrap(), d1);
+    assert_eq!(log.get(2).unwrap(), d2);
+}
+
+/// Exactly one `att_revb` event per revoked index in the batch.
+#[test]
+fn test_batch_revoke_emits_events() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    let contract_id = client.address.clone();
+    for i in 0u8..5 {
+        client.append_attestation_digest(&digest(&env, i));
+    }
+
+    // Clear events from setup and appends
+    env.events().all();
+
+    let indices = vec![&env, 0u32, 2, 4];
+    let invoice_id = client.get_escrow().invoice_id;
+    client.revoke_attestation_digests(&indices);
+
+    let all_events = env.events().all();
+    let events = all_events.events();
+    assert_eq!(events.len(), 3);
+
+    for (i, idx) in std::vec![0u32, 2, 4].iter().enumerate() {
+        assert_eq!(
+            events.get(i).unwrap().clone(),
+            crate::AttestationDigestBatchRevoked {
+                name: symbol_short!("att_revb"),
+                invoice_id: invoice_id.clone(),
+                index: *idx,
+            }
+            .to_xdr(&env, &contract_id),
+            "batch event {} should have att_revb topic and index {}",
+            i,
+            idx,
+        );
+    }
+}
+
+/// Mid-batch failure rolls back all prior revocations.
+#[test]
+fn test_batch_revoke_atomic_rollback() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    for i in 0u8..4 {
+        client.append_attestation_digest(&digest(&env, i));
+    }
+
+    // Revoke index 1 first to make it unavailable for the batch.
+    client.revoke_attestation_digest(&1);
+
+    // Batch targeting [0, 1, 2] — index 1 is already revoked → rollback.
+    assert_contract_error(
+        client.try_revoke_attestation_digests(&vec![&env, 0u32, 1, 2]),
+        EscrowError::AttestationAlreadyRevoked,
+    );
+
+    // Index 0 and 2 must NOT have been revoked (atomic rollback).
+    assert!(!client.is_attestation_revoked(&0));
+    assert!(client.is_attestation_revoked(&1)); // was revoked BEFORE the batch
+    assert!(!client.is_attestation_revoked(&2));
+}
+
+/// Single and batch revocation publish distinguishable topics.
+#[test]
+fn test_batch_revoke_emits_distinct_topic() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    let contract_id = client.address.clone();
+    let d0 = digest(&env, 0x01);
+    let d1 = digest(&env, 0x02);
+    client.append_attestation_digest(&d0);
+    client.append_attestation_digest(&d1);
+
+    // --- Single revocation emits att_rev ---
+    client.revoke_attestation_digest(&0);
+    let all_events = env.events().all();
+    let single_event = all_events.events().last().unwrap().clone();
+    let invoice_id = client.get_escrow().invoice_id;
+    assert_eq!(
+        single_event,
+        crate::AttestationDigestRevoked {
+            name: symbol_short!("att_rev"),
+            invoice_id: invoice_id.clone(),
+            index: 0,
+        }
+        .to_xdr(&env, &contract_id),
+        "single revocation should emit att_rev topic",
+    );
+
+    // --- Batch revocation emits att_revb ---
+    client.revoke_attestation_digests(&vec![&env, 1u32]);
+    let all_events = env.events().all();
+    let batch_event = all_events.events().last().unwrap().clone();
+    assert_eq!(
+        batch_event,
+        crate::AttestationDigestBatchRevoked {
+            name: symbol_short!("att_revb"),
+            invoice_id,
+            index: 1,
+        }
+        .to_xdr(&env, &contract_id),
+        "batch revocation should emit att_revb topic",
+    );
+
+    // The two topics must differ.
+    assert_ne!(
+        symbol_short!("att_rev"),
+        symbol_short!("att_revb"),
+        "att_rev and att_revb must be distinct symbols",
+    );
 }

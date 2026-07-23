@@ -1492,6 +1492,14 @@ pub struct AttestationDigestUnrevoked {
 }
 
 #[contractevent]
+pub struct AttestationDigestBatchRevoked {
+    #[topic]
+    pub name: Symbol,
+    pub invoice_id: Symbol,
+    pub index: u32,
+}
+
+#[contractevent]
 pub struct MaturityMaxHorizonUpdated {
     #[topic]
     pub name: Symbol,
@@ -2793,8 +2801,9 @@ impl LiquifactEscrow {
     /// occurrence will fail with [`EscrowError::AttestationAlreadyRevoked`].
     ///
     /// # Events
-    /// One [`AttestationDigestRevoked`] event per newly revoked index, preserving the same event
-    /// shape as the single-index entrypoint.
+    /// One [`AttestationDigestBatchRevoked`] event per newly revoked index. The topic symbol
+    /// `att_revb` distinguishes batch revocations from single
+    /// [`AttestationDigestRevoked`] events (topic `att_rev`).
     pub fn revoke_attestation_digests(env: Env, indices: Vec<u32>) {
         let n = indices.len();
 
@@ -2834,8 +2843,8 @@ impl LiquifactEscrow {
                 .instance()
                 .set(&DataKey::AttestationRevoked(index), &true);
 
-            AttestationDigestRevoked {
-                name: symbol_short!("att_rev"),
+            AttestationDigestBatchRevoked {
+                name: symbol_short!("att_revb"),
                 invoice_id: escrow.invoice_id.clone(),
                 index,
             }

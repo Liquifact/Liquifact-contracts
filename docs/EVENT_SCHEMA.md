@@ -44,6 +44,7 @@ The current contract defines 36 event structs.
 | `AllowlistEnabledChanged` | `al_ena` | `set_allowlist_active` |
 | `AttestationDigestAppended` | `att_app` | `append_attestation_digest` |
 | `AttestationDigestRevoked` | `att_rev` | `revoke_attestation_digest` |
+| `AttestationDigestBatchRevoked` | `att_revb` | `revoke_attestation_digests` |
 | `AttestationDigestUnrevoked` | `att_unrev` | `unrevoke_attestation_digest` |
 | `BeneficiaryRotated` | `ben_rot` | `rotate_beneficiary` |
 | `CollateralClearedEvt` | — | `clear_sme_collateral_commitment` |
