@@ -63,6 +63,7 @@ mod legal_hold;
 mod migration_errors;
 mod pause;
 mod properties;
+mod reconciliation_lifecycle;
 mod settlement;
 
 /// Registers a new escrow contract instance and returns its contract id.
