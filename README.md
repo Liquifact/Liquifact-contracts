@@ -320,6 +320,15 @@ The escrow supports an optional investor allowlist gate that controls which addr
 - Batch operations and equivalence to single calls
 - Security considerations for TTL management and admin key security
 
+
+- Active/inactive toggle behavior and interaction with per-address entries
+- Persistent storage model and TTL/archival implications
+- Fund-gate enforcement rules and default-to-deny semantics
+- Batch operations and equivalence to single calls
+- Security considerations for TTL management and admin key security
+
+
+
 ## Escrow cancellation and refund lifecycle
 
 The escrow supports cancellation by the admin under specific criteria, unlocking investor refunds and a residual dust sweep with liability-floor protection. See [`docs/escrow-cancellation-refunds.md`](docs/escrow-cancellation-refunds.md) for the end-to-end documentation, including:
