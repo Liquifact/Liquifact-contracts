@@ -79,6 +79,12 @@ pub fn init(
 - `Some(x)` for `max_per_investor`: Immutable maximum cumulative principal per investor address
 - **Validation:** Both caps must be positive if configured (`> 0`)
 
+**Init validation test cross-links:**
+- `MinContributionNotPositive` (zero floor): [`test_init_min_contribution_not_positive_panics`](../escrow/src/tests/cap_validation.rs#L551)
+- `MinContributionExceedsAmount` (floor > amount): [`test_init_min_contribution_exceeds_amount_panics`](../escrow/src/tests/cap_validation.rs#L582)
+- `MaxUniqueInvestorsNotPositive` (zero unique cap): [`test_init_zero_max_unique_investors_panics`](../escrow/src/tests/cap_validation.rs#L619)
+- `MaxPerInvestorNotPositive` (zero per-investor cap): [`test_init_zero_max_per_investor_panics`](../escrow/src/tests/cap_validation.rs#L234)
+
 ## API Reference
 
 ### Query Functions
@@ -217,16 +223,30 @@ For the funding floor:
 - Deposits exactly equal to `min_contribution` are accepted.
 - Follow-on deposits from an existing investor still must satisfy the same per-call floor.
 
+**Test cross-links:**
+- Below floor rejected: [`test_min_contribution_floor_below_value_rejected`](../escrow/src/tests/cap_validation.rs#L265)
+- Exact floor accepted: [`test_min_contribution_floor_exact_value_accepted`](../escrow/src/tests/cap_validation.rs#L299)
+- Follow-on below floor rejected: [`test_min_contribution_floor_follow_on_below_value_rejected`](../escrow/src/tests/cap_validation.rs#L335)
+
 For the per-investor cap:
 - Cumulative funding for one investor may equal `max_per_investor`.
 - Any deposit that would raise the cumulative contribution above the cap is rejected.
 - The cap is enforced across multiple `fund` / `fund_with_commitment` calls for the same investor.
+
+**Test cross-links:**
+- Exact cumulative cap accepted: [`test_per_investor_cap_exact_cumulative_value_accepted`](../escrow/src/tests/cap_validation.rs#L371)
+- One over cap rejected: [`test_per_investor_cap_one_over_rejected`](../escrow/src/tests/cap_validation.rs#L408)
 
 For the unique investor cap:
 - Distinct first-time funders are counted until the configured `max_unique_investors` is reached.
 - Funding from the last allowed unique investor is accepted.
 - A new address attempting to fund after the cap is reached is rejected.
 - Follow-on funding by an already-counted investor continues to succeed even after the distinct-investor cap is reached.
+
+**Test cross-links:**
+- Exact unique cap accepted: [`test_unique_investor_cap_exact_value_accepted`](../escrow/src/tests/cap_validation.rs#L444)
+- Next new funder rejected: [`test_unique_investor_cap_new_funder_one_over_rejected`](../escrow/src/tests/cap_validation.rs#L479)
+- Existing investor follow-on succeeds: [`test_unique_investor_cap_existing_investor_follow_on_succeeds`](../escrow/src/tests/cap_validation.rs#L515)
 
 #### Tiered Yield System
 

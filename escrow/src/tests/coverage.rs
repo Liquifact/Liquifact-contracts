@@ -7,12 +7,12 @@ use crate::{
     CollateralRecordedEvt, DataKey, EscrowCloseSnapshot, EscrowError, FundingCancelled,
     InvestorRefundedEvt, LiquifactEscrow, LiquifactEscrowClient, PrimaryAttestationBound,
     RegistryRefRebound, TreasuryDustSwept, YieldTier, DEFAULT_MATURITY_MAX_HORIZON_SECS,
-    MAX_ATTESTATION_APPEND_ENTRIES, SCHEMA_VERSION,
+    MAX_ATTESTATION_APPEND_ENTRIES, MAX_BUMP_TTL_BATCH, SCHEMA_VERSION,
 };
 use soroban_sdk::{
     symbol_short,
     testutils::{Address as _, Events as _, Ledger},
-    Address, BytesN, Env, Error, InvokeError, Vec as SorobanVec,
+    Address, BytesN, Env, Error, Event, InvokeError, Vec as SorobanVec,
 };
 
 const AMOUNT: i128 = 100_000_000_000;
@@ -231,8 +231,10 @@ fn escrow_error_discriminants_match_canonical_table() {
         (EscrowError::FloorLowerNotOpen, 173),
         (EscrowError::NewFloorNotLower, 174),
         (EscrowError::NewFloorNotPositive, 175),
+        (EscrowError::BumpTtlBatchEmpty, 223),
+        (EscrowError::BumpTtlBatchTooLarge, 224),
     ];
-    assert_eq!(TABLE.len(), 89);
+    assert_eq!(TABLE.len(), 91);
     for (variant, code) in TABLE {
         assert_eq!(*variant as u32, *code, "discriminant drift for code {code}");
     }
@@ -1092,7 +1094,44 @@ fn test_overwrite_then_clear() {
     assert!(client.get_sme_collateral_commitment().is_none());
 }
 
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+#[test]
+fn test_clear_emits_exactly_one_coll_clr_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let contract_id = client.address.clone();
+    default_init(&client, &env, &admin, &sme);
+
+    let asset = symbol_short!("USDC");
+    client.record_sme_collateral_commitment(&asset, &PLEDGE);
+
+    // Clear the event buffer so we only measure the clear operation
+    let _ = env.events().all();
+    client.clear_sme_collateral_commitment();
+
+    let contract_events = env.events().all().filter_by_contract(&contract_id);
+    let events = contract_events.events();
+    assert_eq!(
+        events.len(),
+        1,
+        "clear_sme_collateral_commitment must emit exactly one event"
+    );
+
+    let invoice_id = client.get_escrow().invoice_id;
+    assert_eq!(
+        events.last().unwrap().clone(),
+        CollateralClearedEvt {
+            name: symbol_short!("coll_clr"),
+            invoice_id,
+            asset,
+            amount: PLEDGE,
+            recorded_at: env.ledger().timestamp(),
+        }
+        .to_xdr(&env, &contract_id)
+    );
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // Anchoring tests: read-view default/absent return values (docs/escrow-read-api.md)
 //
 // Each test asserts the default or absent-key return value documented in the
@@ -1142,6 +1181,13 @@ fn read_view_defaults_before_init() {
     assert_eq!(client.get_distributed_principal(), 0);
     // get_sme_collateral_commitment ÔåÆ None
     assert!(client.get_sme_collateral_commitment().is_none());
+    // get_protocol_fee_bps ÔåÆ 0
+    assert_eq!(client.get_protocol_fee_bps(), 0);
+    // preview_protocol_fee ÔåÆ (0, 0)
+    assert_eq!(
+        client.preview_protocol_fee(),
+        ProtocolFeePreview { fee: 0, net: 0 }
+    );
 }
 
 /// Per-investor views return their documented defaults for a fresh/absent investor.
@@ -1233,8 +1279,8 @@ fn read_view_error_on_absent_before_init() {
     let (client, _admin, _sme) = setup(&env);
     let (funding_token, treasury) = free_addresses(&env);
 
-    // get_escrow ÔåÆ EscrowNotInitialized (20)
-    assert_contract_error(client.try_get_escrow(), EscrowError::EscrowNotInitialized);
+    // try_get_escrow returns None before init
+    assert_eq!(client.try_get_escrow(), None, "try_get_escrow must return None before init");
     // get_funding_token ÔåÆ FundingTokenNotSet (21)
     assert_contract_error(
         client.try_get_funding_token(),
@@ -1270,6 +1316,82 @@ fn read_view_error_on_absent_before_init() {
     &None::<i64>,);
     assert_eq!(client.get_version(), SCHEMA_VERSION);
     assert_eq!(client.get_funding_token(), funding_token);
+    // try_get_escrow returns Some after init
+    assert!(client.try_get_escrow().is_some(), "try_get_escrow must return Some after init");
+    // Verify the returned value matches get_escrow
+    let escrow_via_try = client.try_get_escrow().unwrap();
+    let escrow_via_get = client.get_escrow();
+    assert_eq!(escrow_via_try, escrow_via_get, "try_get_escrow must return same value as get_escrow after init");
+}
+
+/// try_get_escrow provides O(1) read view without mutating storage.
+#[test]
+fn try_get_escrow_read_view() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let (token, treasury) = free_addresses(&env);
+
+    // Before init: returns None (sensible default, no panic)
+    assert_eq!(
+        client.try_get_escrow(),
+        None,
+        "try_get_escrow must return None before initialization"
+    );
+
+    // Initialize the escrow
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "READ_VIEW_TEST"),
+        &sme,
+        &1000i128,
+        &500i64,
+        &100u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    // After init: returns Some with the escrow state
+    let escrow_opt = client.try_get_escrow();
+    assert!(
+        escrow_opt.is_some(),
+        "try_get_escrow must return Some after initialization"
+    );
+
+    let escrow = escrow_opt.unwrap();
+    assert_eq!(escrow.invoice_id, soroban_sdk::symbol_short!("READ_VIEW_TEST"));
+    assert_eq!(escrow.admin, admin);
+    assert_eq!(escrow.sme_address, sme);
+    assert_eq!(escrow.amount, 1000i128);
+    assert_eq!(escrow.funding_target, 1000i128);
+    assert_eq!(escrow.funded_amount, 0i128);
+    assert_eq!(escrow.yield_bps, 500i64);
+    assert_eq!(escrow.maturity, 100u64);
+    assert_eq!(escrow.status, 0u32); // open status
+
+    // Verify consistency with get_escrow (the panicking version)
+    let escrow_via_get = client.get_escrow();
+    assert_eq!(
+        escrow, escrow_via_get,
+        "try_get_escrow must return identical value to get_escrow when initialized"
+    );
+
+    // Verify it's a pure read: calling multiple times doesn't change state
+    let escrow_2nd_call = client.try_get_escrow().unwrap();
+    assert_eq!(
+        escrow, escrow_2nd_call,
+        "try_get_escrow must be idempotent (pure read)"
+    );
 }
 
 /// has_maturity_lock reflects the configured maturity.
@@ -1618,6 +1740,105 @@ fn test_bump_ttl_covers_persistent_investor_keys() {
     // assert!(ttl_allow > 0, "Allowlist TTL should be extended");
     //     let ttl_contrib = env.storage().persistent().get_ttl(&DataKey::InvestorContribution(investor.clone()));
     // assert!(ttl_contrib > 0, "Contribution TTL should be extended");
+}
+
+#[test]
+fn test_bump_ttl_empty_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let (funding_token, treasury) = free_addresses(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "TTL002"),
+        &sme,
+        &100,
+        &10,
+        &0,
+        &funding_token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+    let empty_vec = SorobanVec::new(&env);
+    let result = client.try_bump_ttl(&empty_vec);
+    assert_contract_error(result, EscrowError::BumpTtlBatchEmpty);
+}
+
+#[test]
+fn test_bump_ttl_oversized_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let (funding_token, treasury) = free_addresses(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "TTL003"),
+        &sme,
+        &100,
+        &10,
+        &0,
+        &funding_token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+    let mut investors = SorobanVec::new(&env);
+    for _ in 0..=(MAX_BUMP_TTL_BATCH as usize) {
+        investors.push_back(Address::generate(&env));
+    }
+    let result = client.try_bump_ttl(&investors);
+    assert_contract_error(result, EscrowError::BumpTtlBatchTooLarge);
+}
+
+#[test]
+fn test_bump_ttl_max_batch_succeeds() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let (funding_token, treasury) = free_addresses(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "TTL004"),
+        &sme,
+        &100,
+        &10,
+        &0,
+        &funding_token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+    let mut investors = SorobanVec::new(&env);
+    for _ in 0..MAX_BUMP_TTL_BATCH {
+        investors.push_back(Address::generate(&env));
+    }
+    client.bump_ttl(&investors);
+    // Succeeds without panic.
 }
 
 #[test]
@@ -1975,6 +2196,318 @@ fn test_sme_collateral_replacement_preserves_prior_amount() {
     let stored = client.get_sme_collateral_commitment().unwrap();
     assert_eq!(stored.amount, 7000);
 }
+
+// ─── Comprehensive SME collateral commitment tests (issue #619) ──────────────
+
+/// Helper: initialise a bare escrow without a real token (metadata-only tests).
+fn init_collateral_escrow<'a>(
+    env: &'a Env,
+    client: &LiquifactEscrowClient<'a>,
+    admin: &Address,
+    sme: &Address,
+) {
+    let (token, treasury) = free_addresses(env);
+    client.init(
+        admin,
+        &soroban_sdk::String::from_str(env, "COLTEST"),
+        sme,
+        &100_000,
+        &500i64,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+}
+
+/// Happy path: first `record_sme_collateral_commitment` returns correct
+/// asset / amount / timestamp and `get_sme_collateral_commitment` reflects
+/// the stored record.
+#[test]
+fn test_collateral_first_record_returns_correct_fields_and_prior_amount_is_zero() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    init_collateral_escrow(&env, &client, &admin, &sme);
+
+    let asset = soroban_sdk::Symbol::new(&env, "USDC");
+    env.ledger().with_mut(|li| li.timestamp = 1000);
+
+    let result = client.record_sme_collateral_commitment(&asset, &5_000);
+    assert_eq!(result.amount, 5_000);
+    assert_eq!(result.asset, asset);
+    assert_eq!(result.recorded_at, 1000);
+
+    let stored = client.get_sme_collateral_commitment().unwrap();
+    assert_eq!(stored.amount, 5_000);
+    assert_eq!(stored.asset, asset);
+    assert_eq!(stored.recorded_at, 1000);
+}
+
+/// The `CollateralRecordedEvt` emitted on the **first** record must carry
+/// `prior_amount = 0` (no previous commitment).
+#[test]
+fn test_collateral_first_record_event_prior_amount_is_zero() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    init_collateral_escrow(&env, &client, &admin, &sme);
+
+    let asset = soroban_sdk::Symbol::new(&env, "GOLD");
+    env.ledger().with_mut(|li| li.timestamp = 500);
+    client.record_sme_collateral_commitment(&asset, &8_000);
+
+    // Find the CollateralRecordedEvt in the event log.
+    let all_events = env.events().all();
+    let events_list = all_events.events();
+    // The last event should be CollateralRecordedEvt.
+    let found = events_list.iter().any(|ev| {
+        // CollateralRecordedEvt has topic name "coll_rec"; verify prior_amount field.
+        let contract_id = client.address.clone();
+        let expected = CollateralRecordedEvt {
+            name: symbol_short!("coll_rec"),
+            invoice_id: client.get_escrow().invoice_id,
+            amount: 8_000,
+            prior_amount: 0,
+        }
+        .to_xdr(&env, &contract_id);
+        ev == expected
+    });
+    assert!(found, "CollateralRecordedEvt with prior_amount=0 must be emitted on first record");
+}
+
+/// Replacement: a second `record_sme_collateral_commitment` overwrites storage
+/// and the emitted event carries the **prior** amount.
+#[test]
+fn test_collateral_replacement_overwrites_stored_value_and_emits_prior_amount() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    init_collateral_escrow(&env, &client, &admin, &sme);
+
+    let asset = soroban_sdk::Symbol::new(&env, "ETH");
+
+    // First record.
+    env.ledger().with_mut(|li| li.timestamp = 1000);
+    client.record_sme_collateral_commitment(&asset, &3_000);
+
+    // Advance ledger — replacement timestamp must be >= recorded_at.
+    env.ledger().with_mut(|li| li.timestamp = 2000);
+    client.record_sme_collateral_commitment(&asset, &9_000);
+
+    // Storage must reflect the replacement.
+    let stored = client.get_sme_collateral_commitment().unwrap();
+    assert_eq!(stored.amount, 9_000);
+    assert_eq!(stored.recorded_at, 2000);
+
+    // Verify prior_amount in the replacement event.
+    let contract_id = client.address.clone();
+    let invoice_id = client.get_escrow().invoice_id;
+    let all_events = env.events().all();
+    let events_list = all_events.events();
+    let replacement_event_found = events_list.iter().any(|ev| {
+        ev == CollateralRecordedEvt {
+            name: symbol_short!("coll_rec"),
+            invoice_id: invoice_id.clone(),
+            amount: 9_000,
+            prior_amount: 3_000,
+        }
+        .to_xdr(&env, &contract_id)
+    });
+    assert!(
+        replacement_event_found,
+        "replacement CollateralRecordedEvt must carry prior_amount = 3_000"
+    );
+}
+
+/// Backwards timestamp: replacing with a ledger timestamp **earlier** than
+/// `recorded_at` must be rejected with `CollateralTimestampBackwards` (62).
+/// The stored record must be preserved.
+#[test]
+fn test_collateral_backwards_timestamp_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    init_collateral_escrow(&env, &client, &admin, &sme);
+
+    let asset = soroban_sdk::Symbol::new(&env, "GOLD");
+
+    // Record at timestamp 5000.
+    env.ledger().with_mut(|li| li.timestamp = 5000);
+    client.record_sme_collateral_commitment(&asset, &5_000);
+
+    // Attempt replacement with earlier timestamp.
+    env.ledger().with_mut(|li| li.timestamp = 100);
+    let res = client.try_record_sme_collateral_commitment(&asset, &7_000);
+    assert_contract_error(res, EscrowError::CollateralTimestampBackwards);
+
+    // Original record must still be intact.
+    let stored = client.get_sme_collateral_commitment().unwrap();
+    assert_eq!(stored.amount, 5_000);
+    assert_eq!(stored.recorded_at, 5000);
+}
+
+/// Same-timestamp replacement: `now == prior.recorded_at` is allowed (monotonic, not
+/// strictly increasing).
+#[test]
+fn test_collateral_same_timestamp_replacement_is_allowed() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    init_collateral_escrow(&env, &client, &admin, &sme);
+
+    let asset = soroban_sdk::Symbol::new(&env, "USDC");
+
+    env.ledger().with_mut(|li| li.timestamp = 3000);
+    client.record_sme_collateral_commitment(&asset, &1_000);
+
+    // Same timestamp: should succeed (>= semantics).
+    env.ledger().with_mut(|li| li.timestamp = 3000);
+    client.record_sme_collateral_commitment(&asset, &2_000);
+
+    let stored = client.get_sme_collateral_commitment().unwrap();
+    assert_eq!(stored.amount, 2_000);
+    assert_eq!(stored.recorded_at, 3000);
+}
+
+/// Zero amount must be rejected with `CollateralAmountNotPositive` (60).
+#[test]
+fn test_collateral_zero_amount_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    init_collateral_escrow(&env, &client, &admin, &sme);
+
+    let asset = soroban_sdk::Symbol::new(&env, "USDC");
+    let res = client.try_record_sme_collateral_commitment(&asset, &0);
+    assert_contract_error(res, EscrowError::CollateralAmountNotPositive);
+    assert_eq!(client.get_sme_collateral_commitment(), None);
+}
+
+/// Negative amount must be rejected with `CollateralAmountNotPositive` (60).
+#[test]
+fn test_collateral_negative_amount_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    init_collateral_escrow(&env, &client, &admin, &sme);
+
+    let asset = soroban_sdk::Symbol::new(&env, "USDC");
+    let res = client.try_record_sme_collateral_commitment(&asset, &(-1_000i128));
+    assert_contract_error(res, EscrowError::CollateralAmountNotPositive);
+    assert_eq!(client.get_sme_collateral_commitment(), None);
+}
+
+/// Empty asset symbol must be rejected with `CollateralAssetEmpty` (61).
+#[test]
+fn test_collateral_empty_asset_rejected_with_typed_error() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    init_collateral_escrow(&env, &client, &admin, &sme);
+
+    let empty_asset = soroban_sdk::Symbol::new(&env, "");
+    let res = client.try_record_sme_collateral_commitment(&empty_asset, &5_000);
+    assert_contract_error(res, EscrowError::CollateralAssetEmpty);
+    assert_eq!(client.get_sme_collateral_commitment(), None);
+}
+
+/// A caller that is **not** the SME address must be rejected (auth failure).
+/// The stored commitment (if any) must be unchanged.
+#[test]
+fn test_collateral_non_sme_caller_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    init_collateral_escrow(&env, &client, &admin, &sme);
+
+    let asset = soroban_sdk::Symbol::new(&env, "USDC");
+
+    // First, record as SME to establish a baseline.
+    client.record_sme_collateral_commitment(&asset, &5_000);
+
+    // Now attempt with no auth at all — should fail.
+    env.mock_auths(&[]);
+    let non_sme = Address::generate(&env);
+    let _ = non_sme; // unused but documents intent
+    let res = client.try_record_sme_collateral_commitment(&asset, &9_999);
+    assert!(res.is_err(), "non-SME caller must be rejected");
+
+    // Original record must be unchanged.
+    let stored = client.get_sme_collateral_commitment().unwrap();
+    assert_eq!(stored.amount, 5_000);
+}
+
+/// Metadata-only invariant: no token balance on the escrow contract changes after
+/// `record_sme_collateral_commitment`. Uses a real SAC token so we can query balances.
+#[test]
+fn test_collateral_record_does_not_change_token_balances() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    // Deploy a real SAC token so we can check balances.
+    let sac = env.register_stellar_asset_contract_v2(Address::generate(&env));
+    let token_id = sac.address();
+    let sac_admin = soroban_sdk::token::StellarAssetClient::new(&env, &token_id);
+    let token_client = soroban_sdk::token::TokenClient::new(&env, &token_id);
+
+    let (client, admin, sme) = setup(&env);
+    let treasury = Address::generate(&env);
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "COLBAL"),
+        &sme,
+        &100_000,
+        &500i64,
+        &0u64,
+        &token_id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    let escrow_id = client.address.clone();
+
+    // Mint some tokens into the escrow to have a non-zero baseline.
+    sac_admin.mint(&escrow_id, &10_000);
+    let balance_before = token_client.balance(&escrow_id);
+    let sme_balance_before = token_client.balance(&sme);
+
+    let asset = soroban_sdk::Symbol::new(&env, "COLLAT");
+    client.record_sme_collateral_commitment(&asset, &50_000);
+
+    let balance_after = token_client.balance(&escrow_id);
+    let sme_balance_after = token_client.balance(&sme);
+
+    assert_eq!(
+        balance_before, balance_after,
+        "escrow token balance must not change after recording collateral"
+    );
+    assert_eq!(
+        sme_balance_before, sme_balance_after,
+        "SME token balance must not change after recording collateral"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 #[test]
 fn test_clear_legal_hold_convenience() {
@@ -3549,6 +4082,278 @@ fn test_collateral_same_timestamp_replacement_is_allowed() {
     );
 }
 
+// =============================================================================
+// Collateral Boundary Tests (Issue: Cover collateral boundaries)
+//
+// These tests assert the exact accept/reject boundaries for collateral operations,
+// verifying typed error codes, event emissions, and authorization requirements.
+// =============================================================================
+
+#[test]
+fn test_collateral_amount_boundary_exactly_one_minimum_valid() {
+    // Amount=1 is the minimum valid positive amount.
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    init_for_collateral(&env, &client, &admin, &sme, "BOUND_001");
+
+    let asset = soroban_sdk::Symbol::new(&env, "GOLD");
+    let commitment = client.record_sme_collateral_commitment(&asset, &1i128);
+
+    assert_eq!(commitment.amount, 1i128);
+    assert_eq!(commitment.asset, asset);
+
+    // Verify storage reflects the minimum valid amount.
+    let stored = client
+        .get_sme_collateral_commitment()
+        .expect("amount=1 must be stored");
+    assert_eq!(stored.amount, 1i128);
+}
+
+#[test]
+fn test_collateral_amount_boundary_zero_rejected() {
+    // Amount=0 must be rejected with CollateralAmountNotPositive.
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    init_for_collateral(&env, &client, &admin, &sme, "BOUND_002");
+
+    let asset = soroban_sdk::Symbol::new(&env, "GOLD");
+    assert_contract_error(
+        client.try_record_sme_collateral_commitment(&asset, &0i128),
+        EscrowError::CollateralAmountNotPositive,
+    );
+
+    // Verify no commitment was stored.
+    assert!(
+        client.get_sme_collateral_commitment().is_none(),
+        "zero amount must not be stored"
+    );
+}
+
+#[test]
+fn test_collateral_amount_boundary_negative_one_rejected() {
+    // Amount=-1 must be rejected with CollateralAmountNotPositive.
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    init_for_collateral(&env, &client, &admin, &sme, "BOUND_003");
+
+    let asset = soroban_sdk::Symbol::new(&env, "GOLD");
+    assert_contract_error(
+        client.try_record_sme_collateral_commitment(&asset, &-1i128),
+        EscrowError::CollateralAmountNotPositive,
+    );
+
+    // Verify no commitment was stored.
+    assert!(
+        client.get_sme_collateral_commitment().is_none(),
+        "negative amount must not be stored"
+    );
+}
+
+#[test]
+fn test_collateral_amount_boundary_i128_max_accepted() {
+    // Amount=i128::MAX is the maximum valid amount.
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    init_for_collateral(&env, &client, &admin, &sme, "BOUND_004");
+
+    let asset = soroban_sdk::Symbol::new(&env, "GOLD");
+    let max_amount = i128::MAX;
+    let commitment = client.record_sme_collateral_commitment(&asset, &max_amount);
+
+    assert_eq!(commitment.amount, max_amount);
+    assert_eq!(commitment.asset, asset);
+
+    // Verify storage reflects the maximum valid amount.
+    let stored = client
+        .get_sme_collateral_commitment()
+        .expect("i128::MAX must be stored");
+    assert_eq!(stored.amount, max_amount);
+}
+
+#[test]
+fn test_collateral_timestamp_boundary_exactly_equal_allowed() {
+    // Replacement with timestamp == prior.recorded_at is allowed (monotonic, not strictly increasing).
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    init_for_collateral(&env, &client, &admin, &sme, "BOUND_005");
+
+    let asset = soroban_sdk::Symbol::new(&env, "GOLD");
+    
+    // Record first commitment at t=0 (from setup).
+    client.record_sme_collateral_commitment(&asset, &100i128);
+    let first = client.get_sme_collateral_commitment().unwrap();
+    assert_eq!(first.recorded_at, env.ledger().timestamp());
+
+    // Do NOT advance timestamp — replacement at same timestamp.
+    let result = client.try_record_sme_collateral_commitment(&asset, &200i128);
+    assert!(
+        result.is_ok(),
+        "replacement at equal timestamp must succeed"
+    );
+
+    let updated = client.get_sme_collateral_commitment().unwrap();
+    assert_eq!(updated.amount, 200i128);
+    assert_eq!(updated.recorded_at, env.ledger().timestamp());
+}
+
+#[test]
+fn test_collateral_timestamp_boundary_one_less_rejected() {
+    // Replacement with timestamp < prior.recorded_at must be rejected with CollateralTimestampBackwards.
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    init_for_collateral(&env, &client, &admin, &sme, "BOUND_006");
+
+    let asset = soroban_sdk::Symbol::new(&env, "GOLD");
+
+    // Record at a known higher timestamp.
+    env.ledger().with_mut(|li| li.timestamp = 5000);
+    client.record_sme_collateral_commitment(&asset, &100i128);
+    let first = client.get_sme_collateral_commitment().unwrap();
+    assert_eq!(first.recorded_at, 5000);
+
+    // Move ledger timestamp backward by exactly 1 (to 4999).
+    env.ledger().with_mut(|li| li.timestamp = 4999);
+
+    assert_contract_error(
+        client.try_record_sme_collateral_commitment(&asset, &200i128),
+        EscrowError::CollateralTimestampBackwards,
+    );
+
+    // Verify original commitment is preserved.
+    let preserved = client.get_sme_collateral_commitment().unwrap();
+    assert_eq!(preserved.amount, 100i128);
+    assert_eq!(preserved.recorded_at, 5000);
+}
+
+#[test]
+fn test_collateral_clear_no_commitment_rejected() {
+    // clear_sme_collateral_commitment when no commitment exists must be rejected with NoCollateralToClear.
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    init_for_collateral(&env, &client, &admin, &sme, "BOUND_007");
+
+    // Verify no commitment exists.
+    assert!(client.get_sme_collateral_commitment().is_none());
+
+    // Attempt to clear when no commitment was recorded.
+    assert_contract_error(
+        client.try_clear_sme_collateral_commitment(),
+        EscrowError::NoCollateralToClear,
+    );
+}
+
+#[test]
+fn test_collateral_clear_non_sme_caller_rejected() {
+    // clear_sme_collateral_commitment requires SME auth; non-SME caller must be rejected.
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    init_for_collateral(&env, &client, &admin, &sme, "BOUND_008");
+
+    let asset = soroban_sdk::Symbol::new(&env, "GOLD");
+    client.record_sme_collateral_commitment(&asset, &100i128);
+
+    // Verify commitment exists.
+    assert!(client.get_sme_collateral_commitment().is_some());
+
+    // Revoke all auths so the SME signature is absent.
+    env.mock_auths(&[]);
+
+    // Attempt to clear without SME auth — should panic (auth failure).
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.clear_sme_collateral_commitment();
+    }));
+    assert!(
+        result.is_err(),
+        "clear without SME auth must be rejected"
+    );
+
+    // Re-enable auth and verify commitment still exists (was not cleared).
+    env.mock_all_auths();
+    assert!(
+        client.get_sme_collateral_commitment().is_some(),
+        "commitment must not be cleared by unauthorized caller"
+    );
+}
+
+#[test]
+fn test_collateral_record_non_sme_caller_rejected() {
+    // record_sme_collateral_commitment requires SME auth; non-SME caller must be rejected.
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    init_for_collateral(&env, &client, &admin, &sme, "BOUND_009");
+
+    // Revoke all auths so the SME signature is absent.
+    env.mock_auths(&[]);
+
+    let asset = soroban_sdk::Symbol::new(&env, "GOLD");
+
+    // Attempt to record without SME auth — should panic (auth failure).
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.record_sme_collateral_commitment(&asset, &100i128);
+    }));
+    assert!(
+        result.is_err(),
+        "record without SME auth must be rejected"
+    );
+
+    // Re-enable auth and verify no commitment was stored.
+    env.mock_all_auths();
+    assert!(
+        client.get_sme_collateral_commitment().is_none(),
+        "commitment must not be recorded by unauthorized caller"
+    );
+}
+
+#[test]
+fn test_collateral_empty_asset_symbol_rejected() {
+    // Empty asset symbol must be rejected with CollateralAssetEmpty.
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    init_for_collateral(&env, &client, &admin, &sme, "BOUND_010");
+
+    let empty_asset = soroban_sdk::Symbol::new(&env, "");
+    assert_contract_error(
+        client.try_record_sme_collateral_commitment(&empty_asset, &100i128),
+        EscrowError::CollateralAssetEmpty,
+    );
+
+    // Verify no commitment was stored.
+    assert!(
+        client.get_sme_collateral_commitment().is_none(),
+        "empty asset symbol must not be stored"
+    );
+}
+
+#[test]
+fn test_collateral_valid_single_char_asset_symbol_accepted() {
+    // A valid single-character asset symbol must be accepted.
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    init_for_collateral(&env, &client, &admin, &sme, "BOUND_011");
+
+    let single_char_asset = soroban_sdk::Symbol::new(&env, "X");
+    let commitment = client.record_sme_collateral_commitment(&single_char_asset, &100i128);
+
+    assert_eq!(commitment.asset, single_char_asset);
+    assert_eq!(commitment.amount, 100i128);
+
+    // Verify storage reflects the single-char asset.
+    let stored = client
+        .get_sme_collateral_commitment()
+        .expect("single-char asset must be stored");
+    assert_eq!(stored.asset, single_char_asset);
+}
+
+// Event emission tests are already covered by integration.rs:
+// - test_collateral_record_event_payload_is_metadata_only
+// - test_collateral_replacement_event_contains_prior_amount
+// These tests verify CollateralRecordedEvt with prior_amount field.
+// No additional event tests needed in coverage.rs for boundary purposes.
+
+// =============================================================================
+// End of Collateral Boundary Tests
+// =============================================================================
+
 #[test]
 fn test_state_machine_illegal_transitions_rejected() {
     let env = Env::default();
@@ -4019,4 +4824,370 @@ fn refactor_gate_helpers_rotate_blocked_post_settlement() {
         client.try_rotate_beneficiary(&new_sme),
         EscrowError::RotationNotOpen,
     );
+}
+
+// ---------------------------------------------------------------------------
+// get_settlement_pool — aggregate coupon view
+// ---------------------------------------------------------------------------
+//
+// Test matrix:
+//   1. Returns 0 before snapshot (escrow open, not yet funded)
+//   2. Returns 0 when initialised but funding target never reached
+//   3. Returns correct principal + coupon after funding to exact target
+//   4. Rounding floor: yield that does not divide evenly truncates down
+//   5. Zero yield_bps → pool equals principal
+//   6. Idempotent: calling twice returns the same value
+//   7. Pool >= sum of all per-investor compute_investor_payout (no-dust leak)
+//   8. Target-lowering promotion writes snapshot; get_settlement_pool reflects it
+//   9. Value is unchanged after settle (snapshot is immutable)
+//  10. Over-funded escrow: total_principal includes amount above target
+
+/// Helper: init an escrow with a real SEP-41 token, mint `amount` to `investor`,
+/// fund to exactly `amount` (which meets the target), and return the client +
+/// investor address.
+fn funded_with_real_token<'a>(
+    env: &'a Env,
+    label: &str,
+    amount: i128,
+    yield_bps: i64,
+) -> (super::LiquifactEscrowClient<'a>, Address, Address) {
+    let token = install_stellar_asset_token(env);
+    let admin = Address::generate(env);
+    let sme = Address::generate(env);
+    let treasury = Address::generate(env);
+    let client = super::deploy(env);
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(env, label),
+        &sme,
+        &amount,
+        &yield_bps,
+        &0u64,
+        &token.id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    let investor = Address::generate(env);
+    token.stellar.mint(&investor, &amount);
+    client.fund(&investor, &amount);
+    (client, investor, sme)
+}
+
+// 1. Returns 0 before the funding-close snapshot exists.
+#[test]
+fn get_settlement_pool_returns_zero_before_snapshot() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let (token, treasury) = free_addresses(&env);
+
+    // Initialise but do NOT fund — snapshot is absent.
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "SP_NOSNAPSHOT"),
+        &sme,
+        &1_000i128,
+        &800i64,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    assert_eq!(client.get_settlement_pool(), 0);
+}
+
+// 2. Returns 0 when the escrow is initialised but never reaches funded status.
+#[test]
+fn get_settlement_pool_returns_zero_partial_funding() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let token = install_stellar_asset_token(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let treasury = Address::generate(&env);
+    let client = super::deploy(&env);
+
+    // Target = 1_000, we only fund 500 — escrow stays open, no snapshot.
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "SP_PARTIAL"),
+        &sme,
+        &1_000i128,
+        &800i64,
+        &0u64,
+        &token.id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    let investor = Address::generate(&env);
+    token.stellar.mint(&investor, &500i128);
+    client.fund(&investor, &500i128);
+
+    // Still open — no snapshot written.
+    assert_eq!(client.get_escrow().status, 0);
+    assert_eq!(client.get_settlement_pool(), 0);
+}
+
+// 3. Returns principal + coupon after funding to exact target (800 bps = 8 %).
+#[test]
+fn get_settlement_pool_principal_plus_coupon_800bps() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _investor, _sme) = funded_with_real_token(&env, "SP_800", 10_000i128, 800i64);
+
+    // coupon = 10_000 × 800 / 10_000 = 800
+    // pool   = 10_000 + 800 = 10_800
+    assert_eq!(client.get_settlement_pool(), 10_800);
+}
+
+// 4. Floor rounding: yield that does not divide evenly truncates down.
+//    principal = 10_001, yield_bps = 1  →  coupon = floor(10_001/10_000) = 1
+//    pool = 10_001 + 1 = 10_002
+#[test]
+fn get_settlement_pool_rounding_floor() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _investor, _sme) = funded_with_real_token(&env, "SP_FLOOR", 10_001i128, 1i64);
+
+    // coupon = 10_001 × 1 / 10_000 = 1  (floor; remainder 1 is discarded)
+    // pool   = 10_001 + 1 = 10_002
+    assert_eq!(client.get_settlement_pool(), 10_002);
+}
+
+// Verify the floor is strict: a principal that yields no whole coupon unit.
+//    principal = 9_999, yield_bps = 1  →  coupon = floor(9_999/10_000) = 0
+//    pool = 9_999 + 0 = 9_999
+#[test]
+fn get_settlement_pool_rounding_floor_zero_coupon_unit() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _investor, _sme) = funded_with_real_token(&env, "SP_FLOOR0", 9_999i128, 1i64);
+
+    // coupon = floor(9_999 / 10_000) = 0
+    assert_eq!(client.get_settlement_pool(), 9_999);
+}
+
+// 5. Zero yield_bps → pool equals principal exactly.
+#[test]
+fn get_settlement_pool_zero_yield() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let principal = 50_000i128;
+    let (client, _investor, _sme) = funded_with_real_token(&env, "SP_ZEROYIELD", principal, 0i64);
+
+    // coupon = 50_000 × 0 / 10_000 = 0  →  pool = 50_000
+    assert_eq!(client.get_settlement_pool(), principal);
+}
+
+// 6. Max reasonable yield_bps (10_000 = 100 %): pool = 2 × principal.
+#[test]
+fn get_settlement_pool_max_yield_doubles_principal() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let principal = 500i128;
+    let (client, _investor, _sme) =
+        funded_with_real_token(&env, "SP_MAXBPS", principal, 10_000i64);
+
+    // coupon = 500 × 10_000 / 10_000 = 500  →  pool = 1_000
+    assert_eq!(client.get_settlement_pool(), 1_000);
+}
+
+// 7. Idempotent: calling get_settlement_pool twice returns the same value
+//    (pure read, no side effects).
+#[test]
+fn get_settlement_pool_idempotent() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _investor, _sme) = funded_with_real_token(&env, "SP_IDEM", 10_000i128, 500i64);
+
+    let first = client.get_settlement_pool();
+    let second = client.get_settlement_pool();
+    assert_eq!(first, second);
+}
+
+// 8. Pool is >= sum of all per-investor compute_investor_payout (no rounding leak
+//    when a single investor holds the full principal).
+#[test]
+fn get_settlement_pool_ge_sum_of_investor_payouts_single_investor() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let amount = 100_000i128;
+    let (client, investor, _sme) = funded_with_real_token(&env, "SP_GESUM", amount, 800i64);
+
+    let pool = client.get_settlement_pool();
+    let payout = client.compute_investor_payout(&investor);
+
+    // Single investor == 100 % share: payout must equal pool (no rounding residue
+    // when the investor holds the full principal).
+    assert!(pool >= payout);
+    // For a single investor with 100 % share the values are identical.
+    assert_eq!(pool, payout);
+}
+
+// 9. Pool >= sum of per-investor payouts for multiple investors (rounding residue
+//    stays non-negative; the dust sweep absorbs it).
+#[test]
+fn get_settlement_pool_ge_sum_of_investor_payouts_multi_investor() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let token = install_stellar_asset_token(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let treasury = Address::generate(&env);
+    let client = super::deploy(&env);
+
+    // Three investors, deliberately unequal split so rounding is exercised.
+    // Target = 300, each contributes 100.
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "SP_MULTI"),
+        &sme,
+        &300i128,
+        &333i64, // 3.33 % — chosen to create fractional coupon
+        &0u64,
+        &token.id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    let investors: [Address; 3] = [
+        Address::generate(&env),
+        Address::generate(&env),
+        Address::generate(&env),
+    ];
+    for inv in &investors {
+        token.stellar.mint(inv, &100i128);
+        client.fund(inv, &100i128);
+    }
+
+    let pool: i128 = client.get_settlement_pool();
+    let payout_sum: i128 = investors
+        .iter()
+        .map(|inv| client.compute_investor_payout(inv))
+        .sum();
+
+    assert!(pool >= payout_sum, "pool={pool} < payout_sum={payout_sum}");
+}
+
+// 10. Value is unchanged after settle (snapshot is immutable post-close).
+#[test]
+fn get_settlement_pool_unchanged_after_settle() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _investor, _sme) =
+        funded_with_real_token(&env, "SP_POSTSETTLED", 10_000i128, 800i64);
+
+    let pre_settle = client.get_settlement_pool();
+    // Advance ledger and settle.
+    env.ledger().with_mut(|l| l.timestamp = 1_000);
+    client.settle();
+
+    let post_settle = client.get_settlement_pool();
+    assert_eq!(pre_settle, post_settle);
+}
+
+// 11. Over-funded escrow: a single investor contributes more than the target.
+//     The snapshot total_principal captures the full funded_amount (> target),
+//     and the pool reflects the over-funded principal.
+#[test]
+fn get_settlement_pool_over_funded_single_investor() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let token = install_stellar_asset_token(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let treasury = Address::generate(&env);
+    let client = super::deploy(&env);
+
+    // Target = 1_000; investor contributes 1_200 in one call (over-funds).
+    // Snapshot captures total_principal = 1_200.
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "SP_OVER"),
+        &sme,
+        &1_000i128,
+        &1_000i64, // 10 % — easy to verify manually
+        &0u64,
+        &token.id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    let inv = Address::generate(&env);
+    token.stellar.mint(&inv, &1_200i128);
+    client.fund(&inv, &1_200i128);
+
+    // Snapshot total_principal = 1_200 (the full funded_amount at close).
+    // coupon = 1_200 × 1_000 / 10_000 = 120
+    // pool   = 1_200 + 120 = 1_320
+    let pool = client.get_settlement_pool();
+    assert_eq!(pool, 1_320);
+}
+
+// 12. Large principal (near i64::MAX scale) — verifies no overflow from
+//     checked_mul when yield_bps > 0.
+#[test]
+fn get_settlement_pool_large_principal_no_overflow() {
+    let env = Env::default();
+    env.mock_all_auths();
+    // Use a principal that would overflow i64 but fits safely in i128.
+    // i64::MAX ≈ 9.2 × 10^18; i128 can hold up to ~1.7 × 10^38.
+    // With yield_bps = 10_000, coupon = principal, pool = 2 × principal.
+    // Choose principal = 1_000_000_000_000_000i128 (10^15) — fits real token mint.
+    let large = 1_000_000_000_000_000i128;
+    let (client, _investor, _sme) =
+        funded_with_real_token(&env, "SP_LARGE", large, 10_000i64);
+
+    // coupon = large × 10_000 / 10_000 = large
+    // pool   = large + large = 2 × large
+    assert_eq!(client.get_settlement_pool(), 2 * large);
 }

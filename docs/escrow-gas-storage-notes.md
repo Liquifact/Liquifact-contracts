@@ -20,7 +20,7 @@ Cost savings below are reasoned from the Soroban host cost schedule, not measure
 | `fund_impl` (event field) | `InvestorEffectiveYield` read after write to populate event | Captured in `investor_effective_yield_bps` local at write time | **−1 read** on every `fund` / `fund_with_commitment` call | Value is known at write time; post-write read is redundant |
 | `fund_impl` (returning investor, `simple_fund`) | `InvestorEffectiveYield` not read (yield set on first deposit only) | Read once for event field on returning-investor path | No net change — read was already absent on first-deposit path; added on returning path to populate event correctly |  |
 | `fund_impl` (`legal_hold_active` order) | Hold check after escrow read | Unchanged — escrow read is always needed for `yield_bps` and `status`; hoisting hold before escrow would not reduce reads | No change | Comment added explaining order |
-| `sweep_terminal_dust` | `DataKey::Escrow`, `DataKey::Treasury`, `DataKey::FundingToken` — each read once | Same | No change — reads are non-redundant | Each key is distinct and read exactly once |
+| `sweep_terminal_dust` | `DataKey::Escrow`, `DataKey::Treasury`, `DataKey::FundingToken`, `DataKey::MaxDustSweepOverride` (once, `.unwrap_or(MAX_DUST_SWEEP_AMOUNT)`) | Same | One additional read for the new override key, but absent-storage semantics keep cost identical for legacy instances | Each key is distinct and read exactly once; the override read is hoisted into a single local at the top so the existing per-call ceiling check and any downstream logic reuse the value |
 | `get_investor_yield_bps` | `DataKey::Escrow` + `DataKey::InvestorEffectiveYield` | Same | No change — reads are non-redundant | Escrow read is required for the base yield fallback; doc comment added to inform callers |
 | All other `get_*` getters | Single read per key | Same | No change — reads are non-redundant | Each getter reads exactly one key |
 | All `env.clone()` call sites | — | — | No change — all clones are required | `env` is used after every `get_escrow` call for storage writes, ledger reads, or event publish; comments added at each site |
@@ -82,6 +82,9 @@ Key properties (invariant):
 
 - **Extension never shortens** an existing TTL.
 - **No state mutation beyond TTL extension**: `bump_ttl` only calls `extend_ttl(...)`.
+- **Batch size bounded**: `allowlisted` is capped at [`MAX_BUMP_TTL_BATCH`](../escrow/src/lib.rs) (32) to
+  limit per-call storage work. An empty vector is rejected with [`EscrowError::BumpTtlBatchEmpty`]
+  (223) and an oversized vector with [`EscrowError::BumpTtlBatchTooLarge`] (224).
 
 ### Thresholds
 
