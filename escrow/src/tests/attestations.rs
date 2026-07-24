@@ -522,7 +522,7 @@ fn test_get_attestation_state_with_primary() {
     let (client, _) = setup_with_init(&env);
     let d = digest(&env, 0xAA);
     client.bind_primary_attestation_hash(&d);
-    
+
     let state = client.get_attestation_state();
     assert_eq!(state.primary_hash, Some(d));
     assert_eq!(state.append_log.len(), 0);
@@ -538,13 +538,13 @@ fn test_get_attestation_state_with_append_log() {
     for i in 0u8..3 {
         client.append_attestation_digest(&digest(&env, i));
     }
-    
+
     let state = client.get_attestation_state();
     assert_eq!(state.primary_hash, None);
     assert_eq!(state.append_log.len(), 3);
     assert_eq!(state.append_log_len, 3);
     assert_eq!(state.remaining_capacity, MAX_ATTESTATION_APPEND_ENTRIES - 3);
-    
+
     // Verify log contents
     for i in 0u8..3 {
         assert_eq!(state.append_log.get(i as u32).unwrap(), digest(&env, i));
@@ -558,11 +558,11 @@ fn test_get_attestation_state_full() {
     let (client, _) = setup_with_init(&env);
     let primary = digest(&env, 0xCC);
     client.bind_primary_attestation_hash(&primary);
-    
+
     for i in 0u8..5 {
         client.append_attestation_digest(&digest(&env, i));
     }
-    
+
     let state = client.get_attestation_state();
     assert_eq!(state.primary_hash, Some(primary));
     assert_eq!(state.append_log.len(), 5);
@@ -579,7 +579,7 @@ fn test_get_attestation_state_after_revoke() {
         client.append_attestation_digest(&digest(&env, i));
     }
     client.revoke_attestation_digest(&1);
-    
+
     let state = client.get_attestation_state();
     assert_eq!(state.append_log.len(), 3);
     assert_eq!(state.append_log_len, 3);
@@ -594,7 +594,7 @@ fn test_get_attestation_state_full_capacity() {
     for i in 0u8..(MAX_ATTESTATION_APPEND_ENTRIES as u8) {
         client.append_attestation_digest(&digest(&env, i));
     }
-    
+
     let state = client.get_attestation_state();
     assert_eq!(state.append_log.len(), MAX_ATTESTATION_APPEND_ENTRIES);
     assert_eq!(state.append_log_len, MAX_ATTESTATION_APPEND_ENTRIES);
@@ -606,21 +606,21 @@ fn test_get_attestation_state_full_capacity() {
 fn test_get_attestation_state_consistency() {
     let env = Env::default();
     let (client, _) = setup_with_init(&env);
-    
+
     // Initial state
     let state1 = client.get_attestation_state();
     assert_eq!(state1.append_log_len, 0);
-    
+
     // After append
     client.append_attestation_digest(&digest(&env, 0x01));
     let state2 = client.get_attestation_state();
     assert_eq!(state2.append_log_len, 1);
-    
+
     // After revoke
     client.revoke_attestation_digest(&0);
     let state3 = client.get_attestation_state();
     assert_eq!(state3.append_log_len, 1); // Length unchanged
-    
+
     // After unrevoke
     client.unrevoke_attestation_digest(&0);
     let state4 = client.get_attestation_state();
@@ -635,19 +635,27 @@ fn test_get_attestation_state_capacity_after_unrevoke() {
     for i in 0u8..3 {
         client.append_attestation_digest(&digest(&env, i));
     }
-    
+
     let state1 = client.get_attestation_state();
-    assert_eq!(state1.remaining_capacity, MAX_ATTESTATION_APPEND_ENTRIES - 3);
-    
+    assert_eq!(
+        state1.remaining_capacity,
+        MAX_ATTESTATION_APPEND_ENTRIES - 3
+    );
+
     client.revoke_attestation_digest(&1);
     let state2 = client.get_attestation_state();
-    assert_eq!(state2.remaining_capacity, MAX_ATTESTATION_APPEND_ENTRIES - 3);
-    
+    assert_eq!(
+        state2.remaining_capacity,
+        MAX_ATTESTATION_APPEND_ENTRIES - 3
+    );
+
     client.unrevoke_attestation_digest(&1);
     let state3 = client.get_attestation_state();
-    assert_eq!(state3.remaining_capacity, MAX_ATTESTATION_APPEND_ENTRIES - 3);
+    assert_eq!(
+        state3.remaining_capacity,
+        MAX_ATTESTATION_APPEND_ENTRIES - 3
+    );
 }
-
 
 /// Unrevoking an index that was never revoked still returns
 /// `AttestationNotRevoked` even after an unrelated index was revoked.
