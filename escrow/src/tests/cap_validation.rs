@@ -2738,8 +2738,7 @@ fn test_lower_protocol_fee_bps_requires_admin_auth() {
 }
 
 #[test]
-#[should_panic]
-fn test_lower_protocol_fee_bps_unauthorized_panics() {
+fn test_lower_protocol_fee_bps_unauthorized_typed_error() {
     let env = Env::default();
     env.mock_all_auths();
     let admin = Address::generate(&env);
@@ -2769,7 +2768,76 @@ fn test_lower_protocol_fee_bps_unauthorized_panics() {
     );
 
     env.mock_auths(&[]);
-    client.lower_protocol_fee_bps(&300i64);
+    assert_contract_error(
+        client.try_lower_protocol_fee_bps(&300i64),
+        EscrowError::Unauthorized,
+    );
+}
+
+#[test]
+fn test_lower_protocol_fee_bps_rejects_exact_boundary_at_10000() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let (token, treasury) = free_addresses(&env);
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "FEE_LO_BOUND_MAX"),
+        &sme,
+        &100_000_000_000i128,
+        &800i64,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &Some(1_000i64),
+    );
+
+    assert_contract_error(
+        client.try_lower_protocol_fee_bps(&10_000i64),
+        EscrowError::ProtocolFeeBpsOutOfRange,
+    );
+}
+
+#[test]
+fn test_lower_protocol_fee_bps_rejects_exact_boundary_at_zero() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let (token, treasury) = free_addresses(&env);
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "FEE_LO_BOUND_ZERO"),
+        &sme,
+        &100_000_000_000i128,
+        &800i64,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &Some(500i64),
+    );
+
+    assert_contract_error(
+        client.try_lower_protocol_fee_bps(&0i64),
+        EscrowError::ProtocolFeeBpsNotLower,
+    );
 }
 
 #[test]
