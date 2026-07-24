@@ -22,8 +22,8 @@ use super::{
     install_stellar_asset_token, setup, StellarTestToken, MAX_DUST_SWEEP_AMOUNT, TARGET,
 };
 use crate::{
-    is_maturity_reached, EscrowError, EscrowSettled, LiquifactEscrow, SettlementReadiness,
-    YieldTier,
+    EscrowError, EscrowSettled, InvoiceEscrow, LiquifactEscrow, SettlementReadiness,
+    SettledAtTimestamp, YieldTier,
 };
 use soroban_sdk::{
     symbol_short,
@@ -2539,4 +2539,244 @@ fn settlement_state_changed_no_topic_collision() {
     // Ensure the topic is <= 9 chars (symbol_short! constraint).
     // "setl_st" is 7 chars, which satisfies the <= 9 requirement.
     assert!("setl_st".len() <= 9, "topic must be <= 9 characters");
+}
+
+// ── get_settlement_state tests ────────────────────────────────────────────────
+
+/// `get_settlement_state` returns sensible defaults (no panic) when escrow is uninitialized.
+#[test]
+fn settlement_state_defaults_when_uninitialized() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    // No init — get_settlement_state must NOT panic (returns sensible default).
+    let state = client.get_settlement_state();
+
+    assert!(
+        !state.is_settleable,
+        "uninitialized escrow is not settleable"
+    );
+    assert_eq!(
+        state.settled_at,
+        SettledAtTimestamp::None,
+        "uninitialized escrow has no settled_at"
+    );
+    assert!(!state.is_settled, "uninitialized escrow is not settled");
+}
+
+/// `get_settlement_state` returns `is_settled = false` for open (status 0) escrow.
+#[test]
+fn settlement_state_open_escrow() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    let state = client.get_settlement_state();
+
+    assert!(
+        !state.is_settleable,
+        "open escrow not fundable, not settleable"
+    );
+    assert_eq!(
+        state.settled_at,
+        SettledAtTimestamp::None,
+        "settled_at must be None before settlement"
+    );
+    assert!(
+        !state.is_settled,
+        "is_settled must be false for open status"
+    );
+}
+
+/// `get_settlement_state` returns `is_settleable = true` for funded, no-maturity, no-hold escrow.
+#[test]
+fn settlement_state_funded_no_maturity_settleable() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    fund_to_target(&client, &env);
+
+    let state = client.get_settlement_state();
+
+    assert!(
+        state.is_settleable,
+        "funded with no maturity must be settleable"
+    );
+    assert_eq!(
+        state.settled_at,
+        SettledAtTimestamp::None,
+        "settled_at must be None before settle called"
+    );
+    assert!(
+        !state.is_settled,
+        "is_settled must be false for funded status"
+    );
+}
+
+/// `get_settlement_state` after `settle()` reflects settled state.
+#[test]
+fn settlement_state_after_settle() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    fund_to_target(&client, &env);
+
+    let ts: u64 = 42;
+    env.ledger().with_mut(|l| l.timestamp = ts);
+    client.settle();
+
+    let state = client.get_settlement_state();
+
+    assert!(!state.is_settleable, "already settled — not settleable");
+    assert_eq!(
+        state.settled_at,
+        SettledAtTimestamp::Some(ts),
+        "settled_at must match settle timestamp"
+    );
+    assert!(state.is_settled, "is_settled must be true after settle");
+}
+
+/// `get_settlement_state` after `withdraw()` shows is_settled = true (status >= 2).
+#[test]
+fn settlement_state_after_withdraw() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _sme, _sac) = setup_funded_with_token(&env);
+    client.withdraw();
+
+    let state = client.get_settlement_state();
+
+    assert!(!state.is_settleable, "withdrawn — not settleable");
+    assert_eq!(
+        state.settled_at,
+        SettledAtTimestamp::None,
+        "settled_at is None — settle() was never called"
+    );
+    assert!(state.is_settled, "is_settled must be true — status >= 2");
+}
+
+/// `get_settlement_state` reflects legal-hold block: `is_settleable = false` while hold active.
+#[test]
+fn settlement_state_legal_hold_blocks_settleable() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    fund_to_target(&client, &env);
+
+    client.set_legal_hold(&true);
+
+    let state = client.get_settlement_state();
+
+    assert!(
+        !state.is_settleable,
+        "legal hold must block settleability"
+    );
+    assert_eq!(state.settled_at, SettledAtTimestamp::None);
+    assert!(!state.is_settled);
+}
+
+/// `get_settlement_state` with maturity gate: not settleable before maturity.
+#[test]
+fn settlement_state_maturity_gate() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let maturity: u64 = 5_000;
+    let (token, treasury) = free_addresses(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "SS_MAT"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &maturity,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+    fund_to_target(&client, &env);
+
+    // Before maturity
+    env.ledger().with_mut(|l| l.timestamp = maturity - 1);
+    let state = client.get_settlement_state();
+    assert!(
+        !state.is_settleable,
+        "before maturity — not settleable"
+    );
+
+    // At maturity
+    env.ledger().with_mut(|l| l.timestamp = maturity);
+    let state2 = client.get_settlement_state();
+    assert!(
+        state2.is_settleable,
+        "at maturity — settleable"
+    );
+}
+
+/// `get_settlement_state` after `partial_settle`: not settleable before maturity,
+/// settleable at maturity.
+#[test]
+fn settlement_state_partial_settle() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let maturity: u64 = 5_000;
+    let (token, treasury) = free_addresses(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "SS_PART"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &maturity,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+    // Partially fund
+    let investor = Address::generate(&env);
+    client.fund(&investor, &(TARGET / 2));
+    client.partial_settle(&sme);
+
+    // Before maturity
+    env.ledger().with_mut(|l| l.timestamp = maturity - 1);
+    let state = client.get_settlement_state();
+    assert!(
+        !state.is_settleable,
+        "after partial_settle, before maturity — not settleable"
+    );
+
+    // At maturity
+    env.ledger().with_mut(|l| l.timestamp = maturity);
+    let state2 = client.get_settlement_state();
+    assert!(
+        state2.is_settleable,
+        "after partial_settle, at maturity — settleable"
+    );
 }
