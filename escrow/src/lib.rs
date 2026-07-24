@@ -665,6 +665,38 @@ pub(crate) fn guard_not_legal_hold(env: &Env, error: EscrowError) {
     ensure(env, !LiquifactEscrow::legal_hold_active(env), error);
 }
 
+/// Shared guard: assert that the investor passes the allowlist gate when it is active.
+///
+/// When [`DataKey::AllowlistActive`] is `false` the check is a no-op (everyone passes).
+/// When active, the investor must have [`DataKey::InvestorAllowlisted`] set to `true`;
+/// absent entries default to deny.
+///
+/// Centralising the gate means adding a new funding-path entrypoint cannot accidentally
+/// omit the allowlist check or diverge from the canonical two-step pattern (read toggle,
+/// then conditionally enforce per-investor status).
+///
+/// # Errors
+/// Panics with [`EscrowError::InvestorNotAllowlisted`] when the allowlist is active and
+/// the investor is not on it.
+///
+/// # Security notes
+/// - Read-only: performs at most one instance-storage read (toggle) and one
+///   persistent-storage read (per-investor entry) with `unwrap_or(false)` semantics.
+///   Does not write or delete any storage key.
+/// - This is **not** an authorization check. Callers must still invoke
+///   `Address::require_auth()` for the entrypoint's bound role before any storage
+///   mutation or token transfer.
+#[inline(always)]
+pub(crate) fn guard_investor_allowlisted(env: &Env, investor: &Address) {
+    if LiquifactEscrow::is_allowlist_active(env.clone()) {
+        ensure(
+            env,
+            LiquifactEscrow::is_investor_allowlisted(env.clone(), investor.clone()),
+            EscrowError::InvestorNotAllowlisted,
+        );
+    }
+}
+
 /// Predicate: `true` when `status` is one of the **terminal** escrow states
 /// (`2` = settled, `3` = withdrawn, `4` = cancelled).
 ///
@@ -4025,13 +4057,7 @@ impl LiquifactEscrow {
             );
         }
 
-        if Self::is_allowlist_active(env.clone()) {
-            ensure(
-                &env,
-                Self::is_investor_allowlisted(env.clone(), investor.clone()),
-                EscrowError::InvestorNotAllowlisted,
-            );
-        }
+        guard_investor_allowlisted(&env, &investor);
 
         let prev: i128 = Self::get_persistent_investor_contribution(&env, investor.clone());
         let new_contribution: i128 = prev
