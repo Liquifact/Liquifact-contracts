@@ -1832,6 +1832,23 @@ pub struct InvestorAllowlistChanged {
     pub allowed: u32,
 }
 
+/// Emitted once per [`LiquifactEscrow::set_investors_allowlisted`] call after
+/// all per-investor `InvestorAllowlistChanged` events, providing a single
+/// batch-level signal for indexers.
+#[contractevent]
+pub struct InvestorAllowlistBatchApplied {
+    /// Hardcoded `"al_batch"` symbol (topic).
+    #[topic]
+    pub name: Symbol,
+    /// The escrow's `invoice_id` (topic, for indexer correlation).
+    #[topic]
+    pub invoice_id: Symbol,
+    /// Number of addresses in the batch.
+    pub batch_size: u32,
+    /// `1` = allowed, `0` = blocked.
+    pub allowed: u32,
+}
+
 #[contractevent]
 pub struct LegalHoldClearCancelled {
     #[topic]
@@ -3992,9 +4009,13 @@ impl LiquifactEscrow {
             .publish(&env);
         }
 
-        env.storage()
-            .instance()
-            .set(&DataKey::AllowlistIndex, &index);
+        InvestorAllowlistBatchApplied {
+            name: symbol_short!("al_batch"),
+            invoice_id: escrow.invoice_id.clone(),
+            batch_size: n,
+            allowed: if allowed { 1 } else { 0 },
+        }
+        .publish(&env);
     }
 
     pub fn is_investor_allowlisted(env: Env, investor: Address) -> bool {

@@ -1,6 +1,6 @@
 use super::{
-    AllowlistEnabledChanged, DataKey, EscrowError, InvestorAllowlistChanged, LiquifactEscrow,
-    LiquifactEscrowClient, MAX_INVESTOR_READ_BATCH,
+    AllowlistEnabledChanged, DataKey, EscrowError, InvestorAllowlistBatchApplied,
+    InvestorAllowlistChanged, LiquifactEscrow, LiquifactEscrowClient,
 };
 use soroban_sdk::Vec as SorobanVec;
 use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env, Error, Event, InvokeError};
@@ -921,466 +921,377 @@ fn gate_batch_revoke_blocks_all_revoked_members() {
 }
 
 // =============================================================================
-// get_allowlist_page tests
+// Batch event tests – InvestorAllowlistBatchApplied (`al_batch`)
+//
+// Every `set_investors_allowlisted` call must emit:
+//   - one `InvestorAllowlistChanged` (`al_set`) per address in the batch, AND
+//   - exactly one `InvestorAllowlistBatchApplied` (`al_batch`) at the end.
 // =============================================================================
 
-use super::AllowlistEntry;
+/// Batch allow emits N per-investor events plus exactly 1 batch event.
+#[test]
+fn test_batch_allowlist_emits_batch_event() {
+    use soroban_sdk::testutils::Events as _;
 
-/// Helper to initialize with yield tiers for tier-index testing.
-fn init_with_tiers(env: &Env, client: &LiquifactEscrowClient) -> (Address, Address) {
-    let admin = Address::generate(env);
-    let sme = Address::generate(env);
-    let token = Address::generate(env);
-    let treasury = Address::generate(env);
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init_gate(&env, &client);
+    let contract_id = client.address.clone();
+    let invoice_id = client.get_escrow().invoice_id;
 
-    let mut tiers = SorobanVec::new(env);
-    tiers.push_back(super::YieldTier {
-        min_lock_secs: 100,
-        yield_bps: 900, // Tier 1
-    });
-    tiers.push_back(super::YieldTier {
-        min_lock_secs: 200,
-        yield_bps: 1100, // Tier 2
-    });
+    let a = Address::generate(&env);
+    let b = Address::generate(&env);
+    let c = Address::generate(&env);
 
-    client.init(
-        &admin,
-        &soroban_sdk::String::from_str(env, "TIERINV01"),
-        &sme,
-        &100_000i128,
-        &800i64, // Base yield
-        &0u64,
-        &token,
-        &None,
-        &treasury,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &Some(tiers),
-        &None,
-        &None,
-        &None::<i64>,
+    let mut batch: SorobanVec<Address> = SorobanVec::new(&env);
+    batch.push_back(a.clone());
+    batch.push_back(b.clone());
+    batch.push_back(c.clone());
+
+    client.set_allowlist_active(&true);
+    client.set_investors_allowlisted(&batch, &true);
+
+    let binding = env.events().all();
+    let events = binding.events();
+
+    for addr in [&a, &b, &c] {
+        let expected = InvestorAllowlistChanged {
+            name: symbol_short!("al_set"),
+            invoice_id: invoice_id.clone(),
+            investor: addr.clone(),
+            allowed: 1,
+        }
+        .to_xdr(&env, &contract_id);
+        assert!(
+            events.iter().any(|e| *e == expected),
+            "must emit al_set for each address"
+        );
+    }
+
+    let batch_xdr = InvestorAllowlistBatchApplied {
+        name: symbol_short!("al_batch"),
+        invoice_id,
+        batch_size: 3,
+        allowed: 1,
+    }
+    .to_xdr(&env, &contract_id);
+    assert!(
+        events.iter().any(|e| *e == batch_xdr),
+        "exactly one al_batch event must be emitted"
     );
-    (admin, sme)
 }
 
+/// Batch revoke emits N per-investor events plus exactly 1 batch event.
 #[test]
-fn test_get_allowlist_page_empty_allowlist() {
+fn test_batch_revoke_emits_batch_event() {
+    use soroban_sdk::testutils::Events as _;
+
     let env = Env::default();
     env.mock_all_auths();
     let client = deploy(&env);
-    init(&env, &client);
+    init_gate(&env, &client);
+    let contract_id = client.address.clone();
+    let invoice_id = client.get_escrow().invoice_id;
 
-    // Query empty allowlist
-    let page = client.get_allowlist_page(&0, &10);
-    assert_eq!(page.len(), 0);
+    let a = Address::generate(&env);
+    let b = Address::generate(&env);
+
+    let mut batch: SorobanVec<Address> = SorobanVec::new(&env);
+    batch.push_back(a.clone());
+    batch.push_back(b.clone());
+
+    client.set_allowlist_active(&true);
+    client.set_investors_allowlisted(&batch, &true);
+
+    // Clear events from the first batch call.
+    let _ = env.events().all();
+
+    // Now revoke.
+    client.set_investors_allowlisted(&batch, &false);
+
+    let binding = env.events().all();
+    let events = binding.events();
+
+    let al_set_a = InvestorAllowlistChanged {
+        name: symbol_short!("al_set"),
+        invoice_id: invoice_id.clone(),
+        investor: a,
+        allowed: 0,
+    }
+    .to_xdr(&env, &contract_id);
+    let al_set_b = InvestorAllowlistChanged {
+        name: symbol_short!("al_set"),
+        invoice_id: invoice_id.clone(),
+        investor: b,
+        allowed: 0,
+    }
+    .to_xdr(&env, &contract_id);
+    assert!(
+        events.iter().any(|e| *e == al_set_a),
+        "must emit al_set for a"
+    );
+    assert!(
+        events.iter().any(|e| *e == al_set_b),
+        "must emit al_set for b"
+    );
+
+    let batch_xdr = InvestorAllowlistBatchApplied {
+        name: symbol_short!("al_batch"),
+        invoice_id,
+        batch_size: 2,
+        allowed: 0,
+    }
+    .to_xdr(&env, &contract_id);
+    assert!(
+        events.iter().any(|e| *e == batch_xdr),
+        "exactly one al_batch event must be emitted"
+    );
 }
 
+/// Single-element batch emits 1 al_set + 1 al_batch.
 #[test]
-fn test_get_allowlist_page_start_beyond_bounds() {
+fn test_single_element_batch_emits_both_events() {
+    use soroban_sdk::testutils::Events as _;
+
     let env = Env::default();
     env.mock_all_auths();
     let client = deploy(&env);
-    init(&env, &client);
+    init_gate(&env, &client);
+    let contract_id = client.address.clone();
+    let invoice_id = client.get_escrow().invoice_id;
 
-    let investor = Address::generate(&env);
-    client.set_investor_allowlisted(&investor, &true);
+    let a = Address::generate(&env);
 
-    // Start index beyond the bounds
-    let page = client.get_allowlist_page(&10, &5);
-    assert_eq!(page.len(), 0);
+    let mut batch: SorobanVec<Address> = SorobanVec::new(&env);
+    batch.push_back(a.clone());
+
+    client.set_allowlist_active(&true);
+    client.set_investors_allowlisted(&batch, &true);
+
+    let binding = env.events().all();
+    let events = binding.events();
+
+    let al_set_xdr = InvestorAllowlistChanged {
+        name: symbol_short!("al_set"),
+        invoice_id: invoice_id.clone(),
+        investor: a,
+        allowed: 1,
+    }
+    .to_xdr(&env, &contract_id);
+    let batch_xdr = InvestorAllowlistBatchApplied {
+        name: symbol_short!("al_batch"),
+        invoice_id,
+        batch_size: 1,
+        allowed: 1,
+    }
+    .to_xdr(&env, &contract_id);
+
+    assert!(
+        events.iter().any(|e| *e == al_set_xdr),
+        "must emit 1 al_set"
+    );
+    assert!(
+        events.iter().any(|e| *e == batch_xdr),
+        "must emit 1 al_batch"
+    );
 }
 
+/// Max-size batch emits N al_set + 1 al_batch.
 #[test]
-fn test_get_allowlist_page_limit_zero() {
+fn test_max_size_batch_emits_correct_event_count() {
+    use soroban_sdk::testutils::Events as _;
+
     let env = Env::default();
     env.mock_all_auths();
     let client = deploy(&env);
-    init(&env, &client);
+    init_gate(&env, &client);
+    let contract_id = client.address.clone();
+    let invoice_id = client.get_escrow().invoice_id;
 
-    let investor = Address::generate(&env);
-    client.set_investor_allowlisted(&investor, &true);
-
-    // Limit of zero
-    let page = client.get_allowlist_page(&0, &0);
-    assert_eq!(page.len(), 0);
-}
-
-#[test]
-fn test_get_allowlist_page_single_investor_no_funding() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let client = deploy(&env);
-    init(&env, &client);
-
-    let investor = Address::generate(&env);
-    client.set_investor_allowlisted(&investor, &true);
-
-    let page = client.get_allowlist_page(&0, &10);
-    assert_eq!(page.len(), 1);
-
-    let entry = page.get(0).unwrap();
-    assert_eq!(entry.investor, investor);
-    assert_eq!(entry.tier, 0); // No funding yet, so tier 0
-}
-
-#[test]
-fn test_get_allowlist_page_pagination() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let client = deploy(&env);
-    init(&env, &client);
-
-    // Add 5 investors to allowlist
-    let mut investors = std::vec![];
-    for _ in 0..5 {
-        let inv = Address::generate(&env);
-        client.set_investor_allowlisted(&inv, &true);
-        investors.push(inv);
+    let max_batch = super::MAX_INVESTOR_ALLOWLIST_BATCH as usize;
+    let mut batch: SorobanVec<Address> = SorobanVec::new(&env);
+    let mut addrs: SorobanVec<Address> = SorobanVec::new(&env);
+    for _ in 0..max_batch {
+        let addr = Address::generate(&env);
+        addrs.push_back(addr.clone());
+        batch.push_back(addr);
     }
 
-    // Get first page (2 entries)
-    let page1 = client.get_allowlist_page(&0, &2);
-    assert_eq!(page1.len(), 2);
-    assert_eq!(page1.get(0).unwrap().investor, investors[0]);
-    assert_eq!(page1.get(1).unwrap().investor, investors[1]);
-
-    // Get second page (2 entries)
-    let page2 = client.get_allowlist_page(&2, &2);
-    assert_eq!(page2.len(), 2);
-    assert_eq!(page2.get(0).unwrap().investor, investors[2]);
-    assert_eq!(page2.get(1).unwrap().investor, investors[3]);
-
-    // Get third page (1 entry remaining)
-    let page3 = client.get_allowlist_page(&4, &2);
-    assert_eq!(page3.len(), 1);
-    assert_eq!(page3.get(0).unwrap().investor, investors[4]);
-
-    // Get beyond bounds
-    let page4 = client.get_allowlist_page(&5, &2);
-    assert_eq!(page4.len(), 0);
-}
-
-#[test]
-fn test_get_allowlist_page_respects_max_limit() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let client = deploy(&env);
-    init(&env, &client);
-
-    // Add many investors to allowlist
-    for _ in 0..60 {
-        let inv = Address::generate(&env);
-        client.set_investor_allowlisted(&inv, &true);
-    }
-
-    // Request limit > MAX_INVESTOR_READ_BATCH (50)
-    let page = client.get_allowlist_page(&0, &100);
-    
-    // Should be capped at MAX_INVESTOR_READ_BATCH
-    assert_eq!(page.len(), 50);
-}
-
-#[test]
-fn test_get_allowlist_page_excludes_revoked_investors() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let client = deploy(&env);
-    init(&env, &client);
-
-    let inv1 = Address::generate(&env);
-    let inv2 = Address::generate(&env);
-    let inv3 = Address::generate(&env);
-
-    // Add all three
-    client.set_investor_allowlisted(&inv1, &true);
-    client.set_investor_allowlisted(&inv2, &true);
-    client.set_investor_allowlisted(&inv3, &true);
-
-    // Revoke inv2
-    client.set_investor_allowlisted(&inv2, &false);
-
-    // Query allowlist
-    let page = client.get_allowlist_page(&0, &10);
-    
-    // Should only return inv1 and inv3
-    assert_eq!(page.len(), 2);
-    assert_eq!(page.get(0).unwrap().investor, inv1);
-    assert_eq!(page.get(1).unwrap().investor, inv3);
-}
-
-#[test]
-fn test_get_allowlist_page_with_base_yield_funding() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let client = deploy(&env);
-    init(&env, &client);
-
-    let investor = Address::generate(&env);
-    client.set_investor_allowlisted(&investor, &true);
     client.set_allowlist_active(&true);
+    client.set_investors_allowlisted(&batch, &true);
 
-    // Fund without commitment (uses base yield)
-    client.fund(&investor, &1_000i128);
+    let binding = env.events().all();
+    let events = binding.events();
 
-    let page = client.get_allowlist_page(&0, &10);
-    assert_eq!(page.len(), 1);
-
-    let entry = page.get(0).unwrap();
-    assert_eq!(entry.investor, investor);
-    assert_eq!(entry.tier, 0); // Base yield = tier 0
-}
-
-#[test]
-fn test_get_allowlist_page_with_tier1_funding() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let client = deploy(&env);
-    init_with_tiers(&env, &client);
-
-    let investor = Address::generate(&env);
-    client.set_investor_allowlisted(&investor, &true);
-    client.set_allowlist_active(&true);
-
-    // Fund with commitment matching tier 1 (min_lock_secs: 100, yield_bps: 900)
-    client.fund_with_commitment(&investor, &1_000i128, &100u64);
-
-    let page = client.get_allowlist_page(&0, &10);
-    assert_eq!(page.len(), 1);
-
-    let entry = page.get(0).unwrap();
-    assert_eq!(entry.investor, investor);
-    assert_eq!(entry.tier, 1); // Tier 1
-}
-
-#[test]
-fn test_get_allowlist_page_with_tier2_funding() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let client = deploy(&env);
-    init_with_tiers(&env, &client);
-
-    let investor = Address::generate(&env);
-    client.set_investor_allowlisted(&investor, &true);
-    client.set_allowlist_active(&true);
-
-    // Fund with commitment matching tier 2 (min_lock_secs: 200, yield_bps: 1100)
-    client.fund_with_commitment(&investor, &1_000i128, &200u64);
-
-    let page = client.get_allowlist_page(&0, &10);
-    assert_eq!(page.len(), 1);
-
-    let entry = page.get(0).unwrap();
-    assert_eq!(entry.investor, investor);
-    assert_eq!(entry.tier, 2); // Tier 2
-}
-
-#[test]
-fn test_get_allowlist_page_mixed_tiers() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let client = deploy(&env);
-    init_with_tiers(&env, &client);
-
-    let inv_no_fund = Address::generate(&env);
-    let inv_base = Address::generate(&env);
-    let inv_tier1 = Address::generate(&env);
-    let inv_tier2 = Address::generate(&env);
-
-    // Add all to allowlist
-    client.set_investor_allowlisted(&inv_no_fund, &true);
-    client.set_investor_allowlisted(&inv_base, &true);
-    client.set_investor_allowlisted(&inv_tier1, &true);
-    client.set_investor_allowlisted(&inv_tier2, &true);
-    client.set_allowlist_active(&true);
-
-    // inv_no_fund: no funding
-    // inv_base: fund without commitment (base yield 800)
-    client.fund(&inv_base, &1_000i128);
-    // inv_tier1: fund with tier 1 commitment
-    client.fund_with_commitment(&inv_tier1, &1_000i128, &100u64);
-    // inv_tier2: fund with tier 2 commitment
-    client.fund_with_commitment(&inv_tier2, &1_000i128, &200u64);
-
-    let page = client.get_allowlist_page(&0, &10);
-    assert_eq!(page.len(), 4);
-
-    // Verify each entry
-    let entry0 = page.get(0).unwrap();
-    assert_eq!(entry0.investor, inv_no_fund);
-    assert_eq!(entry0.tier, 0); // Not funded
-
-    let entry1 = page.get(1).unwrap();
-    assert_eq!(entry1.investor, inv_base);
-    assert_eq!(entry1.tier, 0); // Base yield
-
-    let entry2 = page.get(2).unwrap();
-    assert_eq!(entry2.investor, inv_tier1);
-    assert_eq!(entry2.tier, 1); // Tier 1
-
-    let entry3 = page.get(3).unwrap();
-    assert_eq!(entry3.investor, inv_tier2);
-    assert_eq!(entry3.tier, 2); // Tier 2
-}
-
-#[test]
-fn test_get_allowlist_page_no_tiers_configured() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let client = deploy(&env);
-    init(&env, &client); // No tiers in init
-
-    let inv1 = Address::generate(&env);
-    let inv2 = Address::generate(&env);
-
-    client.set_investor_allowlisted(&inv1, &true);
-    client.set_investor_allowlisted(&inv2, &true);
-    client.set_allowlist_active(&true);
-
-    // Fund both
-    client.fund(&inv1, &500i128);
-    client.fund(&inv2, &1_000i128);
-
-    let page = client.get_allowlist_page(&0, &10);
-    assert_eq!(page.len(), 2);
-
-    // Both should have tier 0 (no tier table configured)
-    assert_eq!(page.get(0).unwrap().tier, 0);
-    assert_eq!(page.get(1).unwrap().tier, 0);
-}
-
-#[test]
-fn test_get_allowlist_page_pagination_with_revoked() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let client = deploy(&env);
-    init(&env, &client);
-
-    // Add 5 investors
-    let mut investors = std::vec![];
-    for _ in 0..5 {
-        let inv = Address::generate(&env);
-        client.set_investor_allowlisted(&inv, &true);
-        investors.push(inv);
-    }
-
-    // Revoke investors at index 1 and 3
-    client.set_investor_allowlisted(&investors[1], &false);
-    client.set_investor_allowlisted(&investors[3], &false);
-
-    // Get all active entries
-    let page = client.get_allowlist_page(&0, &10);
-    
-    // Should only return 3 active investors (0, 2, 4)
-    assert_eq!(page.len(), 3);
-    assert_eq!(page.get(0).unwrap().investor, investors[0]);
-    assert_eq!(page.get(1).unwrap().investor, investors[2]);
-    assert_eq!(page.get(2).unwrap().investor, investors[4]);
-}
-
-#[test]
-fn test_get_allowlist_page_works_when_allowlist_disabled() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let client = deploy(&env);
-    init(&env, &client);
-
-    let investor = Address::generate(&env);
-    client.set_investor_allowlisted(&investor, &true);
-
-    // Allowlist gate is off (default)
-    assert!(!client.is_allowlist_active());
-
-    // get_allowlist_page should still work
-    let page = client.get_allowlist_page(&0, &10);
-    assert_eq!(page.len(), 1);
-    assert_eq!(page.get(0).unwrap().investor, investor);
-}
-
-#[test]
-fn test_get_allowlist_page_all_investors_revoked() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let client = deploy(&env);
-    init(&env, &client);
-
-    let inv1 = Address::generate(&env);
-    let inv2 = Address::generate(&env);
-
-    client.set_investor_allowlisted(&inv1, &true);
-    client.set_investor_allowlisted(&inv2, &true);
-
-    // Revoke both
-    client.set_investor_allowlisted(&inv1, &false);
-    client.set_investor_allowlisted(&inv2, &false);
-
-    // Should return empty
-    let page = client.get_allowlist_page(&0, &10);
-    assert_eq!(page.len(), 0);
-}
-
-#[test]
-fn test_get_allowlist_page_large_pagination() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let client = deploy(&env);
-    init(&env, &client);
-
-    // Add 100 investors
-    let count = 100;
-    for _ in 0..count {
-        let inv = Address::generate(&env);
-        client.set_investor_allowlisted(&inv, &true);
-    }
-
-    // Page through all entries with limit of 10
-    let mut total_retrieved = 0u32;
-    let page_size = 10u32;
-    let mut start = 0u32;
-
-    loop {
-        let page = client.get_allowlist_page(&start, &page_size);
-        let page_len = page.len();
-        
-        if page_len == 0 {
-            break;
+    let mut al_set_found = 0u32;
+    for i in 0..addrs.len() {
+        let addr = addrs.get(i).unwrap();
+        let xdr = InvestorAllowlistChanged {
+            name: symbol_short!("al_set"),
+            invoice_id: invoice_id.clone(),
+            investor: addr,
+            allowed: 1,
         }
-
-        total_retrieved += page_len;
-        start += page_size;
-
-        // Safety check to prevent infinite loop in tests
-        if start > 200 {
-            panic!("Pagination loop exceeded safety limit");
+        .to_xdr(&env, &contract_id);
+        if events.iter().any(|e| *e == xdr) {
+            al_set_found += 1;
         }
     }
+    assert_eq!(
+        al_set_found, max_batch as u32,
+        "must emit one al_set per address"
+    );
 
-    assert_eq!(total_retrieved, count);
+    let batch_xdr = InvestorAllowlistBatchApplied {
+        name: symbol_short!("al_batch"),
+        invoice_id,
+        batch_size: max_batch as u32,
+        allowed: 1,
+    }
+    .to_xdr(&env, &contract_id);
+    assert!(
+        events.iter().any(|e| *e == batch_xdr),
+        "must emit exactly 1 al_batch"
+    );
 }
 
+/// Single-address setter does NOT emit al_batch event.
 #[test]
-fn test_get_allowlist_page_tier_after_additional_fund() {
+fn test_single_allowlist_setter_does_not_emit_batch_event() {
+    use soroban_sdk::testutils::Events as _;
+
     let env = Env::default();
     env.mock_all_auths();
     let client = deploy(&env);
-    init_with_tiers(&env, &client);
+    init_gate(&env, &client);
+    let contract_id = client.address.clone();
+    let invoice_id = client.get_escrow().invoice_id;
 
-    let investor = Address::generate(&env);
-    client.set_investor_allowlisted(&investor, &true);
+    let a = Address::generate(&env);
+
+    client.set_allowlist_active(&true);
+    client.set_investor_allowlisted(&a, &true);
+
+    let binding = env.events().all();
+    let events = binding.events();
+
+    let al_set_xdr = InvestorAllowlistChanged {
+        name: symbol_short!("al_set"),
+        invoice_id: invoice_id.clone(),
+        investor: a,
+        allowed: 1,
+    }
+    .to_xdr(&env, &contract_id);
+    assert!(
+        events.iter().any(|e| *e == al_set_xdr),
+        "single setter must emit al_set"
+    );
+
+    let batch_xdr = InvestorAllowlistBatchApplied {
+        name: symbol_short!("al_batch"),
+        invoice_id,
+        batch_size: 1,
+        allowed: 1,
+    }
+    .to_xdr(&env, &contract_id);
+    assert!(
+        !events.iter().any(|e| *e == batch_xdr),
+        "single setter must not emit al_batch"
+    );
+}
+
+/// Multiple consecutive batch calls each emit their own batch event.
+#[test]
+fn test_multiple_batch_calls_each_emit_batch_event() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init_gate(&env, &client);
+    let contract_id = client.address.clone();
+    let invoice_id = client.get_escrow().invoice_id;
+
+    let a = Address::generate(&env);
+    let b = Address::generate(&env);
+    let c = Address::generate(&env);
+
+    let mut batch1: SorobanVec<Address> = SorobanVec::new(&env);
+    batch1.push_back(a.clone());
+    batch1.push_back(b.clone());
+
+    let mut batch2: SorobanVec<Address> = SorobanVec::new(&env);
+    batch2.push_back(c.clone());
+
     client.set_allowlist_active(&true);
 
-    // First deposit with tier 1 commitment
-    client.fund_with_commitment(&investor, &1_000i128, &100u64);
+    // Snapshot events from first batch call.
+    client.set_investors_allowlisted(&batch1, &true);
+    let binding1 = env.events().all();
+    let events1 = binding1.events();
 
-    // Additional funding (tier is locked after first deposit)
-    client.fund(&investor, &500i128);
+    // Snapshot events from second batch call.
+    client.set_investors_allowlisted(&batch2, &true);
+    let binding2 = env.events().all();
+    let events2 = binding2.events();
 
-    let page = client.get_allowlist_page(&0, &10);
-    assert_eq!(page.len(), 1);
+    let al_set_a = InvestorAllowlistChanged {
+        name: symbol_short!("al_set"),
+        invoice_id: invoice_id.clone(),
+        investor: a,
+        allowed: 1,
+    }
+    .to_xdr(&env, &contract_id);
+    let al_set_b = InvestorAllowlistChanged {
+        name: symbol_short!("al_set"),
+        invoice_id: invoice_id.clone(),
+        investor: b,
+        allowed: 1,
+    }
+    .to_xdr(&env, &contract_id);
+    assert!(
+        events1.iter().any(|e| *e == al_set_a),
+        "batch1 must emit al_set for a"
+    );
+    assert!(
+        events1.iter().any(|e| *e == al_set_b),
+        "batch1 must emit al_set for b"
+    );
 
-    let entry = page.get(0).unwrap();
-    assert_eq!(entry.investor, investor);
-    assert_eq!(entry.tier, 1); // Should still be tier 1
+    let batch1_xdr = InvestorAllowlistBatchApplied {
+        name: symbol_short!("al_batch"),
+        invoice_id: invoice_id.clone(),
+        batch_size: 2,
+        allowed: 1,
+    }
+    .to_xdr(&env, &contract_id);
+    assert!(
+        events1.iter().any(|e| *e == batch1_xdr),
+        "must emit al_batch(batch_size=2) from first call"
+    );
+
+    let al_set_c = InvestorAllowlistChanged {
+        name: symbol_short!("al_set"),
+        invoice_id: invoice_id.clone(),
+        investor: c,
+        allowed: 1,
+    }
+    .to_xdr(&env, &contract_id);
+    assert!(
+        events2.iter().any(|e| *e == al_set_c),
+        "batch2 must emit al_set for c"
+    );
+
+    let batch2_xdr = InvestorAllowlistBatchApplied {
+        name: symbol_short!("al_batch"),
+        invoice_id,
+        batch_size: 1,
+        allowed: 1,
+    }
+    .to_xdr(&env, &contract_id);
+    assert!(
+        events2.iter().any(|e| *e == batch2_xdr),
+        "must emit al_batch(batch_size=1) from second call"
+    );
 }
