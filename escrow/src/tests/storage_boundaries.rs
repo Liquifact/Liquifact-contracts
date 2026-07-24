@@ -522,9 +522,38 @@ fn test_min_contribution_zero_rejected() {
     );
 }
 
-/// MinContribution exactly equal to the amount is rejected with MinContributionExceedsAmount (code 7).
+/// MinContribution exactly equal to the amount is accepted (boundary: mc == amount is valid).
+/// MinContribution one over the amount is rejected with MinContributionExceedsAmount (code 7).
 #[test]
-fn test_min_contribution_equal_to_amount_rejected() {
+fn test_min_contribution_equal_to_amount_accepted() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    // mc == amount is the boundary that is still accepted (condition is mc > amount to reject)
+    client.init(
+        &admin,
+        &String::from_str(&env, "MCEQ"),
+        &sme,
+        &100_000i128,
+        &500i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &Some(100_000i128), // mc == amount → accepted
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+    assert_eq!(client.get_min_contribution_floor(), 100_000i128);
+}
+
+#[test]
+fn test_min_contribution_one_over_amount_rejected() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
     assert_contract_error(
@@ -539,7 +568,7 @@ fn test_min_contribution_equal_to_amount_rejected() {
             &None,
             &Address::generate(&env),
             &None,
-            &Some(100_000i128), // min == amount → rejected
+            &Some(100_001i128), // mc > amount → rejected
             &None,
             &None,
             &None,
@@ -1168,11 +1197,11 @@ fn test_paused_cleared_emits_event() {
     let (client, admin, sme) = setup(&env);
     let contract_id = client.address.clone();
     basic_init(&client, &env, &admin, &sme);
+    let invoice_id = client.get_escrow().invoice_id; // Read invoice_id before set_paused emits events
     client.set_paused(&true);
     client.set_paused(&false);
     assert!(!client.is_paused());
-    let events = env.events().all();
-    let invoice_id = client.get_escrow().invoice_id;
+    let events = env.events().all(); // Snapshot after the set_paused calls
     assert_eq!(
         events.events().last().unwrap().clone(),
         PausedChanged {
