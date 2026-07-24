@@ -473,5 +473,6 @@ If the admin calls `cancel_funding()` before the target is reached:
 | [ADR-001](adr/ADR-001-state-model.md) | State model design decision |
 | [ADR-002](adr/ADR-002-auth-boundaries.md) | Authorization guard ordering |
 | [ADR-005](adr/ADR-005-tiered-yield.md) | Tiered yield design |
+| [yield-tier.md](yield-tier.md) | Yield-tier model, invariants, and entrypoint behavior |
 | [ADR-006](adr/ADR-006-dust-sweep-and-token-safety.md) | Dust sweep and token safety |
 | [ADR-007](adr/ADR-007-storage-key-evolution.md) | Storage key evolution policy |

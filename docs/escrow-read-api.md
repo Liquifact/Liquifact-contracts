@@ -546,6 +546,8 @@ without re-implementing the `unwrap_or` fallback themselves.
 
 ## Tier Lookup
 
+For a fuller explanation of the data model, invariants, and entrypoint semantics, see [yield-tier.md](yield-tier.md).
+
 ### `preview_yield_tier(amount: i128, lock: u64) → (i64, u64)`
 
 **Signature:** `pub fn preview_yield_tier(env: Env, amount: i128, lock: u64) -> (i64, u64)`
