@@ -12,7 +12,7 @@ use crate::{
 use soroban_sdk::{
     symbol_short,
     testutils::{Address as _, Events as _, Ledger},
-    Address, BytesN, Env, Error, InvokeError, Vec as SorobanVec,
+    Address, BytesN, Env, Error, Event, InvokeError, Vec as SorobanVec,
 };
 
 const AMOUNT: i128 = 100_000_000_000;
@@ -1097,7 +1097,44 @@ fn test_overwrite_then_clear() {
     assert!(client.get_sme_collateral_commitment().is_none());
 }
 
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+#[test]
+fn test_clear_emits_exactly_one_coll_clr_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let contract_id = client.address.clone();
+    default_init(&client, &env, &admin, &sme);
+
+    let asset = symbol_short!("USDC");
+    client.record_sme_collateral_commitment(&asset, &PLEDGE);
+
+    // Clear the event buffer so we only measure the clear operation
+    let _ = env.events().all();
+    client.clear_sme_collateral_commitment();
+
+    let contract_events = env.events().all().filter_by_contract(&contract_id);
+    let events = contract_events.events();
+    assert_eq!(
+        events.len(),
+        1,
+        "clear_sme_collateral_commitment must emit exactly one event"
+    );
+
+    let invoice_id = client.get_escrow().invoice_id;
+    assert_eq!(
+        events.last().unwrap().clone(),
+        CollateralClearedEvt {
+            name: symbol_short!("coll_clr"),
+            invoice_id,
+            asset,
+            amount: PLEDGE,
+            recorded_at: env.ledger().timestamp(),
+        }
+        .to_xdr(&env, &contract_id)
+    );
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // Anchoring tests: read-view default/absent return values (docs/escrow-read-api.md)
 //
 // Each test asserts the default or absent-key return value documented in the
