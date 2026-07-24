@@ -3230,6 +3230,13 @@ impl LiquifactEscrow {
             allowed: if allowed { 1 } else { 0 },
         }
         .publish(&env);
+
+        AllowlistStateChanged {
+            name: symbol_short!("al_state"),
+            invoice_id: escrow.invoice_id.clone(),
+            total_count: index.len(),
+        }
+        .publish(&env);
     }
 
     /// Batch add or remove investors from the allowlist.

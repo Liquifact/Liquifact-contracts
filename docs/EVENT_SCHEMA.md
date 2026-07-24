@@ -42,6 +42,7 @@ The current contract defines 36 event structs.
 | `AdminProposedEvent` | `adm_prop` | `propose_admin`, `transfer_admin` |
 | `AdminTransferredEvent` | `admin` | (never emitted; placeholder for `accept_admin` doc) |
 | `AllowlistEnabledChanged` | `al_ena` | `set_allowlist_active` |
+| `AllowlistStateChanged` | `al_state` | `set_investor_allowlisted`, `set_investors_allowlisted` |
 | `AttestationDigestAppended` | `att_app` | `append_attestation_digest` |
 | `AttestationDigestRevoked` | `att_rev` | `revoke_attestation_digest` |
 | `AttestationDigestUnrevoked` | `att_unrev` | `unrevoke_attestation_digest` |
@@ -533,6 +534,31 @@ Data:
 operations. `batch_size` equals the count of `al_set` events emitted in the
 same transaction. Existing indexers that only consume `al_set` remain fully
 compatible — `al_batch` is purely additive.
+
+### `AllowlistStateChanged`
+
+Emitted after any allowlist state change (single or batch) to provide the aggregate state.
+Carries the total count of allowlisted addresses after the modification, enabling indexers
+to track the overall allowlist size without inferring from individual per-address events.
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `allowlist_state_changed` |
+| 1 | `name` | `Symbol` | `al_state` |
+| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
+
+Data:
+
+| Field | Type | Values |
+|---|---|---|
+| `total_count` | `u32` | Total number of allowlisted addresses after the state change |
+
+**Indexer guidance:** filter on `topic[1] == "al_state"` to detect aggregate allowlist state changes.
+This event is emitted after both `set_investor_allowlisted` and `set_investors_allowlisted` calls,
+providing a single source of truth for the total allowlist count without needing to aggregate
+individual `al_set` events.
 
 ## Nested Types
 
