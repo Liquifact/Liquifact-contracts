@@ -590,6 +590,45 @@ fn claim_returns_typed_error_when_paused() {
     );
 }
 
+#[test]
+fn fund_with_commitment_returns_typed_error_when_paused() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    init_open(&client, &env, &admin, &sme, "PAU031");
+    client.set_paused(&true);
+    assert_contract_error(
+        client.try_fund_with_commitment(&investor, &TARGET, &0u64),
+        EscrowError::PausedBlocksFunding,
+    );
+}
+
+#[test]
+fn fund_batch_returns_typed_error_when_paused() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    init_open(&client, &env, &admin, &sme, "PAU032");
+    client.set_paused(&true);
+    let entries = SorobanVec::from_array(&env, [(investor.clone(), TARGET)]);
+    assert_contract_error(
+        client.try_fund_batch(&entries),
+        EscrowError::PausedBlocksFunding,
+    );
+}
+
+#[test]
+fn set_paused_by_non_admin_returns_typed_error() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    init_open(&client, &env, &admin, &sme, "PAU033");
+    env.mock_auths(&[]);
+    assert_contract_error(
+        client.try_set_paused(&true),
+        EscrowError::Unauthorized,
+    );
+}
+
 // ── 14. Multiple pauses toggle correctly ──────────────────────────────────────
 
 #[test]
