@@ -75,9 +75,8 @@ re-implementing storage reads to guarantee identical semantics.
 - [get_distributed_principal](#get_distributed_principal--i128)
 - [get_reconciliation](#get_reconciliation--reconciliationview)
 
-**Protocol Fees:**
-- [get_protocol_fee_bps](#get_protocol_fee_bps--i64)
-- [preview_protocol_fee](#preview_protocol_fee--protocolfeepreview)
+**Paginated Enumeration:**
+- [Paginated Enumeration](#paginated-enumeration)
 
 ---
 
@@ -870,25 +869,40 @@ Returns the yield-tier ladder configured at `init`, or an empty `Vec` when no ti
 
 ---
 
-## Protocol Fees
+## Paginated Enumeration
 
-### `get_protocol_fee_bps() → i64`
+`get_investors`, `get_allowlisted_investors`, and `get_revoked_attestation_digests` share one `(start, limit)` contract. Both args are `u32`; `start` is a zero-based index position and `limit` is clamped (never rejected) to a per-view maximum. See docs/escrow-indexer.md for how indexers poll these.
 
-**Storage key:** `DataKey::ProtocolFeeBps`  
-**Signature:** `pub fn get_protocol_fee_bps(env: Env) -> i64`
+All three apply the same guard first:
 
-Returns the immutable protocol fee in basis points (`0..=10_000`) applied to the SME disbursement.
+```text
+len = length of backing index/log   // absent key => 0
+if start >= len || limit == 0 { return empty Vec }
+```
 
-- **Default** — returns `0` if unset.
-- **Pure read** — no auth required, no state mutation.
+So `start >= len` or `limit == 0` returns an empty `Vec` (never panics), and an absent backing key behaves as `len == 0`. All three are pure reads (no auth, no writes, no TTL bump). Every backing collection is append-only, so a given `start` keeps addressing the same position as new entries are appended at the tail; already-read pages stay stable.
 
----
+| View | Backing key | Max limit | Page shape |
+|------|-------------|-----------|------------|
+| `get_investors` | `InvestorIndex` | `MAX_INVESTOR_READ_BATCH` = 50 | Unfiltered half-open slice |
+| `get_allowlisted_investors` | `AllowlistIndex` | 50 | Half-open slice, then filtered |
+| `get_revoked_attestation_digests` | `AttestationAppendLog` | `MAX_ATTESTATION_READ_PAGE` = 20 | Forward scan for matches |
 
-### `preview_protocol_fee() → ProtocolFeePreview`
+**get_investors** returns `index[start .. min(start + min(limit,50), len)]` in first-funded order, one address per position. Detect the last page when the returned length is below your page size; otherwise call again with `start += page_size`.
 
-**Signature:** `pub fn preview_protocol_fee(env: Env) -> ProtocolFeePreview`
+**get_allowlisted_investors** walks the same window over `AllowlistIndex` but drops addresses whose live `InvestorAllowlisted(addr)` flag is no longer true (revoked entries stay in the index and are skipped at read time). A page may be shorter than the window, so a short or empty page is NOT end-of-list. Advance `start` by the page size each call and stop once `start >= len`. Note `get_allowlisted_investors_count` returns only the live count, not the index length.
 
-Returns the protocol fee amount going to the treasury and the net amount going to the SME.
+**get_revoked_attestation_digests** scans forward from `start` collecting up to `min(limit,20)` revoked entries, skipping non-revoked ones; it stops on match count, not positions scanned, and does not report where it stopped. The log is capped at 32 entries, so `start = 0` then `start = 20` covers any instance. Read the log length from `get_attestation_log_stats` or `get_escrow_summary().attestation_log_length`; do not derive the next `start` from the returned length.
 
-- **Default** — returns zeros (`fee: 0`, `net: 0`) if the escrow is not initialized or the funded amount is zero.
-- **Pure read** — no auth required, no state mutation.
+Worked loop (full investor enumeration, 50 at a time):
+
+```text
+start = 0
+page_size = 50
+loop {
+    page = get_investors(start, page_size)
+    process(page)
+    if page.len() < page_size { break }   // last page
+    start += page_size
+}
+```
