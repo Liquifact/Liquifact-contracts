@@ -1181,6 +1181,47 @@ pub struct ProtocolFeePreview {
 
 // --- Events ---
 
+/// Emitted exactly once when [`DataKey::FundingCloseSnapshot`] is first written to instance
+/// storage, signalling the **status 0 → 1** transition (escrow becomes fully funded).
+///
+/// This event fires from every code path that crosses the funding threshold:
+/// - [`LiquifactEscrow::fund`] / [`LiquifactEscrow::fund_with_commitment`] (via `fund_impl`)
+/// - [`LiquifactEscrow::fund_batch`]
+/// - [`LiquifactEscrow::update_funding_target`] (target lowered to ≤ already-funded amount)
+/// - [`LiquifactEscrow::partial_settle`]
+///
+/// Indexers MUST NOT rely on inferring the snapshot write from companion events (`funded`,
+/// `part_set`, `fund_tgt`). This event is the authoritative signal.
+///
+/// # Topic
+/// `snap_st` (7 chars, ≤ 9-char `symbol_short!` limit).
+///
+/// # No topic collision
+/// `snap_st` is distinct from all other topics in this contract:
+/// `escrow_ii`, `funded`, `escrow_sd`, `inv_claim`, `sme_wd`, `legalhld`, `legal_h`,
+/// `paused`, `coll_rec`, `coll_clr`, `fund_ext`, `dust_sw`, `al_set`, `al_ena`,
+/// `att_bind`, `att_app`, `att_rev`, `att_unrev`, `ben_rot`, `part_set`, `fund_tgt`,
+/// `raise_cap`, `inv_cap`, `floor_lo`, `mtry_max`, `mtry_rse`, `adm_prop`, `adm_acc`,
+/// `adm_sup`, `adm_can`, `depr_xfer`, `upgrade`, `maturity`, `fund_can`, `refunded`,
+/// `unfunded`, `lh_req`, `lh_cancel`.
+#[contractevent]
+pub struct FundingSnapshotStored {
+    /// Topic 1: hardcoded `snap_st`.
+    #[topic]
+    pub name: Symbol,
+    /// Topic 2: escrow invoice identifier.
+    #[topic]
+    pub invoice_id: Symbol,
+    /// Total principal at the moment the snapshot was sealed (≥ `funding_target`).
+    pub total_principal: i128,
+    /// The funding target recorded in the snapshot.
+    pub funding_target: i128,
+    /// Ledger timestamp at which the snapshot was sealed.
+    pub closed_at_ledger_timestamp: u64,
+    /// Ledger sequence number at which the snapshot was sealed.
+    pub closed_at_ledger_sequence: u32,
+}
+
 #[contractevent]
 pub struct EscrowInitialized {
     #[topic]
@@ -4445,19 +4486,25 @@ impl LiquifactEscrow {
             && !env.storage().instance().has(&DataKey::FundingCloseSnapshot)
         {
             escrow.status = 1;
-            env.storage().instance().set(
-                &DataKey::FundingCloseSnapshot,
-                &FundingCloseSnapshot {
-                    total_principal: escrow.funded_amount,
-                    funding_target: new_target,
-                    closed_at_ledger_timestamp: env.ledger().timestamp(),
-                    closed_at_ledger_sequence: env.ledger().sequence(),
-                },
-            );
-            true
-        } else {
-            false
-        };
+            let snap = FundingCloseSnapshot {
+                total_principal: escrow.funded_amount,
+                funding_target: new_target,
+                closed_at_ledger_timestamp: env.ledger().timestamp(),
+                closed_at_ledger_sequence: env.ledger().sequence(),
+            };
+            env.storage()
+                .instance()
+                .set(&DataKey::FundingCloseSnapshot, &snap);
+            FundingSnapshotStored {
+                name: symbol_short!("snap_st"),
+                invoice_id: escrow.invoice_id.clone(),
+                total_principal: snap.total_principal,
+                funding_target: snap.funding_target,
+                closed_at_ledger_timestamp: snap.closed_at_ledger_timestamp,
+                closed_at_ledger_sequence: snap.closed_at_ledger_sequence,
+            }
+            .publish(&env);
+        }
 
         env.storage().instance().set(&DataKey::Escrow, &escrow);
 
@@ -5174,6 +5221,15 @@ impl LiquifactEscrow {
                 env.storage()
                     .instance()
                     .set(&DataKey::FundingCloseSnapshot, &snap);
+                FundingSnapshotStored {
+                    name: symbol_short!("snap_st"),
+                    invoice_id: escrow.invoice_id.clone(),
+                    total_principal: snap.total_principal,
+                    funding_target: snap.funding_target,
+                    closed_at_ledger_timestamp: snap.closed_at_ledger_timestamp,
+                    closed_at_ledger_sequence: snap.closed_at_ledger_sequence,
+                }
+                .publish(&env);
             }
         }
 
@@ -5295,6 +5351,15 @@ impl LiquifactEscrow {
             env.storage()
                 .instance()
                 .set(&DataKey::FundingCloseSnapshot, &snap);
+            FundingSnapshotStored {
+                name: symbol_short!("snap_st"),
+                invoice_id: escrow.invoice_id.clone(),
+                total_principal: snap.total_principal,
+                funding_target: snap.funding_target,
+                closed_at_ledger_timestamp: snap.closed_at_ledger_timestamp,
+                closed_at_ledger_sequence: snap.closed_at_ledger_sequence,
+            }
+            .publish(&env);
         }
 
         env.storage().instance().set(&DataKey::Escrow, &escrow);

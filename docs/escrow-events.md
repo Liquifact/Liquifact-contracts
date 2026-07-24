@@ -82,38 +82,34 @@ Emitted when an investor deposits principal.
 }
 ```
 
-### `FundingReached`
-Emitted exactly once when the escrow transitions from **open** (status 0) to **funded** (status 1).
+### `FundingSnapshotStored`
+Emitted exactly once when `DataKey::FundingCloseSnapshot` is first written to instance storage,
+signalling the **status 0 → 1** (open → funded) transition. Fires from every code path that
+crosses the funding threshold: `fund` / `fund_with_commitment` (via `fund_impl`), `fund_batch`,
+`update_funding_target` (when target is lowered to ≤ funded amount), and `partial_settle`.
 
-This event is the dedicated state-change signal for the 0→1 transition. Indexers can
-subscribe to `fund_rchd` to react to the funding threshold crossing without inspecting
-the `status` field of every per-deposit `EscrowFunded` event.
-
-The event fires in two situations:
-1. During `fund` / `fund_with_commitment` / `fund_batch` when a deposit crosses the
-   threshold — emitted immediately **after** the per-deposit `EscrowFunded` event.
-2. During `update_funding_target` when a target lowering promotes an
-   already-credited principal — emitted immediately **after** the `FundingTargetUpdated` event.
+Indexers MUST use this event as the authoritative signal for the snapshot write. Do not infer it
+from companion events (`funded`, `part_set`, `fund_tgt`).
 
 **Topics:**
-1. `fund_rchd` (Symbol) — ≤ 9 chars, no collision with existing topics
+1. `snap_st` (Symbol)
 2. `invoice_id` (Symbol)
 
 **Data Payload:**
-- `funded_amount` (i128) — total principal at the moment of the 0→1 transition (may exceed target on over-funded escrows)
-- `funding_target` (i128) — the effective target that was satisfied
-- `ledger_timestamp` (u64) — ledger timestamp at promotion time
-- `ledger_sequence` (u32) — ledger sequence at promotion time
+- `total_principal` (i128) — funded amount at the moment the snapshot was sealed (≥ `funding_target`)
+- `funding_target` (i128) — funding target recorded in the snapshot
+- `closed_at_ledger_timestamp` (u64) — ledger timestamp when the snapshot was sealed
+- `closed_at_ledger_sequence` (u32) — ledger sequence number when the snapshot was sealed
 
 **Example (JSON Decoded):**
 ```json
 {
-  "topics": ["fund_rchd", "INV_001"],
+  "topics": ["snap_st", "INV_001"],
   "data": {
-    "funded_amount": "10000000000",
+    "total_principal": "10000000000",
     "funding_target": "10000000000",
-    "ledger_timestamp": 1714180000,
-    "ledger_sequence": 1500
+    "closed_at_ledger_timestamp": 1714184000,
+    "closed_at_ledger_sequence": 5000042
   }
 }
 ```
