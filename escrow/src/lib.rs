@@ -1549,6 +1549,21 @@ pub struct AttestationDigestInfo {
     pub revoked: bool,
 }
 
+/// Read-only view of the current attestation state.
+/// Returns a sensible default (empty/None) when attestation is unset.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AttestationState {
+    /// The primary attestation hash, if bound.
+    pub primary_hash: Option<BytesN<32>>,
+    /// The append log of attestation digests.
+    pub append_log: Vec<BytesN<32>>,
+    /// Current length of the append log.
+    pub append_log_len: u32,
+    /// Remaining capacity in the append log.
+    pub remaining_capacity: u32,
+}
+
 #[contractevent]
 pub struct AllowlistEnabledChanged {
     #[topic]
@@ -2550,6 +2565,23 @@ impl LiquifactEscrow {
             .instance()
             .get(&DataKey::AttestationAppendLog)
             .unwrap_or_else(|| Vec::new(&env))
+    }
+
+    /// Read-only view exposing the current attestation state.
+    /// Returns a sensible default (empty/None) when attestation is unset.
+    /// This is an O(1) read that reuses stored values rather than recomputing.
+    pub fn get_attestation_state(env: Env) -> AttestationState {
+        let primary_hash = Self::get_primary_attestation_hash(env.clone());
+        let append_log = Self::get_attestation_append_log(env.clone());
+        let append_log_len = append_log.len();
+        let remaining_capacity = MAX_ATTESTATION_APPEND_ENTRIES.saturating_sub(append_log_len);
+
+        AttestationState {
+            primary_hash,
+            append_log,
+            append_log_len,
+            remaining_capacity,
+        }
     }
 
     /// Returns the digest and revocation flag at `index`.
