@@ -920,123 +920,467 @@ fn gate_batch_revoke_blocks_all_revoked_members() {
     assert_eq!(client.get_contribution(&b), 1_000i128);
 }
 
-// ── get_allowlisted_investors pagination ──────────────────────────────────
+// =============================================================================
+// get_allowlist_page tests
+// =============================================================================
 
-fn add_allowlisted(_env: &Env, client: &LiquifactEscrowClient<'_>, inv: Address) {
-    client.set_investor_allowlisted(&inv, &true);
-}
+use super::AllowlistEntry;
 
-fn add_allowlisted_n(
-    env: &Env,
-    client: &LiquifactEscrowClient<'_>,
-    n: u32,
-) -> std::vec::Vec<Address> {
-    let mut invs = std::vec::Vec::new();
-    for _ in 0..n {
-        let inv = Address::generate(env);
-        add_allowlisted(env, client, inv.clone());
-        invs.push(inv);
-    }
-    invs
+/// Helper to initialize with yield tiers for tier-index testing.
+fn init_with_tiers(env: &Env, client: &LiquifactEscrowClient) -> (Address, Address) {
+    let admin = Address::generate(env);
+    let sme = Address::generate(env);
+    let token = Address::generate(env);
+    let treasury = Address::generate(env);
+
+    let mut tiers = SorobanVec::new(env);
+    tiers.push_back(super::YieldTier {
+        min_lock_secs: 100,
+        yield_bps: 900, // Tier 1
+    });
+    tiers.push_back(super::YieldTier {
+        min_lock_secs: 200,
+        yield_bps: 1100, // Tier 2
+    });
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(env, "TIERINV01"),
+        &sme,
+        &100_000i128,
+        &800i64, // Base yield
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &Some(tiers),
+        &None,
+        &None,
+        &None::<i64>,
+    );
+    (admin, sme)
 }
 
 #[test]
-fn test_get_allowlisted_investors_basic_pagination() {
+fn test_get_allowlist_page_empty_allowlist() {
     let env = Env::default();
     env.mock_all_auths();
     let client = deploy(&env);
     init(&env, &client);
-    client.set_allowlist_active(&true);
 
-    let invs = add_allowlisted_n(&env, &client, 5);
-
-    let page = client.get_allowlisted_investors(&0, &3);
-    assert_eq!(page.len(), 3);
-    assert_eq!(page.get(0).unwrap(), invs[0]);
-    assert_eq!(page.get(1).unwrap(), invs[1]);
-    assert_eq!(page.get(2).unwrap(), invs[2]);
-
-    let page2 = client.get_allowlisted_investors(&3, &3);
-    assert_eq!(page2.len(), 2);
-    assert_eq!(page2.get(0).unwrap(), invs[3]);
-    assert_eq!(page2.get(1).unwrap(), invs[4]);
-}
-
-#[test]
-fn test_get_allowlisted_investors_start_past_end() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let client = deploy(&env);
-    init(&env, &client);
-    client.set_allowlist_active(&true);
-    add_allowlisted(&env, &client, Address::generate(&env));
-
-    let page = client.get_allowlisted_investors(&5, &10);
+    // Query empty allowlist
+    let page = client.get_allowlist_page(&0, &10);
     assert_eq!(page.len(), 0);
 }
 
 #[test]
-fn test_get_allowlisted_investors_zero_limit() {
+fn test_get_allowlist_page_start_beyond_bounds() {
     let env = Env::default();
     env.mock_all_auths();
     let client = deploy(&env);
     init(&env, &client);
-    client.set_allowlist_active(&true);
-    add_allowlisted(&env, &client, Address::generate(&env));
 
-    let page = client.get_allowlisted_investors(&0, &0);
+    let investor = Address::generate(&env);
+    client.set_investor_allowlisted(&investor, &true);
+
+    // Start index beyond the bounds
+    let page = client.get_allowlist_page(&10, &5);
     assert_eq!(page.len(), 0);
 }
 
 #[test]
-fn test_get_allowlisted_investors_limit_exceeds_remaining() {
+fn test_get_allowlist_page_limit_zero() {
     let env = Env::default();
     env.mock_all_auths();
     let client = deploy(&env);
     init(&env, &client);
-    client.set_allowlist_active(&true);
 
-    let invs = add_allowlisted_n(&env, &client, 3);
+    let investor = Address::generate(&env);
+    client.set_investor_allowlisted(&investor, &true);
 
-    let page = client.get_allowlisted_investors(&2, &100);
+    // Limit of zero
+    let page = client.get_allowlist_page(&0, &0);
+    assert_eq!(page.len(), 0);
+}
+
+#[test]
+fn test_get_allowlist_page_single_investor_no_funding() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init(&env, &client);
+
+    let investor = Address::generate(&env);
+    client.set_investor_allowlisted(&investor, &true);
+
+    let page = client.get_allowlist_page(&0, &10);
     assert_eq!(page.len(), 1);
-    assert_eq!(page.get(0).unwrap(), invs[2]);
+
+    let entry = page.get(0).unwrap();
+    assert_eq!(entry.investor, investor);
+    assert_eq!(entry.tier, 0); // No funding yet, so tier 0
 }
 
 #[test]
-fn test_get_allowlisted_investors_filters_unallowlisted() {
+fn test_get_allowlist_page_pagination() {
     let env = Env::default();
     env.mock_all_auths();
     let client = deploy(&env);
     init(&env, &client);
-    client.set_allowlist_active(&true);
 
-    let a = Address::generate(&env);
-    let b = Address::generate(&env);
-    let c = Address::generate(&env);
-    add_allowlisted(&env, &client, a.clone());
-    add_allowlisted(&env, &client, b.clone());
-    add_allowlisted(&env, &client, c.clone());
+    // Add 5 investors to allowlist
+    let mut investors = std::vec![];
+    for _ in 0..5 {
+        let inv = Address::generate(&env);
+        client.set_investor_allowlisted(&inv, &true);
+        investors.push(inv);
+    }
 
-    // Revoke b from allowlist.
-    client.set_investor_allowlisted(&b, &false);
+    // Get first page (2 entries)
+    let page1 = client.get_allowlist_page(&0, &2);
+    assert_eq!(page1.len(), 2);
+    assert_eq!(page1.get(0).unwrap().investor, investors[0]);
+    assert_eq!(page1.get(1).unwrap().investor, investors[1]);
 
-    let page = client.get_allowlisted_investors(&0, &5);
+    // Get second page (2 entries)
+    let page2 = client.get_allowlist_page(&2, &2);
+    assert_eq!(page2.len(), 2);
+    assert_eq!(page2.get(0).unwrap().investor, investors[2]);
+    assert_eq!(page2.get(1).unwrap().investor, investors[3]);
+
+    // Get third page (1 entry remaining)
+    let page3 = client.get_allowlist_page(&4, &2);
+    assert_eq!(page3.len(), 1);
+    assert_eq!(page3.get(0).unwrap().investor, investors[4]);
+
+    // Get beyond bounds
+    let page4 = client.get_allowlist_page(&5, &2);
+    assert_eq!(page4.len(), 0);
+}
+
+#[test]
+fn test_get_allowlist_page_respects_max_limit() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init(&env, &client);
+
+    // Add many investors to allowlist
+    for _ in 0..60 {
+        let inv = Address::generate(&env);
+        client.set_investor_allowlisted(&inv, &true);
+    }
+
+    // Request limit > MAX_INVESTOR_READ_BATCH (50)
+    let page = client.get_allowlist_page(&0, &100);
+    
+    // Should be capped at MAX_INVESTOR_READ_BATCH
+    assert_eq!(page.len(), 50);
+}
+
+#[test]
+fn test_get_allowlist_page_excludes_revoked_investors() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init(&env, &client);
+
+    let inv1 = Address::generate(&env);
+    let inv2 = Address::generate(&env);
+    let inv3 = Address::generate(&env);
+
+    // Add all three
+    client.set_investor_allowlisted(&inv1, &true);
+    client.set_investor_allowlisted(&inv2, &true);
+    client.set_investor_allowlisted(&inv3, &true);
+
+    // Revoke inv2
+    client.set_investor_allowlisted(&inv2, &false);
+
+    // Query allowlist
+    let page = client.get_allowlist_page(&0, &10);
+    
+    // Should only return inv1 and inv3
     assert_eq!(page.len(), 2);
-    assert_eq!(page.get(0).unwrap(), a);
-    assert_eq!(page.get(1).unwrap(), c);
+    assert_eq!(page.get(0).unwrap().investor, inv1);
+    assert_eq!(page.get(1).unwrap().investor, inv3);
 }
 
 #[test]
-fn test_get_allowlisted_investors_caps_at_max_batch() {
+fn test_get_allowlist_page_with_base_yield_funding() {
     let env = Env::default();
     env.mock_all_auths();
     let client = deploy(&env);
     init(&env, &client);
+
+    let investor = Address::generate(&env);
+    client.set_investor_allowlisted(&investor, &true);
     client.set_allowlist_active(&true);
 
-    add_allowlisted_n(&env, &client, MAX_INVESTOR_READ_BATCH + 5);
+    // Fund without commitment (uses base yield)
+    client.fund(&investor, &1_000i128);
 
-    let page = client.get_allowlisted_investors(&0, &u32::MAX);
-    assert_eq!(page.len(), MAX_INVESTOR_READ_BATCH);
+    let page = client.get_allowlist_page(&0, &10);
+    assert_eq!(page.len(), 1);
+
+    let entry = page.get(0).unwrap();
+    assert_eq!(entry.investor, investor);
+    assert_eq!(entry.tier, 0); // Base yield = tier 0
+}
+
+#[test]
+fn test_get_allowlist_page_with_tier1_funding() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init_with_tiers(&env, &client);
+
+    let investor = Address::generate(&env);
+    client.set_investor_allowlisted(&investor, &true);
+    client.set_allowlist_active(&true);
+
+    // Fund with commitment matching tier 1 (min_lock_secs: 100, yield_bps: 900)
+    client.fund_with_commitment(&investor, &1_000i128, &100u64);
+
+    let page = client.get_allowlist_page(&0, &10);
+    assert_eq!(page.len(), 1);
+
+    let entry = page.get(0).unwrap();
+    assert_eq!(entry.investor, investor);
+    assert_eq!(entry.tier, 1); // Tier 1
+}
+
+#[test]
+fn test_get_allowlist_page_with_tier2_funding() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init_with_tiers(&env, &client);
+
+    let investor = Address::generate(&env);
+    client.set_investor_allowlisted(&investor, &true);
+    client.set_allowlist_active(&true);
+
+    // Fund with commitment matching tier 2 (min_lock_secs: 200, yield_bps: 1100)
+    client.fund_with_commitment(&investor, &1_000i128, &200u64);
+
+    let page = client.get_allowlist_page(&0, &10);
+    assert_eq!(page.len(), 1);
+
+    let entry = page.get(0).unwrap();
+    assert_eq!(entry.investor, investor);
+    assert_eq!(entry.tier, 2); // Tier 2
+}
+
+#[test]
+fn test_get_allowlist_page_mixed_tiers() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init_with_tiers(&env, &client);
+
+    let inv_no_fund = Address::generate(&env);
+    let inv_base = Address::generate(&env);
+    let inv_tier1 = Address::generate(&env);
+    let inv_tier2 = Address::generate(&env);
+
+    // Add all to allowlist
+    client.set_investor_allowlisted(&inv_no_fund, &true);
+    client.set_investor_allowlisted(&inv_base, &true);
+    client.set_investor_allowlisted(&inv_tier1, &true);
+    client.set_investor_allowlisted(&inv_tier2, &true);
+    client.set_allowlist_active(&true);
+
+    // inv_no_fund: no funding
+    // inv_base: fund without commitment (base yield 800)
+    client.fund(&inv_base, &1_000i128);
+    // inv_tier1: fund with tier 1 commitment
+    client.fund_with_commitment(&inv_tier1, &1_000i128, &100u64);
+    // inv_tier2: fund with tier 2 commitment
+    client.fund_with_commitment(&inv_tier2, &1_000i128, &200u64);
+
+    let page = client.get_allowlist_page(&0, &10);
+    assert_eq!(page.len(), 4);
+
+    // Verify each entry
+    let entry0 = page.get(0).unwrap();
+    assert_eq!(entry0.investor, inv_no_fund);
+    assert_eq!(entry0.tier, 0); // Not funded
+
+    let entry1 = page.get(1).unwrap();
+    assert_eq!(entry1.investor, inv_base);
+    assert_eq!(entry1.tier, 0); // Base yield
+
+    let entry2 = page.get(2).unwrap();
+    assert_eq!(entry2.investor, inv_tier1);
+    assert_eq!(entry2.tier, 1); // Tier 1
+
+    let entry3 = page.get(3).unwrap();
+    assert_eq!(entry3.investor, inv_tier2);
+    assert_eq!(entry3.tier, 2); // Tier 2
+}
+
+#[test]
+fn test_get_allowlist_page_no_tiers_configured() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init(&env, &client); // No tiers in init
+
+    let inv1 = Address::generate(&env);
+    let inv2 = Address::generate(&env);
+
+    client.set_investor_allowlisted(&inv1, &true);
+    client.set_investor_allowlisted(&inv2, &true);
+    client.set_allowlist_active(&true);
+
+    // Fund both
+    client.fund(&inv1, &500i128);
+    client.fund(&inv2, &1_000i128);
+
+    let page = client.get_allowlist_page(&0, &10);
+    assert_eq!(page.len(), 2);
+
+    // Both should have tier 0 (no tier table configured)
+    assert_eq!(page.get(0).unwrap().tier, 0);
+    assert_eq!(page.get(1).unwrap().tier, 0);
+}
+
+#[test]
+fn test_get_allowlist_page_pagination_with_revoked() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init(&env, &client);
+
+    // Add 5 investors
+    let mut investors = std::vec![];
+    for _ in 0..5 {
+        let inv = Address::generate(&env);
+        client.set_investor_allowlisted(&inv, &true);
+        investors.push(inv);
+    }
+
+    // Revoke investors at index 1 and 3
+    client.set_investor_allowlisted(&investors[1], &false);
+    client.set_investor_allowlisted(&investors[3], &false);
+
+    // Get all active entries
+    let page = client.get_allowlist_page(&0, &10);
+    
+    // Should only return 3 active investors (0, 2, 4)
+    assert_eq!(page.len(), 3);
+    assert_eq!(page.get(0).unwrap().investor, investors[0]);
+    assert_eq!(page.get(1).unwrap().investor, investors[2]);
+    assert_eq!(page.get(2).unwrap().investor, investors[4]);
+}
+
+#[test]
+fn test_get_allowlist_page_works_when_allowlist_disabled() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init(&env, &client);
+
+    let investor = Address::generate(&env);
+    client.set_investor_allowlisted(&investor, &true);
+
+    // Allowlist gate is off (default)
+    assert!(!client.is_allowlist_active());
+
+    // get_allowlist_page should still work
+    let page = client.get_allowlist_page(&0, &10);
+    assert_eq!(page.len(), 1);
+    assert_eq!(page.get(0).unwrap().investor, investor);
+}
+
+#[test]
+fn test_get_allowlist_page_all_investors_revoked() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init(&env, &client);
+
+    let inv1 = Address::generate(&env);
+    let inv2 = Address::generate(&env);
+
+    client.set_investor_allowlisted(&inv1, &true);
+    client.set_investor_allowlisted(&inv2, &true);
+
+    // Revoke both
+    client.set_investor_allowlisted(&inv1, &false);
+    client.set_investor_allowlisted(&inv2, &false);
+
+    // Should return empty
+    let page = client.get_allowlist_page(&0, &10);
+    assert_eq!(page.len(), 0);
+}
+
+#[test]
+fn test_get_allowlist_page_large_pagination() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init(&env, &client);
+
+    // Add 100 investors
+    let count = 100;
+    for _ in 0..count {
+        let inv = Address::generate(&env);
+        client.set_investor_allowlisted(&inv, &true);
+    }
+
+    // Page through all entries with limit of 10
+    let mut total_retrieved = 0u32;
+    let page_size = 10u32;
+    let mut start = 0u32;
+
+    loop {
+        let page = client.get_allowlist_page(&start, &page_size);
+        let page_len = page.len();
+        
+        if page_len == 0 {
+            break;
+        }
+
+        total_retrieved += page_len;
+        start += page_size;
+
+        // Safety check to prevent infinite loop in tests
+        if start > 200 {
+            panic!("Pagination loop exceeded safety limit");
+        }
+    }
+
+    assert_eq!(total_retrieved, count);
+}
+
+#[test]
+fn test_get_allowlist_page_tier_after_additional_fund() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init_with_tiers(&env, &client);
+
+    let investor = Address::generate(&env);
+    client.set_investor_allowlisted(&investor, &true);
+    client.set_allowlist_active(&true);
+
+    // First deposit with tier 1 commitment
+    client.fund_with_commitment(&investor, &1_000i128, &100u64);
+
+    // Additional funding (tier is locked after first deposit)
+    client.fund(&investor, &500i128);
+
+    let page = client.get_allowlist_page(&0, &10);
+    assert_eq!(page.len(), 1);
+
+    let entry = page.get(0).unwrap();
+    assert_eq!(entry.investor, investor);
+    assert_eq!(entry.tier, 1); // Should still be tier 1
 }
