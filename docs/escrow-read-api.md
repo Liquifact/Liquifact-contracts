@@ -44,6 +44,9 @@ re-implementing storage reads to guarantee identical semantics.
 **Tier Lookup:**
 - [preview_yield_tier](#preview_yield_tieramount-i128-lock-u64--i64-u64)
 
+**Deposit Preview:**
+- [preview_fund](#preview_fundenvinvestor-address-amount-i128--u32)
+
 **Per-Investor State:**
 - [get_contribution](#get_contributioninvestor-address--i128)
 - [get_unique_funder_count](#get_unique_funder_count--u32)
@@ -60,6 +63,7 @@ re-implementing storage reads to guarantee identical semantics.
 - [get_attestation_append_log](#get_attestation_append_log--vecbytesn32)
 - [get_attestation_log_stats](#get_attestation_log_stats--u32-u32)
 - [is_attestation_revoked](#is_attestation_revokedindex-u32--bool)
+- [get_revoked_attestation_indices](#get_revoked_attestation_indices--vecu32)
 
 **Collateral Metadata:**
 - [get_sme_collateral_commitment](#get_sme_collateral_commitment--optionsmecollateralcommitment)
@@ -74,6 +78,9 @@ re-implementing storage reads to guarantee identical semantics.
 **Distributed Principal:**
 - [get_distributed_principal](#get_distributed_principal--i128)
 - [get_reconciliation](#get_reconciliation--reconciliationview)
+
+**Paginated Enumeration:**
+- [Paginated Enumeration](#paginated-enumeration)
 
 ---
 
@@ -246,17 +253,36 @@ Returns the pending-admin proposal's remaining validity window computed against 
 
 ## `get_remaining_funding_capacity() → i128`
 
-**Storage key:** `DataKey::Escrow`
+**Storage key:** `DataKey::Escrow`  
+**Signature:** `pub fn get_remaining_funding_capacity(env: Env) -> i128`
 
-Returns the remaining funding capacity before the funding target is reached.
+Returns `max(0, funding_target − funded_amount)` — the headroom remaining before the funding
+target is reached. Saturating arithmetic ensures the result is **always non-negative**, even
+when the escrow has been over-funded past the target.
 
-- **Calculation**: `funding_target.saturating_sub(funded_amount)` clamped at `0` (via `.max(0)`) so it never goes negative when over-funded.
-- **Informational only**: This view is for frontend guidance. The `fund` method may still accept deposits that over-fund past the target while the escrow status is `0` (Open).
-- **No authorization**: Pure read; no auth or signature required.
-- **Complexity**:
-  - Time Complexity: $O(1)$ read from storage.
-  - Space Complexity: $O(1)$ in-memory calculation.
-- Panics with `"Escrow not initialized"` before `init`.
+**Informational only:** Front-ends should use this view to size deposit suggestions. The `fund`
+entrypoint does **not** use this value as a gate — it accepts deposits that push `funded_amount`
+past `funding_target` while `status == 0` (open). A return value of `0` means the target has
+already been met or exceeded; it does not mean further deposits are rejected.
+
+**Requires initialization:** Yes — emits [`EscrowError::EscrowNotInitialized`] (code 20) if
+called before `init`.
+
+**No authorization required.** Pure read; no state mutation.
+
+| Escrow state | Return value |
+|---|---|
+| No deposits yet | `funding_target` |
+| Partially funded | `funding_target − funded_amount` |
+| Exactly at target | `0` |
+| Over-funded | `0` (clamped, never negative) |
+
+**Complexity:** O(1) — single instance-storage read.
+
+**Security notes:**
+- The `.max(0)` clamp is redundant given `saturating_sub` but is retained explicitly for
+  auditor clarity.
+- Reads `DataKey::Escrow` directly; no side effects.
 
 ---
 
@@ -554,6 +580,67 @@ to the same internal `effective_yield_for_commitment` helper — there is no sep
 
 ---
 
+## Deposit Preview
+
+### `preview_fund(env, investor: Address, amount: i128) → u32`
+
+**Signature:** `pub fn preview_fund(env: Env, investor: Address, amount: i128) -> u32`
+
+Pure-read preview: returns `0` if a [`LiquifactEscrow::fund`] call with the same `(investor, amount)`
+would succeed on the current ledger, or the numeric [`EscrowError`] code of the **first** guard that
+would reject it.
+
+Guards are evaluated in the exact same order as [`LiquifactEscrow::fund_impl`] so the returned code
+is always the first failure a real `fund` would encounter.
+
+**Authorization:** None — pure read; no auth required, no state mutation, no side effects.
+
+**Advisory only:** This view is a snapshot. Racing state changes (a concurrent fund, an admin
+legal-hold toggle, or a deadline expiry on the next ledger) may cause a real `fund` to revert even
+when this view returned `0`. Always handle the `fund` result; never treat a preview success as a
+guarantee.
+
+**Return values:**
+
+| Return | Meaning |
+|--------|---------|
+| `0` | Deposit would be accepted (all guards pass) |
+| `20` | Escrow not initialized — [`EscrowError::EscrowNotInitialized`] |
+| `100` | Amount ≤ 0 — [`EscrowError::FundingAmountNotPositive`] |
+| `101` | Below minimum contribution floor — [`EscrowError::FundingBelowMinContribution`] |
+| `102` | Legal hold active — [`EscrowError::LegalHoldBlocksFunding`] |
+| `103` | Escrow not in open status — [`EscrowError::EscrowNotOpenForFunding`] |
+| `104` | Investor not allowlisted when allowlist is active — [`EscrowError::InvestorNotAllowlisted`] |
+| `105` | Contribution would overflow i128 — [`EscrowError::InvestorContributionOverflow`] |
+| `106` | Would exceed per-investor cap — [`EscrowError::InvestorContributionExceedsCap`] |
+| `107` | New investor would exceed unique-investor cap — [`EscrowError::UniqueInvestorCapReached`] |
+| `110` | Total funded amount would overflow — [`EscrowError::FundedAmountOverflow`] |
+| `164` | Funding deadline passed — [`EscrowError::FundingDeadlinePassed`] |
+| `210` | Operational pause active — [`EscrowError::PausedBlocksFunding`] |
+
+**Guard ordering (matches `fund_impl`):**
+
+1. Amount must be positive.
+2. Amount must meet the minimum contribution floor (if configured).
+3. Escrow must be initialized.
+4. Operational pause must not be active.
+5. Legal hold must not be active.
+6. Escrow status must be open (`0`).
+7. Funding deadline must not have passed (if configured).
+8. Investor must be allowlisted (if allowlist is active).
+9. Investor contribution must not overflow.
+10. New contribution must not exceed the per-investor cap (if configured).
+11. New investor must not exceed the unique-investor cap (if configured).
+12. Total funded amount must not overflow.
+
+**Code mapping:** Every guard above corresponds to the same-named check in
+[`LiquifactEscrow::fund_impl`]. Search for the error variant name in `fund_impl` to
+cross-reference the enforcement side. The preview runs the checks in the same linear
+order so the first failure code reported here is exactly the first error `fund` itself
+would emit.
+
+---
+
 ## Per-Investor State
 
 ### `get_contribution(investor: Address) → i128`
@@ -805,74 +892,47 @@ Returns the yield-tier ladder configured at `init`, or an empty `Vec` when no ti
 
 ---
 
-## Allowlist
+## `get_revoked_attestation_indices() → Vec<u32>`
 
-### `is_allowlist_active() → bool`
+**Storage keys:** `DataKey::AttestationAppendLog`, `DataKey::AttestationRevoked(u32)`  
+**Signature:** `pub fn get_revoked_attestation_indices(env: Env) -> Vec<u32>`
 
-**Storage key:** `DataKey::AllowlistActive` (instance)
-**Signature:** `pub fn is_allowlist_active(env: Env) -> bool`
+Returns the ordered set of indices in the attestation append-log that have been revoked.
+Scans `0..get_attestation_append_log().len()` and collects every index `i` where
+`DataKey::AttestationRevoked(i)` is set. The result is ascending (0-based) and its length
+is bounded by the log length, which is itself capped at `MAX_ATTESTATION_APPEND_ENTRIES` (32).
 
-Returns `true` when the investor allowlist gate is active.
+**Requires initialization:** No  
+**No authorization required.** Pure read; no state mutation.
 
-**Requires initialization:** No
-**Default when absent:** `false`
+**Relation to other attestation views:**
 
----
+| View | What it returns |
+|---|---|
+| `get_attestation_append_log()` | All digests (revoked and active) in insertion order |
+| `is_attestation_revoked(index)` | Revocation flag for a single index |
+| `get_revoked_attestation_indices()` | Ordered set of all revoked indices |
 
-### `is_investor_allowlisted(investor: Address) → bool`
+**Alignment guarantee:** index `i` in the returned `Vec` corresponds to
+`get_attestation_append_log().get(i)` — the same ordering. Integrators can join
+the two views by position without secondary key lookups.
 
-**Storage key:** `DataKey::InvestorAllowlisted(investor)` (persistent)
-**Signature:** `pub fn is_investor_allowlisted(env: Env, investor: Address) -> bool`
+**Legacy instances:** instances where no revocations have ever been recorded return an
+empty `Vec`. This is backward-compatible under the additive-key policy (ADR-007).
 
-Returns `true` when the given address is currently allowlisted.
+| Log / revocation state | Return value |
+|---|---|
+| Empty log | `[]` |
+| Log with no revocations | `[]` |
+| Some indices revoked | Ascending list of revoked indices, e.g. `[0, 2, 4]` |
+| All indices revoked | `[0, 1, 2, …, log.len()-1]` |
+| After `unrevoke_attestation_digest(i)` | Index `i` no longer appears |
 
-**Requires initialization:** No
-**Default when absent:** `false` (default-to-deny semantics)
+**Complexity:** O(N) where N = `get_attestation_append_log().len()` ≤ 32. The scan and
+storage reads are bounded by `MAX_ATTESTATION_APPEND_ENTRIES`.
 
----
-
-### `get_allowlist_state() → AllowlistState`
-
-**Storage keys:** `DataKey::AllowlistActive`, `DataKey::AllowlistIndex` (both instance)
-**Signature:** `pub fn get_allowlist_state(env: Env) -> AllowlistState`
-
-Returns the full allowlist state in **O(1)** by reading directly from instance storage.
-No iteration, no persistent-storage reads, no event replay — two key lookups regardless
-of how many addresses are in the index.
-
-**Requires initialization:** No
-**Default when absent:** `AllowlistState { active: false, index: [] }` — never panics.
-**No mutation:** pure read; no storage writes, no side effects.
-
-**Return value:** `AllowlistState` struct with fields:
-- `active: bool` — whether the gate is currently enforced.
-- `index: Vec<Address>` — ordered list of addresses added to the allowlist index (not yet removed). Mirrors `DataKey::AllowlistIndex` exactly.
-
-**Note on `index` vs live status:** an address in `index` may have its persistent
-`DataKey::InvestorAllowlisted` entry set to `false` if removed after being indexed.
-For per-address live status use `is_investor_allowlisted`.
-
----
-
-### `get_allowlisted_investors(start: u32, limit: u32) → Vec<Address>`
-
-**Storage keys:** `DataKey::AllowlistIndex` (instance), `DataKey::InvestorAllowlisted` (persistent, per address)
-**Signature:** `pub fn get_allowlisted_investors(env: Env, start: u32, limit: u32) -> Vec<Address>`
-
-Returns a paginated list of currently-allowlisted addresses (filters out entries where the live
-`InvestorAllowlisted` flag is `false`). `limit` is capped at 50.
-
-**Requires initialization:** No
-**Default when absent:** empty `Vec`
-
----
-
-### `get_allowlisted_investors_count() → u32`
-
-**Storage keys:** `DataKey::AllowlistIndex` (instance), `DataKey::InvestorAllowlisted` (persistent, per address)
-**Signature:** `pub fn get_allowlisted_investors_count(env: Env) -> u32`
-
-Returns the count of addresses where the live `InvestorAllowlisted` flag is `true`.
-
-**Requires initialization:** No
-**Default when absent:** `0`
+**Security notes:**
+- Pure read — no authorization required, no state mutation.
+- Bounded scan — loops at most 32 times regardless of call context.
+- Reads `DataKey::AttestationAppendLog` once for log length, then probes
+  `DataKey::AttestationRevoked(i)` per slot; no writes occur.

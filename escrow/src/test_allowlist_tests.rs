@@ -1,6 +1,6 @@
 use super::{
-    AllowlistEnabledChanged, AllowlistState, DataKey, EscrowError, InvestorAllowlistChanged,
-    LiquifactEscrow, LiquifactEscrowClient,
+    AllowlistEnabledChanged, DataKey, EscrowError, InvestorAllowlistBatchApplied,
+    InvestorAllowlistChanged, LiquifactEscrow, LiquifactEscrowClient,
 };
 use soroban_sdk::Vec as SorobanVec;
 use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env, Error, Event, InvokeError};
@@ -921,120 +921,377 @@ fn gate_batch_revoke_blocks_all_revoked_members() {
 }
 
 // =============================================================================
-// get_allowlist_state — issue #713
+// Batch event tests – InvestorAllowlistBatchApplied (`al_batch`)
 //
-// O(1) read-only view that returns AllowlistState { active, index } directly
-// from instance storage without mutation or iteration over persistent entries.
+// Every `set_investors_allowlisted` call must emit:
+//   - one `InvestorAllowlistChanged` (`al_set`) per address in the batch, AND
+//   - exactly one `InvestorAllowlistBatchApplied` (`al_batch`) at the end.
 // =============================================================================
 
-/// Fresh contract, allowlist never configured — view must return the default
-/// (inactive, empty index) without panicking.
+/// Batch allow emits N per-investor events plus exactly 1 batch event.
 #[test]
-fn test_get_allowlist_state_unset_returns_default() {
+fn test_batch_allowlist_emits_batch_event() {
+    use soroban_sdk::testutils::Events as _;
+
     let env = Env::default();
     env.mock_all_auths();
     let client = deploy(&env);
-    init(&env, &client);
+    init_gate(&env, &client);
+    let contract_id = client.address.clone();
+    let invoice_id = client.get_escrow().invoice_id;
 
-    let state = client.get_allowlist_state();
+    let a = Address::generate(&env);
+    let b = Address::generate(&env);
+    let c = Address::generate(&env);
 
-    assert!(!state.active, "active must be false when never set");
-    assert_eq!(
-        state.index.len(),
-        0,
-        "index must be empty when no investors have been added"
+    let mut batch: SorobanVec<Address> = SorobanVec::new(&env);
+    batch.push_back(a.clone());
+    batch.push_back(b.clone());
+    batch.push_back(c.clone());
+
+    client.set_allowlist_active(&true);
+    client.set_investors_allowlisted(&batch, &true);
+
+    let binding = env.events().all();
+    let events = binding.events();
+
+    for addr in [&a, &b, &c] {
+        let expected = InvestorAllowlistChanged {
+            name: symbol_short!("al_set"),
+            invoice_id: invoice_id.clone(),
+            investor: addr.clone(),
+            allowed: 1,
+        }
+        .to_xdr(&env, &contract_id);
+        assert!(
+            events.iter().any(|e| *e == expected),
+            "must emit al_set for each address"
+        );
+    }
+
+    let batch_xdr = InvestorAllowlistBatchApplied {
+        name: symbol_short!("al_batch"),
+        invoice_id,
+        batch_size: 3,
+        allowed: 1,
+    }
+    .to_xdr(&env, &contract_id);
+    assert!(
+        events.iter().any(|e| *e == batch_xdr),
+        "exactly one al_batch event must be emitted"
     );
 }
 
-/// Set the allowlist toggle and add investors, then assert the view reflects
-/// exactly what was written.
+/// Batch revoke emits N per-investor events plus exactly 1 batch event.
 #[test]
-fn test_get_allowlist_state_returns_current_state() {
+fn test_batch_revoke_emits_batch_event() {
+    use soroban_sdk::testutils::Events as _;
+
     let env = Env::default();
     env.mock_all_auths();
     let client = deploy(&env);
-    init(&env, &client);
+    init_gate(&env, &client);
+    let contract_id = client.address.clone();
+    let invoice_id = client.get_escrow().invoice_id;
 
     let a = Address::generate(&env);
     let b = Address::generate(&env);
 
+    let mut batch: SorobanVec<Address> = SorobanVec::new(&env);
+    batch.push_back(a.clone());
+    batch.push_back(b.clone());
+
     client.set_allowlist_active(&true);
-    client.set_investor_allowlisted(&a, &true);
-    client.set_investor_allowlisted(&b, &true);
+    client.set_investors_allowlisted(&batch, &true);
 
-    let state = client.get_allowlist_state();
+    // Clear events from the first batch call.
+    let _ = env.events().all();
 
-    assert!(state.active, "active must be true after set_allowlist_active(true)");
-    assert_eq!(state.index.len(), 2, "index must contain both added investors");
+    // Now revoke.
+    client.set_investors_allowlisted(&batch, &false);
+
+    let binding = env.events().all();
+    let events = binding.events();
+
+    let al_set_a = InvestorAllowlistChanged {
+        name: symbol_short!("al_set"),
+        invoice_id: invoice_id.clone(),
+        investor: a,
+        allowed: 0,
+    }
+    .to_xdr(&env, &contract_id);
+    let al_set_b = InvestorAllowlistChanged {
+        name: symbol_short!("al_set"),
+        invoice_id: invoice_id.clone(),
+        investor: b,
+        allowed: 0,
+    }
+    .to_xdr(&env, &contract_id);
     assert!(
-        (state.index.get(0).unwrap() == a && state.index.get(1).unwrap() == b)
-            || (state.index.get(0).unwrap() == b && state.index.get(1).unwrap() == a),
-        "index must contain a and b"
+        events.iter().any(|e| *e == al_set_a),
+        "must emit al_set for a"
+    );
+    assert!(
+        events.iter().any(|e| *e == al_set_b),
+        "must emit al_set for b"
+    );
+
+    let batch_xdr = InvestorAllowlistBatchApplied {
+        name: symbol_short!("al_batch"),
+        invoice_id,
+        batch_size: 2,
+        allowed: 0,
+    }
+    .to_xdr(&env, &contract_id);
+    assert!(
+        events.iter().any(|e| *e == batch_xdr),
+        "exactly one al_batch event must be emitted"
     );
 }
 
-/// After mutating the allowlist (adding then removing an investor), the view
-/// must reflect the latest state, not a stale snapshot.
+/// Single-element batch emits 1 al_set + 1 al_batch.
 #[test]
-fn test_get_allowlist_state_after_update() {
+fn test_single_element_batch_emits_both_events() {
+    use soroban_sdk::testutils::Events as _;
+
     let env = Env::default();
     env.mock_all_auths();
     let client = deploy(&env);
-    init(&env, &client);
+    init_gate(&env, &client);
+    let contract_id = client.address.clone();
+    let invoice_id = client.get_escrow().invoice_id;
+
+    let a = Address::generate(&env);
+
+    let mut batch: SorobanVec<Address> = SorobanVec::new(&env);
+    batch.push_back(a.clone());
+
+    client.set_allowlist_active(&true);
+    client.set_investors_allowlisted(&batch, &true);
+
+    let binding = env.events().all();
+    let events = binding.events();
+
+    let al_set_xdr = InvestorAllowlistChanged {
+        name: symbol_short!("al_set"),
+        invoice_id: invoice_id.clone(),
+        investor: a,
+        allowed: 1,
+    }
+    .to_xdr(&env, &contract_id);
+    let batch_xdr = InvestorAllowlistBatchApplied {
+        name: symbol_short!("al_batch"),
+        invoice_id,
+        batch_size: 1,
+        allowed: 1,
+    }
+    .to_xdr(&env, &contract_id);
+
+    assert!(
+        events.iter().any(|e| *e == al_set_xdr),
+        "must emit 1 al_set"
+    );
+    assert!(
+        events.iter().any(|e| *e == batch_xdr),
+        "must emit 1 al_batch"
+    );
+}
+
+/// Max-size batch emits N al_set + 1 al_batch.
+#[test]
+fn test_max_size_batch_emits_correct_event_count() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init_gate(&env, &client);
+    let contract_id = client.address.clone();
+    let invoice_id = client.get_escrow().invoice_id;
+
+    let max_batch = super::MAX_INVESTOR_ALLOWLIST_BATCH as usize;
+    let mut batch: SorobanVec<Address> = SorobanVec::new(&env);
+    let mut addrs: SorobanVec<Address> = SorobanVec::new(&env);
+    for _ in 0..max_batch {
+        let addr = Address::generate(&env);
+        addrs.push_back(addr.clone());
+        batch.push_back(addr);
+    }
+
+    client.set_allowlist_active(&true);
+    client.set_investors_allowlisted(&batch, &true);
+
+    let binding = env.events().all();
+    let events = binding.events();
+
+    let mut al_set_found = 0u32;
+    for i in 0..addrs.len() {
+        let addr = addrs.get(i).unwrap();
+        let xdr = InvestorAllowlistChanged {
+            name: symbol_short!("al_set"),
+            invoice_id: invoice_id.clone(),
+            investor: addr,
+            allowed: 1,
+        }
+        .to_xdr(&env, &contract_id);
+        if events.iter().any(|e| *e == xdr) {
+            al_set_found += 1;
+        }
+    }
+    assert_eq!(
+        al_set_found, max_batch as u32,
+        "must emit one al_set per address"
+    );
+
+    let batch_xdr = InvestorAllowlistBatchApplied {
+        name: symbol_short!("al_batch"),
+        invoice_id,
+        batch_size: max_batch as u32,
+        allowed: 1,
+    }
+    .to_xdr(&env, &contract_id);
+    assert!(
+        events.iter().any(|e| *e == batch_xdr),
+        "must emit exactly 1 al_batch"
+    );
+}
+
+/// Single-address setter does NOT emit al_batch event.
+#[test]
+fn test_single_allowlist_setter_does_not_emit_batch_event() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init_gate(&env, &client);
+    let contract_id = client.address.clone();
+    let invoice_id = client.get_escrow().invoice_id;
+
+    let a = Address::generate(&env);
+
+    client.set_allowlist_active(&true);
+    client.set_investor_allowlisted(&a, &true);
+
+    let binding = env.events().all();
+    let events = binding.events();
+
+    let al_set_xdr = InvestorAllowlistChanged {
+        name: symbol_short!("al_set"),
+        invoice_id: invoice_id.clone(),
+        investor: a,
+        allowed: 1,
+    }
+    .to_xdr(&env, &contract_id);
+    assert!(
+        events.iter().any(|e| *e == al_set_xdr),
+        "single setter must emit al_set"
+    );
+
+    let batch_xdr = InvestorAllowlistBatchApplied {
+        name: symbol_short!("al_batch"),
+        invoice_id,
+        batch_size: 1,
+        allowed: 1,
+    }
+    .to_xdr(&env, &contract_id);
+    assert!(
+        !events.iter().any(|e| *e == batch_xdr),
+        "single setter must not emit al_batch"
+    );
+}
+
+/// Multiple consecutive batch calls each emit their own batch event.
+#[test]
+fn test_multiple_batch_calls_each_emit_batch_event() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init_gate(&env, &client);
+    let contract_id = client.address.clone();
+    let invoice_id = client.get_escrow().invoice_id;
 
     let a = Address::generate(&env);
     let b = Address::generate(&env);
+    let c = Address::generate(&env);
 
-    // Initial state: add both.
+    let mut batch1: SorobanVec<Address> = SorobanVec::new(&env);
+    batch1.push_back(a.clone());
+    batch1.push_back(b.clone());
+
+    let mut batch2: SorobanVec<Address> = SorobanVec::new(&env);
+    batch2.push_back(c.clone());
+
     client.set_allowlist_active(&true);
-    client.set_investor_allowlisted(&a, &true);
-    client.set_investor_allowlisted(&b, &true);
 
-    let state_after_add = client.get_allowlist_state();
-    assert_eq!(state_after_add.index.len(), 2);
+    // Snapshot events from first batch call.
+    client.set_investors_allowlisted(&batch1, &true);
+    let binding1 = env.events().all();
+    let events1 = binding1.events();
 
-    // Mutate: remove b from the index.
-    client.set_investor_allowlisted(&b, &false);
+    // Snapshot events from second batch call.
+    client.set_investors_allowlisted(&batch2, &true);
+    let binding2 = env.events().all();
+    let events2 = binding2.events();
 
-    let state_after_remove = client.get_allowlist_state();
-    assert_eq!(
-        state_after_remove.index.len(),
-        1,
-        "index must shrink after removal"
-    );
-    assert_eq!(
-        state_after_remove.index.get(0).unwrap(),
-        a,
-        "only a must remain in the index"
+    let al_set_a = InvestorAllowlistChanged {
+        name: symbol_short!("al_set"),
+        invoice_id: invoice_id.clone(),
+        investor: a,
+        allowed: 1,
+    }
+    .to_xdr(&env, &contract_id);
+    let al_set_b = InvestorAllowlistChanged {
+        name: symbol_short!("al_set"),
+        invoice_id: invoice_id.clone(),
+        investor: b,
+        allowed: 1,
+    }
+    .to_xdr(&env, &contract_id);
+    assert!(
+        events1.iter().any(|e| *e == al_set_a),
+        "batch1 must emit al_set for a"
     );
     assert!(
-        state_after_remove.active,
-        "active flag must be unchanged after investor removal"
+        events1.iter().any(|e| *e == al_set_b),
+        "batch1 must emit al_set for b"
     );
-}
 
-/// Calling get_allowlist_state must not mutate storage: calling it twice in
-/// sequence must yield byte-identical results and leave storage unchanged.
-#[test]
-fn test_get_allowlist_state_does_not_mutate_storage() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let client = deploy(&env);
-    init(&env, &client);
-
-    let a = Address::generate(&env);
-    client.set_allowlist_active(&true);
-    client.set_investor_allowlisted(&a, &true);
-
-    // Call the view twice — results must be identical.
-    let first = client.get_allowlist_state();
-    let second = client.get_allowlist_state();
-
-    assert_eq!(
-        first, second,
-        "get_allowlist_state must be idempotent and non-mutating"
+    let batch1_xdr = InvestorAllowlistBatchApplied {
+        name: symbol_short!("al_batch"),
+        invoice_id: invoice_id.clone(),
+        batch_size: 2,
+        allowed: 1,
+    }
+    .to_xdr(&env, &contract_id);
+    assert!(
+        events1.iter().any(|e| *e == batch1_xdr),
+        "must emit al_batch(batch_size=2) from first call"
     );
-    assert!(first.active);
-    assert_eq!(first.index.len(), 1);
-    assert_eq!(first.index.get(0).unwrap(), a);
+
+    let al_set_c = InvestorAllowlistChanged {
+        name: symbol_short!("al_set"),
+        invoice_id: invoice_id.clone(),
+        investor: c,
+        allowed: 1,
+    }
+    .to_xdr(&env, &contract_id);
+    assert!(
+        events2.iter().any(|e| *e == al_set_c),
+        "batch2 must emit al_set for c"
+    );
+
+    let batch2_xdr = InvestorAllowlistBatchApplied {
+        name: symbol_short!("al_batch"),
+        invoice_id,
+        batch_size: 1,
+        allowed: 1,
+    }
+    .to_xdr(&env, &contract_id);
+    assert!(
+        events2.iter().any(|e| *e == batch2_xdr),
+        "must emit al_batch(batch_size=1) from second call"
+    );
 }

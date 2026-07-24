@@ -48,7 +48,7 @@ with `unwrap_or(0)`.
 
 | Variant | Rust type stored | Set by | Notes |
 |---------|-----------------|--------|-------|
-| `RegistryRef` | `Address` | `init` (when `registry` arg is `Some`) | Hint only — not an on-chain authority |
+| `RegistryRef` | `Address` | `init` (when `registry` arg is `Some`); `set_registry_ref` | Hint only — not an on-chain authority. Admin may update or clear at any time via `set_registry_ref` |
 | `YieldTierTable` | `Vec<YieldTier>` | `init` (when non-empty tiers supplied) | Immutable after init |
 | `FundingCloseSnapshot` | `FundingCloseSnapshot` | `fund_impl` on first transition to `status == 1` | Immutable once written |
 | `SmeCollateralPledge` | `SmeCollateralCommitment` | `record_sme_collateral_commitment` | Record-only; replaceable by SME |
