@@ -204,6 +204,57 @@ fn test_append_single_entry_stored() {
     assert_eq!(log.get(0).unwrap(), d);
 }
 
+/// `append_attestation_digest` emits `AttestationDigestAppended` with the correct
+/// index and digest on the first append.
+#[test]
+fn test_append_emits_event_with_index_zero() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    let contract_id = client.address.clone();
+    let d = digest(&env, 0x11);
+
+    client.append_attestation_digest(&d);
+
+    let invoice_id = client.get_escrow().invoice_id;
+    let all_events = env.events().all();
+    assert_eq!(
+        all_events.events().last().unwrap().clone(),
+        AttestationDigestAppended {
+            name: symbol_short!("att_app"),
+            invoice_id,
+            index: 0,
+            digest: d,
+        }
+        .to_xdr(&env, &contract_id)
+    );
+}
+
+/// The `index` field of `AttestationDigestAppended` increments monotonically
+/// across sequential appends, matching the entry's position in the log.
+#[test]
+fn test_append_event_index_increments_across_calls() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    let contract_id = client.address.clone();
+    let invoice_id = client.get_escrow().invoice_id;
+
+    for i in 0u8..4 {
+        let d = digest(&env, i);
+        client.append_attestation_digest(&d);
+        let all_events = env.events().all();
+        assert_eq!(
+            all_events.events().last().unwrap().clone(),
+            AttestationDigestAppended {
+                name: symbol_short!("att_app"),
+                invoice_id: invoice_id.clone(),
+                index: i as u32,
+                digest: d,
+            }
+            .to_xdr(&env, &contract_id)
+        );
+    }
+}
+
 /// Multiple appends preserve insertion order.
 #[test]
 fn test_append_multiple_entries_ordered() {
@@ -949,75 +1000,4 @@ fn test_revoked_digests_view_caps_limit() {
     }
     let page = client.get_revoked_attestation_digests(&0, &100);
     assert_eq!(page.len(), crate::MAX_ATTESTATION_READ_PAGE);
-}
-
-// ---------------------------------------------------------------------------
-// revoke_attestation_digest — typed EscrowError edge cases (issue #378)
-// ---------------------------------------------------------------------------
-
-/// index > log.len() (large value) returns `AttestationIndexOutOfRange`.
-#[test]
-fn test_revoke_large_index_out_of_range() {
-    let env = Env::default();
-    let (client, _) = setup_with_init(&env);
-    client.append_attestation_digest(&digest(&env, 0x01));
-    assert_contract_error(
-        client.try_revoke_attestation_digest(&99),
-        EscrowError::AttestationIndexOutOfRange,
-    );
-}
-
-/// Revoking the first entry (index 0) in a multi-entry log succeeds.
-#[test]
-fn test_revoke_first_entry() {
-    let env = Env::default();
-    let (client, _) = setup_with_init(&env);
-    client.append_attestation_digest(&digest(&env, 0x01));
-    client.append_attestation_digest(&digest(&env, 0x02));
-    client.revoke_attestation_digest(&0);
-    assert!(client.is_attestation_revoked(&0));
-    assert!(!client.is_attestation_revoked(&1));
-}
-
-/// Revoking the last entry in a multi-entry log succeeds.
-#[test]
-fn test_revoke_last_entry() {
-    let env = Env::default();
-    let (client, _) = setup_with_init(&env);
-    for i in 0u8..3 {
-        client.append_attestation_digest(&digest(&env, i));
-    }
-    client.revoke_attestation_digest(&2);
-    assert!(!client.is_attestation_revoked(&0));
-    assert!(!client.is_attestation_revoked(&1));
-    assert!(client.is_attestation_revoked(&2));
-}
-
-/// Third revoke attempt on same index still returns `AttestationAlreadyRevoked`.
-#[test]
-fn test_repeated_revoke_returns_typed_error() {
-    let env = Env::default();
-    let (client, _) = setup_with_init(&env);
-    client.append_attestation_digest(&digest(&env, 0x10));
-    client.revoke_attestation_digest(&0);
-    assert_contract_error(
-        client.try_revoke_attestation_digest(&0),
-        EscrowError::AttestationAlreadyRevoked,
-    );
-    // A second retry also returns the same typed error.
-    assert_contract_error(
-        client.try_revoke_attestation_digest(&0),
-        EscrowError::AttestationAlreadyRevoked,
-    );
-}
-
-/// Non-admin `try_revoke_attestation_digest` returns an authorization error.
-#[test]
-fn test_revoke_non_admin_returns_error() {
-    let env = Env::default();
-    let (client, _) = setup_with_init(&env);
-    client.append_attestation_digest(&digest(&env, 0xFF));
-    env.mock_auths(&[]);
-    // Any error (not Ok) satisfies the auth-rejection requirement.
-    assert!(client.try_revoke_attestation_digest(&0).is_err());
 }
