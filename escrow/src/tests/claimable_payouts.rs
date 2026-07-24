@@ -1,6 +1,9 @@
 #[cfg(test)]
-use super::{deploy_with_id, default_init, deploy, free_addresses, install_stellar_asset_token, setup, EscrowError, MAX_CLAIMABLE_PAYOUT_BATCH};
-use soroban_sdk::{Address, Env, Vec as SorobanVec, String};
+use super::{
+    default_init, deploy, deploy_with_id, free_addresses, install_stellar_asset_token, setup,
+    EscrowError, MAX_CLAIMABLE_PAYOUT_BATCH,
+};
+use soroban_sdk::{Address, Env, String, Vec as SorobanVec};
 
 // Basic happy-path and edge-case tests for get_claimable_payouts
 
