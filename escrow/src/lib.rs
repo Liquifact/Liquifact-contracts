@@ -1922,6 +1922,20 @@ pub struct InvestorAllowlistBatchApplied {
     pub allowed: u32,
 }
 
+/// Emitted after any allowlist state change to provide the aggregate state.
+/// Carries the total count of allowlisted addresses after the modification,
+/// enabling indexers to track the overall allowlist size without inferring
+/// from individual per-address events.
+#[contractevent]
+pub struct AllowlistStateChanged {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    /// Total number of allowlisted addresses after the state change.
+    pub total_count: u32,
+}
+
 #[contractevent]
 pub struct LegalHoldClearCancelled {
     #[topic]
@@ -4143,6 +4157,13 @@ impl LiquifactEscrow {
             allowed: if allowed { 1 } else { 0 },
         }
         .publish(&env);
+
+        AllowlistStateChanged {
+            name: symbol_short!("al_state"),
+            invoice_id: escrow.invoice_id.clone(),
+            total_count: index.len(),
+        }
+        .publish(&env);
     }
 
     /// Batch add or remove investors from the allowlist.
@@ -4213,6 +4234,13 @@ impl LiquifactEscrow {
             invoice_id: escrow.invoice_id.clone(),
             batch_size: n,
             allowed: if allowed { 1 } else { 0 },
+        }
+        .publish(&env);
+
+        AllowlistStateChanged {
+            name: symbol_short!("al_state"),
+            invoice_id: escrow.invoice_id.clone(),
+            total_count: index.len(),
         }
         .publish(&env);
     }

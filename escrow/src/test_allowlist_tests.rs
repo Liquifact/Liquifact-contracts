@@ -1,6 +1,7 @@
 use super::{
-    AllowlistEnabledChanged, DataKey, EscrowError, InvestorAllowlistBatchApplied,
-    InvestorAllowlistChanged, LiquifactEscrow, LiquifactEscrowClient,
+    AllowlistEnabledChanged, AllowlistStateChanged, DataKey, EscrowError,
+    InvestorAllowlistBatchApplied, InvestorAllowlistChanged, LiquifactEscrow,
+    LiquifactEscrowClient,
 };
 use soroban_sdk::Vec as SorobanVec;
 use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env, Error, Event, InvokeError};
@@ -1293,5 +1294,224 @@ fn test_multiple_batch_calls_each_emit_batch_event() {
     assert!(
         events2.iter().any(|e| *e == batch2_xdr),
         "must emit al_batch(batch_size=1) from second call"
+    );
+}
+
+// =============================================================================
+// AllowlistStateChanged (`al_state`) tests
+// =============================================================================
+
+#[test]
+fn state_change_event_emitted_on_single_add() {
+    let env = Env::default();
+    let client = deploy(&env);
+    init(&env, &client);
+    let contract_id = client.address.clone();
+    let invoice_id = client.get_escrow().invoice_id;
+
+    let investor = Address::generate(&env);
+
+    client.set_investor_allowlisted(&investor, &true);
+
+    let binding = env.events().all();
+    let events = binding.events();
+
+    let state_event = AllowlistStateChanged {
+        name: symbol_short!("al_state"),
+        invoice_id: invoice_id.clone(),
+        total_count: 1,
+    }
+    .to_xdr(&env, &contract_id);
+    assert!(
+        events.iter().any(|e| *e == state_event),
+        "must emit al_state with total_count=1 after adding first investor"
+    );
+}
+
+#[test]
+fn state_change_event_emitted_on_single_remove() {
+    let env = Env::default();
+    let client = deploy(&env);
+    init(&env, &client);
+    let contract_id = client.address.clone();
+    let invoice_id = client.get_escrow().invoice_id;
+
+    let investor = Address::generate(&env);
+
+    // Add first
+    client.set_investor_allowlisted(&investor, &true);
+    let _ = env.events().all(); // Clear events
+
+    // Remove
+    client.set_investor_allowlisted(&investor, &false);
+
+    let binding = env.events().all();
+    let events = binding.events();
+
+    let state_event = AllowlistStateChanged {
+        name: symbol_short!("al_state"),
+        invoice_id,
+        total_count: 0,
+    }
+    .to_xdr(&env, &contract_id);
+    assert!(
+        events.iter().any(|e| *e == state_event),
+        "must emit al_state with total_count=0 after removing only investor"
+    );
+}
+
+#[test]
+fn state_change_event_emitted_on_batch_add() {
+    let env = Env::default();
+    let client = deploy(&env);
+    init(&env, &client);
+    let contract_id = client.address.clone();
+    let invoice_id = client.get_escrow().invoice_id;
+
+    let a = Address::generate(&env);
+    let b = Address::generate(&env);
+    let c = Address::generate(&env);
+
+    let mut batch: SorobanVec<Address> = SorobanVec::new(&env);
+    batch.push_back(a.clone());
+    batch.push_back(b.clone());
+    batch.push_back(c.clone());
+
+    client.set_investors_allowlisted(&batch, &true);
+
+    let binding = env.events().all();
+    let events = binding.events();
+
+    let state_event = AllowlistStateChanged {
+        name: symbol_short!("al_state"),
+        invoice_id,
+        total_count: 3,
+    }
+    .to_xdr(&env, &contract_id);
+    assert!(
+        events.iter().any(|e| *e == state_event),
+        "must emit al_state with total_count=3 after batch add of 3 investors"
+    );
+}
+
+#[test]
+fn state_change_event_emitted_on_batch_remove() {
+    let env = Env::default();
+    let client = deploy(&env);
+    init(&env, &client);
+    let contract_id = client.address.clone();
+    let invoice_id = client.get_escrow().invoice_id;
+
+    let a = Address::generate(&env);
+    let b = Address::generate(&env);
+
+    let mut batch: SorobanVec<Address> = SorobanVec::new(&env);
+    batch.push_back(a.clone());
+    batch.push_back(b.clone());
+
+    // Add first
+    client.set_investors_allowlisted(&batch, &true);
+    let _ = env.events().all(); // Clear events
+
+    // Remove
+    client.set_investors_allowlisted(&batch, &false);
+
+    let binding = env.events().all();
+    let events = binding.events();
+
+    let state_event = AllowlistStateChanged {
+        name: symbol_short!("al_state"),
+        invoice_id,
+        total_count: 0,
+    }
+    .to_xdr(&env, &contract_id);
+    assert!(
+        events.iter().any(|e| *e == state_event),
+        "must emit al_state with total_count=0 after batch remove of all investors"
+    );
+}
+
+#[test]
+fn state_change_event_count_increments_on_multiple_adds() {
+    let env = Env::default();
+    let client = deploy(&env);
+    init(&env, &client);
+    let contract_id = client.address.clone();
+    let invoice_id = client.get_escrow().invoice_id;
+
+    let investor1 = Address::generate(&env);
+    let investor2 = Address::generate(&env);
+
+    // Add first
+    client.set_investor_allowlisted(&investor1, &true);
+    let binding1 = env.events().all();
+    let events1 = binding1.events();
+
+    let state_event1 = AllowlistStateChanged {
+        name: symbol_short!("al_state"),
+        invoice_id: invoice_id.clone(),
+        total_count: 1,
+    }
+    .to_xdr(&env, &contract_id);
+    assert!(
+        events1.iter().any(|e| *e == state_event1),
+        "first add must emit al_state with total_count=1"
+    );
+
+    // Add second
+    client.set_investor_allowlisted(&investor2, &true);
+    let binding2 = env.events().all();
+    let events2 = binding2.events();
+
+    let state_event2 = AllowlistStateChanged {
+        name: symbol_short!("al_state"),
+        invoice_id,
+        total_count: 2,
+    }
+    .to_xdr(&env, &contract_id);
+    assert!(
+        events2.iter().any(|e| *e == state_event2),
+        "second add must emit al_state with total_count=2"
+    );
+}
+
+#[test]
+fn state_change_event_emitted_alongside_per_address_events() {
+    let env = Env::default();
+    let client = deploy(&env);
+    init(&env, &client);
+    let contract_id = client.address.clone();
+    let invoice_id = client.get_escrow().invoice_id;
+
+    let investor = Address::generate(&env);
+
+    client.set_investor_allowlisted(&investor, &true);
+
+    let binding = env.events().all();
+    let events = binding.events();
+
+    // Check that al_set is still emitted
+    let al_set = InvestorAllowlistChanged {
+        name: symbol_short!("al_set"),
+        invoice_id: invoice_id.clone(),
+        investor: investor.clone(),
+        allowed: 1,
+    }
+    .to_xdr(&env, &contract_id);
+    assert!(
+        events.iter().any(|e| *e == al_set),
+        "must still emit al_set per-address event"
+    );
+
+    // Check that al_state is also emitted
+    let al_state = AllowlistStateChanged {
+        name: symbol_short!("al_state"),
+        invoice_id,
+        total_count: 1,
+    }
+    .to_xdr(&env, &contract_id);
+    assert!(
+        events.iter().any(|e| *e == al_state),
+        "must emit al_state aggregate event"
     );
 }
