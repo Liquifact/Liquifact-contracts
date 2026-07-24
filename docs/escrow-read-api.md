@@ -72,6 +72,10 @@ re-implementing storage reads to guarantee identical semantics.
 - [get_distributed_principal](#get_distributed_principal--i128)
 - [get_reconciliation](#get_reconciliation--reconciliationview)
 
+**Protocol Fees:**
+- [get_protocol_fee_bps](#get_protocol_fee_bps--i64)
+- [preview_protocol_fee](#preview_protocol_fee--protocolfeepreview)
+
 ---
 
 ## Core Escrow State
@@ -799,3 +803,28 @@ Returns the yield-tier ladder configured at `init`, or an empty `Vec` when no ti
 |-------|------|-------------|
 | `min_lock_secs` | `u64` | Minimum `committed_lock_secs` an investor must pass to qualify for this tier |
 | `yield_bps` | `i64` | Effective annualized yield in basis points for qualifying investors |
+
+---
+
+## Protocol Fees
+
+### `get_protocol_fee_bps() → i64`
+
+**Storage key:** `DataKey::ProtocolFeeBps`  
+**Signature:** `pub fn get_protocol_fee_bps(env: Env) -> i64`
+
+Returns the immutable protocol fee in basis points (`0..=10_000`) applied to the SME disbursement.
+
+- **Default** — returns `0` if unset.
+- **Pure read** — no auth required, no state mutation.
+
+---
+
+### `preview_protocol_fee() → ProtocolFeePreview`
+
+**Signature:** `pub fn preview_protocol_fee(env: Env) -> ProtocolFeePreview`
+
+Returns the protocol fee amount going to the treasury and the net amount going to the SME.
+
+- **Default** — returns zeros (`fee: 0`, `net: 0`) if the escrow is not initialized or the funded amount is zero.
+- **Pure read** — no auth required, no state mutation.

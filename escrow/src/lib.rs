@@ -1028,6 +1028,17 @@ pub struct SettlementReadiness {
     pub ready_now: bool,
 }
 
+/// Preview of the protocol fee split returned by
+/// [`LiquifactEscrow::preview_protocol_fee`].
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProtocolFeePreview {
+    /// The computed protocol fee amount going to the treasury.
+    pub fee: i128,
+    /// The net amount going to the SME.
+    pub net: i128,
+}
+
 // --- Events ---
 
 #[contractevent]
@@ -3935,14 +3946,7 @@ impl LiquifactEscrow {
             .unwrap_or(0);
         for i in 0..n {
             let (_, amount) = entries.get(i).unwrap();
-            ensure(&env, amount > 0, EscrowError::FundingAmountNotPositive);
-            if floor > 0 {
-                ensure(
-                    &env,
-                    amount >= floor,
-                    EscrowError::FundingBelowMinContribution,
-                );
-            }
+            Self::check_funding_amount(&env, amount, floor);
         }
 
         // ── Duplicate-address guard (issue #643) ──────────────────────────────
@@ -3978,6 +3982,18 @@ impl LiquifactEscrow {
         escrow
     }
 
+    #[inline(always)]
+    fn check_funding_amount(env: &Env, amount: i128, floor: i128) {
+        ensure(env, amount > 0, EscrowError::FundingAmountNotPositive);
+        if floor > 0 {
+            ensure(
+                env,
+                amount >= floor,
+                EscrowError::FundingBelowMinContribution,
+            );
+        }
+    }
+
     fn fund_impl(
         env: Env,
         investor: Address,
@@ -3987,20 +4003,12 @@ impl LiquifactEscrow {
     ) -> InvoiceEscrow {
         investor.require_auth();
 
-        ensure(&env, amount > 0, EscrowError::FundingAmountNotPositive);
-
         let floor: i128 = env
             .storage()
             .instance()
             .get(&DataKey::MinContributionFloor)
             .unwrap_or(0);
-        if floor > 0 {
-            ensure(
-                &env,
-                amount >= floor,
-                EscrowError::FundingBelowMinContribution,
-            );
-        }
+        Self::check_funding_amount(&env, amount, floor);
 
         // env.clone(): env is used again after this call for storage writes and publish.
         let mut escrow = Self::get_escrow(env.clone());
@@ -4345,6 +4353,31 @@ impl LiquifactEscrow {
     /// - [`EscrowError::InsufficientContractBalance`] — contract holds less than `funded_amount`.
     /// - [`EscrowError::WithdrawFeeArithmeticOverflow`] — `funded_amount * fee_bps` overflowed `i128`.
     /// - [`EscrowError::WithdrawNetArithmeticUnderflow`] — `funded_amount - fee` underflowed (unreachable for in-range `fee_bps`).
+    pub fn preview_protocol_fee(env: Env) -> ProtocolFeePreview {
+        let escrow: Option<InvoiceEscrow> = env.storage().instance().get(&DataKey::Escrow);
+        let amount = match escrow {
+            Some(ref esc) => esc.funded_amount,
+            None => 0,
+        };
+        if amount == 0 {
+            return ProtocolFeePreview { fee: 0, net: 0 };
+        }
+        let fee_bps: i64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::ProtocolFeeBps)
+            .unwrap_or(0);
+        let fee: i128 = amount
+            .checked_mul(fee_bps as i128)
+            .and_then(|scaled| scaled.checked_div(10_000))
+            .unwrap_or_else(|| fail(&env, EscrowError::WithdrawFeeArithmeticOverflow));
+        let net: i128 = amount
+            .checked_sub(fee)
+            .unwrap_or_else(|| fail(&env, EscrowError::WithdrawNetArithmeticUnderflow));
+
+        ProtocolFeePreview { fee, net }
+    }
+
     pub fn withdraw(env: Env) -> InvoiceEscrow {
         // Operational pause gate (read-only), before require_auth and orthogonal to legal hold.
         ensure(

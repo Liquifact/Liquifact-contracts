@@ -7,7 +7,7 @@ use crate::{
     CollateralRecordedEvt, DataKey, EscrowCloseSnapshot, EscrowError, FundingCancelled,
     InvestorRefundedEvt, LiquifactEscrow, LiquifactEscrowClient, PrimaryAttestationBound,
     RegistryRefRebound, TreasuryDustSwept, YieldTier, DEFAULT_MATURITY_MAX_HORIZON_SECS,
-    MAX_ATTESTATION_APPEND_ENTRIES, SCHEMA_VERSION,
+    MAX_ATTESTATION_APPEND_ENTRIES, SCHEMA_VERSION, ProtocolFeePreview,
 };
 use soroban_sdk::{
     symbol_short,
@@ -1142,6 +1142,13 @@ fn read_view_defaults_before_init() {
     assert_eq!(client.get_distributed_principal(), 0);
     // get_sme_collateral_commitment ÔåÆ None
     assert!(client.get_sme_collateral_commitment().is_none());
+    // get_protocol_fee_bps ÔåÆ 0
+    assert_eq!(client.get_protocol_fee_bps(), 0);
+    // preview_protocol_fee ÔåÆ (0, 0)
+    assert_eq!(
+        client.preview_protocol_fee(),
+        ProtocolFeePreview { fee: 0, net: 0 }
+    );
 }
 
 /// Per-investor views return their documented defaults for a fresh/absent investor.
@@ -4019,4 +4026,77 @@ fn refactor_gate_helpers_rotate_blocked_post_settlement() {
         client.try_rotate_beneficiary(&new_sme),
         EscrowError::RotationNotOpen,
     );
+}
+
+#[test]
+fn test_protocol_fee_preview_and_getter() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let client = deploy(&env);
+    let token = install_stellar_asset_token(&env);
+    let treasury = Address::generate(&env);
+
+    // Initial check: before init, BPS defaults to 0 and preview returns 0
+    assert_eq!(client.get_protocol_fee_bps(), 0);
+    assert_eq!(
+        client.preview_protocol_fee(),
+        ProtocolFeePreview { fee: 0, net: 0 }
+    );
+
+    // Init with 500 BPS (5%) protocol fee
+    let target = 100_000_000i128;
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "FEETEST"),
+        &sme,
+        &target,
+        &0i64,
+        &0u64,
+        &token.id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &Some(500i64), // protocol_fee_bps
+    );
+
+    // Assert getter returns 500 BPS
+    assert_eq!(client.get_protocol_fee_bps(), 500);
+
+    // Preview when funded_amount is zero
+    assert_eq!(
+        client.preview_protocol_fee(),
+        ProtocolFeePreview { fee: 0, net: 0 }
+    );
+
+    // Fund the escrow
+    let funder = Address::generate(&env);
+    token.stellar.mint(&funder, &12345i128);
+    token.stellar.mint(&funder, &12345i128); // mint enough to be pulled
+    client.fund(&funder, &12345i128);
+
+    // Verify preview: fee = 12345 * 500 / 10000 = 617, net = 12345 - 617 = 11728
+    let preview = client.preview_protocol_fee();
+    assert_eq!(preview.fee, 617);
+    assert_eq!(preview.net, 11728);
+
+    // Transition status to 1 (funded) to allow withdraw
+    // Update funding target to 12345 so it is fully funded
+    client.update_funding_target(&12345i128);
+
+    // Perform withdraw
+    client.withdraw();
+
+    // Verify actual token split matches preview
+    assert_eq!(token.token.balance(&treasury), 617);
+    assert_eq!(token.token.balance(&sme), 11728);
 }
