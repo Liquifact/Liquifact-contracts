@@ -12,6 +12,7 @@ use crate::{
 use soroban_sdk::{
     symbol_short,
     testutils::{Address as _, Events as _, Ledger},
+    token::TokenClient,
     Address, BytesN, Env, Error, InvokeError, Vec as SorobanVec,
 };
 
@@ -4019,4 +4020,72 @@ fn refactor_gate_helpers_rotate_blocked_post_settlement() {
         client.try_rotate_beneficiary(&new_sme),
         EscrowError::RotationNotOpen,
     );
+}
+
+/// Asserts the metadata-only invariant: calling record_sme_collateral_commitment
+/// does **not** change the escrow contract's funding-token balance.
+///
+/// Anchors invariant ESC-COL-001 documented in `docs/escrow-sme-collateral.md`.
+#[test]
+fn test_sme_collateral_no_token_balance_change() {
+    let env = Env::default();
+    let token = install_stellar_asset_token(&env);
+    let treasury = Address::generate(&env);
+    let (client, admin, sme) = setup(&env);
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "COL001"),
+        &sme,
+        &1000,
+        &10,
+        &10,
+        &token.id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    // Mint tokens directly into the escrow so the invariant assertion is non-trivial.
+    // fund() is state-only; only an explicit mint gives the contract a real balance.
+    token.stellar.mint(&client.address, &500);
+
+    let token_client = TokenClient::new(&env, &token.id);
+    let balance_before = token_client.balance(&client.address);
+    assert!(balance_before > 0, "escrow must have non-zero balance before collateral record");
+
+    // First record (no prior commitment)
+    let asset = soroban_sdk::Symbol::new(&env, "GOLD");
+    let commitment = client.record_sme_collateral_commitment(&asset, &1000);
+    assert_eq!(commitment.amount, 1000);
+    assert_eq!(commitment.asset, asset);
+
+    let balance_after_first = token_client.balance(&client.address);
+    assert_eq!(
+        balance_after_first, balance_before,
+        "funding-token balance must not change after first collateral record"
+    );
+
+    // Replacement record
+    env.ledger().with_mut(|li| li.timestamp += 1);
+    let commitment2 = client.record_sme_collateral_commitment(&asset, &2000);
+    assert_eq!(commitment2.amount, 2000);
+
+    let balance_after_second = token_client.balance(&client.address);
+    assert_eq!(
+        balance_after_second, balance_before,
+        "funding-token balance must not change after replacement collateral record"
+    );
+
+    // Verify stored data changed but balance did not
+    let stored = client.get_sme_collateral_commitment().unwrap();
+    assert_eq!(stored.amount, 2000);
 }

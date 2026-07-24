@@ -2992,19 +2992,45 @@ impl LiquifactEscrow {
     /// Record or replace the optional SME collateral commitment metadata.
     ///
     /// **Metadata-only:** this writes [`DataKey::SmeCollateralPledge`] and emits
-    /// [`CollateralRecordedEvt`]. It does not transfer tokens, reserve balances, verify custody,
-    /// create an on-chain encumbrance, or block any contract flows (such as settlement, withdrawals,
-    /// or claims).
+    /// [`CollateralRecordedEvt`]. It does **not** transfer tokens, reserve balances, verify
+    /// custody, create an on-chain encumbrance, or block any contract flows (such as
+    /// settlement, SME withdrawals, investor claims, refunds, or compliance holds).
+    ///
+    /// The stored [`SmeCollateralCommitment`] is self-reported metadata for off-chain risk
+    /// review. Integrators and indexers must treat it as reported collateral metadata and
+    /// verify supporting evidence (custody, title, security perfection) outside this contract.
+    /// See [`docs/escrow-sme-collateral.md`] for the authoritative, code-accurate model
+    /// including replacement semantics, event indexing guidance, and risk-team procedures.
     ///
     /// # Authorization
-    /// - Requires the signature of the configured SME (`InvoiceEscrow::sme_address`). Enforced via
-    ///   `sme_address.require_auth()` during execution.
+    /// - **SME-only:** requires the signature of the configured SME (`InvoiceEscrow::sme_address`).
+    ///   Enforced via `sme_address.require_auth()` through [`LiquifactEscrow::load_escrow_require_sme`].
+    /// - The admin, investors, and treasury cannot call this entrypoint.
     ///
     /// # Validation Rules
     /// - **Positive Amount:** The `amount` parameter must be strictly positive (`amount > 0`).
-    /// - **Non-empty Asset Symbol:** The `asset` parameter must be a non-empty Symbol (not equal to `Symbol::new(&env, "")`).
-    /// - **Monotonic Timestamp:** When replacing an existing commitment, the current ledger timestamp must not
-    ///   be earlier than the prior `recorded_at` value (`now >= prior.recorded_at`).
+    ///   Emits [`EscrowError::CollateralAmountNotPositive`] (code 60) otherwise.
+    /// - **Non-empty Asset Symbol:** The `asset` parameter must be a non-empty [`Symbol`]
+    ///   (not equal to `Symbol::new(&env, "")`). Emits [`EscrowError::CollateralAssetEmpty`]
+    ///   (code 61) otherwise.
+    /// - **Monotonic Timestamp:** When replacing an existing commitment, the current ledger
+    ///   timestamp must not be earlier than the prior `recorded_at` value
+    ///   (`now >= prior.recorded_at`). Emits [`EscrowError::CollateralTimestampBackwards`]
+    ///   (code 62) otherwise. This provides defense-in-depth against stale out-of-order writes.
+    ///
+    /// # Replacement Semantics
+    /// - When no prior commitment exists, `prior_amount` in [`CollateralRecordedEvt`] is `0`.
+    /// - When replacing, `prior_amount` is set to the old commitment's amount, and the new
+    ///   commitment atomically overwrites [`DataKey::SmeCollateralPledge`].
+    /// - The prior record is not archived — only the current value is retrievable via
+    ///   [`LiquifactEscrow::get_sme_collateral_commitment`].
+    /// - There is no limit on how many times the commitment can be replaced.
+    ///
+    /// # No Token Movement Invariant
+    /// This entrypoint does **not** interact with any token contract. The escrow's funding-token
+    /// balance remains unchanged after the call completes. See
+    /// `test_sme_collateral_no_token_balance_change` in `escrow/src/tests/coverage.rs` for the
+    /// test that anchors this invariant.
     ///
     /// # Errors
     /// - [`EscrowError::CollateralAmountNotPositive`] if `amount <= 0`.

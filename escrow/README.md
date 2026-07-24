@@ -213,7 +213,15 @@ This is the symmetric counterpart to `lower_max_unique_investors` — it allows 
 
 ## SME collateral commitment metadata
 
-`record_sme_collateral_commitment` is SME-authenticated metadata only. It writes `SmeCollateralCommitment`, emits `CollateralRecordedEvt`, and does not move tokens, verify custody, reserve balances, or create an enforceable on-chain claim. Off-chain risk teams should follow [`docs/escrow-sme-collateral.md`](../docs/escrow-sme-collateral.md) before using the record in underwriting, monitoring, or reporting.
+`record_sme_collateral_commitment` is SME-authenticated **metadata only**. It writes
+[`SmeCollateralCommitment`], emits [`CollateralRecordedEvt`], and does **not** move tokens,
+verify custody, reserve balances, create an on-chain encumbrance, or block any contract flow.
+The record is self-reported metadata for off-chain risk review; it is not proof of custody,
+lien, or enforceable on-chain claim.
+
+See [`docs/escrow-sme-collateral.md`](../docs/escrow-sme-collateral.md) for the authoritative,
+code-accurate model including replacement semantics, event indexing guidance, and risk-team
+handling procedures.
 
 ## Security review sign-off checklist (pre-deploy)
 
