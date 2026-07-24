@@ -583,10 +583,12 @@ pub enum EscrowError {
     /// [`LiquifactEscrow::unfund`] blocked because a compliance/legal hold is active.
     /// No fund movement is permitted until the hold is cleared by the admin.
     UnfundLegalHoldActive = 222,
-    /// [`LiquifactEscrow::set_max_dust_sweep`] received a non-positive `cap`.
-    /// The dust-sweep per-call ceiling must be strictly positive; zero or negative
-    /// inputs are rejected to preserve the blast-radius bounding invariant.
-    MaxDustSweepNotPositive = 223,
+
+    /// [`LiquifactEscrow::lower_protocol_fee_bps`] did not strictly lower the protocol fee basis points.
+    ProtocolFeeBpsNotLower = 223,
+
+    /// [`LiquifactEscrow::lower_protocol_fee_bps`] called after the escrow reached status 3 (withdrawn).
+    ProtocolFeeLowerWithdrawn = 224,
 }
 
 #[inline(always)]
@@ -1273,8 +1275,8 @@ pub struct ProtocolFeeBpsLowered {
     pub name: Symbol,
     #[topic]
     pub invoice_id: Symbol,
-    pub old_fee_bps: i64,
-    pub new_fee_bps: i64,
+    pub old_bps: i64,
+    pub new_bps: i64,
 }
 
 #[contractevent]
@@ -4664,62 +4666,49 @@ impl LiquifactEscrow {
         new_floor
     }
 
-    /// Lower the protocol fee (in basis points) while the escrow is still open.
+    /// Lower the configured protocol fee basis points (`0..=10_000`) before the escrow reaches status 3 (withdrawn).
     ///
-    /// Admin-only. The new fee must be strictly lower than the current stored fee.
-    /// Once set, the updated fee applies to any subsequent [`LiquifactEscrow::withdraw`]
-    /// disbursement.
-    ///
-    /// **Only lower:** the function cannot raise the fee.  Use [`LiquifactEscrow::init`]
-    /// to set the initial fee; there is no raise path after init.
-    ///
-    /// # Arguments
-    /// * `env` — The Soroban environment.
-    /// * `new_fee_bps` — New protocol fee in basis points; must be in `0..current_fee_bps`.
-    ///
-    /// # Returns
-    /// The new fee value on success.
+    /// This is admin-only and intentionally can only reduce the fee; it cannot raise the fee or set
+    /// values outside `0..=10_000`. Once the escrow reaches status `3` (withdrawn), fee reduction is blocked
+    /// so an already-disbursed escrow cannot be retroactively re-priced.
     ///
     /// # Errors
-    /// Emits typed [`EscrowError`] codes:
-    /// - [`EscrowError::Unauthorized`] (code 1) if caller is not admin.
-    /// - [`EscrowError::ProtocolFeeLowerNotAllowed`] (code 220) if escrow is not open (status != 0).
-    /// - [`EscrowError::ProtocolFeeNotLower`] (code 219) if `new_fee_bps >= current_fee_bps`.
-    pub fn lower_protocol_fee_bps(env: Env, new_fee_bps: i64) -> i64 {
+    /// - Emits [`EscrowError::ProtocolFeeBpsOutOfRange`] if `new_bps` is outside `0..=10_000`.
+    /// - Emits [`EscrowError::ProtocolFeeLowerWithdrawn`] if `escrow.status == 3` (withdrawn).
+    /// - Emits [`EscrowError::ProtocolFeeBpsNotLower`] if `new_bps` is greater than or equal to current `get_protocol_fee_bps()`.
+    /// - Emits [`EscrowError::EscrowNotInitialized`] if escrow storage is missing.
+    /// - Panics with [`EscrowError::Unauthorized`] if caller is not admin (via `load_escrow_require_admin`).
+    pub fn lower_protocol_fee_bps(env: Env, new_bps: i64) -> i64 {
         let escrow = Self::load_escrow_require_admin(&env);
-
-        guard_status_eq(
-            &env,
-            escrow.status,
-            0,
-            EscrowError::ProtocolFeeLowerNotAllowed,
-        );
-
-        let old_fee_bps: i64 = env
-            .storage()
-            .instance()
-            .get(&DataKey::ProtocolFeeBps)
-            .unwrap_or(0);
 
         ensure(
             &env,
-            new_fee_bps < old_fee_bps,
-            EscrowError::ProtocolFeeNotLower,
+            (0..=10_000).contains(&new_bps),
+            EscrowError::ProtocolFeeBpsOutOfRange,
         );
+
+        ensure(
+            &env,
+            escrow.status != 3,
+            EscrowError::ProtocolFeeLowerWithdrawn,
+        );
+
+        let old_bps = Self::get_protocol_fee_bps(env.clone());
+        ensure(&env, new_bps < old_bps, EscrowError::ProtocolFeeBpsNotLower);
 
         env.storage()
             .instance()
-            .set(&DataKey::ProtocolFeeBps, &new_fee_bps);
+            .set(&DataKey::ProtocolFeeBps, &new_bps);
 
         ProtocolFeeBpsLowered {
             name: symbol_short!("fee_lo"),
             invoice_id: escrow.invoice_id.clone(),
-            old_fee_bps,
-            new_fee_bps,
+            old_bps,
+            new_bps,
         }
         .publish(&env);
 
-        new_fee_bps
+        new_bps
     }
 
     /// Raises the per-investor contribution cap.

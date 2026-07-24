@@ -16,8 +16,8 @@
 
 ### 1.1 Protocol fee split (on-chain disbursement)
 
-When principal is custodied on-chain, `withdraw` splits `funded_amount` using the immutable
-`protocol_fee_bps` configured at `init` (basis points, `0..=10_000`, default `0`, stored under
+When principal is custodied on-chain, `withdraw` splits `funded_amount` using the
+`protocol_fee_bps` configured at `init` or reduced via `lower_protocol_fee_bps` (basis points, `0..=10_000`, default `0`, stored under
 `DataKey::ProtocolFeeBps`):
 
 ```text
@@ -26,6 +26,7 @@ sme_payout = funded_amount - fee
 ```
 
 - `fee` is transferred to the immutable `DataKey::Treasury`; `sme_payout` to `sme_address`.
+- **Fee Reduction (`lower_protocol_fee_bps`):** An admin may lower `protocol_fee_bps` after initialization via `lower_protocol_fee_bps(new_bps)`. The function strictly enforces `0 <= new_bps < current_bps` and blocks changes once status is `3` (withdrawn). Emits `ProtocolFeeBpsLowered`.
 - **Conservation:** `sme_payout + fee == funded_amount`. Floor rounding leaves any residue with the
   SME, so the treasury is never over-credited.
 - **Dependency:** the fee is only realized on this on-chain disbursement path. Off-chain `settle`,
