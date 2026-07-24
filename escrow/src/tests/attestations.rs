@@ -928,6 +928,17 @@ fn test_revoked_digests_view_pagination_and_empty_past_end() {
 }
 
 #[test]
+fn test_revoked_digests_view_zero_limit() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    client.append_attestation_digest(&digest(&env, 0xAA));
+    client.revoke_attestation_digest(&0);
+
+    let page = client.get_revoked_attestation_digests(&0, &0);
+    assert_eq!(page.len(), 0);
+}
+
+#[test]
 #[ignore = "branch-specific latent failure"]
 fn test_revoked_digests_view_caps_limit() {
     let env = Env::default();
