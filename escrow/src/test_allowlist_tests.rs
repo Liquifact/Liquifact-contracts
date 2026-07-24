@@ -955,48 +955,31 @@ fn test_batch_allowlist_emits_batch_event() {
     let binding = env.events().all();
     let events = binding.events();
 
-    // Count al_set events (one per address).
-    let al_set_count: u32 = events
-        .iter()
-        .filter(|e| {
-            **e == InvestorAllowlistChanged {
-                name: symbol_short!("al_set"),
-                invoice_id: invoice_id.clone(),
-                investor: a.clone(),
-                allowed: 1,
-            }
-            .to_xdr(&env, &contract_id)
-                || **e
-                    == InvestorAllowlistChanged {
-                        name: symbol_short!("al_set"),
-                        invoice_id: invoice_id.clone(),
-                        investor: b.clone(),
-                        allowed: 1,
-                    }
-                    .to_xdr(&env, &contract_id)
-                || **e
-                    == InvestorAllowlistChanged {
-                        name: symbol_short!("al_set"),
-                        invoice_id: invoice_id.clone(),
-                        investor: c.clone(),
-                        allowed: 1,
-                    }
-                    .to_xdr(&env, &contract_id)
-        })
-        .count() as u32;
+    // Verify per-investor events.
+    for addr in [&a, &b, &c] {
+        let expected = InvestorAllowlistChanged {
+            name: symbol_short!("al_set"),
+            invoice_id: invoice_id.clone(),
+            investor: addr.clone(),
+            allowed: 1,
+        }
+        .to_xdr(&env, &contract_id);
+        assert!(
+            events.iter().any(|e| *e == expected),
+            "must emit al_set for each address"
+        );
+    }
 
-    assert_eq!(al_set_count, 3, "one al_set per address in the batch");
-
-    // Verify exactly one batch event exists.
+    // Verify exactly one batch event.
     let batch_xdr = InvestorAllowlistBatchApplied {
         name: symbol_short!("al_batch"),
-        invoice_id: invoice_id.clone(),
+        invoice_id,
         batch_size: 3,
         allowed: 1,
     }
     .to_xdr(&env, &contract_id);
     assert!(
-        events.contains(&batch_xdr),
+        events.iter().any(|e| *e == batch_xdr),
         "exactly one al_batch event must be emitted"
     );
 }
@@ -1036,19 +1019,25 @@ fn test_batch_revoke_emits_batch_event() {
     let al_set_a = InvestorAllowlistChanged {
         name: symbol_short!("al_set"),
         invoice_id: invoice_id.clone(),
-        investor: a.clone(),
+        investor: a,
         allowed: 0,
     }
     .to_xdr(&env, &contract_id);
     let al_set_b = InvestorAllowlistChanged {
         name: symbol_short!("al_set"),
         invoice_id: invoice_id.clone(),
-        investor: b.clone(),
+        investor: b,
         allowed: 0,
     }
     .to_xdr(&env, &contract_id);
-    assert!(events.contains(&al_set_a), "must emit al_set for a");
-    assert!(events.contains(&al_set_b), "must emit al_set for b");
+    assert!(
+        events.iter().any(|e| *e == al_set_a),
+        "must emit al_set for a"
+    );
+    assert!(
+        events.iter().any(|e| *e == al_set_b),
+        "must emit al_set for b"
+    );
 
     // Verify batch event.
     let batch_xdr = InvestorAllowlistBatchApplied {
@@ -1059,7 +1048,7 @@ fn test_batch_revoke_emits_batch_event() {
     }
     .to_xdr(&env, &contract_id);
     assert!(
-        events.contains(&batch_xdr),
+        events.iter().any(|e| *e == batch_xdr),
         "exactly one al_batch event must be emitted"
     );
 }
@@ -1102,8 +1091,14 @@ fn test_single_element_batch_emits_both_events() {
     }
     .to_xdr(&env, &contract_id);
 
-    assert!(events.contains(&al_set_xdr), "must emit 1 al_set");
-    assert!(events.contains(&batch_xdr), "must emit 1 al_batch");
+    assert!(
+        events.iter().any(|e| *e == al_set_xdr),
+        "must emit 1 al_set"
+    );
+    assert!(
+        events.iter().any(|e| *e == batch_xdr),
+        "must emit 1 al_batch"
+    );
 }
 
 /// Max-size batch emits N al_set + 1 al_batch.
@@ -1144,7 +1139,7 @@ fn test_max_size_batch_emits_correct_event_count() {
             allowed: 1,
         }
         .to_xdr(&env, &contract_id);
-        if events.contains(&xdr) {
+        if events.iter().any(|e| *e == xdr) {
             al_set_found += 1;
         }
     }
@@ -1160,7 +1155,10 @@ fn test_max_size_batch_emits_correct_event_count() {
         allowed: 1,
     }
     .to_xdr(&env, &contract_id);
-    assert!(events.contains(&batch_xdr), "must emit exactly 1 al_batch");
+    assert!(
+        events.iter().any(|e| *e == batch_xdr),
+        "must emit exactly 1 al_batch"
+    );
 }
 
 /// Single-address setter does NOT emit al_batch event.
@@ -1192,7 +1190,7 @@ fn test_single_allowlist_setter_does_not_emit_batch_event() {
     }
     .to_xdr(&env, &contract_id);
     assert!(
-        events.contains(&al_set_xdr),
+        events.iter().any(|e| *e == al_set_xdr),
         "single setter must emit al_set"
     );
 
@@ -1205,7 +1203,7 @@ fn test_single_allowlist_setter_does_not_emit_batch_event() {
     }
     .to_xdr(&env, &contract_id);
     assert!(
-        !events.contains(&batch_xdr),
+        !events.iter().any(|e| *e == batch_xdr),
         "single setter must not emit al_batch"
     );
 }
@@ -1234,16 +1232,42 @@ fn test_multiple_batch_calls_each_emit_batch_event() {
     batch2.push_back(c.clone());
 
     client.set_allowlist_active(&true);
+
+    // Snapshot events from first batch call.
     client.set_investors_allowlisted(&batch1, &true);
+    let binding1 = env.events().all();
+    let events1 = binding1.events();
+
+    // Snapshot events from second batch call.
     client.set_investors_allowlisted(&batch2, &true);
+    let binding2 = env.events().all();
+    let events2 = binding2.events();
 
-    let binding = env.events().all();
-    let events = binding.events();
+    // Verify batch1 per-investor events.
+    let al_set_a = InvestorAllowlistChanged {
+        name: symbol_short!("al_set"),
+        invoice_id: invoice_id.clone(),
+        investor: a,
+        allowed: 1,
+    }
+    .to_xdr(&env, &contract_id);
+    let al_set_b = InvestorAllowlistChanged {
+        name: symbol_short!("al_set"),
+        invoice_id: invoice_id.clone(),
+        investor: b,
+        allowed: 1,
+    }
+    .to_xdr(&env, &contract_id);
+    assert!(
+        events1.iter().any(|e| *e == al_set_a),
+        "batch1 must emit al_set for a"
+    );
+    assert!(
+        events1.iter().any(|e| *e == al_set_b),
+        "batch1 must emit al_set for b"
+    );
 
-    // Batch 1: 2 al_set + 1 al_batch (batch_size=2, allowed=1)
-    // Batch 2: 1 al_set  + 1 al_batch (batch_size=1, allowed=1)
-    // Total:   3 al_set  + 2 al_batch
-
+    // Verify batch1 batch event.
     let batch1_xdr = InvestorAllowlistBatchApplied {
         name: symbol_short!("al_batch"),
         invoice_id: invoice_id.clone(),
@@ -1251,6 +1275,25 @@ fn test_multiple_batch_calls_each_emit_batch_event() {
         allowed: 1,
     }
     .to_xdr(&env, &contract_id);
+    assert!(
+        events1.iter().any(|e| *e == batch1_xdr),
+        "must emit al_batch(batch_size=2) from first call"
+    );
+
+    // Verify batch2 per-investor event.
+    let al_set_c = InvestorAllowlistChanged {
+        name: symbol_short!("al_set"),
+        invoice_id: invoice_id.clone(),
+        investor: c,
+        allowed: 1,
+    }
+    .to_xdr(&env, &contract_id);
+    assert!(
+        events2.iter().any(|e| *e == al_set_c),
+        "batch2 must emit al_set for c"
+    );
+
+    // Verify batch2 batch event.
     let batch2_xdr = InvestorAllowlistBatchApplied {
         name: symbol_short!("al_batch"),
         invoice_id,
@@ -1258,13 +1301,8 @@ fn test_multiple_batch_calls_each_emit_batch_event() {
         allowed: 1,
     }
     .to_xdr(&env, &contract_id);
-
     assert!(
-        events.contains(&batch1_xdr),
-        "must emit al_batch(batch_size=2) from first call"
-    );
-    assert!(
-        events.contains(&batch2_xdr),
+        events2.iter().any(|e| *e == batch2_xdr),
         "must emit al_batch(batch_size=1) from second call"
     );
 }

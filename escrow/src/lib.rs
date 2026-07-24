@@ -4261,6 +4261,8 @@ impl LiquifactEscrow {
 
         guard_status_eq(&env, escrow.status, 0, EscrowError::PartialSettleNotOpen);
 
+        let old_status = escrow.status;
+
         // Transition to funded status early.
         escrow.status = 1;
 
@@ -4278,6 +4280,15 @@ impl LiquifactEscrow {
         }
 
         env.storage().instance().set(&DataKey::Escrow, &escrow);
+
+        SettlementStateChanged {
+            name: symbol_short!("setl_st"),
+            invoice_id: escrow.invoice_id.clone(),
+            old_status,
+            new_status: escrow.status,
+            funded_amount: escrow.funded_amount,
+        }
+        .publish(&env);
 
         EscrowPartialSettle {
             name: symbol_short!("part_set"),
@@ -4327,10 +4338,20 @@ impl LiquifactEscrow {
             .checked_add(coupon)
             .unwrap_or_else(|| fail(&env, EscrowError::ComputePayoutArithmeticOverflow));
 
+        let old_status = escrow.status;
         escrow.status = 2;
 
         env.storage().instance().set(&DataKey::SettledAt, &now);
         env.storage().instance().set(&DataKey::Escrow, &escrow);
+
+        SettlementStateChanged {
+            name: symbol_short!("setl_st"),
+            invoice_id: escrow.invoice_id.clone(),
+            old_status,
+            new_status: escrow.status,
+            funded_amount: escrow.funded_amount,
+        }
+        .publish(&env);
 
         EscrowSettled {
             name: symbol_short!("escrow_sd"),
@@ -4394,6 +4415,7 @@ impl LiquifactEscrow {
 
         guard_status_eq(&env, escrow.status, 1, EscrowError::WithdrawalNotFunded);
 
+        let old_status = escrow.status;
         let amount = escrow.funded_amount;
         let sme = escrow.sme_address.clone();
 
@@ -4476,6 +4498,15 @@ impl LiquifactEscrow {
             amount: net,
             recipient: sme,
             fee,
+        }
+        .publish(&env);
+
+        SettlementStateChanged {
+            name: symbol_short!("setl_st"),
+            invoice_id: escrow.invoice_id.clone(),
+            old_status,
+            new_status: escrow.status,
+            funded_amount: escrow.funded_amount,
         }
         .publish(&env);
 
@@ -5268,8 +5299,18 @@ impl LiquifactEscrow {
 
         guard_status_eq(&env, escrow.status, 0, EscrowError::CancelFundingNotOpen);
 
+        let old_status = escrow.status;
         escrow.status = 4;
         env.storage().instance().set(&DataKey::Escrow, &escrow);
+
+        SettlementStateChanged {
+            name: symbol_short!("setl_st"),
+            invoice_id: escrow.invoice_id.clone(),
+            old_status,
+            new_status: escrow.status,
+            funded_amount: escrow.funded_amount,
+        }
+        .publish(&env);
 
         FundingCancelled {
             name: symbol_short!("fund_can"),
