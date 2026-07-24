@@ -564,18 +564,19 @@ pub enum EscrowError {
     WithdrawNetArithmeticUnderflow = 217,
     /// [`LiquifactEscrow::init`] rejected a `funding_deadline` at or after maturity.
     FundingDeadlineAtOrAfterMaturity = 218,
-
+    /// [`LiquifactEscrow::lower_protocol_fee_bps`] did not strictly lower the fee.
+    ProtocolFeeNotLower = 219,
+    /// [`LiquifactEscrow::lower_protocol_fee_bps`] called while escrow is not open.
+    ProtocolFeeLowerNotAllowed = 220,
     /// [`LiquifactEscrow::unfund`] called when [`InvoiceEscrow::status`] is not 0 (open).
     /// Unfunding is only valid while the escrow is still accepting contributions.
-    UnfundEscrowNotOpen = 220,
-
+    EscrowNotOpen = 221,
     /// [`LiquifactEscrow::unfund`] requested amount exceeds the investor's recorded contribution.
     /// Never withdraw more than was contributed; checked via [`i128::checked_sub`].
-    OverWithdrawal = 221,
-
+    OverWithdrawal = 222,
     /// [`LiquifactEscrow::unfund`] blocked because a compliance/legal hold is active.
     /// No fund movement is permitted until the hold is cleared by the admin.
-    UnfundLegalHoldActive = 222,
+    LegalHoldActive = 223,
 }
 
 #[inline(always)]
@@ -609,7 +610,6 @@ pub(crate) fn guard_status_eq(
 ///
 /// Used for terminal-state checks where multiple valid statuses apply (e.g. sweep dust
 /// is allowed in settled/withdrawn/cancelled).
-#[allow(dead_code)]
 #[inline(always)]
 pub(crate) fn guard_status_in(env: &Env, actual_status: u32, allowed: &[u32], error: EscrowError) {
     ensure(env, allowed.contains(&actual_status), error);
@@ -721,7 +721,7 @@ pub(crate) fn guard_investor_allowlisted(env: &Env, investor: &Address) {
 /// `guard_status_in` keep the call-site `ensure` self-documenting at entrypoints.
 #[inline(always)]
 pub(crate) fn is_terminal_status(status: u32) -> bool {
-    matches!(status, 2..=4)
+    matches!(status, 2 | 3 | 4)
 }
 
 /// Predicate: `true` when `status` is one of the **pre-settlement** escrow states
@@ -1119,6 +1119,16 @@ pub struct MinContributionFloorLowered {
 }
 
 #[contractevent]
+pub struct ProtocolFeeBpsLowered {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    pub old_fee_bps: i64,
+    pub new_fee_bps: i64,
+}
+
+#[contractevent]
 pub struct MaxPerInvestorCapRaised {
     #[topic]
     pub name: Symbol,
@@ -1178,11 +1188,6 @@ pub struct EscrowSettled {
     pub maturity: u64,
     /// Ledger timestamp at which the settlement occurred.
     pub settled_at_ledger_timestamp: u64,
-    /// Total settlement pool (principal + coupon) at settlement time.
-    /// Computed using the same checked arithmetic and floor rounding as
-    /// [`LiquifactEscrow::compute_investor_payout`]: `coupon = funded_amount × yield_bps / 10_000` (floor),
-    /// then `settle_pool = funded_amount + coupon`.
-    pub settle_pool: i128,
 }
 
 #[contractevent]
@@ -1449,9 +1454,8 @@ pub struct InvestorRefundedEvt {
 
 /// Emitted after a successful [`LiquifactEscrow::unfund`] call.
 ///
-/// The investor partially or fully exits their principal position while the escrow
-/// remains open (status 0). Carries the withdrawal amount, the investor's remaining
-/// contribution, the escrow's updated `funded_amount`, and the ledger timestamp.
+/// Carries the investor address, amount withdrawn, remaining contribution,
+/// new escrow funded_amount, and ledger timestamp for off-chain reconciliation.
 #[contractevent]
 pub struct EscrowUnfunded {
     #[topic]
@@ -3969,6 +3973,64 @@ impl LiquifactEscrow {
         new_floor
     }
 
+    /// Lower the protocol fee (in basis points) while the escrow is still open.
+    ///
+    /// Admin-only. The new fee must be strictly lower than the current stored fee.
+    /// Once set, the updated fee applies to any subsequent [`LiquifactEscrow::withdraw`]
+    /// disbursement.
+    ///
+    /// **Only lower:** the function cannot raise the fee.  Use [`LiquifactEscrow::init`]
+    /// to set the initial fee; there is no raise path after init.
+    ///
+    /// # Arguments
+    /// * `env` — The Soroban environment.
+    /// * `new_fee_bps` — New protocol fee in basis points; must be in `0..current_fee_bps`.
+    ///
+    /// # Returns
+    /// The new fee value on success.
+    ///
+    /// # Errors
+    /// Emits typed [`EscrowError`] codes:
+    /// - [`EscrowError::Unauthorized`] (code 1) if caller is not admin.
+    /// - [`EscrowError::ProtocolFeeLowerNotAllowed`] (code 220) if escrow is not open (status != 0).
+    /// - [`EscrowError::ProtocolFeeNotLower`] (code 219) if `new_fee_bps >= current_fee_bps`.
+    pub fn lower_protocol_fee_bps(env: Env, new_fee_bps: i64) -> i64 {
+        let escrow = Self::load_escrow_require_admin(&env);
+
+        guard_status_eq(
+            &env,
+            escrow.status,
+            0,
+            EscrowError::ProtocolFeeLowerNotAllowed,
+        );
+
+        let old_fee_bps: i64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::ProtocolFeeBps)
+            .unwrap_or(0);
+
+        ensure(
+            &env,
+            new_fee_bps < old_fee_bps,
+            EscrowError::ProtocolFeeNotLower,
+        );
+
+        env.storage()
+            .instance()
+            .set(&DataKey::ProtocolFeeBps, &new_fee_bps);
+
+        ProtocolFeeBpsLowered {
+            name: symbol_short!("fee_lo"),
+            invoice_id: escrow.invoice_id.clone(),
+            old_fee_bps,
+            new_fee_bps,
+        }
+        .publish(&env);
+
+        new_fee_bps
+    }
+
     /// Raises the per-investor contribution cap.
     ///
     /// # Requirements
@@ -4420,12 +4482,9 @@ impl LiquifactEscrow {
             } else {
                 // Returning investor: yield was set on first deposit; read it for the event.
                 // If prev > 0, preserve existing effective yield and claim lock.
-                // Read stored yield for the event (falls back to escrow default for new investors).
-                (
-                    Self::get_persistent_investor_effective_yield(&env, investor.clone())
-                        .unwrap_or(escrow.yield_bps),
-                    0u64,
-                )
+                let eff = Self::get_persistent_investor_effective_yield(&env, investor.clone())
+                    .unwrap_or(escrow.yield_bps);
+                (eff, 0u64)
             }
         } else {
             ensure(&env, prev == 0, EscrowError::TieredSecondDeposit);
@@ -4475,6 +4534,11 @@ impl LiquifactEscrow {
         }
 
         Self::set_persistent_investor_contribution(&env, investor.clone(), new_contribution);
+
+        if simple_fund && prev == 0 {
+            Self::set_persistent_investor_effective_yield(&env, investor.clone(), escrow.yield_bps);
+            Self::set_persistent_investor_claim_not_before(&env, investor.clone(), 0u64);
+        }
 
         if prev == 0 {
             env.storage()
@@ -4616,21 +4680,6 @@ impl LiquifactEscrow {
             );
         }
 
-        // Compute settle_pool using the same arithmetic as compute_investor_payout.
-        // coupon = funded_amount × yield_bps / 10_000  (floor)
-        // settle_pool = funded_amount + coupon
-        let coupon = escrow
-            .funded_amount
-            .checked_mul(escrow.yield_bps as i128)
-            .unwrap_or_else(|| fail(&env, EscrowError::ComputePayoutArithmeticOverflow))
-            .checked_div(10_000)
-            .unwrap_or_else(|| fail(&env, EscrowError::ComputePayoutArithmeticOverflow));
-
-        let settle_pool = escrow
-            .funded_amount
-            .checked_add(coupon)
-            .unwrap_or_else(|| fail(&env, EscrowError::ComputePayoutArithmeticOverflow));
-
         escrow.status = 2;
 
         env.storage().instance().set(&DataKey::SettledAt, &now);
@@ -4652,7 +4701,6 @@ impl LiquifactEscrow {
             yield_bps: escrow.yield_bps,
             maturity: escrow.maturity,
             settled_at_ledger_timestamp: now,
-            settle_pool,
         }
         .publish(&env);
 
@@ -5762,71 +5810,80 @@ impl LiquifactEscrow {
         }
     }
 
-    /// Allow an investor to partially or fully withdraw their principal while the escrow
-    /// remains open (status 0).
+    /// Withdraw `amount` of principal from this investor's contribution while the escrow
+    /// is still **open** (status = 0).
     ///
-    /// An investor may call `unfund` any number of times before the escrow transitions out
-    /// of the open state. Each call decrements the investor's recorded contribution and the
-    /// escrow's `funded_amount` by `amount`, then transfers `amount` tokens back to the
-    /// investor via the SEP-41 balance-delta wrapper.
-    ///
-    /// When the investor's contribution reaches zero the `DataKey::UniqueFunderCount` is
-    /// decremented by one (floor: 0, via saturating arithmetic). Status always remains 0;
-    /// `unfund` never triggers a state transition in either direction.
+    /// # Purpose
+    /// Lets investors reduce or fully exit their position before the escrow closes,
+    /// without requiring admin cancellation.
     ///
     /// # Parameters
-    /// - `investor`: The address whose contribution is being reduced. Must match `require_auth`.
-    /// - `amount`: The positive amount to withdraw (must be ≤ recorded contribution).
+    /// - `investor`: The investor address; must authorize this call.
+    /// - `amount`:   The amount to withdraw; must be positive and ≤ the investor's contribution.
     ///
-    /// # Errors
-    /// - [`EscrowError::UnfundEscrowNotOpen`] if `status != 0`.
-    /// - [`EscrowError::UnfundLegalHoldActive`] if a compliance hold is currently active.
-    /// - [`EscrowError::OverWithdrawal`] if `amount` exceeds the investor's contribution.
+    /// # Guards (evaluated in order)
+    /// 1. `status == 0` — unfunding is forbidden in funded, settled, withdrawn, or cancelled states.
+    /// 2. No active legal hold — fund movement is blocked while a hold is in place.
+    /// 3. `investor.require_auth()` — only the investor may withdraw their own contribution.
+    /// 4. `amount > 0` — zero-amount withdrawals are rejected (same pattern as `fund`).
+    /// 5. `amount <= contribution` — over-withdrawal is rejected via `checked_sub`.
+    ///
+    /// # State mutations
+    /// - Decrements `DataKey::InvestorContribution(investor)` by `amount` (persistent storage).
+    /// - If contribution reaches zero: clears the entry and decrements `UniqueFunderCount`
+    ///   (floor: 0, never negative).
+    /// - Decrements `escrow.funded_amount` by `amount` (checked arithmetic).
+    ///
+    /// # Token custody
+    /// Returns `amount` tokens to `investor` via the SEP-41 transfer wrapper
+    /// (`transfer_funding_token_with_balance_checks`), mirroring the `refund` entrypoint.
     ///
     /// # Events
-    /// Emits [`EscrowUnfunded`] on success.
+    /// Emits [`EscrowUnfunded`] with `investor`, `amount`, `remaining_contribution`,
+    /// `new_funded_amount`, and `timestamp`.
+    ///
+    /// # Errors
+    /// - [`EscrowError::EscrowNotOpen`] — status is not 0.
+    /// - [`EscrowError::LegalHoldActive`] — hold is active.
+    /// - [`EscrowError::OverWithdrawal`] — amount > contribution.
     pub fn unfund(env: Env, investor: Address, amount: i128) -> InvoiceEscrow {
-        // 1. Status guard (read-only; checked before auth to fail fast).
+        // 1. Status guard (read-only before auth)
         let mut escrow = Self::get_escrow(env.clone());
-        ensure(&env, escrow.status == 0, EscrowError::UnfundEscrowNotOpen);
+        ensure(&env, escrow.status == 0, EscrowError::EscrowNotOpen);
 
-        // 2. Legal-hold guard (read-only; checked before auth to fail fast).
+        // 2. Legal-hold guard (read-only before auth)
         ensure(
             &env,
             !Self::legal_hold_active(&env),
-            EscrowError::UnfundLegalHoldActive,
+            EscrowError::LegalHoldActive,
         );
 
-        // 3. Investor auth.
+        // 3. Investor auth
         investor.require_auth();
 
-        // 4. Over-withdrawal guard: the withdrawn amount must not exceed the
-        // investor's recorded contribution. `checked_sub` alone is insufficient
-        // because `contribution - amount` stays a valid (negative) i128 when
-        // `amount > contribution`; an explicit bound is required.
-        let contribution: i128 = Self::get_persistent_investor_contribution(&env, investor.clone());
-        ensure(&env, amount <= contribution, EscrowError::OverWithdrawal);
+        // 4. Amount positive (mirrors fund_impl pattern)
+        if amount <= 0 {
+            panic!("unfund: amount must be positive");
+        }
+
+        // 5. Contribution read and over-withdrawal guard (checked arithmetic)
+        let contribution: i128 =
+            Self::get_persistent_investor_contribution(&env, investor.clone());
         let remaining_contribution = contribution
             .checked_sub(amount)
             .unwrap_or_else(|| fail(&env, EscrowError::OverWithdrawal));
 
-        // Guard: amount must be > 0 (a zero amount would pass checked_sub but is nonsensical).
-        // checked_sub on a negative amount would yield a value > contribution — still caught
-        // above — but a zero withdrawal is explicitly rejected here for clarity.
-        if amount <= 0 {
-            fail(&env, EscrowError::OverWithdrawal);
-        }
-
-        // 5. funded_amount decrement.
+        // 6. funded_amount decrement (checked arithmetic)
         let new_funded_amount = escrow
             .funded_amount
             .checked_sub(amount)
             .unwrap_or_else(|| fail(&env, EscrowError::OverWithdrawal));
+        escrow.funded_amount = new_funded_amount;
 
-        // 6. Effects — update contribution (checks-effects-interactions).
+        // 7. Update InvestorContribution in persistent storage (checks-effects)
         Self::set_persistent_investor_contribution(&env, investor.clone(), remaining_contribution);
 
-        // 7. Decrement UniqueFunderCount when contribution reaches zero.
+        // 8. Decrement UniqueFunderCount when contribution reaches zero (saturating — floor 0)
         if remaining_contribution == 0 {
             let cur: u32 = env
                 .storage()
@@ -5838,13 +5895,16 @@ impl LiquifactEscrow {
                 .set(&DataKey::UniqueFunderCount, &cur.saturating_sub(1));
         }
 
-        // 8. Persist updated escrow.
-        escrow.funded_amount = new_funded_amount;
+        // 9. Persist updated escrow
         env.storage().instance().set(&DataKey::Escrow, &escrow);
 
-        // 9. Token transfer (interactions last — checks-effects-interactions pattern).
+        // 10. Token transfer (interactions last — checks-effects-interactions)
         let token_addr = Self::funding_token_or_fail(&env);
         let this = env.current_contract_address();
+        // NOTE: If on-chain custody is disabled, the funding token address still exists but the
+        // contract holds no tokens; the transfer wrapper will fail. For off-chain custody setups,
+        // operators must ensure the contract balance covers outstanding unfund requests, or integrate
+        // a separate settlement layer. This path mirrors the refund() entrypoint behavior.
         external_calls::transfer_funding_token_with_balance_checks(
             &env,
             &token_addr,
@@ -5853,7 +5913,7 @@ impl LiquifactEscrow {
             amount,
         );
 
-        // 10. Event emission.
+        // 11. Event emission
         let timestamp = env.ledger().timestamp();
         EscrowUnfunded {
             name: symbol_short!("unfunded"),
@@ -5866,6 +5926,7 @@ impl LiquifactEscrow {
         }
         .publish(&env);
 
+        // 12. Return updated escrow
         escrow
     }
 
@@ -5976,8 +6037,7 @@ mod tests;
 /// enough that ordinary test escrow amounts never accidentally overdraw an account,
 /// while still being representable in a signed 64-bit integer.  Defined once here so
 /// that `balance` and `transfer` stay in sync and a single edit suffices to change the
-/// test-harness funding level.  Large-principal tests that fund above this ceiling must
-/// provision balances via a real Stellar asset token (see `install_stellar_asset_token`).
+/// test-harness funding level.
 #[cfg(any(test, feature = "testutils"))]
 pub const MOCK_TOKEN_DEFAULT_BALANCE: i128 = 100_000_000_000_000i128;
 
