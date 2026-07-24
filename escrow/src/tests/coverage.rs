@@ -3556,6 +3556,278 @@ fn test_collateral_same_timestamp_replacement_is_allowed() {
     );
 }
 
+// =============================================================================
+// Collateral Boundary Tests (Issue: Cover collateral boundaries)
+//
+// These tests assert the exact accept/reject boundaries for collateral operations,
+// verifying typed error codes, event emissions, and authorization requirements.
+// =============================================================================
+
+#[test]
+fn test_collateral_amount_boundary_exactly_one_minimum_valid() {
+    // Amount=1 is the minimum valid positive amount.
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    init_for_collateral(&env, &client, &admin, &sme, "BOUND_001");
+
+    let asset = soroban_sdk::Symbol::new(&env, "GOLD");
+    let commitment = client.record_sme_collateral_commitment(&asset, &1i128);
+
+    assert_eq!(commitment.amount, 1i128);
+    assert_eq!(commitment.asset, asset);
+
+    // Verify storage reflects the minimum valid amount.
+    let stored = client
+        .get_sme_collateral_commitment()
+        .expect("amount=1 must be stored");
+    assert_eq!(stored.amount, 1i128);
+}
+
+#[test]
+fn test_collateral_amount_boundary_zero_rejected() {
+    // Amount=0 must be rejected with CollateralAmountNotPositive.
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    init_for_collateral(&env, &client, &admin, &sme, "BOUND_002");
+
+    let asset = soroban_sdk::Symbol::new(&env, "GOLD");
+    assert_contract_error(
+        client.try_record_sme_collateral_commitment(&asset, &0i128),
+        EscrowError::CollateralAmountNotPositive,
+    );
+
+    // Verify no commitment was stored.
+    assert!(
+        client.get_sme_collateral_commitment().is_none(),
+        "zero amount must not be stored"
+    );
+}
+
+#[test]
+fn test_collateral_amount_boundary_negative_one_rejected() {
+    // Amount=-1 must be rejected with CollateralAmountNotPositive.
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    init_for_collateral(&env, &client, &admin, &sme, "BOUND_003");
+
+    let asset = soroban_sdk::Symbol::new(&env, "GOLD");
+    assert_contract_error(
+        client.try_record_sme_collateral_commitment(&asset, &-1i128),
+        EscrowError::CollateralAmountNotPositive,
+    );
+
+    // Verify no commitment was stored.
+    assert!(
+        client.get_sme_collateral_commitment().is_none(),
+        "negative amount must not be stored"
+    );
+}
+
+#[test]
+fn test_collateral_amount_boundary_i128_max_accepted() {
+    // Amount=i128::MAX is the maximum valid amount.
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    init_for_collateral(&env, &client, &admin, &sme, "BOUND_004");
+
+    let asset = soroban_sdk::Symbol::new(&env, "GOLD");
+    let max_amount = i128::MAX;
+    let commitment = client.record_sme_collateral_commitment(&asset, &max_amount);
+
+    assert_eq!(commitment.amount, max_amount);
+    assert_eq!(commitment.asset, asset);
+
+    // Verify storage reflects the maximum valid amount.
+    let stored = client
+        .get_sme_collateral_commitment()
+        .expect("i128::MAX must be stored");
+    assert_eq!(stored.amount, max_amount);
+}
+
+#[test]
+fn test_collateral_timestamp_boundary_exactly_equal_allowed() {
+    // Replacement with timestamp == prior.recorded_at is allowed (monotonic, not strictly increasing).
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    init_for_collateral(&env, &client, &admin, &sme, "BOUND_005");
+
+    let asset = soroban_sdk::Symbol::new(&env, "GOLD");
+    
+    // Record first commitment at t=0 (from setup).
+    client.record_sme_collateral_commitment(&asset, &100i128);
+    let first = client.get_sme_collateral_commitment().unwrap();
+    assert_eq!(first.recorded_at, env.ledger().timestamp());
+
+    // Do NOT advance timestamp — replacement at same timestamp.
+    let result = client.try_record_sme_collateral_commitment(&asset, &200i128);
+    assert!(
+        result.is_ok(),
+        "replacement at equal timestamp must succeed"
+    );
+
+    let updated = client.get_sme_collateral_commitment().unwrap();
+    assert_eq!(updated.amount, 200i128);
+    assert_eq!(updated.recorded_at, env.ledger().timestamp());
+}
+
+#[test]
+fn test_collateral_timestamp_boundary_one_less_rejected() {
+    // Replacement with timestamp < prior.recorded_at must be rejected with CollateralTimestampBackwards.
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    init_for_collateral(&env, &client, &admin, &sme, "BOUND_006");
+
+    let asset = soroban_sdk::Symbol::new(&env, "GOLD");
+
+    // Record at a known higher timestamp.
+    env.ledger().with_mut(|li| li.timestamp = 5000);
+    client.record_sme_collateral_commitment(&asset, &100i128);
+    let first = client.get_sme_collateral_commitment().unwrap();
+    assert_eq!(first.recorded_at, 5000);
+
+    // Move ledger timestamp backward by exactly 1 (to 4999).
+    env.ledger().with_mut(|li| li.timestamp = 4999);
+
+    assert_contract_error(
+        client.try_record_sme_collateral_commitment(&asset, &200i128),
+        EscrowError::CollateralTimestampBackwards,
+    );
+
+    // Verify original commitment is preserved.
+    let preserved = client.get_sme_collateral_commitment().unwrap();
+    assert_eq!(preserved.amount, 100i128);
+    assert_eq!(preserved.recorded_at, 5000);
+}
+
+#[test]
+fn test_collateral_clear_no_commitment_rejected() {
+    // clear_sme_collateral_commitment when no commitment exists must be rejected with NoCollateralToClear.
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    init_for_collateral(&env, &client, &admin, &sme, "BOUND_007");
+
+    // Verify no commitment exists.
+    assert!(client.get_sme_collateral_commitment().is_none());
+
+    // Attempt to clear when no commitment was recorded.
+    assert_contract_error(
+        client.try_clear_sme_collateral_commitment(),
+        EscrowError::NoCollateralToClear,
+    );
+}
+
+#[test]
+fn test_collateral_clear_non_sme_caller_rejected() {
+    // clear_sme_collateral_commitment requires SME auth; non-SME caller must be rejected.
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    init_for_collateral(&env, &client, &admin, &sme, "BOUND_008");
+
+    let asset = soroban_sdk::Symbol::new(&env, "GOLD");
+    client.record_sme_collateral_commitment(&asset, &100i128);
+
+    // Verify commitment exists.
+    assert!(client.get_sme_collateral_commitment().is_some());
+
+    // Revoke all auths so the SME signature is absent.
+    env.mock_auths(&[]);
+
+    // Attempt to clear without SME auth — should panic (auth failure).
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.clear_sme_collateral_commitment();
+    }));
+    assert!(
+        result.is_err(),
+        "clear without SME auth must be rejected"
+    );
+
+    // Re-enable auth and verify commitment still exists (was not cleared).
+    env.mock_all_auths();
+    assert!(
+        client.get_sme_collateral_commitment().is_some(),
+        "commitment must not be cleared by unauthorized caller"
+    );
+}
+
+#[test]
+fn test_collateral_record_non_sme_caller_rejected() {
+    // record_sme_collateral_commitment requires SME auth; non-SME caller must be rejected.
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    init_for_collateral(&env, &client, &admin, &sme, "BOUND_009");
+
+    // Revoke all auths so the SME signature is absent.
+    env.mock_auths(&[]);
+
+    let asset = soroban_sdk::Symbol::new(&env, "GOLD");
+
+    // Attempt to record without SME auth — should panic (auth failure).
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.record_sme_collateral_commitment(&asset, &100i128);
+    }));
+    assert!(
+        result.is_err(),
+        "record without SME auth must be rejected"
+    );
+
+    // Re-enable auth and verify no commitment was stored.
+    env.mock_all_auths();
+    assert!(
+        client.get_sme_collateral_commitment().is_none(),
+        "commitment must not be recorded by unauthorized caller"
+    );
+}
+
+#[test]
+fn test_collateral_empty_asset_symbol_rejected() {
+    // Empty asset symbol must be rejected with CollateralAssetEmpty.
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    init_for_collateral(&env, &client, &admin, &sme, "BOUND_010");
+
+    let empty_asset = soroban_sdk::Symbol::new(&env, "");
+    assert_contract_error(
+        client.try_record_sme_collateral_commitment(&empty_asset, &100i128),
+        EscrowError::CollateralAssetEmpty,
+    );
+
+    // Verify no commitment was stored.
+    assert!(
+        client.get_sme_collateral_commitment().is_none(),
+        "empty asset symbol must not be stored"
+    );
+}
+
+#[test]
+fn test_collateral_valid_single_char_asset_symbol_accepted() {
+    // A valid single-character asset symbol must be accepted.
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    init_for_collateral(&env, &client, &admin, &sme, "BOUND_011");
+
+    let single_char_asset = soroban_sdk::Symbol::new(&env, "X");
+    let commitment = client.record_sme_collateral_commitment(&single_char_asset, &100i128);
+
+    assert_eq!(commitment.asset, single_char_asset);
+    assert_eq!(commitment.amount, 100i128);
+
+    // Verify storage reflects the single-char asset.
+    let stored = client
+        .get_sme_collateral_commitment()
+        .expect("single-char asset must be stored");
+    assert_eq!(stored.asset, single_char_asset);
+}
+
+// Event emission tests are already covered by integration.rs:
+// - test_collateral_record_event_payload_is_metadata_only
+// - test_collateral_replacement_event_contains_prior_amount
+// These tests verify CollateralRecordedEvt with prior_amount field.
+// No additional event tests needed in coverage.rs for boundary purposes.
+
+// =============================================================================
+// End of Collateral Boundary Tests
+// =============================================================================
+
 #[test]
 fn test_state_machine_illegal_transitions_rejected() {
     let env = Env::default();
