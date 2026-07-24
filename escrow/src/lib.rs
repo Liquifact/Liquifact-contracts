@@ -4102,8 +4102,10 @@ impl LiquifactEscrow {
                 now.checked_add(committed_lock_secs)
                     .unwrap_or_else(|| fail(&env, EscrowError::InvestorClaimTimeOverflow))
             };
-            // Bound: reject if the claim lock would expire after the escrow maturity.
-            // Only constrained when both committed_lock_secs > 0 and maturity > 0.
+            // Reject at deposit time if the commitment lock would extend the
+            // investor claim deadline past the escrow settlement maturity.
+            // The bound is only active when both a positive lock and a positive
+            // maturity gate are configured.
             if claim_nb > 0 && escrow.maturity > 0 {
                 ensure(
                     &env,
@@ -4163,7 +4165,7 @@ impl LiquifactEscrow {
             .unwrap_or_else(|| fail(&env, EscrowError::FundingTokenNotSet));
         let this = env.current_contract_address();
 
-        #[cfg(any(test, feature = "testutils"))]
+        #[cfg(test)]
         register_mock_token_if_needed(&env, &token_addr);
 
         external_calls::transfer_into_escrow_with_balance_checks(
@@ -5646,7 +5648,7 @@ impl DefaultMockToken {
     }
 }
 
-#[cfg(any(test, feature = "testutils"))]
+#[cfg(test)]
 fn register_mock_token_if_needed(env: &Env, token_addr: &Address) {
     use std::panic::AssertUnwindSafe;
     let env_clone = env.clone();

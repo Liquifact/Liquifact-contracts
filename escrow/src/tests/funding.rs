@@ -3878,21 +3878,17 @@ fn init_with_maturity(
 }
 
 #[test]
-#[ignore = "upstream latent: escrow API/test drift"]
 fn commitment_lock_within_maturity_is_accepted() {
     // now=1000, maturity=2000, lock=500 → claim_nb=1500 ≤ 2000  ✓
 
     let env = Env::default();
 
-    env.mock_all_auths();
-
-    let mut li = env.ledger().get();
-
-    li.timestamp = 1000;
-
-    env.ledger().set(li);
-
     let (client, admin, sme) = setup(&env);
+
+    // Set timestamp AFTER setup() so it is not reset to 0 by the helper.
+    let mut li = env.ledger().get();
+    li.timestamp = 1000;
+    env.ledger().set(li);
 
     let investor = soroban_sdk::Address::generate(&env);
 
@@ -3906,21 +3902,17 @@ fn commitment_lock_within_maturity_is_accepted() {
 }
 
 #[test]
-#[ignore = "upstream latent: escrow API/test drift"]
 fn commitment_lock_exactly_at_maturity_is_accepted() {
     // now=1000, maturity=2000, lock=1000 → claim_nb=2000 == maturity  ✓ (inclusive)
 
     let env = Env::default();
 
-    env.mock_all_auths();
-
-    let mut li = env.ledger().get();
-
-    li.timestamp = 1000;
-
-    env.ledger().set(li);
-
     let (client, admin, sme) = setup(&env);
+
+    // Set timestamp AFTER setup() so it is not reset to 0 by the helper.
+    let mut li = env.ledger().get();
+    li.timestamp = 1000;
+    env.ledger().set(li);
 
     let investor = soroban_sdk::Address::generate(&env);
 
@@ -3934,21 +3926,17 @@ fn commitment_lock_exactly_at_maturity_is_accepted() {
 }
 
 #[test]
-#[ignore = "upstream latent: escrow API/test drift"]
 fn commitment_lock_one_second_past_maturity_is_rejected() {
     // now=1000, maturity=2000, lock=1001 → claim_nb=2001 > 2000  ✗
 
     let env = Env::default();
 
-    env.mock_all_auths();
-
-    let mut li = env.ledger().get();
-
-    li.timestamp = 1000;
-
-    env.ledger().set(li);
-
     let (client, admin, sme) = setup(&env);
+
+    // Set timestamp AFTER setup() so it is not reset to 0 by the helper.
+    let mut li = env.ledger().get();
+    li.timestamp = 1000;
+    env.ledger().set(li);
 
     let investor = soroban_sdk::Address::generate(&env);
 
@@ -4016,21 +4004,17 @@ fn zero_lock_with_maturity_is_always_accepted() {
 }
 
 #[test]
-#[ignore = "upstream latent: escrow API/test drift"]
 fn lock_with_zero_maturity_is_always_accepted() {
     // maturity==0 means no maturity lock; any lock_secs is fine
 
     let env = Env::default();
 
-    env.mock_all_auths();
-
-    let mut li = env.ledger().get();
-
-    li.timestamp = 1000;
-
-    env.ledger().set(li);
-
     let (client, admin, sme) = setup(&env);
+
+    // Set timestamp AFTER setup() so it is not reset to 0 by the helper.
+    let mut li = env.ledger().get();
+    li.timestamp = 1000;
+    env.ledger().set(li);
 
     let investor = soroban_sdk::Address::generate(&env);
 

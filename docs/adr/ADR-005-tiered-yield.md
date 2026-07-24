@@ -22,6 +22,7 @@ Some invoice products offer higher yield to investors who commit to a longer loc
 - Selects the best matching tier where `committed_lock_secs >= tier.min_lock_secs`.
 - Stores result under `DataKey::InvestorEffectiveYield(investor)`.
 - If `committed_lock_secs > 0`, stores `ledger.timestamp() + committed_lock_secs` under `DataKey::InvestorClaimNotBefore(investor)`.
+- When both a positive commitment lock and a positive escrow `maturity` are configured, the deposit is rejected if `now + committed_lock_secs > maturity` with `CommitmentLockExceedsMaturity`.
 - Emits `EscrowFunded` containing `tier_lock_secs` (the matched threshold, or 0 if base yield).
 - Panics if the investor already has a contribution (prevents re-selection).
 
