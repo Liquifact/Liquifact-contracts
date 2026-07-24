@@ -2339,6 +2339,16 @@ impl LiquifactEscrow {
         }
         .publish(&env);
 
+        if protocol_fee_bps > 0 {
+            ProtocolFeeBpsLowered {
+                name: symbol_short!("fee_lo"),
+                invoice_id: escrow.invoice_id.clone(),
+                old_bps: 0,
+                new_bps: protocol_fee_bps,
+            }
+            .publish(&env);
+        }
+
         escrow
     }
 

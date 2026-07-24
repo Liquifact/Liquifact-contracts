@@ -2854,3 +2854,49 @@ fn test_lower_protocol_fee_bps_successive_reductions() {
     assert_eq!(client.lower_protocol_fee_bps(&0i64), 0i64);
     assert_eq!(client.get_protocol_fee_bps(), 0i64);
 }
+
+#[test]
+fn test_init_protocol_fee_bps_emits_event() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let (token, treasury) = free_addresses(&env);
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "INIT_FEE_EVT"),
+        &sme,
+        &100_000_000_000i128,
+        &800i64,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &Some(500i64),
+    );
+
+    let all_events = env.events().all();
+    let expected = ProtocolFeeBpsLowered {
+        name: symbol_short!("fee_lo"),
+        invoice_id: client.get_escrow().invoice_id,
+        old_bps: 0i64,
+        new_bps: 500i64,
+    };
+
+    assert!(
+        all_events
+            .events()
+            .contains(&expected.to_xdr(&env, &client.address)),
+        "ProtocolFeeBpsLowered event must be emitted at init when fee is > 0"
+    );
+}
+
