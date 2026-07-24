@@ -2214,7 +2214,9 @@ impl LiquifactEscrow {
         );
 
         // Dual authorization: the outgoing SME and the admin must both sign.
-        escrow.sme_address.require_auth();
+        // The beneficiary (SME) authorization is delegated to the shared
+        // [`Self::require_sme_auth`] helper.
+        Self::require_sme_auth(&escrow.sme_address);
         escrow.admin.require_auth();
 
         let prior_sme = escrow.sme_address.clone();
@@ -2249,15 +2251,42 @@ impl LiquifactEscrow {
     /// Load the current escrow and require SME authorization in one step.
     ///
     /// Consolidates the repeated `let escrow = Self::get_escrow(env.clone()); escrow.sme_address.require_auth();`
-    /// pattern used across multiple SME-gated entrypoints.
+    /// pattern used across multiple SME-gated entrypoints. The SME authorization itself
+    /// is delegated to [`Self::require_sme_auth`] so the **beneficiary authorization check**
+    /// lives in a single place.
     fn load_escrow_require_sme(env: &Env) -> InvoiceEscrow {
         let escrow: InvoiceEscrow = env
             .storage()
             .instance()
             .get(&DataKey::Escrow)
             .unwrap_or_else(|| fail(env, EscrowError::EscrowNotInitialized));
-        escrow.sme_address.require_auth();
+        Self::require_sme_auth(&escrow.sme_address);
         escrow
+    }
+
+    /// Shared beneficiary (SME) authorization check.
+    ///
+    /// Centralises the repeated inline `escrow.sme_address.require_auth()` pattern that
+    /// previously appeared in [`LiquifactEscrow::rotate_beneficiary`] and inside the body
+    /// of [`Self::load_escrow_require_sme`]. Routing every SME-gated entrypoint through
+    /// this helper makes the beneficiary authorization boundary auditable in a single
+    /// place: any future entrypoint that needs to verify the SME (the beneficiary of
+    /// the escrow) signs must call this helper, not the underlying
+    /// [`Address::require_auth`] method directly.
+    ///
+    /// # Preserved behavior
+    ///
+    /// Functionally identical to inlining `sme_address.require_auth()` at the same call
+    /// site: same authorization failure semantics, same execution order, no new
+    /// typed errors, no ABI surface change (private helper).
+    ///
+    /// # Errors
+    ///
+    /// Surfaces the same contract authorization failure as
+    /// [`Address::require_auth`] when `sme_address` is not signed by the caller.
+    #[inline(always)]
+    fn require_sme_auth(sme_address: &Address) {
+        sme_address.require_auth();
     }
 
     pub fn get_version(env: Env) -> u32 {
