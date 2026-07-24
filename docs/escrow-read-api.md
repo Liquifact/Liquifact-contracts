@@ -44,6 +44,9 @@ re-implementing storage reads to guarantee identical semantics.
 **Tier Lookup:**
 - [preview_yield_tier](#preview_yield_tieramount-i128-lock-u64--i64-u64)
 
+**Deposit Preview:**
+- [preview_fund](#preview_fundenvinvestor-address-amount-i128--u32)
+
 **Per-Investor State:**
 - [get_contribution](#get_contributioninvestor-address--i128)
 - [get_unique_funder_count](#get_unique_funder_count--u32)
@@ -552,6 +555,67 @@ selection is lock-only; `amount` is accepted for API parity and forward-compatib
 
 **Security note:** the preview is guaranteed to agree with `fund_with_commitment` because it delegates
 to the same internal `effective_yield_for_commitment` helper — there is no separate selection path.
+
+---
+
+## Deposit Preview
+
+### `preview_fund(env, investor: Address, amount: i128) → u32`
+
+**Signature:** `pub fn preview_fund(env: Env, investor: Address, amount: i128) -> u32`
+
+Pure-read preview: returns `0` if a [`LiquifactEscrow::fund`] call with the same `(investor, amount)`
+would succeed on the current ledger, or the numeric [`EscrowError`] code of the **first** guard that
+would reject it.
+
+Guards are evaluated in the exact same order as [`LiquifactEscrow::fund_impl`] so the returned code
+is always the first failure a real `fund` would encounter.
+
+**Authorization:** None — pure read; no auth required, no state mutation, no side effects.
+
+**Advisory only:** This view is a snapshot. Racing state changes (a concurrent fund, an admin
+legal-hold toggle, or a deadline expiry on the next ledger) may cause a real `fund` to revert even
+when this view returned `0`. Always handle the `fund` result; never treat a preview success as a
+guarantee.
+
+**Return values:**
+
+| Return | Meaning |
+|--------|---------|
+| `0` | Deposit would be accepted (all guards pass) |
+| `20` | Escrow not initialized — [`EscrowError::EscrowNotInitialized`] |
+| `100` | Amount ≤ 0 — [`EscrowError::FundingAmountNotPositive`] |
+| `101` | Below minimum contribution floor — [`EscrowError::FundingBelowMinContribution`] |
+| `102` | Legal hold active — [`EscrowError::LegalHoldBlocksFunding`] |
+| `103` | Escrow not in open status — [`EscrowError::EscrowNotOpenForFunding`] |
+| `104` | Investor not allowlisted when allowlist is active — [`EscrowError::InvestorNotAllowlisted`] |
+| `105` | Contribution would overflow i128 — [`EscrowError::InvestorContributionOverflow`] |
+| `106` | Would exceed per-investor cap — [`EscrowError::InvestorContributionExceedsCap`] |
+| `107` | New investor would exceed unique-investor cap — [`EscrowError::UniqueInvestorCapReached`] |
+| `110` | Total funded amount would overflow — [`EscrowError::FundedAmountOverflow`] |
+| `164` | Funding deadline passed — [`EscrowError::FundingDeadlinePassed`] |
+| `210` | Operational pause active — [`EscrowError::PausedBlocksFunding`] |
+
+**Guard ordering (matches `fund_impl`):**
+
+1. Amount must be positive.
+2. Amount must meet the minimum contribution floor (if configured).
+3. Escrow must be initialized.
+4. Operational pause must not be active.
+5. Legal hold must not be active.
+6. Escrow status must be open (`0`).
+7. Funding deadline must not have passed (if configured).
+8. Investor must be allowlisted (if allowlist is active).
+9. Investor contribution must not overflow.
+10. New contribution must not exceed the per-investor cap (if configured).
+11. New investor must not exceed the unique-investor cap (if configured).
+12. Total funded amount must not overflow.
+
+**Code mapping:** Every guard above corresponds to the same-named check in
+[`LiquifactEscrow::fund_impl`]. Search for the error variant name in `fund_impl` to
+cross-reference the enforcement side. The preview runs the checks in the same linear
+order so the first failure code reported here is exactly the first error `fund` itself
+would emit.
 
 ---
 

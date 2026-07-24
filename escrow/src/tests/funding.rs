@@ -7591,3 +7591,675 @@ fn test_unfund_event_emitted() {
 
     assert_eq!(*last, expected.to_xdr(&env, &contract_id));
 }
+
+// ---------------------------------------------------------------------------
+// preview_fund — pure-read guard preview
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_preview_fund_valid_deposit_returns_zero() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "PV001"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    let result = client.preview_fund(&investor, &(TARGET / 2));
+    assert_eq!(result, 0, "valid deposit should return 0");
+}
+
+#[test]
+fn test_preview_fund_not_initialized_returns_20() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let investor = Address::generate(&env);
+
+    let result = client.preview_fund(&investor, &1_000i128);
+    assert_eq!(result, EscrowError::EscrowNotInitialized as u32);
+}
+
+#[test]
+fn test_preview_fund_zero_amount_returns_100() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    let result = client.preview_fund(&investor, &0i128);
+    assert_eq!(result, EscrowError::FundingAmountNotPositive as u32);
+}
+
+#[test]
+fn test_preview_fund_negative_amount_returns_100() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    let result = client.preview_fund(&investor, &(-1i128));
+    assert_eq!(result, EscrowError::FundingAmountNotPositive as u32);
+}
+
+#[test]
+fn test_preview_fund_below_floor_returns_101() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    let (token, treasury) = free_addresses(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "PVFLOOR"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &Some(10_000i128), // min_contribution floor
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    let result = client.preview_fund(&investor, &5_000i128);
+    assert_eq!(result, EscrowError::FundingBelowMinContribution as u32);
+}
+
+#[test]
+fn test_preview_fund_at_floor_returns_zero() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    let (token, treasury) = free_addresses(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "PVATFLR"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &Some(10_000i128),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    let result = client.preview_fund(&investor, &10_000i128);
+    assert_eq!(result, 0, "amount equal to floor should succeed");
+}
+
+#[test]
+fn test_preview_fund_paused_returns_210() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    client.set_paused(&true);
+
+    let result = client.preview_fund(&investor, &1_000i128);
+    assert_eq!(result, EscrowError::PausedBlocksFunding as u32);
+}
+
+#[test]
+fn test_preview_fund_legal_hold_returns_102() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    client.set_legal_hold(&true);
+
+    let result = client.preview_fund(&investor, &1_000i128);
+    assert_eq!(result, EscrowError::LegalHoldBlocksFunding as u32);
+}
+
+#[test]
+fn test_preview_fund_not_open_status_returns_103() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    // Fully fund to transition status to 1 (funded), then settle.
+    client.fund(&investor, &TARGET);
+    client.settle();
+
+    let another = Address::generate(&env);
+    let result = client.preview_fund(&another, &1_000i128);
+    assert_eq!(result, EscrowError::EscrowNotOpenForFunding as u32);
+}
+
+#[test]
+fn test_preview_fund_deadline_passed_returns_164() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    let (token, treasury) = free_addresses(&env);
+    let deadline = 1_000u64;
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "PVDL"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &Some(deadline),
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    // Advance ledger past the deadline.
+    env.ledger().with_mut(|li| {
+        li.timestamp = deadline + 1;
+    });
+
+    let result = client.preview_fund(&investor, &1_000i128);
+    assert_eq!(result, EscrowError::FundingDeadlinePassed as u32);
+}
+
+#[test]
+fn test_preview_fund_deadline_not_passed_returns_zero() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    let (token, treasury) = free_addresses(&env);
+    let deadline = 1_000u64;
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "PVNDL"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &Some(deadline),
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    // At exactly the deadline — fund is still allowed.
+    env.ledger().with_mut(|li| {
+        li.timestamp = deadline;
+    });
+
+    let result = client.preview_fund(&investor, &1_000i128);
+    assert_eq!(result, 0, "at deadline should still succeed");
+}
+
+#[test]
+fn test_preview_fund_not_allowlisted_returns_104() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    let (token, treasury) = free_addresses(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "PVNAL"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    // Activate allowlist but don't add the investor.
+    client.set_allowlist_active(&true);
+
+    let result = client.preview_fund(&investor, &1_000i128);
+    assert_eq!(result, EscrowError::InvestorNotAllowlisted as u32);
+}
+
+#[test]
+fn test_preview_fund_allowlisted_returns_zero() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    let (token, treasury) = free_addresses(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "PVAL"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    client.set_allowlist_active(&true);
+
+    // Use first borrower call, then add a different investor to the list.
+    let mut batch = SorobanVec::new(&env);
+    batch.push_back(investor.clone());
+    client.set_investors_allowlisted(&batch, &true);
+
+    let result = client.preview_fund(&investor, &1_000i128);
+    assert_eq!(result, 0, "allowlisted investor should succeed");
+}
+
+#[test]
+fn test_preview_fund_contribution_overflow_returns_105() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let contract_id = client.address.clone();
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let investor = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "PVOVF1"),
+        &sme,
+        &1_000i128,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    // Force the contribution near i128::MAX.
+    env.as_contract(&contract_id, || {
+        env.storage().persistent().set(
+            &DataKey::InvestorContribution(investor.clone()),
+            &(i128::MAX - 1),
+        );
+    });
+
+    let result = client.preview_fund(&investor, &2i128);
+    assert_eq!(result, EscrowError::InvestorContributionOverflow as u32);
+}
+
+#[test]
+fn test_preview_fund_per_investor_cap_exceeded_returns_106() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    let cap: i128 = 50_000i128;
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "PVCAP"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+        &Some(cap),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    // First actual deposit within cap (preview is read-only; need real state for second check).
+    client.fund(&investor, &40_000i128);
+
+    // Second deposit would exceed cap — preview correctly detects this.
+    let result = client.preview_fund(&investor, &20_000i128);
+    assert_eq!(result, EscrowError::InvestorContributionExceedsCap as u32);
+}
+
+#[test]
+fn test_preview_fund_unique_investor_cap_reached_returns_107() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "PVUCAP"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &Some(2u32), // Cap of 2 unique investors
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    let inv1 = Address::generate(&env);
+    let inv2 = Address::generate(&env);
+    let inv3 = Address::generate(&env);
+
+    // Actually fund the first two investors so UniqueFunderCount reaches the cap.
+    client.fund(&inv1, &1_000i128);
+    client.fund(&inv2, &1_000i128);
+
+    // Third investor preview should report the unique-investor cap as reached.
+    assert_eq!(
+        client.preview_fund(&inv3, &1_000i128),
+        EscrowError::UniqueInvestorCapReached as u32
+    );
+}
+
+#[test]
+fn test_preview_fund_funded_amount_overflow_returns_110() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let contract_id = client.address.clone();
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let investor = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "PVFOFL"),
+        &sme,
+        &crate::MAX_INVOICE_AMOUNT,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    // Force funded_amount near i128::MAX via direct storage write.
+    env.as_contract(&contract_id, || {
+        let mut escrow = LiquifactEscrow::get_escrow(env.clone());
+        escrow.funded_amount = i128::MAX - 1;
+        escrow.status = 0;
+        env.storage().instance().set(&DataKey::Escrow, &escrow);
+    });
+
+    let result = client.preview_fund(&investor, &2i128);
+    assert_eq!(result, EscrowError::FundedAmountOverflow as u32);
+}
+
+#[test]
+fn test_preview_fund_ordering_floor_before_paused() {
+    // When both floor violation and pause are active, floor (101) is checked
+    // before pause (210) in fund_impl — verify ordering is respected.
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    let (token, treasury) = free_addresses(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "PVORD1"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &Some(10_000i128),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    // Both pause and floor would fail — floor is checked first in fund_impl.
+    client.set_paused(&true);
+
+    let result = client.preview_fund(&investor, &5_000i128); // below floor
+    assert_eq!(
+        result,
+        EscrowError::FundingBelowMinContribution as u32,
+        "floor (101) must be returned before pause (210)"
+    );
+}
+
+#[test]
+fn test_preview_fund_ordering_legal_hold_before_status() {
+    // When both legal hold is active and status is not open, legal hold (102)
+    // is checked before status (103) — verify ordering is respected.
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    // Fund the escrow to move status past open, then set legal hold.
+    client.fund(&investor, &TARGET); // status → 1 (funded)
+    client.set_legal_hold(&true);
+
+    let another = Address::generate(&env);
+    let result = client.preview_fund(&another, &1_000i128);
+    assert_eq!(
+        result,
+        EscrowError::LegalHoldBlocksFunding as u32,
+        "legal hold (102) must be returned before not-open (103)"
+    );
+}
+
+#[test]
+fn test_preview_fund_ordering_deadline_before_allowlist() {
+    // When both deadline has passed and allowlist would block, deadline (164)
+    // is checked before allowlist (104) — verify ordering is respected.
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    let (token, treasury) = free_addresses(&env);
+    let deadline = 500u64;
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "PVORD2"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &Some(deadline),
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    client.set_allowlist_active(&true);
+    // Investor is NOT allowlisted, AND deadline is past.
+    env.ledger().with_mut(|li| {
+        li.timestamp = deadline + 1;
+    });
+
+    let result = client.preview_fund(&investor, &1_000i128);
+    assert_eq!(
+        result,
+        EscrowError::FundingDeadlinePassed as u32,
+        "deadline (164) must be returned before allowlist (104)"
+    );
+}
+
+#[test]
+fn test_preview_fund_no_state_mutation_on_preview() {
+    // Calling preview_fund must not alter any contract state.
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    let before_escrow = client.get_escrow();
+    let before_count = client.get_unique_funder_count();
+    let before_contrib = client.get_contribution(&investor);
+
+    // A valid preview.
+    let result = client.preview_fund(&investor, &TARGET);
+    assert_eq!(result, 0);
+
+    // State must be unchanged.
+    assert_eq!(client.get_escrow(), before_escrow);
+    assert_eq!(client.get_unique_funder_count(), before_count);
+    assert_eq!(client.get_contribution(&investor), before_contrib);
+
+    // A failing preview (below floor).
+    let (token, treasury) = free_addresses(&env);
+    let client2 = deploy(&env);
+    client2.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "PVNOMP2"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &Some(10_000i128),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    let before2 = client2.get_escrow();
+    let result2 = client2.preview_fund(&investor, &5_000i128);
+    assert_eq!(result2, EscrowError::FundingBelowMinContribution as u32);
+    assert_eq!(
+        client2.get_escrow(),
+        before2,
+        "state must be unchanged after failing preview"
+    );
+}
+
+#[test]
+fn test_preview_fund_returns_zero_for_repeat_investor() {
+    // A returning investor with existing contribution should still get 0.
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    // Make first actual deposit.
+    client.fund(&investor, &(TARGET / 2));
+
+    // Preview a second deposit from the same investor.
+    let result = client.preview_fund(&investor, &(TARGET / 4));
+    assert_eq!(result, 0, "repeat investor should succeed");
+}
+
+#[test]
+fn test_preview_fund_returns_zero_for_overfund() {
+    // Preview should return 0 for an over-funding deposit (past target).
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    let result = client.preview_fund(&investor, &(TARGET + 1));
+    assert_eq!(
+        result, 0,
+        "over-funding should be allowed while status is open"
+    );
+}
