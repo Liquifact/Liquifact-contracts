@@ -730,6 +730,19 @@ pub(crate) fn validate_maturity_bounds(env: &Env, maturity: u64, max_horizon: u6
     );
 }
 
+/// Validate that a basis-points value falls within the allowed `0..=10_000` range.
+///
+/// Centralises the bounds check used by yield bps, tier yield bps, and protocol fee bps
+/// so the ceiling lives in exactly one spot. Panics with the caller-supplied typed
+/// [`EscrowError`] variant when the value is out of range.
+///
+/// # Errors
+/// Panics with the caller-supplied `error` when `bps` is outside `0..=10_000`.
+#[inline(always)]
+pub(crate) fn validate_bps(env: &Env, bps: i64, error: EscrowError) {
+    ensure(env, (0..=10_000).contains(&bps), error);
+}
+
 // --- Storage keys ---
 
 #[contracttype]
@@ -1698,11 +1711,7 @@ impl LiquifactEscrow {
         let n = tiers.len();
         for i in 0..n {
             let t = tiers.get(i).unwrap();
-            ensure(
-                env,
-                (0..=10_000).contains(&t.yield_bps),
-                EscrowError::TierYieldOutOfRange,
-            );
+            validate_bps(env, t.yield_bps, EscrowError::TierYieldOutOfRange);
             ensure(
                 env,
                 t.yield_bps >= base_yield,
@@ -1813,18 +1822,14 @@ impl LiquifactEscrow {
             amount <= MAX_INVOICE_AMOUNT,
             EscrowError::AmountExceedsMax,
         );
-        ensure(
-            &env,
-            (0..=10_000).contains(&yield_bps),
-            EscrowError::YieldBpsOutOfRange,
-        );
+        validate_bps(&env, yield_bps, EscrowError::YieldBpsOutOfRange);
         // Immutable protocol fee in basis points (default 0 = no fee). Validated to the same
         // 0..=10_000 envelope as `yield_bps`; `10_000` routes the entire `funded_amount` to the
         // treasury at withdrawal. See `docs/escrow-numeric-model.md` for the split math.
         let protocol_fee_bps = protocol_fee_bps.unwrap_or(0);
-        ensure(
+        validate_bps(
             &env,
-            (0..=10_000).contains(&protocol_fee_bps),
+            protocol_fee_bps,
             EscrowError::ProtocolFeeBpsOutOfRange,
         );
         ensure(
