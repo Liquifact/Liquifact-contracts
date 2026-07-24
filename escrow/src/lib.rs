@@ -2773,10 +2773,10 @@ impl LiquifactEscrow {
 
         // Guard 6: funding deadline (fund_impl lines 4020-4026).
         #[allow(clippy::collapsible_if)]
-        if let Some(deadline) =
-            env.storage()
-                .instance()
-                .get::<DataKey, u64>(&DataKey::FundingDeadline)
+        if let Some(deadline) = env
+            .storage()
+            .instance()
+            .get::<DataKey, u64>(&DataKey::FundingDeadline)
         {
             if env.ledger().timestamp() > deadline {
                 return EscrowError::FundingDeadlinePassed as u32;
