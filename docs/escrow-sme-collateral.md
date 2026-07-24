@@ -95,14 +95,6 @@ pub struct CollateralClearedEvt {
     pub amount: i128,   // carried from the pledge at the time of removal
     pub recorded_at: u64, // original pledge ledger timestamp
 }
-
-pub struct CollateralCommitmentCleared {
-    pub name: Symbol,   // coll_clr
-    pub invoice_id: Symbol,
-    pub asset: Symbol,
-    pub amount: i128,
-    pub recorded_at: u64,
-}
 ```
 
 ---
