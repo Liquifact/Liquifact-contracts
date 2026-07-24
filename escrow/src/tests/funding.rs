@@ -8089,9 +8089,9 @@ fn test_preview_fund_funded_amount_overflow_returns_110() {
 }
 
 #[test]
-fn test_preview_fund_ordering_paused_before_floor() {
-    // When both floor violation and pause are active, pause (210) is checked
-    // before floor (101) in fund_impl — verify ordering is respected.
+fn test_preview_fund_ordering_floor_before_paused() {
+    // When both floor violation and pause are active, floor (101) is checked
+    // before pause (210) in fund_impl — verify ordering is respected.
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
     let investor = Address::generate(&env);
@@ -8117,14 +8117,14 @@ fn test_preview_fund_ordering_paused_before_floor() {
         &None::<i64>,
     );
 
-    // Both pause and floor would fail — pause is checked first.
+    // Both pause and floor would fail — floor is checked first in fund_impl.
     client.set_paused(&true);
 
     let result = client.preview_fund(&investor, &5_000i128); // below floor
     assert_eq!(
         result,
-        EscrowError::PausedBlocksFunding as u32,
-        "pause (210) must be returned before floor (101)"
+        EscrowError::FundingBelowMinContribution as u32,
+        "floor (101) must be returned before pause (210)"
     );
 }
 
@@ -8242,7 +8242,11 @@ fn test_preview_fund_no_state_mutation_on_preview() {
     let before2 = client2.get_escrow();
     let result2 = client2.preview_fund(&investor, &5_000i128);
     assert_eq!(result2, EscrowError::FundingBelowMinContribution as u32);
-    assert_eq!(client2.get_escrow(), before2, "state must be unchanged after failing preview");
+    assert_eq!(
+        client2.get_escrow(),
+        before2,
+        "state must be unchanged after failing preview"
+    );
 }
 
 #[test]
@@ -8270,5 +8274,8 @@ fn test_preview_fund_returns_zero_for_overfund() {
     default_init(&client, &env, &admin, &sme);
 
     let result = client.preview_fund(&investor, &(TARGET + 1));
-    assert_eq!(result, 0, "over-funding should be allowed while status is open");
+    assert_eq!(
+        result, 0,
+        "over-funding should be allowed while status is open"
+    );
 }
