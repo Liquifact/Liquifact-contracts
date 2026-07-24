@@ -66,6 +66,7 @@ mod coverage;
 mod external_calls;
 mod external_calls_mocked;
 mod funding;
+mod funding_deadline_tests;
 mod init;
 mod integration;
 mod integration_status_guards;

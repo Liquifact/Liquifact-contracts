@@ -165,6 +165,56 @@ let result = fund_batch(entries); // All three processed; status = 1
 
 ---
 
+## Funding deadline — optional open-window expiry
+
+An optional `funding_deadline` (ledger timestamp, `u64`) can be set at `init` via the
+`funding_deadline: Option<u64>` parameter. When present:
+
+- **New `fund` / `fund_batch` / `fund_with_commitment` calls are rejected** after the ledger
+  timestamp passes the deadline, with `EscrowError::FundingDeadlinePassed` (code 164).
+- **`cancel_funding` is NOT blocked by the deadline.** The admin may cancel a stalled
+  open escrow at any time, before or after the deadline.
+- **Already-funded escrows (status 1) are unaffected.** The deadline gate applies only to
+  the open (status 0) state; it cannot retroactively trap funded principal.
+- `is_funding_expired()` returns `true` when `deadline` is set and `now > deadline`.
+- `get_funding_deadline()` returns `Some(deadline)` or `None` if not configured.
+
+### Boundary semantics
+
+| `now` vs `deadline` | `fund` allowed | `is_funding_expired` |
+|---------------------|---------------|----------------------|
+| `now < deadline` | ✅ Yes | `false` |
+| `now == deadline` | ✅ Yes (inclusive at boundary) | `false` |
+| `now > deadline` | ❌ No (`FundingDeadlinePassed`) | `true` |
+| No deadline set | ✅ Always | `false` always |
+
+### Typical expiry + cancellation flow
+
+```
+1. init(funding_deadline = T)             → status 0, deadline stored
+2. investor fund() before T               → status 0 (partial) or 1 (funded)
+3. ledger advances past T
+4. investor fund() attempt                → rejected: FundingDeadlinePassed (164)
+5. admin cancel_funding()                 → status 4 (cancelled)
+6. investor refund()                      → principal returned to investor
+```
+
+### Validation at init
+
+- `funding_deadline` must be strictly greater than the current ledger timestamp at init
+  time (`EscrowError::FundingDeadlinePassed` if deadline <= now).
+- When `maturity > 0`, `funding_deadline` must be strictly less than `maturity`
+  (`EscrowError::FundingDeadlineBeyondMaturity`).
+- `funding_deadline = 0` / `None` means no deadline (open window).
+
+### Security notes
+
+- A passed deadline cannot retroactively cancel or drain an already-funded escrow.
+- The deadline gate never blocks `cancel_funding`; admin always retains manual override.
+- Ledger time is validator-observed; see `docs/escrow-ledger-time.md` for skew guidance.
+
+---
+
 ## Mutual exclusivity: `withdraw` vs `settle`
 
 `withdraw` and `settle` are **mutually exclusive** terminal paths. Both require:
