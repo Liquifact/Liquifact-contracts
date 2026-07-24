@@ -21,6 +21,9 @@ use soroban_sdk::{
 
 /// Set up an escrow with an optional funding deadline at `now + offset_secs`.
 /// Pass `offset_secs = 0` to omit the deadline.
+///
+/// Uses a plain generated token address which auto-registers [`DefaultMockToken`],
+/// giving every investor address a default balance — no manual minting required.
 fn init_with_optional_deadline<'a>(
     env: &'a Env,
     client: &LiquifactEscrowClient<'a>,
@@ -29,8 +32,7 @@ fn init_with_optional_deadline<'a>(
     offset_secs: u64,
     maturity: u64,
 ) {
-    let token = install_stellar_asset_token(env);
-    let treasury = Address::generate(env);
+    let (token, treasury) = free_addresses(env);
 
     let deadline = if offset_secs > 0 {
         Some(env.ledger().timestamp() + offset_secs)
@@ -45,7 +47,7 @@ fn init_with_optional_deadline<'a>(
         &TARGET,
         &800i64,
         &maturity,
-        &token.id,
+        &token,
         &None,
         &treasury,
         &None,
