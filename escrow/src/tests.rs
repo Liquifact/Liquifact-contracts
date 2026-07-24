@@ -77,7 +77,6 @@ mod properties;
 mod reconciliation_lifecycle;
 mod settlement;
  
-
 /// Registers a new escrow contract instance and returns its contract id.
 pub fn deploy_id(env: &Env) -> Address {
     env.register(LiquifactEscrow, ())
