@@ -704,7 +704,11 @@ fn test_collateral_clear_emits_one_dedicated_event_with_cleared_payload() {
     // Capture immediately: subsequent contract calls can replace the test event buffer.
     let events = env.events().all().filter_by_contract(&contract_id);
 
-    assert_eq!(events.events().len(), 1, "clear must emit exactly one event");
+    assert_eq!(
+        events.events().len(),
+        1,
+        "clear must emit exactly one event"
+    );
     let expected = CollateralClearedEvt {
         name: symbol_short!("coll_clr"),
         invoice_id,
