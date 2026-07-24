@@ -1240,17 +1240,6 @@ pub struct EscrowSettled {
 }
 
 #[contractevent]
-pub struct SettlementStateChanged {
-    #[topic]
-    pub name: Symbol,
-    #[topic]
-    pub invoice_id: Symbol,
-    pub old_status: u32,
-    pub new_status: u32,
-    pub funded_amount: i128,
-}
-
-#[contractevent]
 pub struct MaturityUpdatedEvent {
     #[topic]
     pub name: Symbol,
@@ -4522,6 +4511,7 @@ impl LiquifactEscrow {
                 (escrow.yield_bps, 0u64)
             } else {
                 // Returning investor: yield was set on first deposit; read it for the event.
+                // If prev > 0, preserve existing effective yield and claim lock.
                 let eff = Self::get_persistent_investor_effective_yield(&env, investor.clone())
                     .unwrap_or(escrow.yield_bps);
                 (eff, 0u64)
