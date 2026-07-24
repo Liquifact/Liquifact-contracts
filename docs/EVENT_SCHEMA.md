@@ -33,7 +33,7 @@ short routing symbol passed with `symbol_short!(...)`, such as `funded` or
 
 ## Event Catalog
 
-The current contract defines 36 event structs.
+The current contract defines 37 event structs.
 
 | Rust event | `name` symbol | Entrypoint(s) |
 |---|---:|---|
@@ -72,6 +72,7 @@ The current contract defines 36 event structs.
 | `MaxUniqueInvestorsCapRaised` | `raise_cap` | `raise_max_unique_investors` |
 | `MinContributionFloorLowered` | `floor_lo` | `lower_min_contribution_floor` |
 | `PrimaryAttestationBound` | `att_bind` | `bind_primary_attestation_hash` |
+| `ProtocolFeeBpsLowered` | `fee_lo` | `lower_protocol_fee_bps` |
 | `RegistryRefRebound` | `reg_rebind` | `set_registry` |
 | `SmeWithdrew` | `sme_wd` | `withdraw` |
 | `TreasuryDustSwept` | `dust_sw` | `sweep_terminal_dust` |
@@ -117,6 +118,25 @@ Data:
 |---|---|
 | `old_cap` | `u32` |
 | `new_cap` | `u32` |
+
+### `ProtocolFeeBpsLowered`
+
+Emitted after successful `lower_protocol_fee_bps`.
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `protocol_fee_bps_lowered` |
+| 1 | `name` | `Symbol` | `fee_lo` |
+| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
+
+Data:
+
+| Field | Type |
+|---|---|
+| `old_bps` | `i64` |
+| `new_bps` | `i64` |
 
 ### `EscrowFunded`
 
