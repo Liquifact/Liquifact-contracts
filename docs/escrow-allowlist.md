@@ -191,6 +191,20 @@ Check whether a specific address is allowlisted.
 - **Returns:** `true` if entry is `true`, `false` if entry is `false` or absent
 - **Default:** `false` when key is absent (default-to-deny)
 
+#### `get_allowlist_state(env: Env) -> AllowlistState`
+
+Return the full allowlist state in O(1) from instance storage.
+
+- **Authorization:** None (read-only)
+- **Storage:** Reads `DataKey::AllowlistActive` and `DataKey::AllowlistIndex` — both instance storage, loaded on every invocation
+- **Complexity:** O(1) — two key lookups, no iteration over persistent per-investor entries
+- **No mutation:** pure read; no storage writes, no side effects
+- **Returns:** `AllowlistState { active: bool, index: Vec<Address> }`
+  - `active` — whether the gate is currently enforced
+  - `index` — ordered list of addresses ever added (and not removed) from the allowlist index
+- **Default when unset:** `AllowlistState { active: false, index: [] }` — never panics
+- **Note:** `index` mirrors `DataKey::AllowlistIndex` exactly. An address in the index may have its persistent `InvestorAllowlisted` entry set to `false` if removed after indexing. Use `is_investor_allowlisted` for live per-address status.
+
 ## Security Considerations
 
 ### TTL Management

@@ -1,6 +1,6 @@
 use super::{
-    AllowlistEnabledChanged, DataKey, EscrowError, InvestorAllowlistChanged, LiquifactEscrow,
-    LiquifactEscrowClient,
+    AllowlistEnabledChanged, AllowlistState, DataKey, EscrowError, InvestorAllowlistChanged,
+    LiquifactEscrow, LiquifactEscrowClient,
 };
 use soroban_sdk::Vec as SorobanVec;
 use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env, Error, Event, InvokeError};
@@ -918,4 +918,123 @@ fn gate_batch_revoke_blocks_all_revoked_members() {
     // Contributions remain at the pre-revocation values.
     assert_eq!(client.get_contribution(&a), 1_000i128);
     assert_eq!(client.get_contribution(&b), 1_000i128);
+}
+
+// =============================================================================
+// get_allowlist_state — issue #713
+//
+// O(1) read-only view that returns AllowlistState { active, index } directly
+// from instance storage without mutation or iteration over persistent entries.
+// =============================================================================
+
+/// Fresh contract, allowlist never configured — view must return the default
+/// (inactive, empty index) without panicking.
+#[test]
+fn test_get_allowlist_state_unset_returns_default() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init(&env, &client);
+
+    let state = client.get_allowlist_state();
+
+    assert!(!state.active, "active must be false when never set");
+    assert_eq!(
+        state.index.len(),
+        0,
+        "index must be empty when no investors have been added"
+    );
+}
+
+/// Set the allowlist toggle and add investors, then assert the view reflects
+/// exactly what was written.
+#[test]
+fn test_get_allowlist_state_returns_current_state() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init(&env, &client);
+
+    let a = Address::generate(&env);
+    let b = Address::generate(&env);
+
+    client.set_allowlist_active(&true);
+    client.set_investor_allowlisted(&a, &true);
+    client.set_investor_allowlisted(&b, &true);
+
+    let state = client.get_allowlist_state();
+
+    assert!(state.active, "active must be true after set_allowlist_active(true)");
+    assert_eq!(state.index.len(), 2, "index must contain both added investors");
+    assert!(
+        (state.index.get(0).unwrap() == a && state.index.get(1).unwrap() == b)
+            || (state.index.get(0).unwrap() == b && state.index.get(1).unwrap() == a),
+        "index must contain a and b"
+    );
+}
+
+/// After mutating the allowlist (adding then removing an investor), the view
+/// must reflect the latest state, not a stale snapshot.
+#[test]
+fn test_get_allowlist_state_after_update() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init(&env, &client);
+
+    let a = Address::generate(&env);
+    let b = Address::generate(&env);
+
+    // Initial state: add both.
+    client.set_allowlist_active(&true);
+    client.set_investor_allowlisted(&a, &true);
+    client.set_investor_allowlisted(&b, &true);
+
+    let state_after_add = client.get_allowlist_state();
+    assert_eq!(state_after_add.index.len(), 2);
+
+    // Mutate: remove b from the index.
+    client.set_investor_allowlisted(&b, &false);
+
+    let state_after_remove = client.get_allowlist_state();
+    assert_eq!(
+        state_after_remove.index.len(),
+        1,
+        "index must shrink after removal"
+    );
+    assert_eq!(
+        state_after_remove.index.get(0).unwrap(),
+        a,
+        "only a must remain in the index"
+    );
+    assert!(
+        state_after_remove.active,
+        "active flag must be unchanged after investor removal"
+    );
+}
+
+/// Calling get_allowlist_state must not mutate storage: calling it twice in
+/// sequence must yield byte-identical results and leave storage unchanged.
+#[test]
+fn test_get_allowlist_state_does_not_mutate_storage() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init(&env, &client);
+
+    let a = Address::generate(&env);
+    client.set_allowlist_active(&true);
+    client.set_investor_allowlisted(&a, &true);
+
+    // Call the view twice — results must be identical.
+    let first = client.get_allowlist_state();
+    let second = client.get_allowlist_state();
+
+    assert_eq!(
+        first, second,
+        "get_allowlist_state must be idempotent and non-mutating"
+    );
+    assert!(first.active);
+    assert_eq!(first.index.len(), 1);
+    assert_eq!(first.index.get(0).unwrap(), a);
 }

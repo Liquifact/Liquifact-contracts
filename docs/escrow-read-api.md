@@ -67,6 +67,9 @@ re-implementing storage reads to guarantee identical semantics.
 **Allowlist:**
 - [is_allowlist_active](#is_allowlist_active--bool)
 - [is_investor_allowlisted](#is_investor_allowlistedinvestor-address--bool)
+- [get_allowlist_state](#get_allowlist_state--allowliststate)
+- [get_allowlisted_investors](#get_allowlisted_investorsstart-u32-limit-u32--vecaddress)
+- [get_allowlisted_investors_count](#get_allowlisted_investors_count--u32)
 
 **Distributed Principal:**
 - [get_distributed_principal](#get_distributed_principal--i128)
@@ -799,3 +802,77 @@ Returns the yield-tier ladder configured at `init`, or an empty `Vec` when no ti
 |-------|------|-------------|
 | `min_lock_secs` | `u64` | Minimum `committed_lock_secs` an investor must pass to qualify for this tier |
 | `yield_bps` | `i64` | Effective annualized yield in basis points for qualifying investors |
+
+---
+
+## Allowlist
+
+### `is_allowlist_active() → bool`
+
+**Storage key:** `DataKey::AllowlistActive` (instance)
+**Signature:** `pub fn is_allowlist_active(env: Env) -> bool`
+
+Returns `true` when the investor allowlist gate is active.
+
+**Requires initialization:** No
+**Default when absent:** `false`
+
+---
+
+### `is_investor_allowlisted(investor: Address) → bool`
+
+**Storage key:** `DataKey::InvestorAllowlisted(investor)` (persistent)
+**Signature:** `pub fn is_investor_allowlisted(env: Env, investor: Address) -> bool`
+
+Returns `true` when the given address is currently allowlisted.
+
+**Requires initialization:** No
+**Default when absent:** `false` (default-to-deny semantics)
+
+---
+
+### `get_allowlist_state() → AllowlistState`
+
+**Storage keys:** `DataKey::AllowlistActive`, `DataKey::AllowlistIndex` (both instance)
+**Signature:** `pub fn get_allowlist_state(env: Env) -> AllowlistState`
+
+Returns the full allowlist state in **O(1)** by reading directly from instance storage.
+No iteration, no persistent-storage reads, no event replay — two key lookups regardless
+of how many addresses are in the index.
+
+**Requires initialization:** No
+**Default when absent:** `AllowlistState { active: false, index: [] }` — never panics.
+**No mutation:** pure read; no storage writes, no side effects.
+
+**Return value:** `AllowlistState` struct with fields:
+- `active: bool` — whether the gate is currently enforced.
+- `index: Vec<Address>` — ordered list of addresses added to the allowlist index (not yet removed). Mirrors `DataKey::AllowlistIndex` exactly.
+
+**Note on `index` vs live status:** an address in `index` may have its persistent
+`DataKey::InvestorAllowlisted` entry set to `false` if removed after being indexed.
+For per-address live status use `is_investor_allowlisted`.
+
+---
+
+### `get_allowlisted_investors(start: u32, limit: u32) → Vec<Address>`
+
+**Storage keys:** `DataKey::AllowlistIndex` (instance), `DataKey::InvestorAllowlisted` (persistent, per address)
+**Signature:** `pub fn get_allowlisted_investors(env: Env, start: u32, limit: u32) -> Vec<Address>`
+
+Returns a paginated list of currently-allowlisted addresses (filters out entries where the live
+`InvestorAllowlisted` flag is `false`). `limit` is capped at 50.
+
+**Requires initialization:** No
+**Default when absent:** empty `Vec`
+
+---
+
+### `get_allowlisted_investors_count() → u32`
+
+**Storage keys:** `DataKey::AllowlistIndex` (instance), `DataKey::InvestorAllowlisted` (persistent, per address)
+**Signature:** `pub fn get_allowlisted_investors_count(env: Env) -> u32`
+
+Returns the count of addresses where the live `InvestorAllowlisted` flag is `true`.
+
+**Requires initialization:** No
+**Default when absent:** `0`
