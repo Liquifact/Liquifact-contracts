@@ -819,6 +819,83 @@ pub(crate) fn validate_bps(env: &Env, bps: i64, error: EscrowError) {
     ensure(env, (0..=10_000).contains(&bps), error);
 }
 
+/// Shared guard for operational pause at settlement-adjacent entrypoints.
+///
+/// Replaces the repeated pattern `ensure(&env, !Self::paused_active(&env), error_variant)`
+/// that appeared in [`LiquifactEscrow::settle`], [`LiquifactEscrow::withdraw`], and
+/// [`LiquifactEscrow::claim_investor_payout`]. Centralising the read of [`DataKey::Paused`]
+/// and the negation guarantees that adding a new entrypoint with a pause gate cannot
+/// accidentally forget the pause check or use the wrong error variant — the caller passes
+/// the typed error variant that documents which entrypoint was blocked.
+///
+/// The operational pause is orthogonal to the legal hold ([`DataKey::LegalHold`]) and is
+/// checked before (and independently of) authorization. See [`guard_not_legal_hold`] for
+/// the compliance hold gate.
+///
+/// # Errors
+/// Panics with the caller-supplied `error` (one of the `EscrowError::PausedBlocks*`
+/// variants) when [`DataKey::Paused`] is `true`.
+///
+/// # Security notes
+/// - Read-only: performs a single instance-storage read with `unwrap_or(false)` (no panic on
+///   missing key). Does not write or delete any storage key.
+/// - This is **not** an authorization check. Callers must still call `Address::require_auth()`
+///   for the entrypoint's bound role before any storage mutation or token transfer, per
+///   [ADR-002](docs/adr/ADR-002-auth-boundaries.md).
+#[inline(always)]
+pub(crate) fn guard_paused(env: &Env, error: EscrowError) {
+    ensure(env, !LiquifactEscrow::paused_active(env), error);
+}
+
+/// Shared precondition helper for settlement-eligible entrypoints.
+///
+/// Combines the canonical gate sequence for entrypoints that transition a funded escrow
+/// toward settlement ([`LiquifactEscrow::settle`] and [`LiquifactEscrow::withdraw`]):
+///
+/// 1. Operational pause check (read-only, before require_auth).
+/// 2. Legal hold check (read-only, before require_auth).
+/// 3. Load escrow and require SME authorization.
+/// 4. Status == 1 (funded) check.
+/// 5. Return the loaded escrow for further processing by the caller.
+///
+/// By centralising this sequence, new settlement-path entrypoints cannot accidentally
+/// omit a check, reorder checks incorrectly, or use the wrong error variant. The caller
+/// supplies three error variants (one for each failure case), allowing each entrypoint
+/// to use context-specific error codes while enforcing identical behavior.
+///
+/// # Parameters
+/// - `pause_error`: Error variant to return if `paused_active()` is true.
+/// - `legal_hold_error`: Error variant to return if `legal_hold_active()` is true.
+/// - `status_error`: Error variant to return if `escrow.status != 1`.
+///
+/// # Returns
+/// The loaded [`InvoiceEscrow`] if all preconditions pass, or panics with the appropriate
+/// error variant if any check fails.
+///
+/// # Authorization and Ordering
+/// Authorization (SME) is part of this helper via [`LiquifactEscrow::load_escrow_require_sme`],
+/// and is applied after the read-only pause and legal-hold checks, following
+/// [ADR-002](docs/adr/ADR-002-auth-boundaries.md).
+///
+/// # Security notes
+/// - Status check ensures the escrow can still receive settlement-path operations.
+/// - No storage writes; only reads. Callers are responsible for mutations.
+/// - Maturity checks (when needed) are left to the caller because only `settle()` enforces
+///   maturity; `withdraw()` does not gate on maturity.
+#[inline]
+fn guard_settlement_preconditions(
+    env: &Env,
+    pause_error: EscrowError,
+    legal_hold_error: EscrowError,
+    status_error: EscrowError,
+) -> InvoiceEscrow {
+    guard_paused(env, pause_error);
+    guard_not_legal_hold(env, legal_hold_error);
+    let escrow = LiquifactEscrow::load_escrow_require_sme(env);
+    ensure(env, escrow.status == 1, status_error);
+    escrow
+}
+
 // --- Storage keys ---
 
 #[contracttype]
@@ -5427,18 +5504,12 @@ impl LiquifactEscrow {
     }
 
     pub fn settle(env: Env) -> InvoiceEscrow {
-        // Operational pause gate (read-only), before require_auth and orthogonal to legal hold.
-        ensure(
+        let mut escrow = guard_settlement_preconditions(
             &env,
-            !Self::paused_active(&env),
             EscrowError::PausedBlocksSettlement,
+            EscrowError::LegalHoldBlocksSettlement,
+            EscrowError::SettlementNotFunded,
         );
-        guard_not_legal_hold(&env, EscrowError::LegalHoldBlocksSettlement);
-
-        // env.clone(): env is used again after this call for ledger timestamp, storage set, and publish.
-        let mut escrow = Self::load_escrow_require_sme(&env);
-
-        ensure(&env, escrow.status == 1, EscrowError::SettlementNotFunded);
 
         let now = env.ledger().timestamp();
         if escrow.maturity > 0 {
@@ -5537,17 +5608,12 @@ impl LiquifactEscrow {
     }
 
     pub fn withdraw(env: Env) -> InvoiceEscrow {
-        // Operational pause gate (read-only), before require_auth and orthogonal to legal hold.
-        ensure(
+        let mut escrow = guard_settlement_preconditions(
             &env,
-            !Self::paused_active(&env),
             EscrowError::PausedBlocksWithdrawal,
+            EscrowError::LegalHoldBlocksWithdrawal,
+            EscrowError::WithdrawalNotFunded,
         );
-        guard_not_legal_hold(&env, EscrowError::LegalHoldBlocksWithdrawal);
-
-        let mut escrow = Self::load_escrow_require_sme(&env);
-
-        guard_status_eq(&env, escrow.status, 1, EscrowError::WithdrawalNotFunded);
 
         let amount = escrow.funded_amount;
         let sme = escrow.sme_address.clone();
@@ -5686,11 +5752,7 @@ impl LiquifactEscrow {
     /// or an unexpired commitment lock.
     pub fn claim_investor_payout(env: Env, investor: Address) {
         // Operational pause gate (read-only), before require_auth and orthogonal to legal hold.
-        ensure(
-            &env,
-            !Self::paused_active(&env),
-            EscrowError::PausedBlocksInvestorClaims,
-        );
+        guard_paused(&env, EscrowError::PausedBlocksInvestorClaims);
         guard_not_legal_hold(&env, EscrowError::LegalHoldBlocksInvestorClaims);
 
         investor.require_auth();
