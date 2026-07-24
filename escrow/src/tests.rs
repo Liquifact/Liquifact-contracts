@@ -64,6 +64,7 @@ mod cap_validation;
 #[rustfmt::skip]
 mod coverage;
 mod claimable_payouts;
+mod deadline;
 mod external_calls;
 mod external_calls_mocked;
 mod funding;
