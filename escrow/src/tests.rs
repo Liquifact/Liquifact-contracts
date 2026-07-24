@@ -22,9 +22,9 @@ use super::{
     CollateralRecordedEvt, ContractUpgraded, DataKey, DeprecatedTransferAdminUsed, EscrowError,
     EscrowFunded, EscrowInitialized, EscrowUnfunded, FundingCancelled, FundingTargetUpdated,
     InvestorRefundedEvt, LiquifactEscrow, LiquifactEscrowClient, MaturityMaxHorizonUpdated,
-    MaxUniqueInvestorsCapLowered, PrimaryAttestationBound, ProtocolFeeWithdrawn,
-    RegistryRefRebound, TreasuryDustSwept, YieldTier, MAX_ATTESTATION_APPEND_ENTRIES,
-    MAX_DUST_SWEEP_AMOUNT, MAX_FUND_BATCH, SCHEMA_VERSION,
+    MaxUniqueInvestorsCapLowered, PrimaryAttestationBound, RegistryRefRebound, TreasuryDustSwept,
+    YieldTier, MAX_ATTESTATION_APPEND_ENTRIES, MAX_DUST_SWEEP_AMOUNT, MAX_FUND_BATCH,
+    SCHEMA_VERSION,
 };
 use soroban_sdk::{
     symbol_short,
@@ -60,15 +60,13 @@ pub(crate) fn assert_contract_error<T, E>(
 mod admin;
 mod attestations;
 mod auth_matrix;
-mod beneficiary;
 mod cap_validation;
 #[rustfmt::skip]
 mod coverage;
-mod coverage_boost_tests;
 mod external_calls;
 mod external_calls_mocked;
 mod funding;
-mod funding_boundary_tests;
+mod funding_deadline_tests;
 mod init;
 mod integration;
 mod integration_status_guards;
@@ -78,7 +76,6 @@ mod pause;
 mod properties;
 mod reconciliation_lifecycle;
 mod settlement;
-mod storage_boundaries;
 
 /// Registers a new escrow contract instance and returns its contract id.
 pub fn deploy_id(env: &Env) -> Address {
@@ -158,7 +155,7 @@ pub fn default_init(client: &LiquifactEscrowClient<'_>, env: &Env, admin: &Addre
         &None,
         &None,
         &None,
-        &None, // maturity_max_horizon
+        &None, // No funding deadline,
         &None,
         &None,
         &None::<i64>,

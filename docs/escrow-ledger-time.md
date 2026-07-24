@@ -100,9 +100,32 @@ pub fn get_settled_at(env: Env) -> Option<u64> {
 **Note:** The `EscrowSettled` event also includes `settled_at_ledger_timestamp`, but the storage 
 key provides a permanent, query-friendly view that survives network event retention policies.
 
----
+### 5. Funding Deadline — `DataKey::FundingDeadline`
 
-## `claim_investor_payout` — Idempotency
+```rust
+if let Some(deadline) = env.storage().instance().get(&DataKey::FundingDeadline) {
+    ensure(
+        &env,
+        env.ledger().timestamp() <= deadline,
+        EscrowError::FundingDeadlinePassed,
+    );
+}
+```
+
+- Checked in `fund`, `fund_batch`, and `fund_with_commitment` on every call while the
+  escrow is open (status 0).
+- The gate is `now <= deadline` (inclusive at the deadline boundary).
+- When `funding_deadline` is absent (or was not set at init), the gate is skipped entirely.
+- `is_funding_expired()` returns `true` when `now > deadline` (strictly after deadline).
+- **Only the funding window** is gated; `cancel_funding` is never blocked by the deadline.
+- At init, the deadline is validated to be strictly greater than the current ledger time
+  (`deadline > now` required; equal timestamps are rejected).
+
+**Trust model note:** like all time comparisons in this contract, the deadline is evaluated
+against `env.ledger().timestamp()` — validator-observed ledger time, not wall-clock time.
+The usual ±30s mainnet skew guidance applies; see the Skew section below.
+
+---
 
 `claim_investor_payout` is **idempotent**: calling it more than once for
 the same investor is safe and produces no additional side effects.
@@ -279,32 +302,6 @@ and the current deadline has not elapsed:
 **Event:** `FundingDeadlineExtended` carries `invoice_id`, `old_deadline`, and `new_deadline`.
 
 Indexers should listen for this event to track extended countdowns per invoice.
-
-### `update_funding_deadline` — set, change, or clear
-
-`update_funding_deadline(new_deadline: Option<u64>)` is the general-purpose setter and is also
-restricted to the Open state (status == 0). It does not require a prior deadline and does not
-require the new value to be later than the old one.
-
-| Status | `update_funding_deadline` result |
-|--------|----------------------------------|
-| 0 — Open | ✅ Allowed |
-| 1 — Funded | ❌ `FundingDeadlineUpdateNotOpen` |
-| 2 — Settled | ❌ `FundingDeadlineUpdateNotOpen` |
-| 3 — Withdrawn | ❌ `FundingDeadlineUpdateNotOpen` |
-| 4 — Cancelled | ❌ `FundingDeadlineUpdateNotOpen` |
-
-**Validation:**
-- No deadline need already exist.
-- `Some(d)` requires `d > env.ledger().timestamp()` (`FundingDeadlinePassed`).
-- If `maturity > 0`, `Some(d)` requires `d < maturity` (`FundingDeadlineBeyondMaturity`).
-- `None` clears the deadline; `is_funding_expired()` then returns `false`.
-
-**Event:** `FundingDeadlineUpdated` carries `invoice_id`, `old_deadline`, and `new_deadline`,
-either of which may be `None`.
-
-Indexers tracking countdowns should handle a `new_deadline` of `None` as removal of the
-funding window rather than as an expiry.
 
 ---
 
