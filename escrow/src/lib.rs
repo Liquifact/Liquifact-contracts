@@ -237,6 +237,12 @@ pub const MAX_REFUND_BATCH: u32 = 50;
 /// Upper bound on [`LiquifactEscrow::set_investors_allowlisted`] batch size.
 pub const MAX_INVESTOR_ALLOWLIST_BATCH: u32 = 32;
 
+/// Upper bound on [`LiquifactEscrow::bump_ttl`] allowlisted addresses to cap per-call storage work.
+///
+/// This entrypoint is permissionless; the length cap is the sole mitigation against
+/// unbounded iteration. Must be non-empty to invoke.
+pub const MAX_BUMP_TTL_BATCH: u32 = 32;
+
 /// Upper bound on [`LiquifactEscrow::get_contributions`] / investor read batch size.
 pub const MAX_INVESTOR_READ_BATCH: u32 = 50;
 
@@ -576,7 +582,12 @@ pub enum EscrowError {
     OverWithdrawal = 222,
     /// [`LiquifactEscrow::unfund`] blocked because a compliance/legal hold is active.
     /// No fund movement is permitted until the hold is cleared by the admin.
-    LegalHoldActive = 223,
+    UnfundLegalHoldActive = 222,
+
+    /// [`LiquifactEscrow::bump_ttl`] received an empty allowlisted vector.
+    BumpTtlBatchEmpty = 223,
+    /// [`LiquifactEscrow::bump_ttl`] exceeded [`MAX_BUMP_TTL_BATCH`].
+    BumpTtlBatchTooLarge = 224,
 }
 
 #[inline(always)]
@@ -5593,6 +5604,15 @@ impl LiquifactEscrow {
         // Documentation references:
         // - ADR-007: storage key evolution policy (additive changes / key semantics).
         // - docs/escrow-ledger-time.md: all gating uses `Env::ledger().timestamp()` with `>=`.
+
+        // Reject empty or oversized batches to cap per-call storage work.
+        let n = allowlisted.len();
+        ensure(&env, n > 0, EscrowError::BumpTtlBatchEmpty);
+        ensure(
+            &env,
+            n <= MAX_BUMP_TTL_BATCH,
+            EscrowError::BumpTtlBatchTooLarge,
+        );
 
         // Extend persistent TTL for allowlisted investor entries.
         for addr in allowlisted.iter() {

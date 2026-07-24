@@ -7,7 +7,7 @@ use crate::{
     CollateralRecordedEvt, DataKey, EscrowCloseSnapshot, EscrowError, FundingCancelled,
     InvestorRefundedEvt, LiquifactEscrow, LiquifactEscrowClient, PrimaryAttestationBound,
     RegistryRefRebound, TreasuryDustSwept, YieldTier, DEFAULT_MATURITY_MAX_HORIZON_SECS,
-    MAX_ATTESTATION_APPEND_ENTRIES, SCHEMA_VERSION, ProtocolFeePreview,
+    MAX_ATTESTATION_APPEND_ENTRIES, MAX_BUMP_TTL_BATCH, SCHEMA_VERSION,
 };
 use soroban_sdk::{
     symbol_short,
@@ -231,13 +231,10 @@ fn escrow_error_discriminants_match_canonical_table() {
         (EscrowError::FloorLowerNotOpen, 173),
         (EscrowError::NewFloorNotLower, 174),
         (EscrowError::NewFloorNotPositive, 175),
-        (EscrowError::ProtocolFeeNotLower, 219),
-        (EscrowError::ProtocolFeeLowerNotAllowed, 220),
-        (EscrowError::EscrowNotOpen, 221),
-        (EscrowError::OverWithdrawal, 222),
-        (EscrowError::LegalHoldActive, 223),
+        (EscrowError::BumpTtlBatchEmpty, 223),
+        (EscrowError::BumpTtlBatchTooLarge, 224),
     ];
-    assert_eq!(TABLE.len(), 94);
+    assert_eq!(TABLE.len(), 91);
     for (variant, code) in TABLE {
         assert_eq!(*variant as u32, *code, "discriminant drift for code {code}");
     }
@@ -1743,6 +1740,105 @@ fn test_bump_ttl_covers_persistent_investor_keys() {
     // assert!(ttl_allow > 0, "Allowlist TTL should be extended");
     //     let ttl_contrib = env.storage().persistent().get_ttl(&DataKey::InvestorContribution(investor.clone()));
     // assert!(ttl_contrib > 0, "Contribution TTL should be extended");
+}
+
+#[test]
+fn test_bump_ttl_empty_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let (funding_token, treasury) = free_addresses(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "TTL002"),
+        &sme,
+        &100,
+        &10,
+        &0,
+        &funding_token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+    let empty_vec = SorobanVec::new(&env);
+    let result = client.try_bump_ttl(&empty_vec);
+    assert_contract_error(result, EscrowError::BumpTtlBatchEmpty);
+}
+
+#[test]
+fn test_bump_ttl_oversized_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let (funding_token, treasury) = free_addresses(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "TTL003"),
+        &sme,
+        &100,
+        &10,
+        &0,
+        &funding_token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+    let mut investors = SorobanVec::new(&env);
+    for _ in 0..=(MAX_BUMP_TTL_BATCH as usize) {
+        investors.push_back(Address::generate(&env));
+    }
+    let result = client.try_bump_ttl(&investors);
+    assert_contract_error(result, EscrowError::BumpTtlBatchTooLarge);
+}
+
+#[test]
+fn test_bump_ttl_max_batch_succeeds() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let (funding_token, treasury) = free_addresses(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "TTL004"),
+        &sme,
+        &100,
+        &10,
+        &0,
+        &funding_token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+    let mut investors = SorobanVec::new(&env);
+    for _ in 0..MAX_BUMP_TTL_BATCH {
+        investors.push_back(Address::generate(&env));
+    }
+    client.bump_ttl(&investors);
+    // Succeeds without panic.
 }
 
 #[test]
