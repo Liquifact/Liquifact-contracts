@@ -82,6 +82,42 @@ Emitted when an investor deposits principal.
 }
 ```
 
+### `FundingReached`
+Emitted exactly once when the escrow transitions from **open** (status 0) to **funded** (status 1).
+
+This event is the dedicated state-change signal for the 0→1 transition. Indexers can
+subscribe to `fund_rchd` to react to the funding threshold crossing without inspecting
+the `status` field of every per-deposit `EscrowFunded` event.
+
+The event fires in two situations:
+1. During `fund` / `fund_with_commitment` / `fund_batch` when a deposit crosses the
+   threshold — emitted immediately **after** the per-deposit `EscrowFunded` event.
+2. During `update_funding_target` when a target lowering promotes an
+   already-credited principal — emitted immediately **after** the `FundingTargetUpdated` event.
+
+**Topics:**
+1. `fund_rchd` (Symbol) — ≤ 9 chars, no collision with existing topics
+2. `invoice_id` (Symbol)
+
+**Data Payload:**
+- `funded_amount` (i128) — total principal at the moment of the 0→1 transition (may exceed target on over-funded escrows)
+- `funding_target` (i128) — the effective target that was satisfied
+- `ledger_timestamp` (u64) — ledger timestamp at promotion time
+- `ledger_sequence` (u32) — ledger sequence at promotion time
+
+**Example (JSON Decoded):**
+```json
+{
+  "topics": ["fund_rchd", "INV_001"],
+  "data": {
+    "funded_amount": "10000000000",
+    "funding_target": "10000000000",
+    "ledger_timestamp": 1714180000,
+    "ledger_sequence": 1500
+  }
+}
+```
+
 ### `EscrowSettled`
 Emitted when the SME finalizes the escrow after maturity.
 

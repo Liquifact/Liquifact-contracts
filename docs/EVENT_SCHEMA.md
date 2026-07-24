@@ -51,7 +51,8 @@ The current contract defines 36 event structs.
 | `CollateralRecordedEvt` | `coll_rec` | `record_sme_collateral_commitment` |
 | `ContractUpgraded` | `upgrade` | `upgrade` |
 | `DeprecatedTransferAdminUsed` | `depr_xfer` | `transfer_admin` |
-| `EscrowFunded` | `funded` | `fund`, `fund_with_commitment` |
+| `EscrowFunded` | `funded` | `fund`, `fund_with_commitment`, `fund_batch` |
+| `FundingReached` | `fund_rchd` | `fund`, `fund_with_commitment`, `fund_batch`, `update_funding_target` |
 | `EscrowInitialized` | `escrow_ii` | `init` |
 | `EscrowPartialSettle` | `part_set` | `partial_settle` |
 | `EscrowSettled` | `escrow_sd` | `settle` |
@@ -121,7 +122,7 @@ Data:
 
 ### `EscrowFunded`
 
-Emitted after successful `fund` or `fund_with_commitment`.
+Emitted after successful `fund`, `fund_with_commitment`, or `fund_batch` (once per entry).
 
 Topics:
 
@@ -140,6 +141,36 @@ Data:
 | `funded_amount` | `i128` |
 | `status` | `u32` |
 | `investor_effective_yield_bps` | `i64` |
+
+### `FundingReached`
+
+Emitted exactly **once** when the escrow transitions from **open** (status 0) to **funded**
+(status 1). This event fires:
+
+1. Inside `fund` / `fund_with_commitment` / `fund_batch` when a deposit crosses the
+   funding threshold — always **after** the corresponding `EscrowFunded` event.
+2. Inside `update_funding_target` when a target lowering promotes an already-credited
+   principal — always **after** the `FundingTargetUpdated` event.
+
+Indexers can subscribe to `fund_rchd` to react to the funding threshold crossing without
+inspecting the `status` field of every per-deposit `EscrowFunded` event.
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `funding_reached` |
+| 1 | `name` | `Symbol` | `fund_rchd` |
+| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
+
+Data:
+
+| Field | Type | Description |
+|---|---|---|
+| `funded_amount` | `i128` | Total principal credited at the moment of the 0→1 transition (may exceed `funding_target` on over-funded escrows). |
+| `funding_target` | `i128` | The effective target that was satisfied. |
+| `ledger_timestamp` | `u64` | `env.ledger().timestamp()` at promotion time. |
+| `ledger_sequence` | `u32` | `env.ledger().sequence()` at promotion time. |
 
 ### `EscrowSettled`
 
