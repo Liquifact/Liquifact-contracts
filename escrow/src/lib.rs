@@ -4437,6 +4437,48 @@ impl LiquifactEscrow {
         0
     }
 
+    /// Return the full allowlist state in O(1) by reading directly from instance storage.
+    ///
+    /// Both [`DataKey::AllowlistActive`] and [`DataKey::AllowlistIndex`] live in
+    /// **instance storage**, which is loaded in full on every contract invocation.
+    /// This means two key lookups with no iteration, no persistent-storage reads,
+    /// and no event replay — the read is bounded and constant-time regardless of
+    /// how many addresses are in the index.
+    ///
+    /// # Returns
+    /// An [`AllowlistState`] containing:
+    /// - `active`: whether the allowlist gate is currently enforced.
+    /// - `index`: the ordered list of addresses that have been added to the
+    ///   allowlist index (and not yet removed via [`LiquifactEscrow::set_investor_allowlisted`]).
+    ///
+    /// # Default when unset
+    /// When neither key has ever been written (e.g. freshly deployed contract or
+    /// a deployment predating the allowlist feature), returns
+    /// `AllowlistState { active: false, index: [] }` — never panics.
+    ///
+    /// # Note on `index` vs live status
+    /// The `index` field mirrors [`DataKey::AllowlistIndex`] exactly. An address
+    /// appearing in the index may still have its persistent
+    /// [`DataKey::InvestorAllowlisted`] entry set to `false` if it was removed
+    /// after being indexed. For per-address live status use
+    /// [`LiquifactEscrow::is_investor_allowlisted`].
+    ///
+    /// # No mutation
+    /// This function performs no storage writes and causes no side effects.
+    pub fn get_allowlist_state(env: Env) -> AllowlistState {
+        let active: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::AllowlistActive)
+            .unwrap_or(false);
+        let index: Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&DataKey::AllowlistIndex)
+            .unwrap_or_else(|| Vec::new(&env));
+        AllowlistState { active, index }
+    }
+
     /// Convenience alias for [`LiquifactEscrow::set_legal_hold`] with `active = false`.
     pub fn clear_legal_hold(env: Env) {
         Self::set_legal_hold(env, false);
@@ -6871,10 +6913,36 @@ impl LiquifactEscrow {
     }
 }
 
-/// Read-only reconciliation snapshot returned by
-/// [`LiquifactEscrow::get_reconciliation`].
+/// Snapshot of the full allowlist state returned by [`LiquifactEscrow::get_allowlist_state`].
+///
+/// Both fields are read from **instance storage** in a single invocation, making the
+/// view O(1) with no iteration over persistent per-investor entries.
 ///
 /// Derive rationale:
+/// - `Clone`: required by Soroban SDK `contracttype`.
+/// - `Debug`: improves failure diagnostics in tests.
+/// - `PartialEq`: allows exact state assertions in tests.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct AllowlistState {
+    /// Whether the investor allowlist gate is currently active.
+    /// Matches [`DataKey::AllowlistActive`]. `false` when the key is absent.
+    pub active: bool,
+    /// Ordered list of addresses that have ever been added to the allowlist
+    /// index (and not yet removed via [`LiquifactEscrow::set_investor_allowlisted`]).
+    /// Matches [`DataKey::AllowlistIndex`]. Empty when the key is absent.
+    ///
+    /// Note: an address here may still have its per-investor
+    /// [`DataKey::InvestorAllowlisted`] persistent entry set to `false` if it
+    /// was removed after being indexed. For live per-address status use
+    /// [`LiquifactEscrow::is_investor_allowlisted`].
+    pub index: Vec<Address>,
+}
+
+/// Read-only reconciliation snapshot returned by [`LiquifactEscrow::get_reconciliation`].
+///
+/// Derive rationale:
+/// - `Clone`: required by Soroban SDK `contracttype`.
 /// - `Debug`: improves failure diagnostics in tests.
 /// - `PartialEq`: allows exact assertions in tests.
 #[contracttype]

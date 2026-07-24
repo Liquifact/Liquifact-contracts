@@ -71,6 +71,9 @@ re-implementing storage reads to guarantee identical semantics.
 **Allowlist:**
 - [is_allowlist_active](#is_allowlist_active--bool)
 - [is_investor_allowlisted](#is_investor_allowlistedinvestor-address--bool)
+- [get_allowlist_state](#get_allowlist_state--allowliststate)
+- [get_allowlisted_investors](#get_allowlisted_investorsstart-u32-limit-u32--vecaddress)
+- [get_allowlisted_investors_count](#get_allowlisted_investors_count--u32)
 
 **Distributed Principal:**
 - [get_distributed_principal](#get_distributed_principal--i128)
