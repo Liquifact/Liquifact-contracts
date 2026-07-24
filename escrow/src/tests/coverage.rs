@@ -3821,28 +3821,25 @@ fn test_collateral_recorded_evt_first_record_prior_amount_zero() {
     let (contract_id, client) = super::deploy_with_id(&env);
     let admin = Address::generate(&env);
     let sme = Address::generate(&env);
-    let (token, treasury) = (Address::generate(&env), Address::generate(&env));
+    let invoice_id = soroban_sdk::Symbol::new(&env, "BEVT001");
 
-    client.init(
-        &admin,
-        &soroban_sdk::String::from_str(&env, "BEVT001"),
-        &sme,
-        &10_000i128,
-        &500i64,
-        &0u64,
-        &token,
-        &None,
-        &treasury,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None::<i64>,
-    );
+    // Directly set storage to avoid init events.
+    env.as_contract(&contract_id, || {
+        env.storage().instance().set(
+            &DataKey::Escrow,
+            &crate::InvoiceEscrow {
+                invoice_id: invoice_id.clone(),
+                admin,
+                sme_address: sme,
+                amount: 10_000i128,
+                funding_target: 10_000i128,
+                funded_amount: 0i128,
+                yield_bps: 500i64,
+                maturity: 0u64,
+                status: 0u32,
+            },
+        );
+    });
 
     let asset = soroban_sdk::Symbol::new(&env, "GOLD");
     client.record_sme_collateral_commitment(&asset, &5_000i128);
@@ -3852,7 +3849,7 @@ fn test_collateral_recorded_evt_first_record_prior_amount_zero() {
 
     let expected = CollateralRecordedEvt {
         name: symbol_short!("coll_rec"),
-        invoice_id: soroban_sdk::Symbol::new(&env, "BEVT001"),
+        invoice_id,
         amount: 5_000i128,
         prior_amount: 0i128,
     };
@@ -3873,28 +3870,25 @@ fn test_collateral_recorded_evt_replacement_prior_amount_correct() {
     let (contract_id, client) = super::deploy_with_id(&env);
     let admin = Address::generate(&env);
     let sme = Address::generate(&env);
-    let (token, treasury) = (Address::generate(&env), Address::generate(&env));
+    let invoice_id = soroban_sdk::Symbol::new(&env, "BEVT002");
 
-    client.init(
-        &admin,
-        &soroban_sdk::String::from_str(&env, "BEVT002"),
-        &sme,
-        &10_000i128,
-        &500i64,
-        &0u64,
-        &token,
-        &None,
-        &treasury,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None::<i64>,
-    );
+    // Directly set storage to avoid init events.
+    env.as_contract(&contract_id, || {
+        env.storage().instance().set(
+            &DataKey::Escrow,
+            &crate::InvoiceEscrow {
+                invoice_id: invoice_id.clone(),
+                admin,
+                sme_address: sme,
+                amount: 10_000i128,
+                funding_target: 10_000i128,
+                funded_amount: 0i128,
+                yield_bps: 500i64,
+                maturity: 0u64,
+                status: 0u32,
+            },
+        );
+    });
 
     let asset = soroban_sdk::Symbol::new(&env, "GOLD");
 
@@ -3915,7 +3909,7 @@ fn test_collateral_recorded_evt_replacement_prior_amount_correct() {
 
     let expected = CollateralRecordedEvt {
         name: symbol_short!("coll_rec"),
-        invoice_id: soroban_sdk::Symbol::new(&env, "BEVT002"),
+        invoice_id,
         amount: 7_000i128,
         prior_amount: 3_000i128,
     };
@@ -3936,28 +3930,25 @@ fn test_collateral_cleared_evt_emitted_with_all_fields() {
     let (contract_id, client) = super::deploy_with_id(&env);
     let admin = Address::generate(&env);
     let sme = Address::generate(&env);
-    let (token, treasury) = (Address::generate(&env), Address::generate(&env));
+    let invoice_id = soroban_sdk::Symbol::new(&env, "BEVT003");
 
-    client.init(
-        &admin,
-        &soroban_sdk::String::from_str(&env, "BEVT003"),
-        &sme,
-        &10_000i128,
-        &500i64,
-        &0u64,
-        &token,
-        &None,
-        &treasury,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None::<i64>,
-    );
+    // Directly set storage to avoid init events.
+    env.as_contract(&contract_id, || {
+        env.storage().instance().set(
+            &DataKey::Escrow,
+            &crate::InvoiceEscrow {
+                invoice_id: invoice_id.clone(),
+                admin,
+                sme_address: sme,
+                amount: 10_000i128,
+                funding_target: 10_000i128,
+                funded_amount: 0i128,
+                yield_bps: 500i64,
+                maturity: 0u64,
+                status: 0u32,
+            },
+        );
+    });
 
     let asset = soroban_sdk::Symbol::new(&env, "USDC");
 
@@ -3985,7 +3976,7 @@ fn test_collateral_cleared_evt_emitted_with_all_fields() {
     // The first event from the clear call is CollateralClearedEvt.
     let expected_cleared = CollateralClearedEvt {
         name: symbol_short!("coll_clr"),
-        invoice_id: soroban_sdk::Symbol::new(&env, "BEVT003"),
+        invoice_id,
         asset: asset.clone(),
         amount: 8_000i128,
         recorded_at: 12_345,
