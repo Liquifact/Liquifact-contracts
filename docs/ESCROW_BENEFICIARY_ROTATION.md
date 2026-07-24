@@ -129,6 +129,46 @@ Fields:
 
 ---
 
+## Reconciliation with ADR-002 (Authorization Boundaries)
+
+This document is fully consistent with [ADR-002: Authorization Boundaries](adr/ADR-002-auth-boundaries.md):
+
+### Dual authorization requirement
+
+`rotate_beneficiary` is the **only entrypoint in the escrow contract** that requires authorization from **two distinct roles** in a single transaction. All other entrypoints require exactly one role's signature:
+
+- Admin-only: `init`, `set_legal_hold`, `update_funding_target`, `migrate`, `propose_admin`, etc.
+- SME-only: `settle`, `withdraw`, `record_sme_collateral_commitment`
+- Investor-only: `fund`, `fund_with_commitment`, `claim_investor_payout`
+- Treasury-only: `sweep_terminal_dust`
+
+The dual-auth requirement for `rotate_beneficiary` reflects the high-risk nature of changing the withdrawal destination: neither the admin nor the SME can unilaterally redirect principal. This aligns with ADR-002's principle of role separation to limit blast radius.
+
+### No-op guard
+
+Per ADR-002's "No-Op Guards" section, `rotate_beneficiary` enforces a no-op guard rejecting `new_sme == current_sme` with `NewSmeSameAsCurrent` (error code 162). This prevents noisy events and wasted storage writes for rotations that do not change state, consistent with the same pattern in `update_maturity` and `propose_admin`.
+
+### Guard ordering canonical sequence
+
+`rotate_beneficiary` follows ADR-002's canonical guard ordering:
+
+1. **Read-only preconditions** (legal hold, status checks, no-op check)
+2. **`Address::require_auth()`** for both bound roles (outgoing SME + admin)
+3. **Storage writes** and **event emission**
+
+This ordering ensures no storage mutation occurs until both authorization checks succeed, preserving the contract's invariant that every state-changing operation is guarded by the appropriate signers.
+
+### Shared guard helpers
+
+`rotate_beneficiary` uses the shared gate helpers documented in ADR-002 (issue #626):
+
+- `guard_not_legal_hold(&env, EscrowError::LegalHoldBlocksBeneficiaryRotation)` — centralised legal-hold gate
+- `is_pre_settlement_status(escrow.status)` — predicate for allowed states (open/funded)
+
+These helpers ensure `rotate_beneficiary` cannot diverge from the canonical guard pattern used across all risk-bearing entrypoints.
+
+---
+
 ## Security notes (operator guidance)
 
 - Rotation is intentionally **not** a proposal/accept flow. It is a single call requiring both the outgoing SME and admin signatures.

@@ -180,7 +180,7 @@ pub fn transfer_funding_token_with_balance_checks(
 /// fee-on-transfer, rebasing, or hook behaviors. Non-compliant tokens will cause this
 /// function to fail with a typed error, serving as a safety boundary. Such tokens should be
 /// excluded through governance allowlists and integration review processes.
-/// 
+///
 pub fn transfer_into_escrow_with_balance_checks(
     env: &Env,
     token: &Address,
