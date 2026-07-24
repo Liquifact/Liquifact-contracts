@@ -919,3 +919,215 @@ fn gate_batch_revoke_blocks_all_revoked_members() {
     assert_eq!(client.get_contribution(&a), 1_000i128);
     assert_eq!(client.get_contribution(&b), 1_000i128);
 }
+
+// ---------------------------------------------------------------------------
+// guard_investor_allowlisted behaviour — exercised through every funding
+// entrypoint to verify the extracted helper produces identical rejections.
+// ---------------------------------------------------------------------------
+
+/// `fund_batch` with gate active: allowed investor succeeds, unallowlisted
+/// investor in the same batch is rejected.  Verifies the guard is applied
+/// per-entry inside `fund_impl`, which `fund_batch` delegates to.
+#[test]
+fn guard_helper_fund_batch_allowed_and_blocked_in_same_batch() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init_gate(&env, &client);
+
+    let allowed = Address::generate(&env);
+    let blocked = Address::generate(&env);
+
+    client.set_allowlist_active(&true);
+    client.set_investor_allowlisted(&allowed, &true);
+    // `blocked` is never added → absent entry defaults to deny.
+
+    let mut batch: SorobanVec<(Address, i128)> = SorobanVec::new(&env);
+    batch.push_back((allowed.clone(), 1_000i128));
+    batch.push_back((blocked.clone(), 2_000i128));
+
+    // The batch must be rejected atomically — no partial state.
+    assert_contract_error_gate(
+        client.try_fund_batch(&batch),
+        EscrowError::InvestorNotAllowlisted,
+    );
+    assert_eq!(client.get_contribution(&allowed), 0i128);
+    assert_eq!(client.get_contribution(&blocked), 0i128);
+}
+
+/// `fund_batch` with gate active: all investors allowlisted → entire batch
+/// succeeds.
+#[test]
+fn guard_helper_fund_batch_all_allowed_succeeds() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init_gate(&env, &client);
+
+    let a = Address::generate(&env);
+    let b = Address::generate(&env);
+
+    client.set_allowlist_active(&true);
+    client.set_investor_allowlisted(&a, &true);
+    client.set_investor_allowlisted(&b, &true);
+
+    let mut batch: SorobanVec<(Address, i128)> = SorobanVec::new(&env);
+    batch.push_back((a.clone(), 3_000i128));
+    batch.push_back((b.clone(), 4_000i128));
+
+    let escrow = client.fund_batch(&batch);
+    assert_eq!(escrow.funded_amount, 7_000i128);
+    assert_eq!(client.get_contribution(&a), 3_000i128);
+    assert_eq!(client.get_contribution(&b), 4_000i128);
+}
+
+/// `fund_batch` with gate active: none allowlisted → first entry rejected.
+#[test]
+fn guard_helper_fund_batch_all_blocked_rejects() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init_gate(&env, &client);
+
+    let a = Address::generate(&env);
+    let b = Address::generate(&env);
+
+    client.set_allowlist_active(&true);
+    // Neither a nor b is added.
+
+    let mut batch: SorobanVec<(Address, i128)> = SorobanVec::new(&env);
+    batch.push_back((a.clone(), 1_000i128));
+    batch.push_back((b.clone(), 1_000i128));
+
+    assert_contract_error_gate(
+        client.try_fund_batch(&batch),
+        EscrowError::InvestorNotAllowlisted,
+    );
+}
+
+/// `fund_batch` with gate inactive: mixed entries all succeed (gate bypassed).
+#[test]
+fn guard_helper_fund_batch_gate_inactive_all_succeed() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init_gate(&env, &client);
+
+    let a = Address::generate(&env);
+    let b = Address::generate(&env);
+
+    // Gate is off by default — no allowlist setup needed.
+    let mut batch: SorobanVec<(Address, i128)> = SorobanVec::new(&env);
+    batch.push_back((a.clone(), 5_000i128));
+    batch.push_back((b.clone(), 6_000i128));
+
+    let escrow = client.fund_batch(&batch);
+    assert_eq!(escrow.funded_amount, 11_000i128);
+}
+
+/// Verify the helper produces the identical typed error code (104) through
+/// each of the three funding entrypoints when the gate blocks.
+#[test]
+fn guard_helper_same_error_code_across_all_entrypoints() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init_gate(&env, &client);
+
+    let investor = Address::generate(&env);
+    client.set_allowlist_active(&true);
+    // Investor is absent from the allowlist.
+
+    // 1. fund
+    assert_contract_error_gate(
+        client.try_fund(&investor, &1_000i128),
+        EscrowError::InvestorNotAllowlisted,
+    );
+
+    // 2. fund_with_commitment
+    assert_contract_error_gate(
+        client.try_fund_with_commitment(&investor, &1_000i128, &0u64),
+        EscrowError::InvestorNotAllowlisted,
+    );
+
+    // 3. fund_batch (single entry)
+    let mut batch: SorobanVec<(Address, i128)> = SorobanVec::new(&env);
+    batch.push_back((investor.clone(), 1_000i128));
+    assert_contract_error_gate(
+        client.try_fund_batch(&batch),
+        EscrowError::InvestorNotAllowlisted,
+    );
+}
+
+/// Toggling the gate off between two `fund` calls from the same investor
+/// verifies that the helper re-evaluates on every invocation (no cached state).
+#[test]
+fn guard_helper_re_evaluates_on_every_call() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init_gate(&env, &client);
+
+    let investor = Address::generate(&env);
+
+    // Gate on, investor not on list → rejected.
+    client.set_allowlist_active(&true);
+    assert_contract_error_gate(
+        client.try_fund(&investor, &1_000i128),
+        EscrowError::InvestorNotAllowlisted,
+    );
+
+    // Add investor, gate still on → allowed.
+    client.set_investor_allowlisted(&investor, &true);
+    let escrow = client.fund(&investor, &1_000i128);
+    assert_eq!(escrow.funded_amount, 1_000i128);
+
+    // Revoke investor, gate still on → rejected again.
+    client.set_investor_allowlisted(&investor, &false);
+    assert_contract_error_gate(
+        client.try_fund(&investor, &500i128),
+        EscrowError::InvestorNotAllowlisted,
+    );
+}
+
+/// Verify the guard helper rejects the explicitly-denied investor
+/// (entry set to `false`) with the same typed error, through
+/// `fund_with_commitment`.
+#[test]
+fn guard_helper_fwc_explicitly_denied_rejects() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init_gate(&env, &client);
+
+    let investor = Address::generate(&env);
+    client.set_allowlist_active(&true);
+    client.set_investor_allowlisted(&investor, &false);
+
+    assert_contract_error_gate(
+        client.try_fund_with_commitment(&investor, &2_000i128, &0u64),
+        EscrowError::InvestorNotAllowlisted,
+    );
+    assert_eq!(client.get_contribution(&investor), 0i128);
+}
+
+/// Verify contribution is unchanged when the guard blocks in `fund_batch`.
+#[test]
+fn guard_helper_fund_batch_contribution_unchanged_on_rejection() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init_gate(&env, &client);
+
+    let investor = Address::generate(&env);
+    client.set_allowlist_active(&true);
+
+    let mut batch: SorobanVec<(Address, i128)> = SorobanVec::new(&env);
+    batch.push_back((investor.clone(), 5_000i128));
+
+    assert_contract_error_gate(
+        client.try_fund_batch(&batch),
+        EscrowError::InvestorNotAllowlisted,
+    );
+    assert_eq!(client.get_contribution(&investor), 0i128);
+}
