@@ -204,6 +204,57 @@ fn test_append_single_entry_stored() {
     assert_eq!(log.get(0).unwrap(), d);
 }
 
+/// `append_attestation_digest` emits `AttestationDigestAppended` with the correct
+/// index and digest on the first append.
+#[test]
+fn test_append_emits_event_with_index_zero() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    let contract_id = client.address.clone();
+    let d = digest(&env, 0x11);
+
+    client.append_attestation_digest(&d);
+
+    let invoice_id = client.get_escrow().invoice_id;
+    let all_events = env.events().all();
+    assert_eq!(
+        all_events.events().last().unwrap().clone(),
+        AttestationDigestAppended {
+            name: symbol_short!("att_app"),
+            invoice_id,
+            index: 0,
+            digest: d,
+        }
+        .to_xdr(&env, &contract_id)
+    );
+}
+
+/// The `index` field of `AttestationDigestAppended` increments monotonically
+/// across sequential appends, matching the entry's position in the log.
+#[test]
+fn test_append_event_index_increments_across_calls() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    let contract_id = client.address.clone();
+    let invoice_id = client.get_escrow().invoice_id;
+
+    for i in 0u8..4 {
+        let d = digest(&env, i);
+        client.append_attestation_digest(&d);
+        let all_events = env.events().all();
+        assert_eq!(
+            all_events.events().last().unwrap().clone(),
+            AttestationDigestAppended {
+                name: symbol_short!("att_app"),
+                invoice_id: invoice_id.clone(),
+                index: i as u32,
+                digest: d,
+            }
+            .to_xdr(&env, &contract_id)
+        );
+    }
+}
+
 /// Multiple appends preserve insertion order.
 #[test]
 fn test_append_multiple_entries_ordered() {
