@@ -22,9 +22,9 @@ use super::{
     CollateralRecordedEvt, ContractUpgraded, DataKey, DeprecatedTransferAdminUsed, EscrowError,
     EscrowFunded, EscrowInitialized, EscrowUnfunded, FundingCancelled, FundingTargetUpdated,
     InvestorRefundedEvt, LiquifactEscrow, LiquifactEscrowClient, MaturityMaxHorizonUpdated,
-    MaxUniqueInvestorsCapLowered, PrimaryAttestationBound, ProtocolFeeBpsLowered,
-    RegistryRefRebound, TreasuryDustSwept, YieldTier, MAX_ATTESTATION_APPEND_ENTRIES,
-    MAX_DUST_SWEEP_AMOUNT, MAX_FUND_BATCH, SCHEMA_VERSION,
+    MaxUniqueInvestorsCapLowered, PrimaryAttestationBound, RegistryRefRebound, TreasuryDustSwept,
+    YieldTier, MAX_ATTESTATION_APPEND_ENTRIES, MAX_CLAIMABLE_PAYOUT_BATCH, MAX_DUST_SWEEP_AMOUNT,
+    MAX_FUND_BATCH, SCHEMA_VERSION,
 };
 use soroban_sdk::{
     symbol_short,
@@ -63,6 +63,7 @@ mod auth_matrix;
 mod cap_validation;
 #[rustfmt::skip]
 mod coverage;
+mod claimable_payouts;
 mod external_calls;
 mod external_calls_mocked;
 mod funding;

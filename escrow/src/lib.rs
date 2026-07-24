@@ -245,6 +245,8 @@ pub const MAX_BUMP_TTL_BATCH: u32 = 32;
 
 /// Upper bound on [`LiquifactEscrow::get_contributions`] / investor read batch size.
 pub const MAX_INVESTOR_READ_BATCH: u32 = 50;
+/// Upper bound on [`LiquifactEscrow::get_claimable_payouts`] / investor read batch size.
+pub const MAX_CLAIMABLE_PAYOUT_BATCH: u32 = 50;
 
 /// Upper bound on attestation digest read page size.
 pub const MAX_ATTESTATION_READ_PAGE: u32 = 20;
@@ -387,6 +389,8 @@ pub enum EscrowError {
     FundingBatchDuplicateInvestor = 84,
     /// [`LiquifactEscrow::get_contributions`] exceeded [`MAX_INVESTOR_READ_BATCH`].
     ContributionReadBatchTooLarge = 203,
+    /// [`LiquifactEscrow::get_claimable_payouts`] exceeded [`MAX_CLAIMABLE_PAYOUT_BATCH`].
+    ClaimablePayoutReadBatchTooLarge = 231,
     /// [`LiquifactEscrow::update_funding_target`] received a non-positive target.
     TargetNotPositive = 72,
     /// [`LiquifactEscrow::update_funding_target`] called while escrow is not open.
@@ -3180,6 +3184,56 @@ impl LiquifactEscrow {
             let investor = investors.get(i).unwrap();
             result.push_back(Self::get_persistent_investor_contribution(&env, investor));
         }
+        result
+    }
+
+    /// Returns the claimable payout for each supplied investor.
+    ///
+    /// The returned vector preserves the input ordering.
+    /// Unknown or already-claimed investors return zero.
+    ///
+    /// # Errors
+    /// Panics with [`EscrowError::ClaimablePayoutReadBatchTooLarge`] when
+    /// `investors.len()` exceeds [`MAX_CLAIMABLE_PAYOUT_BATCH`].
+    pub fn get_claimable_payouts(env: Env, investors: Vec<Address>) -> Vec<i128> {
+        let len = investors.len();
+        ensure(
+            &env,
+            len <= MAX_CLAIMABLE_PAYOUT_BATCH,
+            EscrowError::ClaimablePayoutReadBatchTooLarge,
+        );
+
+        let mut result = Vec::new(&env);
+
+        // Short-circuit common read-only gates once to avoid repeated work.
+        let escrow = Self::get_escrow(env.clone());
+        if escrow.status != 2 || Self::legal_hold_active(&env) {
+            for _ in 0..len {
+                result.push_back(0i128);
+            }
+            return result;
+        }
+
+        let now = env.ledger().timestamp();
+
+        for i in 0..len {
+            let investor = investors.get(i).unwrap();
+
+            if Self::get_persistent_investor_claimed(&env, investor.clone()) {
+                result.push_back(0i128);
+                continue;
+            }
+
+            let not_before = Self::get_persistent_investor_claim_not_before(&env, investor.clone());
+            if now < not_before {
+                result.push_back(0i128);
+                continue;
+            }
+
+            // Delegate to the canonical per-investor helper to avoid duplicating payout math.
+            result.push_back(Self::compute_investor_payout(env.clone(), investor.clone()));
+        }
+
         result
     }
 
