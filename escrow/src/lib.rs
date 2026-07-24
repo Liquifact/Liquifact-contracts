@@ -1143,6 +1143,17 @@ pub struct EscrowSettled {
 }
 
 #[contractevent]
+pub struct SettlementStateChanged {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    pub old_status: u32,
+    pub new_status: u32,
+    pub funded_amount: i128,
+}
+
+#[contractevent]
 pub struct MaturityUpdatedEvent {
     #[topic]
     pub name: Symbol,
@@ -4243,6 +4254,15 @@ impl LiquifactEscrow {
 
         env.storage().instance().set(&DataKey::Escrow, &escrow);
 
+        SettlementStateChanged {
+            name: symbol_short!("setl_st"),
+            invoice_id: escrow.invoice_id.clone(),
+            old_status: 0,
+            new_status: 1,
+            funded_amount: escrow.funded_amount,
+        }
+        .publish(&env);
+
         EscrowPartialSettle {
             name: symbol_short!("part_set"),
             invoice_id: escrow.invoice_id.clone(),
@@ -4295,6 +4315,15 @@ impl LiquifactEscrow {
 
         env.storage().instance().set(&DataKey::SettledAt, &now);
         env.storage().instance().set(&DataKey::Escrow, &escrow);
+
+        SettlementStateChanged {
+            name: symbol_short!("setl_st"),
+            invoice_id: escrow.invoice_id.clone(),
+            old_status: 1,
+            new_status: 2,
+            funded_amount: escrow.funded_amount,
+        }
+        .publish(&env);
 
         EscrowSettled {
             name: symbol_short!("escrow_sd"),
@@ -4399,6 +4428,15 @@ impl LiquifactEscrow {
         // consistent regardless of how principal is split.
         escrow.status = 3;
         env.storage().instance().set(&DataKey::Escrow, &escrow);
+
+        SettlementStateChanged {
+            name: symbol_short!("setl_st"),
+            invoice_id: escrow.invoice_id.clone(),
+            old_status: 1,
+            new_status: 3,
+            funded_amount: escrow.funded_amount,
+        }
+        .publish(&env);
 
         let prev_distributed: i128 = env
             .storage()
@@ -5234,6 +5272,15 @@ impl LiquifactEscrow {
 
         escrow.status = 4;
         env.storage().instance().set(&DataKey::Escrow, &escrow);
+
+        SettlementStateChanged {
+            name: symbol_short!("setl_st"),
+            invoice_id: escrow.invoice_id.clone(),
+            old_status: 0,
+            new_status: 4,
+            funded_amount: escrow.funded_amount,
+        }
+        .publish(&env);
 
         FundingCancelled {
             name: symbol_short!("fund_can"),
