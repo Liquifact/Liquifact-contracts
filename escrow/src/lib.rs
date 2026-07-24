@@ -1361,23 +1361,6 @@ pub struct CollateralClearedEvt {
     pub recorded_at: u64,
 }
 
-/// Emitted after [`LiquifactEscrow::clear_sme_collateral_commitment`] removes
-/// the SME-reported collateral metadata.
-///
-/// This supplements [`CollateralClearedEvt`] with a short event name and the
-/// full cleared commitment identity so indexers can reconstruct the
-/// record-to-clear lifecycle without a storage read after removal.
-#[contractevent]
-pub struct CollateralCommitmentCleared {
-    #[topic]
-    pub name: Symbol,
-    #[topic]
-    pub invoice_id: Symbol,
-    pub asset: Symbol,
-    pub amount: i128,
-    pub recorded_at: u64,
-}
-
 #[contractevent]
 pub struct SmeWithdrew {
     #[topic]
@@ -2729,15 +2712,6 @@ impl LiquifactEscrow {
             .remove(&DataKey::SmeCollateralPledge);
 
         CollateralClearedEvt {
-            name: symbol_short!("coll_clr"),
-            invoice_id: escrow.invoice_id.clone(),
-            asset: commitment.asset.clone(),
-            amount: commitment.amount,
-            recorded_at: commitment.recorded_at,
-        }
-        .publish(&env);
-
-        CollateralCommitmentCleared {
             name: symbol_short!("coll_clr"),
             invoice_id: escrow.invoice_id.clone(),
             asset: commitment.asset.clone(),
