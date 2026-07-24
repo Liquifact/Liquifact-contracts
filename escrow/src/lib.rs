@@ -576,6 +576,10 @@ pub enum EscrowError {
     /// [`LiquifactEscrow::unfund`] blocked because a compliance/legal hold is active.
     /// No fund movement is permitted until the hold is cleared by the admin.
     UnfundLegalHoldActive = 222,
+    /// [`LiquifactEscrow::set_max_dust_sweep`] received a non-positive `cap`.
+    /// The dust-sweep per-call ceiling must be strictly positive; zero or negative
+    /// inputs are rejected to preserve the blast-radius bounding invariant.
+    MaxDustSweepNotPositive = 223,
 }
 
 #[inline(always)]
@@ -875,6 +879,18 @@ pub enum DataKey {
     /// **Additive key (ADR-007):** absent on instances predating this key ⇒ read as `0`
     /// (no fee), preserving legacy full-principal disbursement semantics.
     ProtocolFeeBps,
+    /// Admin-configured per-call ceiling for [`LiquifactEscrow::sweep_terminal_dust`],
+    /// overriding the compile-time [`MAX_DUST_SWEEP_AMOUNT`] default. Absent ⇒ use the
+    /// compile-time constant. The override is stored as the **value** (via
+    /// `env.storage().instance().set(&DataKey::MaxDustSweepOverride, &cap)`),
+    /// not as a tuple-key argument — the override is a singleton per escrow
+    /// instance, not indexed by any i128. This mirrors the patterns used by
+    /// [`DataKey::LegalHold`], [`DataKey::FundingDeadline`], and
+    /// [`DataKey::ProtocolFeeBps`].
+    ///
+    /// **Additive key (ADR-007):** absent on instances predating this key ⇒ read as
+    /// the compile-time default, preserving legacy behaviour byte-for-byte.
+    MaxDustSweepOverride,
 }
 
 // --- Data types ---
@@ -1456,6 +1472,29 @@ pub struct TreasuryDustSwept {
     pub recipient: Address,
     pub token: Address,
     pub amount: i128,
+}
+
+/// Emitted by [`LiquifactEscrow::set_max_dust_sweep`] when the admin-configured
+/// per-call ceiling for [`LiquifactEscrow::sweep_terminal_dust`] is updated.
+///
+/// `old_cap` is the **previously effective** cap (the override if one was set,
+/// otherwise the compile-time [`MAX_DUST_SWEEP_AMOUNT`] constant), and `new_cap` is
+/// the override just stored under [`DataKey::MaxDustSweepOverride`]. Indexers can
+/// use this event to track cap changes without probing storage.
+///
+/// # Fields
+/// - `name`: hardcoded `dust_max` symbol_short topic (distinct from `dust_sw`).
+/// - `invoice_id`: escrow invoice identifier (topic for indexer filtering).
+/// - `old_cap`: effective cap before this update.
+/// - `new_cap`: effective cap after this update (always `> 0`, equal to the override).
+#[contractevent]
+pub struct MaxDustSweepUpdated {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    pub old_cap: i128,
+    pub new_cap: i128,
 }
 
 #[contractevent]
@@ -2121,9 +2160,18 @@ impl LiquifactEscrow {
     pub fn sweep_terminal_dust(env: Env, amount: i128) -> i128 {
         guard_not_legal_hold(&env, EscrowError::LegalHoldBlocksTreasuryDustSweep);
         ensure(&env, amount > 0, EscrowError::SweepAmountNotPositive);
+        // Effective per-call ceiling: admin override (DataKey::MaxDustSweepOverride)
+        // when configured, otherwise the compile-time MAX_DUST_SWEEP_AMOUNT default.
+        // Reading once at the top preserves the existing single-read pattern and
+        // keeps the liability-floor invariant unchanged.
+        let effective_max_dust_sweep: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::MaxDustSweepOverride)
+            .unwrap_or(MAX_DUST_SWEEP_AMOUNT);
         ensure(
             &env,
-            amount <= MAX_DUST_SWEEP_AMOUNT,
+            amount <= effective_max_dust_sweep,
             EscrowError::SweepAmountExceedsMax,
         );
 
@@ -2191,6 +2239,72 @@ impl LiquifactEscrow {
         .publish(&env);
 
         sweep_amt
+    }
+
+    /// Configure the admin-controlled per-call ceiling for
+    /// [`LiquifactEscrow::sweep_terminal_dust`].
+    ///
+    /// When set, [`DataKey::MaxDustSweepOverride`] supersedes the compile-time
+    /// [`MAX_DUST_SWEEP_AMOUNT`] default in `sweep_terminal_dust`. Each call sets the
+    /// override to a new positive value — any positive cap is accepted; no
+    /// monotonicity direction is enforced. Subsequent `sweep_terminal_dust` calls
+    /// use the freshly stored override immediately.
+    ///
+    /// # Auth
+    /// Gated through [`Self::load_escrow_require_admin`]: the caller must be the
+    /// current `InvoiceEscrow::admin`.
+    ///
+    /// # Errors
+    /// - [`EscrowError::EscrowNotInitialized`] if the escrow has not been initialized.
+    /// - [`EscrowError::Unauthorized`] if the caller is not the admin.
+    /// - [`EscrowError::MaxDustSweepNotPositive`] if `cap <= 0`.
+    ///
+    /// # Returns
+    /// The newly stored override `cap` (always `> 0`).
+    pub fn set_max_dust_sweep(env: Env, cap: i128) -> i128 {
+        let escrow = Self::load_escrow_require_admin(&env);
+
+        ensure(&env, cap > 0, EscrowError::MaxDustSweepNotPositive);
+
+        // Compute the previously effective cap so the event surfaces the transition
+        // meaningful to indexers (override if set, else compile-time default).
+        let old_cap: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::MaxDustSweepOverride)
+            .unwrap_or(MAX_DUST_SWEEP_AMOUNT);
+
+        env.storage()
+            .instance()
+            .set(&DataKey::MaxDustSweepOverride, &cap);
+
+        MaxDustSweepUpdated {
+            name: symbol_short!("dust_max"),
+            invoice_id: escrow.invoice_id,
+            old_cap,
+            new_cap: cap,
+        }
+        .publish(&env);
+
+        cap
+    }
+
+    /// Read the effective per-call ceiling for [`LiquifactEscrow::sweep_terminal_dust`].
+    ///
+    /// Returns the admin-configured override stored under [`DataKey::MaxDustSweepOverride`]
+    /// when present, otherwise the compile-time [`MAX_DUST_SWEEP_AMOUNT`] constant.
+    ///
+    /// This is a pure read with no auth and no state change. The value returned here is
+    /// exactly what `sweep_terminal_dust` enforces against the requested `amount`.
+    ///
+    /// # Returns
+    /// The effective per-call sweep ceiling in base units of the funding token
+    /// (always `> 0` because the setter rejects non-positive inputs).
+    pub fn get_max_dust_sweep(env: Env) -> i128 {
+        env.storage()
+            .instance()
+            .get(&DataKey::MaxDustSweepOverride)
+            .unwrap_or(MAX_DUST_SWEEP_AMOUNT)
     }
 
     /// Rotate the beneficiary (SME) address that receives liquidity on
