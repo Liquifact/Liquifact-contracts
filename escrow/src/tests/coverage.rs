@@ -4027,15 +4027,10 @@ fn refactor_gate_helpers_rotate_blocked_post_settlement() {
 /// Anchors invariant ESC-COL-001 documented in `docs/escrow-sme-collateral.md`.
 #[test]
 fn test_sme_collateral_no_token_balance_change() {
-    use soroban_sdk::token::StellarAssetClient;
-
     let env = Env::default();
-    env.mock_all_auths();
     let token = install_stellar_asset_token(&env);
     let treasury = Address::generate(&env);
     let (client, admin, sme) = setup(&env);
-
-    let sac_admin = StellarAssetClient::new(&env, &token.id);
 
     client.init(
         &admin,
@@ -4060,7 +4055,7 @@ fn test_sme_collateral_no_token_balance_change() {
 
     // Mint tokens directly into the escrow so the invariant assertion is non-trivial.
     // fund() is state-only; only an explicit mint gives the contract a real balance.
-    sac_admin.mint(&client.address, &500);
+    token.stellar.mint(&client.address, &500);
 
     let token_client = TokenClient::new(&env, &token.id);
     let balance_before = token_client.balance(&client.address);
