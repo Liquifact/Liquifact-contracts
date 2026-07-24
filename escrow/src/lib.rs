@@ -2772,10 +2772,11 @@ impl LiquifactEscrow {
         }
 
         // Guard 6: funding deadline (fund_impl lines 4020-4026).
-        if let Some(deadline) = env.storage().instance().get(&DataKey::FundingDeadline)
-            && env.ledger().timestamp() > deadline
-        {
-            return EscrowError::FundingDeadlinePassed as u32;
+        #[allow(clippy::collapsible_if)]
+        if let Some(deadline) = env.storage().instance().get(&DataKey::FundingDeadline) {
+            if env.ledger().timestamp() > deadline {
+                return EscrowError::FundingDeadlinePassed as u32;
+            }
         }
 
         // Guard 7: allowlist (fund_impl lines 4028-4034).
@@ -2793,13 +2794,15 @@ impl LiquifactEscrow {
         let new_contribution = prev + amount; // safe: checked above
 
         // Guard 9: per-investor cap (fund_impl lines 4041-4051).
+        #[allow(clippy::collapsible_if)]
         if let Some(cap) = env
             .storage()
             .instance()
             .get::<DataKey, i128>(&DataKey::MaxPerInvestorCap)
-            && new_contribution > cap
         {
-            return EscrowError::InvestorContributionExceedsCap as u32;
+            if new_contribution > cap {
+                return EscrowError::InvestorContributionExceedsCap as u32;
+            }
         }
 
         // Guard 10: unique investor cap (fund_impl lines 4056-4077).
@@ -2809,13 +2812,15 @@ impl LiquifactEscrow {
                 .instance()
                 .get(&DataKey::UniqueFunderCount)
                 .unwrap_or(0);
+            #[allow(clippy::collapsible_if)]
             if let Some(cap) = env
                 .storage()
                 .instance()
                 .get::<DataKey, u32>(&DataKey::MaxUniqueInvestorsCap)
-                && cur_funder_count >= cap
             {
-                return EscrowError::UniqueInvestorCapReached as u32;
+                if cur_funder_count >= cap {
+                    return EscrowError::UniqueInvestorCapReached as u32;
+                }
             }
         }
 
