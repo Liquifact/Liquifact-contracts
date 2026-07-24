@@ -186,6 +186,7 @@ liquifact-contracts/
 | `get_version` | — | Read stored `DataKey::Version`. |
 | `get_remaining_investor_slots` | — | Read remaining unique investor capacity before reaching the cap. |
 | `get_reconciliation` | — | Read solvency position: live token balance, outstanding liability, and surplus/deficit. See [`docs/escrow-read-api.md`](docs/escrow-read-api.md). |
+| `get_settlement_pool` | — | Authoritative aggregate view: `total_principal + floor(total_principal × yield_bps / 10_000)` from the funding-close snapshot. Returns `0` before the escrow is funded. Uses escrow base yield; per-investor tier yields are reflected only in `compute_investor_payout`. |
 
 | `set_registry_ref` | Admin | Set, update, or clear the off-chain registry hint (`DataKey::RegistryRef`). `Some(addr)` stores the hint, `None` removes it. Emits `RegistryRefUpdated` with prior and new values. |
 | `rebind_registry_ref` | Admin | Set or update the off-chain registry hint (`DataKey::RegistryRef`). Emits `RegistryRefRebound`. |
