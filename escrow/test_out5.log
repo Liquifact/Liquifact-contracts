@@ -1,0 +1,97 @@
+﻿cargo :    Compiling 
+liquifact_escrow v0.1.0 (C:
+\Users\ADMIN\Desktop\mide-d
+rips\Liquifact-contracts\es
+crow)
+At line:1 char:1
++ cargo test --color never 
+2>&1 | Out-File -Encoding 
+utf8 test_out5.log
++ ~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~
+    + CategoryInfo         
+     : NotSpecified: (     
+  Compiling li...ntracts   
+ \escrow):String) [], R    
+emoteException
+    + FullyQualifiedErrorI 
+   d : NativeCommandError
+ 
+warning: unnecessary 
+parentheses around block 
+return value
+  --> escrow\src\tests\prop
+erties.rs:98:5
+   |
+98 |     (1i128..=max)
+   |     ^           ^
+   |
+   = note: 
+`#[warn(unused_parens)]` 
+(part of 
+`#[warn(unused)]`) on by 
+default
+help: remove these 
+parentheses
+   |
+98 -     (1i128..=max)
+98 +     1i128..=max 
+   |
+
+error[E0061]: this method 
+takes 15 arguments but 14 
+arguments were supplied
+    --> escrow\src\tests\pr
+operties.rs:147:16
+     |
+ 147 |           
+client.init(
+     |  
+________________^^^^-
+ 148 | |             
+&admin,
+ 149 | |             &sorob
+an_sdk::String::from_str(&e
+nv, "I325"),
+ 150 | |             &sme,
+...    |
+ 161 | |             &None,
+ 162 | |         );
+     | |_________- 
+argument #15 of type `&std:
+:option::Option<u64>` is 
+missing
+     |
+note: method defined here
+    --> 
+escrow\src\lib.rs:1049:12
+     |
+1049 |     pub fn init(
+     |            ^^^^
+...
+1065 |         
+funding_deadline: 
+Option<u64>,
+     |         ------------
+-----------------
+help: provide the argument
+     |
+ 147 |         client.init(
+ ...
+ 161 |             &None,
+ 162 ~             /* 
+&std::option::Option<u64> 
+*/,
+ 163 ~         );
+     |
+
+For more information about 
+this error, try `rustc 
+--explain E0061`.
+warning: 
+`liquifact_escrow` (lib 
+test) generated 1 warning
+error: could not compile 
+`liquifact_escrow` (lib 
+test) due to 1 previous 
+error; 1 warning emitted

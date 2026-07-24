@@ -83,3 +83,149 @@ formula to guarantee identical rounding.
 
 See `docs/escrow-read-api.md` → `compute_investor_payout` for the full parameter, return-value,
 and authorization documentation.
+
+## ✅ Aggregate Payout Invariant (issue #483)
+
+### Uniform yield
+
+When all investors share the same `yield_bps`:
+
+```
+settled_pool = total_principal + total_principal × yield_bps / 10_000   (floor)
+Σ payout_i  ≤ settled_pool
+```
+
+The inequality holds because floor division drops at most 1 unit per investor, so:
+
+```
+0 ≤ residue (= settled_pool − Σ payout_i) < n_investors
+```
+
+The residue is swept by the treasury via `sweep_terminal_dust` after all investors have claimed.
+
+### Tiered / mixed yield
+
+When investors carry per-investor effective yields (from `fund_with_commitment` tier selection),
+each investor `i` has their own `settle_pool_i`:
+
+```
+settle_pool_i = total_principal + total_principal × effective_yield_bps_i / 10_000
+payout_i      = contribution_i × settle_pool_i / total_principal   (floor)
+```
+
+Because floor division always gives `payout_i ≤ exact_i`, summing across all investors:
+
+```
+Σ payout_i ≤ Σ exact_i = Σ (contribution_i × settle_pool_i / total_principal)
+           ≤ total_principal × (1 + max_effective_yield_bps / 10_000)
+```
+
+### Rounding guarantee
+
+Rounding always favors the contract, never the investors collectively:
+
+- No individual investor receives more than their exact rational entitlement.
+- The aggregate can never exceed the exact weighted sum of entitlements.
+- The residue is always non-negative — no shortfall is possible from rounding.
+
+### Snapshot-denominator consistency
+
+`FundingCloseSnapshot` is written exactly once when the escrow first reaches `status == 1`.
+It is stored under `DataKey::FundingCloseSnapshot` and **never overwritten**. All
+`compute_investor_payout` calls read the same `total_principal` denominator from this snapshot,
+so the denominator cannot shift between investor claims.
+
+This invariant is verified in `escrow/src/tests/properties.rs` by
+`snapshot_denominator_consistent_across_all_payout_reads`, which reads the snapshot before
+and after every individual payout call and asserts identity.
+
+### Property-based test coverage (issue #483)
+
+| Test | Coverage |
+|------|----------|
+| `prop_payout_sum_le_settle_pool` | Uniform yield, 2–6 investors, arbitrary amounts & yield |
+| `prop_aggregate_payout_le_settle_pool_tiered` | Tiered/mixed yield, snapshot consistency, max-pool bound |
+| `payout_single_investor_equals_settle_pool` | Single investor receives exact `settle_pool` |
+| `payout_equal_split_conservation` | Equal contributions, sum ≤ `settle_pool` |
+| `payout_zero_yield_returns_principal_only` | Zero yield: `payout_i == contribution_i` |
+| `payout_max_yield_conservation` | 100% yield: conservation still holds |
+| `payout_prime_denominator_residue_bounded` | Prime total → residue < `n_investors` |
+| `payout_highly_skewed_contributions` | 99%/1% split; residue bounded |
+| `payout_many_small_investors_conservation` | 8 investors × 1 unit; aggregate ≤ `settle_pool` |
+| `payout_single_large_single_tiny` | Extreme asymmetry stress test |
+| `payout_tiered_mixed_yield_conservation` | 3-tier mixed yield; per-investor & aggregate bounds |
+| `snapshot_denominator_consistent_across_all_payout_reads` | Snapshot immutable across all reads |
+| `fuzz_payout_conservation_multi_investor` | 64-case fuzz, 1–8 investors, full yield range |
+
+## 🔗 On-Chain Payout Transfer: `claim_investor_payout`
+
+When a settled investor calls `claim_investor_payout`, the contract:
+
+1. Computes the gross payout via `compute_investor_payout`.
+2. Guards against a zero payout (floor division edge case — `PayoutZero = 165`).
+3. Marks the investor as claimed (persistent storage write).
+4. Calls `external_calls::transfer_funding_token_with_balance_checks` to transfer the gross
+   payout from the contract to the investor.
+5. Emits `InvestorPayoutClaimed`.
+
+### Atomicity
+
+The claimed marker is written **before** the token transfer. If the transfer fails (e.g.,
+insufficient contract balance, token transfer error, host trap), the Soroban host rolls back
+all storage writes including the marker. The investor may retry.
+
+### Idempotency
+
+A second call from the same investor returns early (the marker is already set) and does **not**
+re-transfer. The balance check in `transfer_funding_token_with_balance_checks` would fail a
+second transfer anyway, but the early return avoids the call entirely.
+
+## 🔗 On-Chain Aggregate View: `get_settlement_pool`
+
+```
+LiquifactEscrow::get_settlement_pool(env) → i128
+```
+
+Returns the **total pool** the SME must repay to fully satisfy all investors, computed
+entirely on-chain from [`DataKey::FundingCloseSnapshot`] and the escrow's **base**
+`yield_bps`:
+
+```text
+coupon       = total_principal × yield_bps / 10_000  (floor)
+settle_pool  = total_principal + coupon
+```
+
+### Why this view exists
+
+`compute_investor_payout` derives a *per-investor* share. SME repayment tooling and
+dashboards previously had to re-derive `total_principal × yield_bps / 10_000` off-chain,
+risking a rounding divergence from the on-chain math. `get_settlement_pool` closes that gap
+by exposing the authoritative aggregate in a single host invocation.
+
+### Yield note
+
+This view uses the escrow **base yield** (`InvoiceEscrow::yield_bps`). Per-investor
+effective yields from [`fund_with_commitment`] tier selection are reflected individually in
+`compute_investor_payout` but are **not** aggregated here. The result is therefore an
+authoritative lower-bound aggregate that avoids per-investor enumeration.
+
+### Return value
+
+| Condition | Returns |
+|-----------|---------|
+| [`DataKey::FundingCloseSnapshot`] absent (escrow not yet funded) | `0` |
+| `total_principal <= 0` (degenerate snapshot) | `0` |
+| Normal funded state | `total_principal + floor(total_principal × yield_bps / 10_000)` |
+
+### Overflow safety
+
+All intermediate multiplications use `i128::checked_mul`; divisions use `i128::checked_div`.
+Emits [`EscrowError::ComputePayoutArithmeticOverflow`] (code 129) rather than silently
+producing a wrong value.
+
+### Authorization
+
+None — pure read; no auth required and no state mutation.
+
+See `docs/escrow-read-api.md` → `get_settlement_pool` for the complete parameter and return
+documentation.

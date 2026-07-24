@@ -58,6 +58,10 @@ If instance storage expires and is not extended, `AllowlistActive` returns `fals
 `unwrap_or`), silently disabling the allowlist gate even if persistent allowlist entries remain.
 Operators must extend instance storage TTL together with persistent storage TTL.
 
+### Write-time TTL extension for persistent keys
+
+Per-investor persistent keys (`InvestorContribution`, `InvestorEffectiveYield`, `InvestorClaimNotBefore`, `InvestorClaimed`) are automatically extended at write time inside the fund and claim flows using the `PERSISTENT_TTL_MIN_EXTENSION_LEDGERS` horizon. This provides defense-in-depth against silent expiry of live positions prior to settlement.
+
 ### Permissionless TTL extension
 
 The contract includes a permissionless `bump_ttl` entrypoint that extends TTLs for:
@@ -97,4 +101,3 @@ References:
 
 - ADR-007: storage key evolution policy and semantics
 - docs/escrow-ledger-time.md: time gates use `Env::ledger().timestamp()` with inclusive `>=` semantics
-

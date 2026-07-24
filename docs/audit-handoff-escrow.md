@@ -106,6 +106,7 @@ Read-only getters are never blocked. Only `admin` can set or clear the hold. The
 | `accept_admin` | `AdminTransferredEvent` | `admin` | Update key registry and access control records; confirm pending proposal cleared |
 | `update_funding_target` | `FundingTargetUpdated` | `fund_tgt` | Update off-chain target display; re-evaluate investor communications |
 | `record_sme_collateral_commitment` | `CollateralRecordedEvt` | `coll_rec` | Store in compliance/risk system; **do not treat as enforced on-chain lock** |
+| `clear_sme_collateral_commitment` | `CollateralClearedEvt` | `coll_clr` | Retire the current metadata-only collateral commitment for the invoice |
 | `sweep_terminal_dust` | `TreasuryDustSwept` | `dust_sw` | Reconcile treasury balance; log sweep amount and token address |
 | `bind_primary_attestation_hash` | `PrimaryAttestationBound` | `att_bind` | Verify digest against known IPFS CID or document bundle; record binding in compliance system |
 | `append_attestation_digest` | `AttestationDigestAppended` | `att_app` | Append to off-chain audit log with `index` for ordering |

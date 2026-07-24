@@ -102,6 +102,16 @@ Admin-only: reduces the configured cap while the escrow is **open** (status `0`)
 - Emits `MaxUniqueInvestorsCapLowered` (`inv_cap`) for indexers.
 - Returns the stored cap after update (same as `get_max_unique_investors_cap()`).
 
+#### `raise_max_unique_investors(env: Env, new_cap: u32) -> u32`
+
+Admin-only: increases the configured cap while the escrow is **open** (status `0`).
+
+- Requires admin authorization.
+- Only permitted when a cap was configured at init.
+- `new_cap` must satisfy `new_cap > old_cap`.
+- Emits `MaxUniqueInvestorsCapRaised` (`raise_cap`) for indexers.
+- Returns the stored cap after update (same as `get_max_unique_investors_cap()`).
+
 ### Usage Examples
 
 #### Initialize with Cap
@@ -251,13 +261,13 @@ The cap is checked AFTER allowlist validation:
 - **Cap enforcement:** Strictly enforced with panic on violation
 - **Counter accuracy:** Atomic operations prevent race conditions
 - **Re-funding safety:** Existing investors can always add more principal
-- **Cap tightening:** Admin may lower the cap while open via `lower_max_unique_investors`; cannot raise
+- **Cap adjustment:** Admin may lower or raise the cap while open via `lower_max_unique_investors` or `raise_max_unique_investors`.
 
 ### Out of Scope
 
 - **Sybil resistance:** No mechanism to prevent one person from using multiple addresses
 - **Identity verification:** No KYC/AML integration
-- **Cap increases:** Caps cannot be raised after initialization (including unlimited → capped)
+- **Unlimited to Capped:** Cannot impose a cap on an unlimited escrow after initialization.
 - **Cap lowering below enrolled funders:** Rejected to preserve the retroactive-cap invariant
 
 ### Token Economics Assumptions
@@ -339,7 +349,7 @@ Monitor these metrics during live operation:
 
 If cap exhaustion becomes an issue while the escrow is still **open**:
 
-1. **Lower the cap:** Admin may call `lower_max_unique_investors` to tighten the limit (cannot raise).
+1. **Adjust the cap:** Admin may call `raise_max_unique_investors` to increase the limit.
 2. **New escrow deployment:** Required for a higher cap or to change unlimited → capped.
 3. **Off-chain coordination:** Direct investors to new escrow instances when needed.
 
@@ -381,4 +391,4 @@ When deploying capped escrows:
 
 The MaxUniqueInvestorsCap and UniqueFunderCount functionality provides a robust, Sybil-limited mechanism for controlling investor participation in LiquiFact escrows. While it doesn't prevent Sybil attacks, it offers operational control and compliance benefits with clear semantics and comprehensive edge case handling.
 
-The implementation prioritizes safety and predictability, with strict enforcement and clear error messages. Organizations should carefully consider their cap requirements during deployment; caps can be **lowered** while open but never raised.
+The implementation prioritizes safety and predictability, with strict enforcement and clear error messages. Organizations should carefully consider their cap requirements during deployment; caps can be adjusted while open via admin-only commands.

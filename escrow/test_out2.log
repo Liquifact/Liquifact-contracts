@@ -1,0 +1,264 @@
+﻿cargo :    Compiling 
+liquifact_escrow 
+v0.1.0 (C:\Users\ADMIN
+\Desktop\mide-drips\Li
+quifact-contracts\escr
+ow)
+At line:1 char:1
++ cargo test --color 
+never 2>&1 | Out-File 
+-Encoding utf8 
+test_out2.log
++ ~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~
+    + CategoryInfo    
+          : NotSpeci  
+  fied: (   Compili   
+ ng li...ntracts\e    
+scrow):String) []    
+, RemoteException
+    + FullyQualifiedE 
+   rrorId : NativeCo  
+  mmandError
+ 
+warning: unnecessary 
+parentheses around 
+block return value
+  --> escrow\src\tests
+\properties.rs:98:5
+   |
+98 |     (1i128..=max)
+   |     ^           ^
+   |
+   = note: `#[warn(unu
+sed_parens)]` (part 
+of `#[warn(unused)]`) 
+on by default
+help: remove these 
+parentheses
+   |
+98 -     (1i128..=max)
+98 +     1i128..=max 
+   |
+
+error[E0425]: cannot 
+find function 
+`fund_to_target_stl` 
+in this scope
+    --> escrow\src\tes
+ts\coverage.rs:2445:5
+     |
+2445 |     fund_to_tar
+get_stl(&env, 
+&client);
+     |     
+^^^^^^^^^^^^^^^^^^ 
+not found in this 
+scope
+
+error[E0425]: cannot 
+find function 
+`fund_to_target_stl` 
+in this scope
+    --> escrow\src\tes
+ts\coverage.rs:2482:5
+     |
+2482 |     fund_to_tar
+get_stl(&env, 
+&client);
+     |     
+^^^^^^^^^^^^^^^^^^ 
+not found in this 
+scope
+
+error[E0425]: cannot 
+find function 
+`fund_to_target_stl` 
+in this scope
+    --> escrow\src\tes
+ts\coverage.rs:2520:5
+     |
+2520 |     fund_to_tar
+get_stl(&env, 
+&client);
+     |     
+^^^^^^^^^^^^^^^^^^ 
+not found in this 
+scope
+
+error[E0308]: 
+mismatched types
+    --> escrow\src\tes
+ts\properties.rs:161:1
+3
+     |
+ 147 |         
+client.init(
+     |                
+---- arguments to 
+this method are 
+incorrect
+...
+ 161 |             
+&max_unique_investors,
+     |             
+^^^^^^^^^^^^^^^^^^^^^ 
+expected 
+`&Option<u64>`, found 
+`&Option<u32>`
+     |
+     = note: expected 
+reference `&std::optio
+n::Option<u64>`
+                found 
+reference `&std::optio
+n::Option<u32>`
+note: method defined 
+here
+    --> escrow\src\lib
+.rs:1049:12
+     |
+1049 |     pub fn 
+init(
+     |            ^^^^
+...
+1064 |         legal_h
+old_clear_delay: 
+Option<u64>,
+     |         -------
+----------------------
+------
+
+error[E0061]: this 
+method takes 15 
+arguments but 14 
+arguments were 
+supplied
+    --> escrow\src\tes
+ts\properties.rs:886:1
+6
+     |
+ 886 |           
+client.init(
+     |  
+________________^^^^-
+ 887 | |             
+&admin,
+ 888 | |             &
+soroban_sdk::String::f
+rom_str(&env, 
+"FUZZSNAP"),
+ 889 | |             
+&sme,
+...    |
+ 900 | |             
+&None,
+ 901 | |              
+       );
+     | |______________
+_______- argument #15 
+of type `&std::option:
+:Option<u64>` is 
+missing
+     |
+note: method defined 
+here
+    --> escrow\src\lib
+.rs:1049:12
+     |
+1049 |     pub fn 
+init(
+     |            ^^^^
+...
+1065 |         
+funding_deadline: 
+Option<u64>,
+     |         -------
+----------------------
+help: provide the 
+argument
+     |
+ 886 |         
+client.init(
+ ...
+ 900 |             
+&None,
+ 901 ~             /* 
+&std::option::Option<u
+64> */,
+     |
+
+error[E0061]: this 
+method takes 15 
+arguments but 14 
+arguments were 
+supplied
+    --> escrow\src\tes
+ts\properties.rs:1110:
+12
+     |
+1110 |       
+client.init(
+     |  
+____________^^^^-
+1111 | |         
+&admin,
+1112 | |         &soro
+ban_sdk::String::from_
+str(env, invoice_id),
+1113 | |         &sme,
+...    |
+1124 | |         
+&None,
+1125 | |             
+);
+     | 
+|_____________- 
+argument #15 of type `
+&std::option::Option<u
+64>` is missing
+     |
+note: method defined 
+here
+    --> escrow\src\lib
+.rs:1049:12
+     |
+1049 |     pub fn 
+init(
+     |            ^^^^
+...
+1065 |         
+funding_deadline: 
+Option<u64>,
+     |         -------
+----------------------
+help: provide the 
+argument
+     |
+1110 |     
+client.init(
+ ...
+1124 |         &None,
+1125 ~         /* &std
+::option::Option<u64> 
+*/,
+     |
+
+Some errors have 
+detailed 
+explanations: E0061, 
+E0308, E0425.
+For more information 
+about an error, try 
+`rustc --explain 
+E0061`.
+warning: 
+`liquifact_escrow` 
+(lib test) generated 
+1 warning
+error: could not 
+compile 
+`liquifact_escrow` 
+(lib test) due to 6 
+previous errors; 1 
+warning emitted

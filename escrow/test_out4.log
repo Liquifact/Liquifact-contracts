@@ -1,0 +1,138 @@
+﻿cargo :    Compiling 
+liquifact_escrow 
+v0.1.0 (C:\Users\ADMIN
+\Desktop\mide-drips\Li
+quifact-contracts\escr
+ow)
+At line:1 char:1
++ cargo test --color 
+never 2>&1 | Out-File 
+-Encoding utf8 
+test_out4.log
++ ~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~
+    + CategoryInfo    
+          : NotSpeci  
+  fied: (   Compili   
+ ng li...ntracts\e    
+scrow):String) []    
+, RemoteException
+    + FullyQualifiedE 
+   rrorId : NativeCo  
+  mmandError
+ 
+warning: unnecessary 
+parentheses around 
+block return value
+  --> escrow\src\tests
+\properties.rs:98:5
+   |
+98 |     (1i128..=max)
+   |     ^           ^
+   |
+   = note: `#[warn(unu
+sed_parens)]` (part 
+of `#[warn(unused)]`) 
+on by default
+help: remove these 
+parentheses
+   |
+98 -     (1i128..=max)
+98 +     1i128..=max 
+   |
+
+error[E0308]: 
+arguments to this 
+method are incorrect
+    --> escrow\src\tes
+ts\properties.rs:147:1
+6
+     |
+ 147 |         
+client.init(
+     |                
+^^^^
+...
+ 160 |             
+&max_unique_investors,
+     |             
+--------------------- 
+unexpected argument 
+#13 of type `&std::opt
+ion::Option<u32>`
+ 161 |             
+&max_per_investor,
+     |             
+----------------- 
+argument #14 of type `
+&std::option::Option<u
+64>` is missing
+     |
+note: method defined 
+here
+    --> escrow\src\lib
+.rs:1049:12
+     |
+1049 |     pub fn 
+init(
+     |            ^^^^
+...
+1064 |         legal_h
+old_clear_delay: 
+Option<u64>,
+     |         -------
+----------------------
+------
+help: did you mean
+     |
+ 147 ~         
+client.init(
+ 148 +             
+&admin,
+ 149 +             &so
+roban_sdk::String::fro
+m_str(&env, "I325"),
+ 150 +             
+&sme,
+ 151 +             
+&funding_target,
+ 152 +             
+&800i64,
+ 153 +             
+&0u64,
+ 154 +             
+&token,
+ 155 +             
+&None,
+ 156 +             
+&treasury,
+ 157 +             
+&None,
+ 158 +             
+&None,
+ 159 +             
+&None,
+ 160 +             
+&max_per_investor,
+ 161 +             /* 
+&std::option::Option<u
+64> */,
+ 162 +             
+&None,
+ 163 ~         );
+     |
+
+For more information 
+about this error, try 
+`rustc --explain 
+E0308`.
+warning: 
+`liquifact_escrow` 
+(lib test) generated 
+1 warning
+error: could not 
+compile 
+`liquifact_escrow` 
+(lib test) due to 1 
+previous error; 1 
+warning emitted

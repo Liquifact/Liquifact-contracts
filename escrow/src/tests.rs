@@ -2,16 +2,29 @@
     unused_imports,
     unused_variables,
     dead_code,
+    unused_comparisons,
+    unused_doc_comments,
+    unused_macros,
+    unused_assignments,
     clippy::needless_borrow,
     clippy::len_zero,
-    clippy::explicit_counter_loop
+    clippy::explicit_counter_loop,
+    clippy::empty_line_after_doc_comments,
+    clippy::empty_line_after_outer_attr,
+    clippy::absurd_extreme_comparisons,
+    clippy::needless_range_loop,
+    clippy::mutable_key_type,
+    clippy::unusual_byte_groupings
 )]
 #[allow(unused_imports)]
 use super::{
-    AttestationDigestRevoked, CollateralRecordedEvt, DataKey, EscrowError, EscrowFunded,
-    EscrowInitialized, FundingTargetUpdated, LiquifactEscrow, LiquifactEscrowClient,
-    MaxUniqueInvestorsCapLowered, YieldTier, MAX_ATTESTATION_APPEND_ENTRIES, MAX_DUST_SWEEP_AMOUNT,
-    MAX_FUND_BATCH, SCHEMA_VERSION,
+    AttestationDigestAppended, AttestationDigestRevoked, AttestationDigestUnrevoked,
+    CollateralRecordedEvt, ContractUpgraded, DataKey, DeprecatedTransferAdminUsed, EscrowError,
+    EscrowFunded, EscrowInitialized, EscrowUnfunded, FundingCancelled, FundingTargetUpdated,
+    InvestorRefundedEvt, LiquifactEscrow, LiquifactEscrowClient, MaturityMaxHorizonUpdated,
+    MaxUniqueInvestorsCapLowered, PrimaryAttestationBound, RegistryRefRebound, TreasuryDustSwept,
+    YieldTier, MAX_ATTESTATION_APPEND_ENTRIES, MAX_DUST_SWEEP_AMOUNT, MAX_FUND_BATCH,
+    SCHEMA_VERSION,
 };
 use soroban_sdk::{
     symbol_short,
@@ -20,6 +33,8 @@ use soroban_sdk::{
     Address, Env, Error, Event, InvokeError, String, Val, Vec as SorobanVec,
 };
 use std::fmt::Debug;
+
+pub use soroban_sdk::Symbol;
 
 pub(crate) fn assert_contract_error<T, E>(
     result: Result<Result<T, E>, Result<Error, InvokeError>>,
@@ -44,15 +59,21 @@ pub(crate) fn assert_contract_error<T, E>(
 // modules stay assertion-focused and each test still owns a fresh Env.
 mod admin;
 mod attestations;
+mod auth_matrix;
 mod cap_validation;
+#[rustfmt::skip]
 mod coverage;
 mod external_calls;
 mod external_calls_mocked;
 mod funding;
 mod init;
 mod integration;
+mod integration_status_guards;
 mod legal_hold;
+mod migration_errors;
+mod pause;
 mod properties;
+mod reconciliation_lifecycle;
 mod settlement;
 
 /// Registers a new escrow contract instance and returns its contract id.
@@ -74,7 +95,7 @@ pub fn deploy_with_id(env: &Env) -> (Address, LiquifactEscrowClient<'_>) {
 
 pub fn setup(env: &Env) -> (LiquifactEscrowClient<'_>, Address, Address) {
     let mut ledger_info = env.ledger().get();
-    ledger_info.timestamp = 12345;
+    ledger_info.timestamp = 0;
     ledger_info.sequence_number = 100;
     env.ledger().set(ledger_info);
     env.mock_all_auths();
@@ -133,7 +154,10 @@ pub fn default_init(client: &LiquifactEscrowClient<'_>, env: &Env, admin: &Addre
         &None,
         &None,
         &None,
-        &None, // No funding deadline
+        &None, // No funding deadline,
+        &None,
+        &None,
+        &None::<i64>,
     );
 }
 
@@ -179,12 +203,19 @@ pub fn init_and_fund_with_real_token<'a>(
         &None,
         &None,
         &None,
+        &None,
+        &None,
+        &None::<i64>,
     );
 
     let investor = Address::generate(env);
+    // The investor must actually hold the principal so the pre-transfer balance
+    // guard in `fund` passes and tokens really move into the escrow.
+    sac_admin.mint(&investor, &target);
     client.fund(&investor, &target);
 
-    // Mint funded_amount into the escrow so withdraw() can actually transfer tokens.
+    // Mint the coupon headroom into the escrow (on top of the principal already
+    // transferred in by `fund`) so withdraw() can transfer principal + yield.
     sac_admin.mint(&escrow_id, &target);
 
     (client, escrow_id, sme)

@@ -1,0 +1,1765 @@
+﻿2026-06-25T10:01:50.6267031Z Current runner version: '2.335.1'
+2026-06-25T10:01:50.6292472Z ##[group]Runner Image Provisioner
+2026-06-25T10:01:50.6293334Z Hosted Compute Agent
+2026-06-25T10:01:50.6294050Z Version: 20260611.554
+2026-06-25T10:01:50.6294752Z Commit: 5e0782fdc9014723d3be820dd114dd31555c2bd1
+2026-06-25T10:01:50.6295555Z Build Date: 2026-06-11T21:40:46Z
+2026-06-25T10:01:50.6296293Z Worker ID: {690f37c4-db3c-424c-ae95-e5c556bdfe12}
+2026-06-25T10:01:50.6297030Z Azure Region: westus3
+2026-06-25T10:01:50.6297680Z ##[endgroup]
+2026-06-25T10:01:50.6299164Z ##[group]Operating System
+2026-06-25T10:01:50.6299910Z Ubuntu
+2026-06-25T10:01:50.6300479Z 24.04.4
+2026-06-25T10:01:50.6301023Z LTS
+2026-06-25T10:01:50.6301791Z ##[endgroup]
+2026-06-25T10:01:50.6302404Z ##[group]Runner Image
+2026-06-25T10:01:50.6303019Z Image: ubuntu-24.04
+2026-06-25T10:01:50.6303675Z Version: 20260615.205.1
+2026-06-25T10:01:50.6304953Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260615.205/images/ubuntu/Ubuntu2404-Readme.md
+2026-06-25T10:01:50.6306601Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20260615.205
+2026-06-25T10:01:50.6307569Z ##[endgroup]
+2026-06-25T10:01:50.6308820Z ##[group]GITHUB_TOKEN Permissions
+2026-06-25T10:01:50.6310763Z Contents: read
+2026-06-25T10:01:50.6311822Z Metadata: read
+2026-06-25T10:01:50.6312454Z Packages: read
+2026-06-25T10:01:50.6313090Z ##[endgroup]
+2026-06-25T10:01:50.6315577Z Secret source: None
+2026-06-25T10:01:50.6316336Z Prepare workflow directory
+2026-06-25T10:01:50.6654414Z Prepare all required actions
+2026-06-25T10:01:50.6692015Z Getting action download info
+2026-06-25T10:01:51.0625185Z Download action repository 'actions/checkout@v4' (SHA:34e114876b0b11c390a56381ad16ebd13914f8d5)
+2026-06-25T10:01:51.2429563Z Download action repository 'dtolnay/rust-toolchain@stable' (SHA:29eef336d9b2848a0b548edc03f92a220660cdb8)
+2026-06-25T10:01:51.5078107Z Download action repository 'Swatinem/rust-cache@v2' (SHA:e18b497796c12c097a38f9edb9d0641fb99eee32)
+2026-06-25T10:01:52.6232450Z Download action repository 'taiki-e/install-action@cargo-llvm-cov' (SHA:901c6c5742b8b5bab0a7cf0bf63286ad5e3120f3)
+2026-06-25T10:01:53.4194751Z Complete job name: fmt-build-test
+2026-06-25T10:01:53.4870963Z Node 20 is being deprecated. This workflow is running with Node 24 by default. If you need to temporarily use Node 20, you can set the ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true environment variable. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+2026-06-25T10:01:53.4878992Z ##[group]Run actions/checkout@v4
+2026-06-25T10:01:53.4879426Z with:
+2026-06-25T10:01:53.4879684Z   repository: Liquifact/Liquifact-contracts
+2026-06-25T10:01:53.4882638Z   token: ***
+2026-06-25T10:01:53.4882873Z   ssh-strict: true
+2026-06-25T10:01:53.4883096Z   ssh-user: git
+2026-06-25T10:01:53.4883335Z   persist-credentials: true
+2026-06-25T10:01:53.4883589Z   clean: true
+2026-06-25T10:01:53.4883816Z   sparse-checkout-cone-mode: true
+2026-06-25T10:01:53.4884119Z   fetch-depth: 1
+2026-06-25T10:01:53.4884343Z   fetch-tags: false
+2026-06-25T10:01:53.4884581Z   show-progress: true
+2026-06-25T10:01:53.4884810Z   lfs: false
+2026-06-25T10:01:53.4885053Z   submodules: false
+2026-06-25T10:01:53.4885280Z   set-safe-directory: true
+2026-06-25T10:01:53.4885695Z ##[endgroup]
+2026-06-25T10:01:53.5926895Z Syncing repository: Liquifact/Liquifact-contracts
+2026-06-25T10:01:53.5928262Z ##[group]Getting Git version info
+2026-06-25T10:01:53.5928732Z Working directory is '/home/runner/work/Liquifact-contracts/Liquifact-contracts'
+2026-06-25T10:01:53.5929418Z [command]/usr/bin/git version
+2026-06-25T10:01:53.5967197Z git version 2.54.0
+2026-06-25T10:01:53.5995390Z ##[endgroup]
+2026-06-25T10:01:53.6012945Z Temporarily overriding HOME='/home/runner/work/_temp/a53658fa-390a-4d67-b852-0d7da08ce633' before making global git config changes
+2026-06-25T10:01:53.6014273Z Adding repository directory to the temporary git global config as a safe directory
+2026-06-25T10:01:53.6019162Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/Liquifact-contracts/Liquifact-contracts
+2026-06-25T10:01:53.6070036Z Deleting the contents of '/home/runner/work/Liquifact-contracts/Liquifact-contracts'
+2026-06-25T10:01:53.6075254Z ##[group]Initializing the repository
+2026-06-25T10:01:53.6079969Z [command]/usr/bin/git init /home/runner/work/Liquifact-contracts/Liquifact-contracts
+2026-06-25T10:01:53.6150833Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-06-25T10:01:53.6151733Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-06-25T10:01:53.6152366Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-06-25T10:01:53.6152960Z hint: call:
+2026-06-25T10:01:53.6153401Z hint:
+2026-06-25T10:01:53.6153768Z hint: 	git config --global init.defaultBranch <name>
+2026-06-25T10:01:53.6154108Z hint:
+2026-06-25T10:01:53.6154419Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-06-25T10:01:53.6154962Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-06-25T10:01:53.6155339Z hint:
+2026-06-25T10:01:53.6155566Z hint: 	git branch -m <name>
+2026-06-25T10:01:53.6155811Z hint:
+2026-06-25T10:01:53.6156145Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-06-25T10:01:53.6161106Z Initialized empty Git repository in /home/runner/work/Liquifact-contracts/Liquifact-contracts/.git/
+2026-06-25T10:01:53.6170289Z [command]/usr/bin/git remote add origin https://github.com/Liquifact/Liquifact-contracts
+2026-06-25T10:01:53.6207406Z ##[endgroup]
+2026-06-25T10:01:53.6208044Z ##[group]Disabling automatic garbage collection
+2026-06-25T10:01:53.6211558Z [command]/usr/bin/git config --local gc.auto 0
+2026-06-25T10:01:53.6246566Z ##[endgroup]
+2026-06-25T10:01:53.6246982Z ##[group]Setting up auth
+2026-06-25T10:01:53.6247426Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-06-25T10:01:53.6278482Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-06-25T10:01:53.6581248Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-06-25T10:01:53.6612062Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-06-25T10:01:53.6852654Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-06-25T10:01:53.6888193Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-06-25T10:01:53.7137686Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-06-25T10:01:53.7174637Z ##[endgroup]
+2026-06-25T10:01:53.7175339Z ##[group]Fetching the repository
+2026-06-25T10:01:53.7184202Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +0b9bae0b82919a91e0d8f6d44359c23fffd3ff68:refs/remotes/pull/427/merge
+2026-06-25T10:01:54.5060440Z From https://github.com/Liquifact/Liquifact-contracts
+2026-06-25T10:01:54.5061545Z  * [new ref]         0b9bae0b82919a91e0d8f6d44359c23fffd3ff68 -> pull/427/merge
+2026-06-25T10:01:54.5098795Z ##[endgroup]
+2026-06-25T10:01:54.5099415Z ##[group]Determining the checkout info
+2026-06-25T10:01:54.5103273Z ##[endgroup]
+2026-06-25T10:01:54.5110348Z [command]/usr/bin/git sparse-checkout disable
+2026-06-25T10:01:54.5160279Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-06-25T10:01:54.5189968Z ##[group]Checking out the ref
+2026-06-25T10:01:54.5195942Z [command]/usr/bin/git checkout --progress --force refs/remotes/pull/427/merge
+2026-06-25T10:01:54.5594096Z Note: switching to 'refs/remotes/pull/427/merge'.
+2026-06-25T10:01:54.5595143Z 
+2026-06-25T10:01:54.5595808Z You are in 'detached HEAD' state. You can look around, make experimental
+2026-06-25T10:01:54.5597065Z changes and commit them, and you can discard any commits you make in this
+2026-06-25T10:01:54.5597991Z state without impacting any branches by switching back to a branch.
+2026-06-25T10:01:54.5598481Z 
+2026-06-25T10:01:54.5598805Z If you want to create a new branch to retain commits you create, you may
+2026-06-25T10:01:54.5599568Z do so (now or later) by using -c with the switch command. Example:
+2026-06-25T10:01:54.5600009Z 
+2026-06-25T10:01:54.5600204Z   git switch -c <new-branch-name>
+2026-06-25T10:01:54.5600489Z 
+2026-06-25T10:01:54.5600664Z Or undo this operation with:
+2026-06-25T10:01:54.5600936Z 
+2026-06-25T10:01:54.5601090Z   git switch -
+2026-06-25T10:01:54.5601520Z 
+2026-06-25T10:01:54.5601900Z Turn off this advice by setting config variable advice.detachedHead to false
+2026-06-25T10:01:54.5602418Z 
+2026-06-25T10:01:54.5603036Z HEAD is now at 0b9bae0 Merge e6055be3a3a09643c229a27d66f25149c6f3470b into f3c49bc43a4afd486efc2e2beb59bd144adb5029
+2026-06-25T10:01:54.5612976Z ##[endgroup]
+2026-06-25T10:01:54.5655118Z [command]/usr/bin/git log -1 --format=%H
+2026-06-25T10:01:54.5680594Z 0b9bae0b82919a91e0d8f6d44359c23fffd3ff68
+2026-06-25T10:01:54.6017137Z ##[group]Run dtolnay/rust-toolchain@stable
+2026-06-25T10:01:54.6017460Z with:
+2026-06-25T10:01:54.6017715Z   components: rustfmt, clippy, llvm-tools-preview
+2026-06-25T10:01:54.6018026Z   toolchain: stable
+2026-06-25T10:01:54.6018247Z ##[endgroup]
+2026-06-25T10:01:54.6150490Z ##[group]Run : parse toolchain version
+2026-06-25T10:01:54.6150905Z [36;1m: parse toolchain version[0m
+2026-06-25T10:01:54.6151215Z [36;1mif [[ -z $toolchain ]]; then[0m
+2026-06-25T10:01:54.6152022Z [36;1m  # GitHub does not enforce `required: true` inputs itself. https://github.com/actions/runner/issues/1070[0m
+2026-06-25T10:01:54.6152588Z [36;1m  echo "'toolchain' is a required input" >&2[0m
+2026-06-25T10:01:54.6152888Z [36;1m  exit 1[0m
+2026-06-25T10:01:54.6153248Z [36;1melif [[ $toolchain =~ ^stable' '[0-9]+' '(year|month|week|day)s?' 'ago$ ]]; then[0m
+2026-06-25T10:01:54.6153657Z [36;1m  if [[ Linux == macOS ]]; then[0m
+2026-06-25T10:01:54.6154714Z [36;1m    echo "toolchain=1.$((($(date -v-$(sed 's/stable \([0-9]*\) \(.\).*/\1\2/' <<< $toolchain) +%s)/60/60/24-16569)/7/6))" >> $GITHUB_OUTPUT[0m
+2026-06-25T10:01:54.6155620Z [36;1m  else[0m
+2026-06-25T10:01:54.6156042Z [36;1m    echo "toolchain=1.$((($(date --date "${toolchain#stable }" +%s)/60/60/24-16569)/7/6))" >> $GITHUB_OUTPUT[0m
+2026-06-25T10:01:54.6156508Z [36;1m  fi[0m
+2026-06-25T10:01:54.6156829Z [36;1melif [[ $toolchain =~ ^stable' 'minus' '[0-9]+' 'releases?$ ]]; then[0m
+2026-06-25T10:01:54.6157371Z [36;1m  echo "toolchain=1.$((($(date +%s)/60/60/24-16569)/7/6-${toolchain//[^0-9]/}))" >> $GITHUB_OUTPUT[0m
+2026-06-25T10:01:54.6158132Z [36;1melif [[ $toolchain =~ ^1\.[0-9]+$ ]]; then[0m
+2026-06-25T10:01:54.6159006Z [36;1m  echo "toolchain=1.$((i=${toolchain#1.}, c=($(date +%s)/60/60/24-16569)/7/6, i+9*i*(10*i<=c)+90*i*(100*i<=c)))" >> $GITHUB_OUTPUT[0m
+2026-06-25T10:01:54.6159817Z [36;1melse[0m
+2026-06-25T10:01:54.6160225Z [36;1m  echo "toolchain=$toolchain" >> $GITHUB_OUTPUT[0m
+2026-06-25T10:01:54.6160743Z [36;1mfi[0m
+2026-06-25T10:01:54.6293563Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-06-25T10:01:54.6293963Z env:
+2026-06-25T10:01:54.6294180Z   toolchain: stable
+2026-06-25T10:01:54.6294419Z ##[endgroup]
+2026-06-25T10:01:54.6442368Z ##[group]Run : construct rustup command line
+2026-06-25T10:01:54.6442743Z [36;1m: construct rustup command line[0m
+2026-06-25T10:01:54.6443211Z [36;1mecho "targets=$(for t in ${targets//,/ }; do echo -n ' --target' $t; done)" >> $GITHUB_OUTPUT[0m
+2026-06-25T10:01:54.6443830Z [36;1mecho "components=$(for c in ${components//,/ }; do echo -n ' --component' $c; done)" >> $GITHUB_OUTPUT[0m
+2026-06-25T10:01:54.6444307Z [36;1mecho "downgrade=" >> $GITHUB_OUTPUT[0m
+2026-06-25T10:01:54.6474635Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-06-25T10:01:54.6475149Z env:
+2026-06-25T10:01:54.6475346Z   targets: 
+2026-06-25T10:01:54.6475598Z   components: rustfmt, clippy, llvm-tools-preview
+2026-06-25T10:01:54.6475903Z ##[endgroup]
+2026-06-25T10:01:54.6563939Z ##[group]Run : set $CARGO_HOME
+2026-06-25T10:01:54.6564240Z [36;1m: set $CARGO_HOME[0m
+2026-06-25T10:01:54.6564578Z [36;1mecho CARGO_HOME=${CARGO_HOME:-"$HOME/.cargo"} >> $GITHUB_ENV[0m
+2026-06-25T10:01:54.6594169Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-06-25T10:01:54.6594629Z ##[endgroup]
+2026-06-25T10:01:54.6680636Z ##[group]Run : install rustup if needed
+2026-06-25T10:01:54.6680961Z [36;1m: install rustup if needed[0m
+2026-06-25T10:01:54.6681268Z [36;1mif ! command -v rustup &>/dev/null; then[0m
+2026-06-25T10:01:54.6682384Z [36;1m  curl --proto '=https' --tlsv1.2 --retry 10 --retry-connrefused --location --silent --show-error --fail https://sh.rustup.rs | sh -s -- --default-toolchain none -y[0m
+2026-06-25T10:01:54.6683139Z [36;1m  echo "$CARGO_HOME/bin" >> $GITHUB_PATH[0m
+2026-06-25T10:01:54.6683438Z [36;1mfi[0m
+2026-06-25T10:01:54.6713430Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-06-25T10:01:54.6713772Z env:
+2026-06-25T10:01:54.6714176Z   CARGO_HOME: /home/runner/.cargo
+2026-06-25T10:01:54.6714441Z ##[endgroup]
+2026-06-25T10:01:54.6799752Z ##[group]Run rustup toolchain install stable --component rustfmt --component clippy --component llvm-tools-preview --profile minimal --no-self-update
+2026-06-25T10:01:54.6800770Z [36;1mrustup toolchain install stable --component rustfmt --component clippy --component llvm-tools-preview --profile minimal --no-self-update[0m
+2026-06-25T10:01:54.6830838Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-06-25T10:01:54.6831178Z env:
+2026-06-25T10:01:54.6831551Z   CARGO_HOME: /home/runner/.cargo
+2026-06-25T10:01:54.6831824Z   RUSTUP_PERMIT_COPY_RENAME: 1
+2026-06-25T10:01:54.6832073Z ##[endgroup]
+2026-06-25T10:01:54.8483319Z info: syncing channel updates for stable-x86_64-unknown-linux-gnu
+2026-06-25T10:01:55.1904635Z info: latest update on 2026-05-28 for version 1.96.0 (ac68faa20 2026-05-25)
+2026-06-25T10:01:55.2142193Z info: component clippy is up to date
+2026-06-25T10:01:55.2142700Z info: component rustfmt is up to date
+2026-06-25T10:01:55.2150525Z info: downloading component llvm-tools
+2026-06-25T10:01:58.1263747Z 
+2026-06-25T10:01:58.1352216Z   stable-x86_64-unknown-linux-gnu updated - rustc 1.96.0 (ac68faa20 2026-05-25) (from rustc 1.96.0 (ac68faa20 2026-05-25))
+2026-06-25T10:01:58.1353094Z 
+2026-06-25T10:01:58.1440002Z ##[group]Run rustup default stable
+2026-06-25T10:01:58.1440333Z [36;1mrustup default stable[0m
+2026-06-25T10:01:58.1472786Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-06-25T10:01:58.1473163Z env:
+2026-06-25T10:01:58.1473379Z   CARGO_HOME: /home/runner/.cargo
+2026-06-25T10:01:58.1473642Z ##[endgroup]
+2026-06-25T10:01:58.1581491Z info: using existing install for stable-x86_64-unknown-linux-gnu
+2026-06-25T10:01:58.1586922Z info: default toolchain set to stable-x86_64-unknown-linux-gnu
+2026-06-25T10:01:58.1587295Z 
+2026-06-25T10:01:58.1671041Z   stable-x86_64-unknown-linux-gnu unchanged - rustc 1.96.0 (ac68faa20 2026-05-25)
+2026-06-25T10:01:58.1671882Z 
+2026-06-25T10:01:58.1706604Z ##[group]Run : create cachekey
+2026-06-25T10:01:58.1706915Z [36;1m: create cachekey[0m
+2026-06-25T10:01:58.1707437Z [36;1mDATE=$(rustc +stable --version --verbose | sed -ne 's/^commit-date: \(20[0-9][0-9]\)-\([01][0-9]\)-\([0-3][0-9]\)$/\1\2\3/p')[0m
+2026-06-25T10:01:58.1708080Z [36;1mHASH=$(rustc +stable --version --verbose | sed -ne 's/^commit-hash: //p')[0m
+2026-06-25T10:01:58.1708608Z [36;1mecho "cachekey=$(echo $DATE$HASH | head -c12)" >> $GITHUB_OUTPUT[0m
+2026-06-25T10:01:58.1739181Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-06-25T10:01:58.1739520Z env:
+2026-06-25T10:01:58.1739735Z   CARGO_HOME: /home/runner/.cargo
+2026-06-25T10:01:58.1739997Z ##[endgroup]
+2026-06-25T10:01:58.2136223Z ##[group]Run : disable incremental compilation
+2026-06-25T10:01:58.2136606Z [36;1m: disable incremental compilation[0m
+2026-06-25T10:01:58.2136974Z [36;1mif [ -z "${CARGO_INCREMENTAL+set}" ]; then[0m
+2026-06-25T10:01:58.2137344Z [36;1m  echo CARGO_INCREMENTAL=0 >> $GITHUB_ENV[0m
+2026-06-25T10:01:58.2137649Z [36;1mfi[0m
+2026-06-25T10:01:58.2168595Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-06-25T10:01:58.2168946Z env:
+2026-06-25T10:01:58.2169206Z   CARGO_HOME: /home/runner/.cargo
+2026-06-25T10:01:58.2169478Z ##[endgroup]
+2026-06-25T10:01:58.2242234Z ##[group]Run : enable colors in Cargo output
+2026-06-25T10:01:58.2242581Z [36;1m: enable colors in Cargo output[0m
+2026-06-25T10:01:58.2242901Z [36;1mif [ -z "${CARGO_TERM_COLOR+set}" ]; then[0m
+2026-06-25T10:01:58.2243250Z [36;1m  echo CARGO_TERM_COLOR=always >> $GITHUB_ENV[0m
+2026-06-25T10:01:58.2243560Z [36;1mfi[0m
+2026-06-25T10:01:58.2273357Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-06-25T10:01:58.2273710Z env:
+2026-06-25T10:01:58.2273924Z   CARGO_HOME: /home/runner/.cargo
+2026-06-25T10:01:58.2274194Z   CARGO_INCREMENTAL: 0
+2026-06-25T10:01:58.2274418Z ##[endgroup]
+2026-06-25T10:01:58.2346435Z ##[group]Run : enable Cargo sparse registry
+2026-06-25T10:01:58.2346946Z [36;1m: enable Cargo sparse registry[0m
+2026-06-25T10:01:58.2347327Z [36;1m# implemented in 1.66, stabilized in 1.68, made default in 1.70[0m
+2026-06-25T10:01:58.2348043Z [36;1mif [ -z "${CARGO_REGISTRIES_CRATES_IO_PROTOCOL+set}" -o -f "/home/runner/work/_temp"/.implicit_cargo_registries_crates_io_protocol ]; then[0m
+2026-06-25T10:01:58.2348764Z [36;1m  if rustc +stable --version --verbose | grep -q '^release: 1\.6[89]\.'; then[0m
+2026-06-25T10:01:58.2349330Z [36;1m    touch "/home/runner/work/_temp"/.implicit_cargo_registries_crates_io_protocol || true[0m
+2026-06-25T10:01:58.2349868Z [36;1m    echo CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse >> $GITHUB_ENV[0m
+2026-06-25T10:01:58.2350360Z [36;1m  elif rustc +stable --version --verbose | grep -q '^release: 1\.6[67]\.'; then[0m
+2026-06-25T10:01:58.2350918Z [36;1m    touch "/home/runner/work/_temp"/.implicit_cargo_registries_crates_io_protocol || true[0m
+2026-06-25T10:01:58.2351683Z [36;1m    echo CARGO_REGISTRIES_CRATES_IO_PROTOCOL=git >> $GITHUB_ENV[0m
+2026-06-25T10:01:58.2352041Z [36;1m  fi[0m
+2026-06-25T10:01:58.2352247Z [36;1mfi[0m
+2026-06-25T10:01:58.2381483Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-06-25T10:01:58.2381837Z env:
+2026-06-25T10:01:58.2382054Z   CARGO_HOME: /home/runner/.cargo
+2026-06-25T10:01:58.2382321Z   CARGO_INCREMENTAL: 0
+2026-06-25T10:01:58.2382550Z   CARGO_TERM_COLOR: always
+2026-06-25T10:01:58.2382790Z ##[endgroup]
+2026-06-25T10:01:58.2745325Z ##[group]Run : work around spurious network errors in curl 8.0
+2026-06-25T10:01:58.2745782Z [36;1m: work around spurious network errors in curl 8.0[0m
+2026-06-25T10:01:58.2746360Z [36;1m# https://rust-lang.zulipchat.com/#narrow/stream/246057-t-cargo/topic/timeout.20investigation[0m
+2026-06-25T10:01:58.2747020Z [36;1mif rustc +stable --version --verbose | grep -q '^release: 1\.7[01]\.'; then[0m
+2026-06-25T10:01:58.2747487Z [36;1m  echo CARGO_HTTP_MULTIPLEXING=false >> $GITHUB_ENV[0m
+2026-06-25T10:01:58.2747816Z [36;1mfi[0m
+2026-06-25T10:01:58.2779202Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-06-25T10:01:58.2779559Z env:
+2026-06-25T10:01:58.2779774Z   CARGO_HOME: /home/runner/.cargo
+2026-06-25T10:01:58.2780043Z   CARGO_INCREMENTAL: 0
+2026-06-25T10:01:58.2780276Z   CARGO_TERM_COLOR: always
+2026-06-25T10:01:58.2780513Z ##[endgroup]
+2026-06-25T10:01:58.2997346Z ##[group]Run rustc +stable --version --verbose
+2026-06-25T10:01:58.2997716Z [36;1mrustc +stable --version --verbose[0m
+2026-06-25T10:01:58.3027924Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-06-25T10:01:58.3028268Z env:
+2026-06-25T10:01:58.3028485Z   CARGO_HOME: /home/runner/.cargo
+2026-06-25T10:01:58.3028755Z   CARGO_INCREMENTAL: 0
+2026-06-25T10:01:58.3028995Z   CARGO_TERM_COLOR: always
+2026-06-25T10:01:58.3029408Z ##[endgroup]
+2026-06-25T10:01:58.3205190Z rustc 1.96.0 (ac68faa20 2026-05-25)
+2026-06-25T10:01:58.3205606Z binary: rustc
+2026-06-25T10:01:58.3206013Z commit-hash: ac68faa20c58cbccd01ee7208bf3b6e93a7d7f96
+2026-06-25T10:01:58.3206501Z commit-date: 2026-05-25
+2026-06-25T10:01:58.3206756Z host: x86_64-unknown-linux-gnu
+2026-06-25T10:01:58.3207011Z release: 1.96.0
+2026-06-25T10:01:58.3207260Z LLVM version: 22.1.2
+2026-06-25T10:01:58.3335839Z ##[group]Run Swatinem/rust-cache@v2
+2026-06-25T10:01:58.3336143Z with:
+2026-06-25T10:01:58.3336649Z   prefix-key: v0-rust
+2026-06-25T10:01:58.3337019Z   add-job-id-key: true
+2026-06-25T10:01:58.3337375Z   add-rust-environment-hash-key: true
+2026-06-25T10:01:58.3337901Z   cache-targets: true
+2026-06-25T10:01:58.3338261Z   cache-all-crates: false
+2026-06-25T10:01:58.3338727Z   cache-workspace-crates: false
+2026-06-25T10:01:58.3339105Z   save-if: true
+2026-06-25T10:01:58.3339425Z   cache-provider: github
+2026-06-25T10:01:58.3339884Z   cache-bin: true
+2026-06-25T10:01:58.3340237Z   lookup-only: false
+2026-06-25T10:01:58.3340608Z   cmd-format: {0}
+2026-06-25T10:01:58.3340959Z env:
+2026-06-25T10:01:58.3341518Z   CARGO_HOME: /home/runner/.cargo
+2026-06-25T10:01:58.3342014Z   CARGO_INCREMENTAL: 0
+2026-06-25T10:01:58.3342375Z   CARGO_TERM_COLOR: always
+2026-06-25T10:01:58.3342721Z ##[endgroup]
+2026-06-25T10:01:58.6125472Z (node:2367) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-06-25T10:01:58.6126216Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-06-25T10:01:58.8342513Z ##[group]Cache Configuration
+2026-06-25T10:01:58.8362352Z Cache Provider:
+2026-06-25T10:01:58.8362712Z     github
+2026-06-25T10:01:58.8363034Z Workspaces:
+2026-06-25T10:01:58.8363519Z     /home/runner/work/Liquifact-contracts/Liquifact-contracts
+2026-06-25T10:01:58.8364097Z Cache Paths:
+2026-06-25T10:01:58.8364417Z     /home/runner/.cargo/bin
+2026-06-25T10:01:58.8364823Z     /home/runner/.cargo/.crates.toml
+2026-06-25T10:01:58.8365299Z     /home/runner/.cargo/.crates2.json
+2026-06-25T10:01:58.8365750Z     /home/runner/.cargo/registry
+2026-06-25T10:01:58.8366161Z     /home/runner/.cargo/git
+2026-06-25T10:01:58.8366695Z     /home/runner/work/Liquifact-contracts/Liquifact-contracts/target
+2026-06-25T10:01:58.8367308Z Restore Key:
+2026-06-25T10:01:58.8367707Z     v0-rust-fmt-build-test-Linux-x64-4107bf91
+2026-06-25T10:01:58.8368188Z Cache Key:
+2026-06-25T10:01:58.8368601Z     v0-rust-fmt-build-test-Linux-x64-4107bf91-e1b782ec
+2026-06-25T10:01:58.8369112Z .. Prefix:
+2026-06-25T10:01:58.8369458Z   - v0-rust-fmt-build-test-Linux-x64
+2026-06-25T10:01:58.8369921Z .. Environment considered:
+2026-06-25T10:01:58.8370305Z   - Rust Versions:
+2026-06-25T10:01:58.8370835Z     - 1.96.0 x86_64-unknown-linux-gnu ac68faa20c58cbccd01ee7208bf3b6e93a7d7f96
+2026-06-25T10:01:58.8372152Z     - 1.96.0 x86_64-unknown-linux-gnu ac68faa20c58cbccd01ee7208bf3b6e93a7d7f96
+2026-06-25T10:01:58.8373554Z   - CARGO_HOME
+2026-06-25T10:01:58.8373906Z   - CARGO_INCREMENTAL
+2026-06-25T10:01:58.8374262Z   - CARGO_TERM_COLOR
+2026-06-25T10:01:58.8374617Z .. Lockfiles considered:
+2026-06-25T10:01:58.8375185Z   - /home/runner/work/Liquifact-contracts/Liquifact-contracts/Cargo.lock
+2026-06-25T10:01:58.8376055Z   - /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/Cargo.toml
+2026-06-25T10:01:58.8377048Z ##[endgroup]
+2026-06-25T10:01:58.8377250Z 
+2026-06-25T10:01:58.8377414Z ... Restoring cache ...
+2026-06-25T10:01:59.0557382Z No cache found.
+2026-06-25T10:01:59.0699163Z ##[group]Run cargo fmt -p liquifact_escrow -- --check
+2026-06-25T10:01:59.0699570Z [36;1mcargo fmt -p liquifact_escrow -- --check[0m
+2026-06-25T10:01:59.0733313Z shell: /usr/bin/bash -e {0}
+2026-06-25T10:01:59.0733571Z env:
+2026-06-25T10:01:59.0733780Z   CARGO_HOME: /home/runner/.cargo
+2026-06-25T10:01:59.0734055Z   CARGO_INCREMENTAL: 0
+2026-06-25T10:01:59.0734296Z   CARGO_TERM_COLOR: always
+2026-06-25T10:01:59.0734529Z   CACHE_ON_FAILURE: false
+2026-06-25T10:01:59.0734945Z ##[endgroup]
+2026-06-25T10:01:59.4908837Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/admin.rs:27:
+2026-06-25T10:01:59.4909689Z          &None,
+2026-06-25T10:01:59.4909990Z          &None,
+2026-06-25T10:01:59.4910290Z      );
+2026-06-25T10:01:59.4910642Z -let updated = client.update_maturity(&2000u64);
+2026-06-25T10:01:59.4911276Z +    let updated = client.update_maturity(&2000u64);
+2026-06-25T10:01:59.4912216Z      assert_eq!(updated.maturity, 2000u64);
+2026-06-25T10:01:59.4912747Z      assert_eq!(updated.status, 0);
+2026-06-25T10:01:59.4913139Z  }
+2026-06-25T10:01:59.4913759Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/admin.rs:56:
+2026-06-25T10:01:59.4914497Z          &None,
+2026-06-25T10:01:59.4914802Z          &None,
+2026-06-25T10:01:59.4915093Z      );
+2026-06-25T10:01:59.4915399Z -client.fund(&investor, &1_000i128);
+2026-06-25T10:01:59.4915827Z +    client.fund(&investor, &1_000i128);
+2026-06-25T10:01:59.4916254Z      client.update_maturity(&2000u64);
+2026-06-25T10:01:59.4916664Z  }
+2026-06-25T10:01:59.4916928Z  
+2026-06-25T10:01:59.4917512Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/admin.rs:86:
+2026-06-25T10:01:59.4918221Z          &None,
+2026-06-25T10:01:59.4918516Z          &None,
+2026-06-25T10:01:59.4918795Z      );
+2026-06-25T10:01:59.4919076Z -env.mock_auths(&[]);
+2026-06-25T10:01:59.4919419Z +    env.mock_auths(&[]);
+2026-06-25T10:01:59.4919796Z      client.update_maturity(&2000u64);
+2026-06-25T10:01:59.4920183Z  }
+2026-06-25T10:01:59.4920444Z  
+2026-06-25T10:01:59.4921022Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/admin.rs:113:
+2026-06-25T10:01:59.4921927Z          &None,
+2026-06-25T10:01:59.4922220Z          &None,
+2026-06-25T10:01:59.4922498Z      );
+2026-06-25T10:01:59.4922836Z -let pending = client.propose_admin(&new_admin);
+2026-06-25T10:01:59.4923357Z +    let pending = client.propose_admin(&new_admin);
+2026-06-25T10:01:59.4923836Z      assert_eq!(pending, new_admin);
+2026-06-25T10:01:59.4924172Z      assert_eq!(client.get_pending_admin(), Some(new_admin));
+2026-06-25T10:01:59.4924544Z      assert_eq!(client.get_escrow().admin, admin);
+2026-06-25T10:01:59.4925034Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/admin.rs:142:
+2026-06-25T10:01:59.4925474Z          &None,
+2026-06-25T10:01:59.4925666Z          &None,
+2026-06-25T10:01:59.4925846Z      );
+2026-06-25T10:01:59.4926052Z -client.propose_admin(&new_admin);
+2026-06-25T10:01:59.4926321Z +    client.propose_admin(&new_admin);
+2026-06-25T10:01:59.4926602Z      let updated = client.accept_admin();
+2026-06-25T10:01:59.4926893Z      assert_eq!(updated.admin, new_admin);
+2026-06-25T10:01:59.4927208Z      assert_eq!(client.get_escrow().admin, new_admin);
+2026-06-25T10:01:59.4927680Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/admin.rs:173:
+2026-06-25T10:01:59.4928115Z          &None,
+2026-06-25T10:01:59.4928311Z          &None,
+2026-06-25T10:01:59.4928497Z      );
+2026-06-25T10:01:59.4928733Z -let unchanged = client.transfer_admin(&new_admin);
+2026-06-25T10:01:59.4929085Z +    let unchanged = client.transfer_admin(&new_admin);
+2026-06-25T10:01:59.4929408Z      assert_eq!(unchanged.admin, admin);
+2026-06-25T10:01:59.4929733Z      assert_eq!(client.get_pending_admin(), Some(new_admin));
+2026-06-25T10:01:59.4930042Z  }
+2026-06-25T10:01:59.4930829Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/admin.rs:201:
+2026-06-25T10:01:59.4931465Z          &None,
+2026-06-25T10:01:59.4931728Z          &None,
+2026-06-25T10:01:59.4931914Z      );
+2026-06-25T10:01:59.4932118Z -client.propose_admin(&admin);
+2026-06-25T10:01:59.4932380Z +    client.propose_admin(&admin);
+2026-06-25T10:01:59.4932627Z  }
+2026-06-25T10:01:59.4932794Z  
+2026-06-25T10:01:59.4932969Z  #[test]
+2026-06-25T10:01:59.4933361Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/admin.rs:343:
+2026-06-25T10:01:59.4933978Z          &None,
+2026-06-25T10:01:59.4934175Z          &None,
+2026-06-25T10:01:59.4934361Z      );
+2026-06-25T10:01:59.4934573Z -let summary = client.get_escrow_summary();
+2026-06-25T10:01:59.4934883Z +    let summary = client.get_escrow_summary();
+2026-06-25T10:01:59.4935164Z  
+2026-06-25T10:01:59.4935393Z      assert_eq!(summary.escrow, client.get_escrow());
+2026-06-25T10:01:59.4935761Z      assert_eq!(summary.legal_hold, client.get_legal_hold());
+2026-06-25T10:01:59.4936269Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/admin.rs:377:
+2026-06-25T10:01:59.4936707Z          &None,
+2026-06-25T10:01:59.4936897Z          &None,
+2026-06-25T10:01:59.4937084Z      );
+2026-06-25T10:01:59.4937404Z -let c = client.record_sme_collateral_commitment(&symbol_short!("USDC"), &5000i128);
+2026-06-25T10:01:59.4937927Z +    let c = client.record_sme_collateral_commitment(&symbol_short!("USDC"), &5000i128);
+2026-06-25T10:01:59.4938326Z      assert_eq!(c.amount, 5000i128);
+2026-06-25T10:01:59.4938614Z      assert_eq!(c.asset, symbol_short!("USDC"));
+2026-06-25T10:01:59.4938974Z      assert_eq!(client.get_sme_collateral_commitment(), Some(c));
+2026-06-25T10:01:59.4939481Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/admin.rs:410:
+2026-06-25T10:01:59.4939916Z          &None,
+2026-06-25T10:01:59.4940102Z          &None,
+2026-06-25T10:01:59.4940283Z      );
+2026-06-25T10:01:59.4940572Z -client.record_sme_collateral_commitment(&symbol_short!("XLM"), &0i128);
+2026-06-25T10:01:59.4941038Z +    client.record_sme_collateral_commitment(&symbol_short!("XLM"), &0i128);
+2026-06-25T10:01:59.4941577Z  }
+2026-06-25T10:01:59.4941751Z  
+2026-06-25T10:01:59.4941930Z  #[test]
+2026-06-25T10:01:59.4942311Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/admin.rs:436:
+2026-06-25T10:01:59.4942741Z          &None,
+2026-06-25T10:01:59.4942929Z          &None,
+2026-06-25T10:01:59.4943112Z      );
+2026-06-25T10:01:59.4943297Z -env.mock_auths(&[]);
+2026-06-25T10:01:59.4943528Z +    env.mock_auths(&[]);
+2026-06-25T10:01:59.4943867Z      client.record_sme_collateral_commitment(&symbol_short!("XLM"), &100i128);
+2026-06-25T10:01:59.4944234Z  }
+2026-06-25T10:01:59.4944410Z  
+2026-06-25T10:01:59.4944772Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/admin.rs:463:
+2026-06-25T10:01:59.4945192Z          &None,
+2026-06-25T10:01:59.4945378Z          &None,
+2026-06-25T10:01:59.4945559Z      );
+2026-06-25T10:01:59.4945759Z -client.fund(&investor, &TARGET);
+2026-06-25T10:01:59.4946025Z +    client.fund(&investor, &TARGET);
+2026-06-25T10:01:59.4946292Z      client.set_legal_hold(&true);
+2026-06-25T10:01:59.4946557Z      assert!(client.get_legal_hold());
+2026-06-25T10:01:59.4946801Z  
+2026-06-25T10:01:59.4947150Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/admin.rs:517:
+2026-06-25T10:01:59.4947573Z          &None,
+2026-06-25T10:01:59.4947761Z          &None,
+2026-06-25T10:01:59.4947954Z      );
+2026-06-25T10:01:59.4948149Z -client.set_legal_hold(&true);
+2026-06-25T10:01:59.4948395Z +    client.set_legal_hold(&true);
+2026-06-25T10:01:59.4948650Z      client.fund(&investor, &1i128);
+2026-06-25T10:01:59.4948901Z  }
+2026-06-25T10:01:59.4949071Z  
+2026-06-25T10:01:59.4949413Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/admin.rs:560:
+2026-06-25T10:01:59.4949834Z          &None,
+2026-06-25T10:01:59.4950017Z          &None,
+2026-06-25T10:01:59.4950350Z      );
+2026-06-25T10:01:59.4950597Z -let updated = client.update_funding_target(&10_000i128);
+2026-06-25T10:01:59.4950968Z +    let updated = client.update_funding_target(&10_000i128);
+2026-06-25T10:01:59.4951493Z      assert_eq!(updated.funding_target, 10_000i128);
+2026-06-25T10:01:59.4951804Z      assert_eq!(updated.status, 0);
+2026-06-25T10:01:59.4952045Z  }
+2026-06-25T10:01:59.4952402Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/admin.rs:593:
+2026-06-25T10:01:59.4952953Z          &None,
+2026-06-25T10:01:59.4953143Z          &None,
+2026-06-25T10:01:59.4953414Z      );
+2026-06-25T10:01:59.4953633Z -env.mock_auths(&[]);
+2026-06-25T10:01:59.4953865Z +    env.mock_auths(&[]);
+2026-06-25T10:01:59.4954112Z      client.update_funding_target(&10_000i128);
+2026-06-25T10:01:59.4954407Z  }
+2026-06-25T10:01:59.4954574Z  
+2026-06-25T10:01:59.4954960Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/admin.rs:627:
+2026-06-25T10:01:59.4955397Z          &None,
+2026-06-25T10:01:59.4955587Z          &None,
+2026-06-25T10:01:59.4955772Z      );
+2026-06-25T10:01:59.4955965Z -client.fund(&investor, &5_000i128);
+2026-06-25T10:01:59.4956232Z +    client.fund(&investor, &5_000i128);
+2026-06-25T10:01:59.4956510Z      client.update_funding_target(&10_000i128);
+2026-06-25T10:01:59.4956774Z  }
+2026-06-25T10:01:59.4956943Z  
+2026-06-25T10:01:59.4957395Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/admin.rs:661:
+2026-06-25T10:01:59.4957840Z          &None,
+2026-06-25T10:01:59.4958028Z          &None,
+2026-06-25T10:01:59.4958224Z      );
+2026-06-25T10:01:59.4958422Z -client.fund(&investor, &4_000i128);
+2026-06-25T10:01:59.4958691Z +    client.fund(&investor, &4_000i128);
+2026-06-25T10:01:59.4958980Z      client.update_funding_target(&3_000i128);
+2026-06-25T10:01:59.4959247Z  }
+2026-06-25T10:01:59.4959419Z  
+2026-06-25T10:01:59.4959783Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/admin.rs:694:
+2026-06-25T10:01:59.4960223Z          &None,
+2026-06-25T10:01:59.4960414Z          &None,
+2026-06-25T10:01:59.4960600Z      );
+2026-06-25T10:01:59.4960803Z -client.update_funding_target(&0i128);
+2026-06-25T10:01:59.4961083Z +    client.update_funding_target(&0i128);
+2026-06-25T10:01:59.4961531Z  }
+2026-06-25T10:01:59.4961705Z  
+2026-06-25T10:01:59.4961975Z  // --- FundingTargetUpdated event and rejection coverage ---
+2026-06-25T10:01:59.4962492Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/admin.rs:733:
+2026-06-25T10:01:59.4962952Z          &None,
+2026-06-25T10:01:59.4963141Z          &None,
+2026-06-25T10:01:59.4963327Z      );
+2026-06-25T10:01:59.4963530Z -client.update_funding_target(&9_000i128);
+2026-06-25T10:01:59.4963818Z +    client.update_funding_target(&9_000i128);
+2026-06-25T10:01:59.4964083Z  
+2026-06-25T10:01:59.4964261Z      assert_eq!(
+2026-06-25T10:01:59.4964472Z          env.events().all(),
+2026-06-25T10:01:59.4964881Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/admin.rs:779:
+2026-06-25T10:01:59.4965304Z          &None,
+2026-06-25T10:01:59.4965485Z          &None,
+2026-06-25T10:01:59.4965667Z      );
+2026-06-25T10:01:59.4966183Z -client.fund(&investor, &5_000i128); // status → 1 (funded)
+2026-06-25T10:01:59.4966626Z +    client.fund(&investor, &5_000i128); // status → 1 (funded)
+2026-06-25T10:01:59.4967008Z      client.settle(); // status → 2 (settled)
+2026-06-25T10:01:59.4967312Z      client.update_funding_target(&6_000i128);
+2026-06-25T10:01:59.4967591Z  }
+2026-06-25T10:01:59.4967950Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/admin.rs:828:
+2026-06-25T10:01:59.4968382Z          &None,
+2026-06-25T10:01:59.4968569Z          &None,
+2026-06-25T10:01:59.4968754Z      );
+2026-06-25T10:01:59.4969040Z -client.fund(&investor, &4_000i128); // funded_amount == 4_000, status still 0
+2026-06-25T10:01:59.4969512Z +    client.fund(&investor, &4_000i128); // funded_amount == 4_000, status still 0
+2026-06-25T10:01:59.4970008Z  
+2026-06-25T10:01:59.4970310Z      // new_target == funded_amount: boundary — must not panic.
+2026-06-25T10:01:59.4970689Z      let updated = client.update_funding_target(&4_000i128);
+2026-06-25T10:01:59.4971186Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/admin.rs:867:
+2026-06-25T10:01:59.4971847Z          &None,
+2026-06-25T10:01:59.4972038Z          &None,
+2026-06-25T10:01:59.4972223Z      );
+2026-06-25T10:01:59.4972434Z -client.update_funding_target(&-1i128);
+2026-06-25T10:01:59.4972921Z +    client.update_funding_target(&-1i128);
+2026-06-25T10:01:59.4973182Z  }
+2026-06-25T10:01:59.4973508Z  // --- update_maturity: open-only, ledger time semantics, MaturityUpdatedEvent ---
+2026-06-25T10:01:59.4973890Z  
+2026-06-25T10:01:59.4974247Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/admin.rs:907:
+2026-06-25T10:01:59.4974670Z          &None,
+2026-06-25T10:01:59.4974861Z          &None,
+2026-06-25T10:01:59.4975065Z      );
+2026-06-25T10:01:59.4975264Z -client.update_maturity(&2000u64);
+2026-06-25T10:01:59.4975540Z +    client.update_maturity(&2000u64);
+2026-06-25T10:01:59.4975790Z  
+2026-06-25T10:01:59.4975965Z      assert_eq!(
+2026-06-25T10:01:59.4976174Z          env.events().all(),
+2026-06-25T10:01:59.4976592Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/admin.rs:953:
+2026-06-25T10:01:59.4977027Z          &None,
+2026-06-25T10:01:59.4977211Z          &None,
+2026-06-25T10:01:59.4977409Z      );
+2026-06-25T10:01:59.4977730Z -client.fund(&investor, &5_000i128); // status → 1 (funded)
+2026-06-25T10:01:59.4978162Z +    client.fund(&investor, &5_000i128); // status → 1 (funded)
+2026-06-25T10:01:59.4978482Z      client.update_maturity(&2000u64);
+2026-06-25T10:01:59.4978726Z  }
+2026-06-25T10:01:59.4978895Z  
+2026-06-25T10:01:59.4979251Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/admin.rs:989:
+2026-06-25T10:01:59.4979692Z          &None,
+2026-06-25T10:01:59.4979894Z          &None,
+2026-06-25T10:01:59.4980211Z      );
+2026-06-25T10:01:59.4980482Z -client.fund(&investor, &5_000i128); // status → 1
+2026-06-25T10:01:59.4980861Z +    client.fund(&investor, &5_000i128); // status → 1
+2026-06-25T10:01:59.4981204Z      client.settle(); // status → 2
+2026-06-25T10:01:59.4981689Z      client.update_maturity(&2000u64);
+2026-06-25T10:01:59.4981946Z  }
+2026-06-25T10:01:59.4982321Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/admin.rs:1036:
+2026-06-25T10:01:59.4982788Z          &None,
+2026-06-25T10:01:59.4982986Z          &None,
+2026-06-25T10:01:59.4983176Z      );
+2026-06-25T10:01:59.4983395Z -let updated = client.update_maturity(&0u64);
+2026-06-25T10:01:59.4983719Z +    let updated = client.update_maturity(&0u64);
+2026-06-25T10:01:59.4984028Z      assert_eq!(updated.maturity, 0u64);
+2026-06-25T10:01:59.4984310Z      assert_eq!(updated.status, 0);
+2026-06-25T10:01:59.4984563Z  }
+2026-06-25T10:01:59.4984943Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/admin.rs:1073:
+2026-06-25T10:01:59.4985388Z          &None,
+2026-06-25T10:01:59.4985581Z          &None,
+2026-06-25T10:01:59.4985769Z      );
+2026-06-25T10:01:59.4985971Z -client.fund(&investor, &5_000i128);
+2026-06-25T10:01:59.4986246Z +    client.fund(&investor, &5_000i128);
+2026-06-25T10:01:59.4986499Z  
+2026-06-25T10:01:59.4986794Z      // Advance ledger to exactly maturity — must succeed
+2026-06-25T10:01:59.4987147Z      env.ledger().with_mut(|l| l.timestamp = 5000);
+2026-06-25T10:01:59.4987628Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/admin.rs:1113:
+2026-06-25T10:01:59.4988060Z          &None,
+2026-06-25T10:01:59.4988250Z          &None,
+2026-06-25T10:01:59.4988439Z      );
+2026-06-25T10:01:59.4988638Z -client.fund(&investor, &5_000i128);
+2026-06-25T10:01:59.4988903Z +    client.fund(&investor, &5_000i128);
+2026-06-25T10:01:59.4989151Z  
+2026-06-25T10:01:59.4989913Z      // One second before maturity — must reject
+2026-06-25T10:01:59.4990242Z      env.ledger().with_mut(|l| l.timestamp = 4999);
+2026-06-25T10:01:59.4990708Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/admin.rs:1150:
+2026-06-25T10:01:59.4991134Z          &None,
+2026-06-25T10:01:59.4991536Z          &None,
+2026-06-25T10:01:59.4991729Z      );
+2026-06-25T10:01:59.4991927Z -client.update_maturity(&2000u64);
+2026-06-25T10:01:59.4992203Z +    client.update_maturity(&2000u64);
+2026-06-25T10:01:59.4992713Z      let updated = client.update_maturity(&3000u64);
+2026-06-25T10:01:59.4993030Z      assert_eq!(updated.maturity, 3000u64);
+2026-06-25T10:01:59.4993344Z      assert_eq!(client.get_escrow().maturity, 3000u64);
+2026-06-25T10:01:59.4993821Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/admin.rs:1327:
+2026-06-25T10:01:59.4994258Z          &None,
+2026-06-25T10:01:59.4994447Z          &None,
+2026-06-25T10:01:59.4994634Z      );
+2026-06-25T10:01:59.4994840Z -client.fund(&investor, &TARGET);
+2026-06-25T10:01:59.4995107Z +    client.fund(&investor, &TARGET);
+2026-06-25T10:01:59.4995364Z      client.settle();
+2026-06-25T10:01:59.4995604Z      token.stellar.mint(&escrow_id, &100i128);
+2026-06-25T10:01:59.4995892Z      env.mock_auths(&[]);
+2026-06-25T10:01:59.4996293Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/admin.rs:1524:
+2026-06-25T10:01:59.4996724Z          &None,
+2026-06-25T10:01:59.4996912Z          &None,
+2026-06-25T10:01:59.4997113Z      );
+2026-06-25T10:01:59.4997318Z -token.stellar.mint(&investor, &TARGET);
+2026-06-25T10:01:59.4997618Z +    token.stellar.mint(&investor, &TARGET);
+2026-06-25T10:01:59.4997908Z      token.stellar.approve(
+2026-06-25T10:01:59.4998142Z          &investor,
+2026-06-25T10:01:59.4998346Z          &escrow_id,
+2026-06-25T10:01:59.5004011Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/cap_validation.rs:32:
+2026-06-25T10:01:59.5004830Z          &None,
+2026-06-25T10:01:59.5005125Z          &None,
+2026-06-25T10:01:59.5005412Z      );
+2026-06-25T10:01:59.5005705Z -// Verify initial state
+2026-06-25T10:01:59.5006073Z +    // Verify initial state
+2026-06-25T10:01:59.5006503Z      assert_eq!(client.get_unique_funder_count(), 0);
+2026-06-25T10:01:59.5007099Z      assert_eq!(client.get_max_unique_investors_cap(), Some(3u32));
+2026-06-25T10:01:59.5007619Z  
+2026-06-25T10:01:59.5008276Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/cap_validation.rs:85:
+2026-06-25T10:01:59.5009074Z          &None,
+2026-06-25T10:01:59.5009385Z          &None,
+2026-06-25T10:01:59.5009675Z      );
+2026-06-25T10:01:59.5010291Z -// Add two investors — reaches the investor cap but NOT the funding target.
+2026-06-25T10:01:59.5011180Z +    // Add two investors — reaches the investor cap but NOT the funding target.
+2026-06-25T10:01:59.5017072Z      let inv1 = Address::generate(&env);
+2026-06-25T10:01:59.5017587Z      let inv2 = Address::generate(&env);
+2026-06-25T10:01:59.5018050Z      client.fund(&inv1, &50_000_000_000i128);
+2026-06-25T10:01:59.5018882Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/cap_validation.rs:125:
+2026-06-25T10:01:59.5019673Z          &None,
+2026-06-25T10:01:59.5019966Z          &None,
+2026-06-25T10:01:59.5020248Z      );
+2026-06-25T10:01:59.5020570Z -let investor = Address::generate(&env);
+2026-06-25T10:01:59.5021031Z +    let investor = Address::generate(&env);
+2026-06-25T10:01:59.5021634Z  
+2026-06-25T10:01:59.5021931Z      // First fund should succeed
+2026-06-25T10:01:59.5022360Z      client.fund(&investor, &30_000_000_000i128);
+2026-06-25T10:01:59.5023172Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/cap_validation.rs:168:
+2026-06-25T10:01:59.5023943Z          &None,
+2026-06-25T10:01:59.5024232Z          &None,
+2026-06-25T10:01:59.5024511Z      );
+2026-06-25T10:01:59.5024893Z -assert_eq!(client.get_max_unique_investors_cap(), None);
+2026-06-25T10:01:59.5025725Z +    assert_eq!(client.get_max_unique_investors_cap(), None);
+2026-06-25T10:01:59.5026224Z  
+2026-06-25T10:01:59.5026609Z      // Should be able to add many investors when no cap is set
+2026-06-25T10:01:59.5027107Z      for i in 0..5 {
+2026-06-25T10:01:59.5027804Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/cap_validation.rs:208:
+2026-06-25T10:01:59.5028581Z          &None,
+2026-06-25T10:01:59.5028865Z          &None,
+2026-06-25T10:01:59.5029153Z      );
+2026-06-25T10:01:59.5029545Z -let inv1 = Address::generate(&env);
+2026-06-25T10:01:59.5029831Z +    let inv1 = Address::generate(&env);
+2026-06-25T10:01:59.5030113Z      client.fund(&inv1, &30_000_000_000i128);
+2026-06-25T10:01:59.5030463Z      assert_eq!(client.get_contribution(&inv1), 30_000_000_000i128);
+2026-06-25T10:01:59.5030793Z  
+2026-06-25T10:01:59.5031204Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/cap_validation.rs:273:
+2026-06-25T10:01:59.5032197Z          &None,
+2026-06-25T10:01:59.5032520Z          &None,
+2026-06-25T10:01:59.5032809Z      );
+2026-06-25T10:01:59.5033191Z -client.fund(&Address::generate(&env), &(floor - 1));
+2026-06-25T10:01:59.5033781Z +    client.fund(&Address::generate(&env), &(floor - 1));
+2026-06-25T10:01:59.5034262Z  }
+2026-06-25T10:01:59.5034524Z  
+2026-06-25T10:01:59.5034787Z  #[test]
+2026-06-25T10:01:59.5035445Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/cap_validation.rs:304:
+2026-06-25T10:01:59.5036211Z          &None,
+2026-06-25T10:01:59.5036511Z          &None,
+2026-06-25T10:01:59.5036768Z      );
+2026-06-25T10:01:59.5036964Z -client.fund(&inv, &floor);
+2026-06-25T10:01:59.5037204Z +    client.fund(&inv, &floor);
+2026-06-25T10:01:59.5037486Z      assert_eq!(client.get_contribution(&inv), floor);
+2026-06-25T10:01:59.5037815Z      assert_eq!(client.get_unique_funder_count(), 1);
+2026-06-25T10:01:59.5038095Z  }
+2026-06-25T10:01:59.5038496Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/cap_validation.rs:338:
+2026-06-25T10:01:59.5038966Z          &None,
+2026-06-25T10:01:59.5039154Z          &None,
+2026-06-25T10:01:59.5039346Z      );
+2026-06-25T10:01:59.5039538Z -client.fund(&investor, &floor);
+2026-06-25T10:01:59.5039795Z +    client.fund(&investor, &floor);
+2026-06-25T10:01:59.5040070Z      client.fund(&investor, &(floor - 1));
+2026-06-25T10:01:59.5040327Z  }
+2026-06-25T10:01:59.5040497Z  
+2026-06-25T10:01:59.5040888Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/cap_validation.rs:370:
+2026-06-25T10:01:59.5041567Z          &None,
+2026-06-25T10:01:59.5041756Z          &None,
+2026-06-25T10:01:59.5041937Z      );
+2026-06-25T10:01:59.5042129Z -client.fund(&inv, &30_000_000_000i128);
+2026-06-25T10:01:59.5042406Z +    client.fund(&inv, &30_000_000_000i128);
+2026-06-25T10:01:59.5042676Z      client.fund(&inv, &20_000_000_000i128);
+2026-06-25T10:01:59.5042970Z      assert_eq!(client.get_contribution(&inv), cap);
+2026-06-25T10:01:59.5043302Z      assert_eq!(client.get_unique_funder_count(), 1);
+2026-06-25T10:01:59.5043790Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/cap_validation.rs:405:
+2026-06-25T10:01:59.5044242Z          &None,
+2026-06-25T10:01:59.5044426Z          &None,
+2026-06-25T10:01:59.5044605Z      );
+2026-06-25T10:01:59.5044794Z -client.fund(&inv, &30_000_000_000i128);
+2026-06-25T10:01:59.5045054Z +    client.fund(&inv, &30_000_000_000i128);
+2026-06-25T10:01:59.5045315Z      client.fund(&inv, &20_000_000_001i128);
+2026-06-25T10:01:59.5045562Z  }
+2026-06-25T10:01:59.5045734Z  
+2026-06-25T10:01:59.5046129Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/cap_validation.rs:435:
+2026-06-25T10:01:59.5046597Z          &None,
+2026-06-25T10:01:59.5046787Z          &None,
+2026-06-25T10:01:59.5046973Z      );
+2026-06-25T10:01:59.5047228Z -client.fund(&Address::generate(&env), &10_000_000_000i128);
+2026-06-25T10:01:59.5047621Z      client.fund(&Address::generate(&env), &10_000_000_000i128);
+2026-06-25T10:01:59.5048175Z      client.fund(&Address::generate(&env), &10_000_000_000i128);
+2026-06-25T10:01:59.5048555Z +    client.fund(&Address::generate(&env), &10_000_000_000i128);
+2026-06-25T10:01:59.5048902Z      assert_eq!(client.get_unique_funder_count(), 3);
+2026-06-25T10:01:59.5049200Z  }
+2026-06-25T10:01:59.5049374Z  
+2026-06-25T10:01:59.5049788Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/cap_validation.rs:468:
+2026-06-25T10:01:59.5050266Z          &None,
+2026-06-25T10:01:59.5050581Z          &None,
+2026-06-25T10:01:59.5050773Z      );
+2026-06-25T10:01:59.5051038Z -client.fund(&Address::generate(&env), &10_000_000_000i128);
+2026-06-25T10:01:59.5051737Z      client.fund(&Address::generate(&env), &10_000_000_000i128);
+2026-06-25T10:01:59.5052111Z      client.fund(&Address::generate(&env), &10_000_000_000i128);
+2026-06-25T10:01:59.5052470Z +    client.fund(&Address::generate(&env), &10_000_000_000i128);
+2026-06-25T10:01:59.5052844Z      client.fund(&Address::generate(&env), &1_000_000_000i128);
+2026-06-25T10:01:59.5053159Z  }
+2026-06-25T10:01:59.5053334Z  
+2026-06-25T10:01:59.5053727Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/cap_validation.rs:501:
+2026-06-25T10:01:59.5054196Z          &None,
+2026-06-25T10:01:59.5054392Z          &None,
+2026-06-25T10:01:59.5054580Z      );
+2026-06-25T10:01:59.5054779Z -client.fund(&inv, &10_000_000_000i128);
+2026-06-25T10:01:59.5055089Z      client.fund(&inv, &10_000_000_000i128);
+2026-06-25T10:01:59.5055371Z +    client.fund(&inv, &10_000_000_000i128);
+2026-06-25T10:01:59.5055703Z      assert_eq!(client.get_contribution(&inv), 20_000_000_000i128);
+2026-06-25T10:01:59.5056071Z      assert_eq!(client.get_unique_funder_count(), 1);
+2026-06-25T10:01:59.5056364Z  }
+2026-06-25T10:01:59.5056753Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/cap_validation.rs:628:
+2026-06-25T10:01:59.5057214Z          &None,
+2026-06-25T10:01:59.5057399Z          &None,
+2026-06-25T10:01:59.5057591Z      );
+2026-06-25T10:01:59.5057818Z -assert_eq!(client.get_unique_funder_count(), 0);
+2026-06-25T10:01:59.5058146Z +    assert_eq!(client.get_unique_funder_count(), 0);
+2026-06-25T10:01:59.5058423Z  
+2026-06-25T10:01:59.5058638Z      // First investor uses fund_with_commitment
+2026-06-25T10:01:59.5058946Z      let inv1 = Address::generate(&env);
+2026-06-25T10:01:59.5059419Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/cap_validation.rs:673:
+2026-06-25T10:01:59.5059876Z          &None,
+2026-06-25T10:01:59.5060072Z          &None,
+2026-06-25T10:01:59.5060256Z      );
+2026-06-25T10:01:59.5060457Z -let inv1 = Address::generate(&env);
+2026-06-25T10:01:59.5060746Z +    let inv1 = Address::generate(&env);
+2026-06-25T10:01:59.5061020Z      let inv2 = Address::generate(&env);
+2026-06-25T10:01:59.5061466Z      client.fund(&inv1, &20_000_000_000i128);
+2026-06-25T10:01:59.5061780Z      client.fund(&inv2, &20_000_000_000i128);
+2026-06-25T10:01:59.5062263Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/cap_validation.rs:711:
+2026-06-25T10:01:59.5062725Z          &None,
+2026-06-25T10:01:59.5062915Z          &None,
+2026-06-25T10:01:59.5063103Z      );
+2026-06-25T10:01:59.5063359Z -client.fund(&Address::generate(&env), &20_000_000_000i128);
+2026-06-25T10:01:59.5063737Z      client.fund(&Address::generate(&env), &20_000_000_000i128);
+2026-06-25T10:01:59.5064109Z +    client.fund(&Address::generate(&env), &20_000_000_000i128);
+2026-06-25T10:01:59.5064446Z      client.lower_max_unique_investors(&2u32);
+2026-06-25T10:01:59.5064724Z  
+2026-06-25T10:01:59.5064963Z      client.fund(&Address::generate(&env), &1_000_000_000i128);
+2026-06-25T10:01:59.5065486Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/cap_validation.rs:744:
+2026-06-25T10:01:59.5065940Z          &None,
+2026-06-25T10:01:59.5066126Z          &None,
+2026-06-25T10:01:59.5066310Z      );
+2026-06-25T10:01:59.5066509Z -let inv1 = Address::generate(&env);
+2026-06-25T10:01:59.5066919Z +    let inv1 = Address::generate(&env);
+2026-06-25T10:01:59.5067197Z      let inv2 = Address::generate(&env);
+2026-06-25T10:01:59.5067465Z      client.fund(&inv1, &30_000_000_000i128);
+2026-06-25T10:01:59.5067735Z      client.fund(&inv2, &30_000_000_000i128);
+2026-06-25T10:01:59.5068191Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/cap_validation.rs:782:
+2026-06-25T10:01:59.5068646Z          &None,
+2026-06-25T10:01:59.5068829Z          &None,
+2026-06-25T10:01:59.5069130Z      );
+2026-06-25T10:01:59.5069340Z -client.lower_max_unique_investors(&4u32);
+2026-06-25T10:01:59.5069638Z +    client.lower_max_unique_investors(&4u32);
+2026-06-25T10:01:59.5069909Z  }
+2026-06-25T10:01:59.5070081Z  
+2026-06-25T10:01:59.5070256Z  #[test]
+2026-06-25T10:01:59.5070638Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/cap_validation.rs:812:
+2026-06-25T10:01:59.5071085Z          &None,
+2026-06-25T10:01:59.5071431Z          &None,
+2026-06-25T10:01:59.5071711Z      );
+2026-06-25T10:01:59.5071964Z -client.fund(&Address::generate(&env), &10_000_000_000i128);
+2026-06-25T10:01:59.5072406Z      client.fund(&Address::generate(&env), &10_000_000_000i128);
+2026-06-25T10:01:59.5072781Z      client.fund(&Address::generate(&env), &10_000_000_000i128);
+2026-06-25T10:01:59.5073142Z +    client.fund(&Address::generate(&env), &10_000_000_000i128);
+2026-06-25T10:01:59.5073469Z      client.lower_max_unique_investors(&2u32);
+2026-06-25T10:01:59.5073745Z  }
+2026-06-25T10:01:59.5073916Z  
+2026-06-25T10:01:59.5074305Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/cap_validation.rs:845:
+2026-06-25T10:01:59.5074788Z          &None,
+2026-06-25T10:01:59.5074982Z          &None,
+2026-06-25T10:01:59.5075173Z      );
+2026-06-25T10:01:59.5075426Z -client.fund(&Address::generate(&env), &100_000_000_000i128);
+2026-06-25T10:01:59.5075815Z +    client.fund(&Address::generate(&env), &100_000_000_000i128);
+2026-06-25T10:01:59.5076192Z      assert_eq!(client.get_escrow().status, 1);
+2026-06-25T10:01:59.5076506Z      client.lower_max_unique_investors(&2u32);
+2026-06-25T10:01:59.5076772Z  }
+2026-06-25T10:01:59.5077179Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/cap_validation.rs:877:
+2026-06-25T10:01:59.5077638Z          &None,
+2026-06-25T10:01:59.5077828Z          &None,
+2026-06-25T10:01:59.5078012Z      );
+2026-06-25T10:01:59.5078221Z -client.lower_max_unique_investors(&10u32);
+2026-06-25T10:01:59.5078527Z +    client.lower_max_unique_investors(&10u32);
+2026-06-25T10:01:59.5078792Z  }
+2026-06-25T10:01:59.5078965Z  
+2026-06-25T10:01:59.5079141Z  #[test]
+2026-06-25T10:01:59.5079535Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/cap_validation.rs:906:
+2026-06-25T10:01:59.5080000Z          &None,
+2026-06-25T10:01:59.5080186Z          &None,
+2026-06-25T10:01:59.5080372Z      );
+2026-06-25T10:01:59.5080683Z -client.lower_max_unique_investors(&3u32);
+2026-06-25T10:01:59.5081534Z +    client.lower_max_unique_investors(&3u32);
+2026-06-25T10:01:59.5096485Z      assert!(
+2026-06-25T10:01:59.5096905Z          env.auths().iter().any(|(addr, _)| *addr == admin),
+2026-06-25T10:01:59.5097431Z          "admin auth was not recorded for lower_max_unique_investors"
+2026-06-25T10:01:59.5098014Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/cap_validation.rs:940:
+2026-06-25T10:01:59.5098513Z          &None,
+2026-06-25T10:01:59.5098722Z          &None,
+2026-06-25T10:01:59.5098939Z      );
+2026-06-25T10:01:59.5099139Z -env.mock_auths(&[]);
+2026-06-25T10:01:59.5099370Z +    env.mock_auths(&[]);
+2026-06-25T10:01:59.5099633Z      client.lower_max_unique_investors(&3u32);
+2026-06-25T10:01:59.5099910Z  }
+2026-06-25T10:01:59.5100079Z  
+2026-06-25T10:01:59.5100494Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/cap_validation.rs:973:
+2026-06-25T10:01:59.5100984Z          &None,
+2026-06-25T10:01:59.5101174Z          &None,
+2026-06-25T10:01:59.5101744Z      );
+2026-06-25T10:01:59.5102026Z -client.fund(&Address::generate(&env), &10_000_000_000i128);
+2026-06-25T10:01:59.5102417Z +    client.fund(&Address::generate(&env), &10_000_000_000i128);
+2026-06-25T10:01:59.5102762Z      client.lower_max_unique_investors(&3u32);
+2026-06-25T10:01:59.5103028Z  
+2026-06-25T10:01:59.5103200Z      assert_eq!(
+2026-06-25T10:01:59.5149805Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/external_calls.rs:229:
+2026-06-25T10:01:59.5150767Z          &None,
+2026-06-25T10:01:59.5150968Z          &None,
+2026-06-25T10:01:59.5151156Z      );
+2026-06-25T10:01:59.5151596Z -// Mint tokens into the contract to simulate on-chain custody
+2026-06-25T10:01:59.5152004Z +    // Mint tokens into the contract to simulate on-chain custody
+2026-06-25T10:01:59.5152395Z      token.stellar.mint(&client.address, &fund_amount);
+2026-06-25T10:01:59.5152713Z      client.fund(investor, &fund_amount);
+2026-06-25T10:01:59.5152998Z      client.cancel_funding();
+2026-06-25T10:01:59.5153459Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/external_calls.rs:309:
+2026-06-25T10:01:59.5153943Z          &None,
+2026-06-25T10:01:59.5154135Z          &None,
+2026-06-25T10:01:59.5154332Z      );
+2026-06-25T10:01:59.5154569Z -// Mint 1001 into contract: 500 for A, 500 for B, 1 dust
+2026-06-25T10:01:59.5154912Z +    // Mint 1001 into contract: 500 for A, 500 for B, 1 dust
+2026-06-25T10:01:59.5155253Z      token.stellar.mint(&client.address, &1_001i128);
+2026-06-25T10:01:59.5155569Z      client.fund(&investor_a, &500i128);
+2026-06-25T10:01:59.5155843Z      client.fund(&investor_b, &500i128);
+2026-06-25T10:01:59.5156303Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/external_calls.rs:356:
+2026-06-25T10:01:59.5156761Z          &None,
+2026-06-25T10:01:59.5156941Z          &None,
+2026-06-25T10:01:59.5157119Z      );
+2026-06-25T10:01:59.5157351Z -token.stellar.mint(&client.address, &1_001i128);
+2026-06-25T10:01:59.5157686Z +    token.stellar.mint(&client.address, &1_001i128);
+2026-06-25T10:01:59.5158023Z      client.fund(&investor_a, &500i128);
+2026-06-25T10:01:59.5158277Z      client.fund(&investor_b, &500i128);
+2026-06-25T10:01:59.5158533Z      client.cancel_funding();
+2026-06-25T10:01:59.5158968Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/external_calls.rs:394:
+2026-06-25T10:01:59.5159420Z          &None,
+2026-06-25T10:01:59.5159602Z          &None,
+2026-06-25T10:01:59.5159787Z      );
+2026-06-25T10:01:59.5159971Z -client.cancel_funding();
+2026-06-25T10:01:59.5160204Z +    client.cancel_funding();
+2026-06-25T10:01:59.5160433Z  
+2026-06-25T10:01:59.5160623Z      // Stray airdrop of 50 tokens
+2026-06-25T10:01:59.5160906Z      token.stellar.mint(&client.address, &50i128);
+2026-06-25T10:01:59.5161609Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/external_calls.rs:434:
+2026-06-25T10:01:59.5162094Z          &None,
+2026-06-25T10:01:59.5162294Z          &None,
+2026-06-25T10:01:59.5162481Z      );
+2026-06-25T10:01:59.5162709Z -token.stellar.mint(&client.address, &900i128);
+2026-06-25T10:01:59.5163039Z +    token.stellar.mint(&client.address, &900i128);
+2026-06-25T10:01:59.5163340Z      client.fund(&inv_a, &300i128);
+2026-06-25T10:01:59.5163593Z      client.fund(&inv_b, &300i128);
+2026-06-25T10:01:59.5163831Z      client.fund(&inv_c, &300i128);
+2026-06-25T10:01:59.5512304Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:46:
+2026-06-25T10:01:59.5513113Z          &None,
+2026-06-25T10:01:59.5513416Z          &None,
+2026-06-25T10:01:59.5513699Z      );
+2026-06-25T10:01:59.5514030Z -let funded = client.fund(&investor, &TARGET);
+2026-06-25T10:01:59.5514613Z +    let funded = client.fund(&investor, &TARGET);
+2026-06-25T10:01:59.5515109Z      assert_eq!(funded.funded_amount, TARGET);
+2026-06-25T10:01:59.5515553Z      assert_eq!(funded.status, 1);
+2026-06-25T10:01:59.5516380Z      let settled = client.settle();
+2026-06-25T10:01:59.5517098Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:76:
+2026-06-25T10:01:59.5517814Z          &None,
+2026-06-25T10:01:59.5518108Z          &None,
+2026-06-25T10:01:59.5518398Z      );
+2026-06-25T10:01:59.5518645Z -let partial = client.fund(&investor, &(TARGET / 2));
+2026-06-25T10:01:59.5519018Z +    let partial = client.fund(&investor, &(TARGET / 2));
+2026-06-25T10:01:59.5519351Z      assert_eq!(partial.status, 0);
+2026-06-25T10:01:59.5519815Z      assert_eq!(partial.funded_amount, TARGET / 2);
+2026-06-25T10:01:59.5520151Z      let full = client.fund(&investor, &(TARGET / 2));
+2026-06-25T10:01:59.5520634Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:141:
+2026-06-25T10:01:59.5521091Z          &None,
+2026-06-25T10:01:59.5521430Z          &None,
+2026-06-25T10:01:59.5521623Z      );
+2026-06-25T10:01:59.5521836Z -client.fund(&investor, &(30_000_000_000i128));
+2026-06-25T10:01:59.5522163Z +    client.fund(&investor, &(30_000_000_000i128));
+2026-06-25T10:01:59.5522503Z      let contribution = client.get_contribution(&investor);
+2026-06-25T10:01:59.5522844Z      assert_eq!(contribution, 30_000_000_000i128);
+2026-06-25T10:01:59.5523121Z  }
+2026-06-25T10:01:59.5523490Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:180:
+2026-06-25T10:01:59.5523929Z          &None,
+2026-06-25T10:01:59.5524118Z          &None,
+2026-06-25T10:01:59.5524302Z      );
+2026-06-25T10:01:59.5524522Z -client.fund(&investor, &(20_000_000_000i128));
+2026-06-25T10:01:59.5524827Z +    client.fund(&investor, &(20_000_000_000i128));
+2026-06-25T10:01:59.5525126Z      client.fund(&investor, &(30_000_000_000i128));
+2026-06-25T10:01:59.5525506Z      assert_eq!(client.get_contribution(&investor), 50_000_000_000i128);
+2026-06-25T10:01:59.5525855Z  }
+2026-06-25T10:01:59.5526232Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:210:
+2026-06-25T10:01:59.5526676Z          &None,
+2026-06-25T10:01:59.5526862Z          &None,
+2026-06-25T10:01:59.5527049Z      );
+2026-06-25T10:01:59.5527303Z -client.fund(&investor_a, &(i128::MAX - 1));
+2026-06-25T10:01:59.5527611Z +    client.fund(&investor_a, &(i128::MAX - 1));
+2026-06-25T10:01:59.5527901Z      client.fund(&investor_b, &2i128);
+2026-06-25T10:01:59.5528152Z  }
+2026-06-25T10:01:59.5528323Z  
+2026-06-25T10:01:59.5528687Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:237:
+2026-06-25T10:01:59.5529132Z          &None,
+2026-06-25T10:01:59.5529325Z          &None,
+2026-06-25T10:01:59.5529509Z      );
+2026-06-25T10:01:59.5529716Z -client.fund(&investor, &(i128::MAX - 1));
+2026-06-25T10:01:59.5530011Z +    client.fund(&investor, &(i128::MAX - 1));
+2026-06-25T10:01:59.5530300Z      let before = client.get_escrow();
+2026-06-25T10:01:59.5530547Z  
+2026-06-25T10:01:59.5530850Z      let overflowed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+2026-06-25T10:01:59.5531562Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:276:
+2026-06-25T10:01:59.5532016Z          &None,
+2026-06-25T10:01:59.5532206Z          &None,
+2026-06-25T10:01:59.5532391Z      );
+2026-06-25T10:01:59.5532603Z -client.fund(&investor_a, &(i128::MAX - 1));
+2026-06-25T10:01:59.5532910Z +    client.fund(&investor_a, &(i128::MAX - 1));
+2026-06-25T10:01:59.5533250Z      client.fund_with_commitment(&investor_b, &2i128, &0u64);
+2026-06-25T10:01:59.5533559Z  }
+2026-06-25T10:01:59.5533738Z  
+2026-06-25T10:01:59.5534095Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:304:
+2026-06-25T10:01:59.5534522Z          &None,
+2026-06-25T10:01:59.5534707Z          &None,
+2026-06-25T10:01:59.5534890Z      );
+2026-06-25T10:01:59.5535092Z -client.fund(&investor_a, &(i128::MAX - 1));
+2026-06-25T10:01:59.5535383Z +    client.fund(&investor_a, &(i128::MAX - 1));
+2026-06-25T10:01:59.5535665Z      let before = client.get_escrow();
+2026-06-25T10:01:59.5536113Z  
+2026-06-25T10:01:59.5536403Z      let overflowed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+2026-06-25T10:01:59.5536940Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:346:
+2026-06-25T10:01:59.5537369Z          &None,
+2026-06-25T10:01:59.5537558Z          &None,
+2026-06-25T10:01:59.5537742Z      );
+2026-06-25T10:01:59.5537939Z -client.fund(&investor, &500i128);
+2026-06-25T10:01:59.5538209Z +    client.fund(&investor, &500i128);
+2026-06-25T10:01:59.5538573Z  
+2026-06-25T10:01:59.5538780Z      env.as_contract(&contract_id, || {
+2026-06-25T10:01:59.5539052Z          assert_eq!(
+2026-06-25T10:01:59.5539464Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:400:
+2026-06-25T10:01:59.5539913Z          &None,
+2026-06-25T10:01:59.5540112Z          &None,
+2026-06-25T10:01:59.5540307Z      );
+2026-06-25T10:01:59.5540514Z -env.as_contract(&contract_id, || {
+2026-06-25T10:01:59.5540799Z +    env.as_contract(&contract_id, || {
+2026-06-25T10:01:59.5541190Z          // Force the contribution near i128::MAX while keeping funded_amount small.
+2026-06-25T10:01:59.5541831Z          // `fund` must still trap on contribution overflow even if funded_amount would not.
+2026-06-25T10:01:59.5542255Z          env.storage().persistent().set(
+2026-06-25T10:01:59.5542720Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:446:
+2026-06-25T10:01:59.5543174Z          &None,
+2026-06-25T10:01:59.5543379Z          &None,
+2026-06-25T10:01:59.5543570Z      );
+2026-06-25T10:01:59.5543771Z -env.as_contract(&contract_id, || {
+2026-06-25T10:01:59.5544045Z +    env.as_contract(&contract_id, || {
+2026-06-25T10:01:59.5544316Z          env.storage().persistent().set(
+2026-06-25T10:01:59.5544638Z              &DataKey::InvestorContribution(investor.clone()),
+2026-06-25T10:01:59.5544957Z              &(i128::MAX - 1),
+2026-06-25T10:01:59.5545374Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:494:
+2026-06-25T10:01:59.5545809Z          &None,
+2026-06-25T10:01:59.5546001Z          &None,
+2026-06-25T10:01:59.5546186Z      );
+2026-06-25T10:01:59.5546391Z -client.fund(&inv_a, &(20_000_000_000i128));
+2026-06-25T10:01:59.5546685Z +    client.fund(&inv_a, &(20_000_000_000i128));
+2026-06-25T10:01:59.5546982Z      client.fund(&inv_b, &(50_000_000_000i128));
+2026-06-25T10:01:59.5547260Z      client.fund(&inv_c, &(30_000_000_000i128));
+2026-06-25T10:01:59.5547612Z      assert_eq!(client.get_contribution(&inv_a), 20_000_000_000i128);
+2026-06-25T10:01:59.5548128Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:531:
+2026-06-25T10:01:59.5548566Z          &None,
+2026-06-25T10:01:59.5548754Z          &None,
+2026-06-25T10:01:59.5548940Z      );
+2026-06-25T10:01:59.5549140Z -client.fund(&inv_a, &(20_000_000_000i128));
+2026-06-25T10:01:59.5549418Z +    client.fund(&inv_a, &(20_000_000_000i128));
+2026-06-25T10:01:59.5549702Z      client.fund(&inv_b, &(50_000_000_000i128));
+2026-06-25T10:01:59.5549982Z      client.fund(&inv_c, &(30_000_000_000i128));
+2026-06-25T10:01:59.5550271Z      let sum = client.get_contribution(&inv_a)
+2026-06-25T10:01:59.5550719Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:563:
+2026-06-25T10:01:59.5551153Z          &None,
+2026-06-25T10:01:59.5551488Z          &None,
+2026-06-25T10:01:59.5551780Z      );
+2026-06-25T10:01:59.5552008Z -client.fund(&investor, &(10_000_000_000i128));
+2026-06-25T10:01:59.5552328Z +    client.fund(&investor, &(10_000_000_000i128));
+2026-06-25T10:01:59.5552606Z  }
+2026-06-25T10:01:59.5552786Z  
+2026-06-25T10:01:59.5552978Z  #[test]
+2026-06-25T10:01:59.5553343Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:589:
+2026-06-25T10:01:59.5553770Z          &None,
+2026-06-25T10:01:59.5553954Z          &None,
+2026-06-25T10:01:59.5554138Z      );
+2026-06-25T10:01:59.5554499Z -client.fund(&investor, &TARGET);
+2026-06-25T10:01:59.5554772Z +    client.fund(&investor, &TARGET);
+2026-06-25T10:01:59.5555021Z  }
+2026-06-25T10:01:59.5555198Z  
+2026-06-25T10:01:59.5555373Z  #[test]
+2026-06-25T10:01:59.5555731Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:615:
+2026-06-25T10:01:59.5556164Z          &None,
+2026-06-25T10:01:59.5556351Z          &None,
+2026-06-25T10:01:59.5556540Z      );
+2026-06-25T10:01:59.5556749Z -client.fund(&investor, &(150_000_000_000i128));
+2026-06-25T10:01:59.5557180Z +    client.fund(&investor, &(150_000_000_000i128));
+2026-06-25T10:01:59.5557494Z      assert_eq!(client.get_escrow().status, 1);
+2026-06-25T10:01:59.5557771Z  }
+2026-06-25T10:01:59.5557945Z  
+2026-06-25T10:01:59.5558298Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:642:
+2026-06-25T10:01:59.5558727Z          &None,
+2026-06-25T10:01:59.5558915Z          &None,
+2026-06-25T10:01:59.5559102Z      );
+2026-06-25T10:01:59.5559309Z -client.fund(&investor, &(TARGET / 2));
+2026-06-25T10:01:59.5559590Z      client.fund(&investor, &(TARGET / 2));
+2026-06-25T10:01:59.5559874Z +    client.fund(&investor, &(TARGET / 2));
+2026-06-25T10:01:59.5560155Z      assert_eq!(client.get_escrow().status, 1);
+2026-06-25T10:01:59.5560422Z  }
+2026-06-25T10:01:59.5560598Z  
+2026-06-25T10:01:59.5560953Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:674:
+2026-06-25T10:01:59.5561543Z          &None,
+2026-06-25T10:01:59.5561741Z          &None,
+2026-06-25T10:01:59.5561927Z      );
+2026-06-25T10:01:59.5562170Z -assert_eq!(client.get_funding_close_snapshot(), None);
+2026-06-25T10:01:59.5562545Z +    assert_eq!(client.get_funding_close_snapshot(), None);
+2026-06-25T10:01:59.5562890Z      client.fund(&inv, &(TARGET + 50_000_000_000i128));
+2026-06-25T10:01:59.5563263Z      let snap = client.get_funding_close_snapshot().expect("snapshot");
+2026-06-25T10:01:59.5563683Z      assert_eq!(snap.total_principal, TARGET + 50_000_000_000i128);
+2026-06-25T10:01:59.5564183Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:711:
+2026-06-25T10:01:59.5564616Z          &None,
+2026-06-25T10:01:59.5564803Z          &None,
+2026-06-25T10:01:59.5564986Z      );
+2026-06-25T10:01:59.5565182Z -client.fund(&a, &(TARGET / 2));
+2026-06-25T10:01:59.5565442Z +    client.fund(&a, &(TARGET / 2));
+2026-06-25T10:01:59.5565748Z      assert_eq!(client.get_funding_close_snapshot(), None);
+2026-06-25T10:01:59.5566062Z      client.fund(&b, &(TARGET / 2));
+2026-06-25T10:01:59.5566350Z      let s1 = client.get_funding_close_snapshot().unwrap();
+2026-06-25T10:01:59.5566835Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:748:
+2026-06-25T10:01:59.5567269Z          &None,
+2026-06-25T10:01:59.5567468Z          &None,
+2026-06-25T10:01:59.5567657Z      );
+2026-06-25T10:01:59.5567858Z -client.fund(&a, &(20_000_000_000i128));
+2026-06-25T10:01:59.5568138Z +    client.fund(&a, &(20_000_000_000i128));
+2026-06-25T10:01:59.5568416Z      client.fund(&b, &(80_000_000_000i128));
+2026-06-25T10:01:59.5568737Z      let snap = client.get_funding_close_snapshot().unwrap();
+2026-06-25T10:01:59.5569080Z      assert_eq!(snap.total_principal, TARGET);
+2026-06-25T10:01:59.5569536Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:793:
+2026-06-25T10:01:59.5569969Z          &None,
+2026-06-25T10:01:59.5570159Z          &None,
+2026-06-25T10:01:59.5570356Z      );
+2026-06-25T10:01:59.5570611Z -client.fund_with_commitment(&inv, &5_000i128, &200u64);
+2026-06-25T10:01:59.5570978Z +    client.fund_with_commitment(&inv, &5_000i128, &200u64);
+2026-06-25T10:01:59.5571460Z      assert_eq!(client.get_investor_yield_bps(&inv), 900);
+2026-06-25T10:01:59.5571845Z      assert_eq!(client.get_investor_claim_not_before(&inv), 200);
+2026-06-25T10:01:59.5572182Z      client.fund(&inv, &5_000i128);
+2026-06-25T10:01:59.5572751Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:834:
+2026-06-25T10:01:59.5573203Z          &None,
+2026-06-25T10:01:59.5573400Z          &None,
+2026-06-25T10:01:59.5573592Z      );
+2026-06-25T10:01:59.5573851Z -client.fund_with_commitment(&i_short, &10_000i128, &40u64);
+2026-06-25T10:01:59.5574241Z +    client.fund_with_commitment(&i_short, &10_000i128, &40u64);
+2026-06-25T10:01:59.5574625Z      assert_eq!(client.get_investor_yield_bps(&i_short), 800);
+2026-06-25T10:01:59.5575004Z      client.fund_with_commitment(&i_long, &10_000i128, &50u64);
+2026-06-25T10:01:59.5575499Z      assert_eq!(client.get_investor_yield_bps(&i_long), 850);
+2026-06-25T10:01:59.5575992Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:873:
+2026-06-25T10:01:59.5576461Z          &None,
+2026-06-25T10:01:59.5576653Z          &None,
+2026-06-25T10:01:59.5576838Z      );
+2026-06-25T10:01:59.5577074Z -client.fund_with_commitment(&inv, &5_000i128, &10u64);
+2026-06-25T10:01:59.5577439Z      client.fund_with_commitment(&inv, &5_000i128, &10u64);
+2026-06-25T10:01:59.5577796Z +    client.fund_with_commitment(&inv, &5_000i128, &10u64);
+2026-06-25T10:01:59.5578087Z  }
+2026-06-25T10:01:59.5578267Z  
+2026-06-25T10:01:59.5578444Z  #[test]
+2026-06-25T10:01:59.5578833Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:905:
+2026-06-25T10:01:59.5579272Z          &None,
+2026-06-25T10:01:59.5579460Z          &None,
+2026-06-25T10:01:59.5579648Z      );
+2026-06-25T10:01:59.5579850Z -client.fund(&inv, &5_000i128);
+2026-06-25T10:01:59.5580100Z +    client.fund(&inv, &5_000i128);
+2026-06-25T10:01:59.5580400Z      client.fund_with_commitment(&inv, &5_000i128, &10u64);
+2026-06-25T10:01:59.5580690Z  }
+2026-06-25T10:01:59.5580874Z  
+2026-06-25T10:01:59.5581232Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:946:
+2026-06-25T10:01:59.5581791Z          &None,
+2026-06-25T10:01:59.5581987Z          &None,
+2026-06-25T10:01:59.5582175Z      );
+2026-06-25T10:01:59.5582392Z -let inv_base = Address::generate(&env);
+2026-06-25T10:01:59.5582686Z +    let inv_base = Address::generate(&env);
+2026-06-25T10:01:59.5582986Z      let inv_tier1 = Address::generate(&env);
+2026-06-25T10:01:59.5583281Z      let inv_tier2 = Address::generate(&env);
+2026-06-25T10:01:59.5583568Z      let inv_mid = Address::generate(&env);
+2026-06-25T10:01:59.5584036Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:1004:
+2026-06-25T10:01:59.5584494Z          &None,
+2026-06-25T10:01:59.5584686Z          &None,
+2026-06-25T10:01:59.5584874Z      );
+2026-06-25T10:01:59.5585081Z -let inv = Address::generate(&env);
+2026-06-25T10:01:59.5585360Z +    let inv = Address::generate(&env);
+2026-06-25T10:01:59.5585611Z  
+2026-06-25T10:01:59.5585951Z      // 1. Tiered fund: committed_lock_secs=150 >= tier.min_lock_secs=100 => yield 900, lock 100.
+2026-06-25T10:01:59.5586416Z      client.fund_with_commitment(&inv, &1_000i128, &150u64);
+2026-06-25T10:01:59.5586919Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:1079:
+2026-06-25T10:01:59.5587362Z          &None,
+2026-06-25T10:01:59.5587555Z          &None,
+2026-06-25T10:01:59.5587753Z      );
+2026-06-25T10:01:59.5587959Z -let inv = Address::generate(&env);
+2026-06-25T10:01:59.5588222Z +    let inv = Address::generate(&env);
+2026-06-25T10:01:59.5588541Z      // fund_with_commitment even with no tiers configured
+2026-06-25T10:01:59.5588896Z      client.fund_with_commitment(&inv, &1_000i128, &150u64);
+2026-06-25T10:01:59.5589194Z  
+2026-06-25T10:01:59.5589557Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:1139:
+2026-06-25T10:01:59.5589992Z          &None,
+2026-06-25T10:01:59.5590178Z          &None,
+2026-06-25T10:01:59.5590363Z      );
+2026-06-25T10:01:59.5590559Z -let inv = Address::generate(&env);
+2026-06-25T10:01:59.5590814Z +    let inv = Address::generate(&env);
+2026-06-25T10:01:59.5591410Z      // Committing 150 secs (between 100 and 200) -> matches the 100 sec tier.
+2026-06-25T10:01:59.5591991Z      client.fund_with_commitment(&inv, &1_000i128, &150u64);
+2026-06-25T10:01:59.5592287Z  
+2026-06-25T10:01:59.5592655Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:1195:
+2026-06-25T10:01:59.5593094Z          &None,
+2026-06-25T10:01:59.5593278Z          &None,
+2026-06-25T10:01:59.5593471Z      );
+2026-06-25T10:01:59.5593704Z -client.fund_with_commitment(&inv, &5_000i128, &0u64);
+2026-06-25T10:01:59.5594177Z +    client.fund_with_commitment(&inv, &5_000i128, &0u64);
+2026-06-25T10:01:59.5594584Z      assert_eq!(client.get_investor_yield_bps(&inv), 800);
+2026-06-25T10:01:59.5595153Z      assert_eq!(client.get_investor_claim_not_before(&inv), 0);
+2026-06-25T10:01:59.5595645Z  }
+2026-06-25T10:01:59.5596237Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:1230:
+2026-06-25T10:01:59.5596841Z          &None,
+2026-06-25T10:01:59.5597035Z          &None,
+2026-06-25T10:01:59.5597233Z      );
+2026-06-25T10:01:59.5597477Z -client.fund_with_commitment(&investor, &100i128, &5u64);
+2026-06-25T10:01:59.5597855Z +    client.fund_with_commitment(&investor, &100i128, &5u64);
+2026-06-25T10:01:59.5598158Z  
+2026-06-25T10:01:59.5598453Z      assert_eq!(client.get_investor_claim_not_before(&investor), u64::MAX);
+2026-06-25T10:01:59.5598814Z  }
+2026-06-25T10:01:59.5599181Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:1266:
+2026-06-25T10:01:59.5599623Z          &None,
+2026-06-25T10:01:59.5599808Z          &None,
+2026-06-25T10:01:59.5599991Z      );
+2026-06-25T10:01:59.5600228Z -client.fund_with_commitment(&investor, &100i128, &6u64);
+2026-06-25T10:01:59.5600594Z +    client.fund_with_commitment(&investor, &100i128, &6u64);
+2026-06-25T10:01:59.5600897Z  }
+2026-06-25T10:01:59.5601076Z  
+2026-06-25T10:01:59.5601250Z  #[test]
+2026-06-25T10:01:59.5601775Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:1299:
+2026-06-25T10:01:59.5602221Z          &None,
+2026-06-25T10:01:59.5602441Z          &None,
+2026-06-25T10:01:59.5602631Z      );
+2026-06-25T10:01:59.5602939Z -let overflowed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+2026-06-25T10:01:59.5603427Z +    let overflowed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+2026-06-25T10:01:59.5603878Z          client.fund_with_commitment(&investor, &100i128, &6u64);
+2026-06-25T10:01:59.5604192Z      }));
+2026-06-25T10:01:59.5604402Z      assert!(overflowed.is_err());
+2026-06-25T10:01:59.5604837Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:1409:
+2026-06-25T10:01:59.5605276Z          &None,
+2026-06-25T10:01:59.5605464Z          &None,
+2026-06-25T10:01:59.5605650Z      );
+2026-06-25T10:01:59.5605849Z -let escrow = client.fund(&inv, &t);
+2026-06-25T10:01:59.5606119Z +    let escrow = client.fund(&inv, &t);
+2026-06-25T10:01:59.5606394Z      assert_eq!(escrow.funded_amount, t);
+2026-06-25T10:01:59.5606671Z      assert_eq!(escrow.status, 1);
+2026-06-25T10:01:59.5606978Z      let snap = client.get_funding_close_snapshot().unwrap();
+2026-06-25T10:01:59.5607467Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:1444:
+2026-06-25T10:01:59.5607901Z          &None,
+2026-06-25T10:01:59.5608091Z          &None,
+2026-06-25T10:01:59.5608282Z      );
+2026-06-25T10:01:59.5608475Z -let seq = env.ledger().sequence();
+2026-06-25T10:01:59.5608740Z +    let seq = env.ledger().sequence();
+2026-06-25T10:01:59.5609003Z      client.fund(&inv, &1_000i128);
+2026-06-25T10:01:59.5609299Z      let snap = client.get_funding_close_snapshot().unwrap();
+2026-06-25T10:01:59.5609647Z      assert_eq!(snap.closed_at_ledger_sequence, seq);
+2026-06-25T10:01:59.5610128Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:1477:
+2026-06-25T10:01:59.5610558Z          &None,
+2026-06-25T10:01:59.5610743Z          &None,
+2026-06-25T10:01:59.5611084Z      );
+2026-06-25T10:01:59.5611368Z -assert_eq!(
+2026-06-25T10:01:59.5611569Z +    assert_eq!(
+2026-06-25T10:01:59.5611796Z          client.get_funding_close_snapshot(),
+2026-06-25T10:01:59.5612067Z          None,
+2026-06-25T10:01:59.5612305Z          "snapshot must be absent before any funding"
+2026-06-25T10:01:59.5612782Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:1512:
+2026-06-25T10:01:59.5613247Z          &None,
+2026-06-25T10:01:59.5613563Z          &None,
+2026-06-25T10:01:59.5613751Z      );
+2026-06-25T10:01:59.5614199Z -// Partial fund — snapshot still absent.
+2026-06-25T10:01:59.5614543Z +    // Partial fund — snapshot still absent.
+2026-06-25T10:01:59.5614834Z      client.fund(&inv, &(TARGET / 2));
+2026-06-25T10:01:59.5615093Z      assert_eq!(
+2026-06-25T10:01:59.5615317Z          client.get_funding_close_snapshot(),
+2026-06-25T10:01:59.5615777Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:1558:
+2026-06-25T10:01:59.5616234Z          &None,
+2026-06-25T10:01:59.5616428Z          &None,
+2026-06-25T10:01:59.5616621Z      );
+2026-06-25T10:01:59.5616904Z -// Fund exactly to target — snapshot is written here.
+2026-06-25T10:01:59.5617299Z +    // Fund exactly to target — snapshot is written here.
+2026-06-25T10:01:59.5617614Z      client.fund(&inv, &TARGET);
+2026-06-25T10:01:59.5617876Z      let snap_at_close = client
+2026-06-25T10:01:59.5618136Z          .get_funding_close_snapshot()
+2026-06-25T10:01:59.5618592Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:1598:
+2026-06-25T10:01:59.5619034Z          &None,
+2026-06-25T10:01:59.5619224Z          &None,
+2026-06-25T10:01:59.5619409Z      );
+2026-06-25T10:01:59.5619636Z -assert_eq!(client.get_unique_funder_count(), 0);
+2026-06-25T10:01:59.5619971Z +    assert_eq!(client.get_unique_funder_count(), 0);
+2026-06-25T10:01:59.5620255Z  }
+2026-06-25T10:01:59.5620432Z  
+2026-06-25T10:01:59.5620608Z  #[test]
+2026-06-25T10:01:59.5620984Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:1624:
+2026-06-25T10:01:59.5621608Z          &None,
+2026-06-25T10:01:59.5621798Z          &None,
+2026-06-25T10:01:59.5621985Z      );
+2026-06-25T10:01:59.5622205Z -assert_eq!(client.get_unique_funder_count(), 0);
+2026-06-25T10:01:59.5622602Z +    assert_eq!(client.get_unique_funder_count(), 0);
+2026-06-25T10:01:59.5622912Z      client.fund(&investor, &(TARGET / 2));
+2026-06-25T10:01:59.5623228Z      assert_eq!(client.get_unique_funder_count(), 1);
+2026-06-25T10:01:59.5623523Z      client.fund(&investor, &(TARGET / 2));
+2026-06-25T10:01:59.5623976Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:1656:
+2026-06-25T10:01:59.5624421Z          &None,
+2026-06-25T10:01:59.5624614Z          &None,
+2026-06-25T10:01:59.5624798Z      );
+2026-06-25T10:01:59.5625022Z -assert_eq!(client.get_unique_funder_count(), 0);
+2026-06-25T10:01:59.5625350Z +    assert_eq!(client.get_unique_funder_count(), 0);
+2026-06-25T10:01:59.5625622Z  
+2026-06-25T10:01:59.5625819Z      client.fund(&inv_a, &(TARGET / 3));
+2026-06-25T10:01:59.5626111Z      assert_eq!(client.get_unique_funder_count(), 1);
+2026-06-25T10:01:59.5626577Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:1703:
+2026-06-25T10:01:59.5627018Z          &None,
+2026-06-25T10:01:59.5627208Z          &None,
+2026-06-25T10:01:59.5627391Z      );
+2026-06-25T10:01:59.5627605Z -assert_eq!(client.get_unique_funder_count(), 0);
+2026-06-25T10:01:59.5627922Z +    assert_eq!(client.get_unique_funder_count(), 0);
+2026-06-25T10:01:59.5628194Z  
+2026-06-25T10:01:59.5628403Z      // First investor uses fund_with_commitment
+2026-06-25T10:01:59.5628758Z      client.fund_with_commitment(&inv_a, &(TARGET / 2), &200u64);
+2026-06-25T10:01:59.5629261Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:1736:
+2026-06-25T10:01:59.5629702Z          &None,
+2026-06-25T10:01:59.5630058Z          &None,
+2026-06-25T10:01:59.5630249Z      );
+2026-06-25T10:01:59.5630508Z -// Should be able to add many investors when no cap is set
+2026-06-25T10:01:59.5630903Z +    // Should be able to add many investors when no cap is set
+2026-06-25T10:01:59.5631223Z      for i in 0..10 {
+2026-06-25T10:01:59.5631580Z          let investor = Address::generate(&env);
+2026-06-25T10:01:59.5631885Z          client.fund(&investor, &(TARGET / 20));
+2026-06-25T10:01:59.5632351Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:1767:
+2026-06-25T10:01:59.5632939Z          &None,
+2026-06-25T10:01:59.5633138Z          &None,
+2026-06-25T10:01:59.5633326Z      );
+2026-06-25T10:01:59.5633598Z -assert_eq!(client.get_max_unique_investors_cap(), Some(3u32));
+2026-06-25T10:01:59.5634011Z +    assert_eq!(client.get_max_unique_investors_cap(), Some(3u32));
+2026-06-25T10:01:59.5634332Z  
+2026-06-25T10:01:59.5634532Z      // Add 3 investors - should succeed
+2026-06-25T10:01:59.5634819Z      let inv1 = Address::generate(&env);
+2026-06-25T10:01:59.5635259Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:1811:
+2026-06-25T10:01:59.5635709Z          &None,
+2026-06-25T10:01:59.5635908Z          &None,
+2026-06-25T10:01:59.5636107Z      );
+2026-06-25T10:01:59.5636309Z -// Add 2 investors
+2026-06-25T10:01:59.5636527Z +    // Add 2 investors
+2026-06-25T10:01:59.5636768Z      let inv1 = Address::generate(&env);
+2026-06-25T10:01:59.5637054Z      let inv2 = Address::generate(&env);
+2026-06-25T10:01:59.5637318Z      client.fund(&inv1, &(TARGET / 4));
+2026-06-25T10:01:59.5637772Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:1856:
+2026-06-25T10:01:59.5638226Z          &None,
+2026-06-25T10:01:59.5638420Z          &None,
+2026-06-25T10:01:59.5638608Z      );
+2026-06-25T10:01:59.5638802Z -// First investor succeeds
+2026-06-25T10:01:59.5639047Z +    // First investor succeeds
+2026-06-25T10:01:59.5639319Z      let inv1 = Address::generate(&env);
+2026-06-25T10:01:59.5639644Z      client.fund_with_commitment(&inv1, &(TARGET / 2), &200u64);
+2026-06-25T10:01:59.5639961Z  
+2026-06-25T10:01:59.5640334Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:1889:
+2026-06-25T10:01:59.5640782Z          &None,
+2026-06-25T10:01:59.5640973Z          &None,
+2026-06-25T10:01:59.5641157Z      );
+2026-06-25T10:01:59.5641492Z -// First fund should succeed
+2026-06-25T10:01:59.5641753Z +    // First fund should succeed
+2026-06-25T10:01:59.5642020Z      client.fund(&investor, &(TARGET / 3));
+2026-06-25T10:01:59.5642339Z      assert_eq!(client.get_unique_funder_count(), 1);
+2026-06-25T10:01:59.5642627Z  
+2026-06-25T10:01:59.5642993Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:1926:
+2026-06-25T10:01:59.5643430Z          &None,
+2026-06-25T10:01:59.5643617Z          &None,
+2026-06-25T10:01:59.5643802Z      );
+2026-06-25T10:01:59.5644033Z -assert_eq!(client.get_unique_funder_count(), 0);
+2026-06-25T10:01:59.5644364Z +    assert_eq!(client.get_unique_funder_count(), 0);
+2026-06-25T10:01:59.5644694Z      assert_eq!(client.get_contribution(&investor), 0);
+2026-06-25T10:01:59.5644981Z  
+2026-06-25T10:01:59.5645224Z      // First non-zero contribution should increment count
+2026-06-25T10:01:59.5645713Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:2010:
+2026-06-25T10:01:59.5646149Z          &None,
+2026-06-25T10:01:59.5646340Z          &None,
+2026-06-25T10:01:59.5646529Z      );
+2026-06-25T10:01:59.5646745Z -// Add exactly 5 investors - should all succeed
+2026-06-25T10:01:59.5647066Z +    // Add exactly 5 investors - should all succeed
+2026-06-25T10:01:59.5647354Z      for i in 0..5 {
+2026-06-25T10:01:59.5647591Z          let investor = Address::generate(&env);
+2026-06-25T10:01:59.5647886Z          client.fund(&investor, &(TARGET / 10));
+2026-06-25T10:01:59.5648532Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:2048:
+2026-06-25T10:01:59.5649001Z          &None,
+2026-06-25T10:01:59.5649202Z          &None,
+2026-06-25T10:01:59.5649391Z      );
+2026-06-25T10:01:59.5649585Z -// Add exactly 5 investors
+2026-06-25T10:01:59.5649827Z +    // Add exactly 5 investors
+2026-06-25T10:01:59.5650073Z      for _i in 0..5 {
+2026-06-25T10:01:59.5650315Z          let investor = Address::generate(&env);
+2026-06-25T10:01:59.5650609Z          client.fund(&investor, &(TARGET / 10));
+2026-06-25T10:01:59.5651199Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:2082:
+2026-06-25T10:01:59.5651757Z          &None,
+2026-06-25T10:01:59.5651946Z          &None,
+2026-06-25T10:01:59.5652133Z      );
+2026-06-25T10:01:59.5652341Z -// Should respect both cap and floor
+2026-06-25T10:01:59.5652618Z +    // Should respect both cap and floor
+2026-06-25T10:01:59.5652900Z      let inv1 = Address::generate(&env);
+2026-06-25T10:01:59.5653175Z      let inv2 = Address::generate(&env);
+2026-06-25T10:01:59.5653436Z      let inv3 = Address::generate(&env);
+2026-06-25T10:01:59.5653874Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:2124:
+2026-06-25T10:01:59.5654316Z          &None,
+2026-06-25T10:01:59.5654513Z          &None,
+2026-06-25T10:01:59.5654699Z      );
+2026-06-25T10:01:59.5654893Z -// First investor can fund large amount
+2026-06-25T10:01:59.5655168Z +    // First investor can fund large amount
+2026-06-25T10:01:59.5655454Z      let inv1 = Address::generate(&env);
+2026-06-25T10:01:59.5655714Z      client.fund(&inv1, &(TARGET * 5));
+2026-06-25T10:01:59.5655960Z  
+2026-06-25T10:01:59.5656319Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:2161:
+2026-06-25T10:01:59.5656749Z          &None,
+2026-06-25T10:01:59.5656933Z          &None,
+2026-06-25T10:01:59.5657114Z      );
+2026-06-25T10:01:59.5657298Z -// Add first investor
+2026-06-25T10:01:59.5657522Z +    // Add first investor
+2026-06-25T10:01:59.5657764Z      let inv1 = Address::generate(&env);
+2026-06-25T10:01:59.5658028Z      client.fund(&inv1, &(TARGET / 2));
+2026-06-25T10:01:59.5658271Z  
+2026-06-25T10:01:59.5658638Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:2201:
+2026-06-25T10:01:59.5659077Z          &None,
+2026-06-25T10:01:59.5659260Z          &None,
+2026-06-25T10:01:59.5659445Z      );
+2026-06-25T10:01:59.5659627Z -(token, treasury)
+2026-06-25T10:01:59.5659851Z +    (token, treasury)
+2026-06-25T10:01:59.5660072Z  }
+2026-06-25T10:01:59.5660150Z  
+2026-06-25T10:01:59.5660236Z  #[test]
+2026-06-25T10:01:59.5660515Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:2471:
+2026-06-25T10:01:59.5660599Z          &None,
+2026-06-25T10:01:59.5660684Z          &None,
+2026-06-25T10:01:59.5660761Z      );
+2026-06-25T10:01:59.5660946Z -// Set ledger timestamp to a known value so claim_nb is deterministic.
+2026-06-25T10:01:59.5661132Z +    // Set ledger timestamp to a known value so claim_nb is deterministic.
+2026-06-25T10:01:59.5661385Z      env.ledger().with_mut(|l| l.timestamp = 1_000_000u64);
+2026-06-25T10:01:59.5661465Z  
+2026-06-25T10:01:59.5661788Z      // First deposit: tier at 100 s → effective yield = 950 bps, lock until 1_000_100.
+2026-06-25T10:01:59.5662074Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:2538:
+2026-06-25T10:01:59.5662162Z          &None,
+2026-06-25T10:01:59.5662246Z          &None,
+2026-06-25T10:01:59.5662336Z      );
+2026-06-25T10:01:59.5662578Z -env.ledger().with_mut(|l| l.timestamp = 2_000_000u64);
+2026-06-25T10:01:59.5662783Z +    env.ledger().with_mut(|l| l.timestamp = 2_000_000u64);
+2026-06-25T10:01:59.5662900Z  
+2026-06-25T10:01:59.5663332Z      // First deposit: 200 s commitment → top tier (1100 bps), lock until 2_000_200.
+2026-06-25T10:01:59.5663561Z      client.fund_with_commitment(&inv, &5_000i128, &200u64);
+2026-06-25T10:01:59.5663995Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:2600:
+2026-06-25T10:01:59.5664084Z          &None,
+2026-06-25T10:01:59.5664162Z          &None,
+2026-06-25T10:01:59.5664245Z      );
+2026-06-25T10:01:59.5664413Z -// Zero lock → base yield only, no claim gate.
+2026-06-25T10:01:59.5664571Z +    // Zero lock → base yield only, no claim gate.
+2026-06-25T10:01:59.5664710Z      client.fund_with_commitment(&inv, &4_000i128, &0u64);
+2026-06-25T10:01:59.5664793Z      assert_eq!(
+2026-06-25T10:01:59.5665028Z          client.get_investor_yield_bps(&inv),
+2026-06-25T10:01:59.5665297Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:2659:
+2026-06-25T10:01:59.5665385Z          &None,
+2026-06-25T10:01:59.5665466Z          &None,
+2026-06-25T10:01:59.5665550Z      );
+2026-06-25T10:01:59.5665686Z -client.fund_with_commitment(&inv, &3_000i128, &0u64);
+2026-06-25T10:01:59.5665814Z +    client.fund_with_commitment(&inv, &3_000i128, &0u64);
+2026-06-25T10:01:59.5665923Z      // Second call must trap.
+2026-06-25T10:01:59.5666025Z      assert_contract_error(
+2026-06-25T10:01:59.5666185Z          client.try_fund_with_commitment(&inv, &3_000i128, &0u64),
+2026-06-25T10:01:59.5666448Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:2704:
+2026-06-25T10:01:59.5666534Z          &None,
+2026-06-25T10:01:59.5666611Z          &None,
+2026-06-25T10:01:59.5666696Z      );
+2026-06-25T10:01:59.5666897Z -// First leg via fund() → establishes base-yield position.
+2026-06-25T10:01:59.5667108Z +    // First leg via fund() → establishes base-yield position.
+2026-06-25T10:01:59.5667212Z      client.fund(&inv, &3_000i128);
+2026-06-25T10:01:59.5667437Z      // Attempt to re-select tier via fund_with_commitment → must panic.
+2026-06-25T10:01:59.5667536Z      assert_contract_error(
+2026-06-25T10:01:59.5667811Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:2750:
+2026-06-25T10:01:59.5667898Z          &None,
+2026-06-25T10:01:59.5667984Z          &None,
+2026-06-25T10:01:59.5668070Z      );
+2026-06-25T10:01:59.5668165Z -client.fund(&inv, &5_000i128);
+2026-06-25T10:01:59.5668266Z +    client.fund(&inv, &5_000i128);
+2026-06-25T10:01:59.5668348Z      assert_eq!(
+2026-06-25T10:01:59.5668464Z          client.get_investor_yield_bps(&inv),
+2026-06-25T10:01:59.5668550Z          800,
+2026-06-25T10:01:59.5668820Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:2906:
+2026-06-25T10:01:59.5668916Z          &None,
+2026-06-25T10:01:59.5668994Z          &None,
+2026-06-25T10:01:59.5669078Z      );
+2026-06-25T10:01:59.5669271Z -let escrow = client.fund_with_commitment(&investor, &1_000i128, &9999u64);
+2026-06-25T10:01:59.5669467Z +    let escrow = client.fund_with_commitment(&investor, &1_000i128, &9999u64);
+2026-06-25T10:01:59.5669566Z      assert_eq!(escrow.status, 0);
+2026-06-25T10:01:59.5669755Z      assert_eq!(client.get_investor_claim_not_before(&investor), 10999u64);
+2026-06-25T10:01:59.5669843Z  }
+2026-06-25T10:01:59.5670109Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:2988:
+2026-06-25T10:01:59.5670198Z              &None,
+2026-06-25T10:01:59.5670277Z              &None,
+2026-06-25T10:01:59.5670363Z              &None,
+2026-06-25T10:01:59.5670442Z -        &None,
+2026-06-25T10:01:59.5670529Z -    );
+2026-06-25T10:01:59.5670604Z -}
+2026-06-25T10:01:59.5670693Z +            &None,
+2026-06-25T10:01:59.5670773Z +        );
+2026-06-25T10:01:59.5670861Z +    }
+2026-06-25T10:01:59.5670937Z  
+2026-06-25T10:01:59.5671036Z      // Create 5 investors
+2026-06-25T10:01:59.5671168Z      let mut investors = SorobanVec::new(&env);
+2026-06-25T10:01:59.5671557Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:3060:
+2026-06-25T10:01:59.5671642Z          &None,
+2026-06-25T10:01:59.5671723Z          &None,
+2026-06-25T10:01:59.5671808Z      );
+2026-06-25T10:01:59.5671919Z -let mut entries = SorobanVec::new(&env);
+2026-06-25T10:01:59.5672172Z +    let mut entries = SorobanVec::new(&env);
+2026-06-25T10:01:59.5672337Z      entries.push_back((inv1.clone(), 25_000i128)); // Within cap
+2026-06-25T10:01:59.5672503Z      entries.push_back((inv2.clone(), 35_000i128)); // Exceeds cap
+2026-06-25T10:01:59.5672586Z  
+2026-06-25T10:01:59.5672857Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:3096:
+2026-06-25T10:01:59.5672942Z          &None,
+2026-06-25T10:01:59.5673021Z          &None,
+2026-06-25T10:01:59.5673227Z      );
+2026-06-25T10:01:59.5673332Z -let inv1 = Address::generate(&env);
+2026-06-25T10:01:59.5673443Z +    let inv1 = Address::generate(&env);
+2026-06-25T10:01:59.5673541Z      let inv2 = Address::generate(&env);
+2026-06-25T10:01:59.5673645Z      let inv3 = Address::generate(&env);
+2026-06-25T10:01:59.5673721Z  
+2026-06-25T10:01:59.5673998Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:3157:
+2026-06-25T10:01:59.5674081Z          &None,
+2026-06-25T10:01:59.5674164Z          &None,
+2026-06-25T10:01:59.5674248Z      );
+2026-06-25T10:01:59.5674353Z -let mut entries = SorobanVec::new(&env);
+2026-06-25T10:01:59.5674468Z +    let mut entries = SorobanVec::new(&env);
+2026-06-25T10:01:59.5674635Z      entries.push_back((inv.clone(), 30_000i128)); // First entry: 30k
+2026-06-25T10:01:59.5674851Z      entries.push_back((inv.clone(), 25_000i128)); // Second entry: 30k + 25k = 55k > cap
+2026-06-25T10:01:59.5674930Z  
+2026-06-25T10:01:59.5675204Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:3234:
+2026-06-25T10:01:59.5675292Z          &None,
+2026-06-25T10:01:59.5675371Z          &None,
+2026-06-25T10:01:59.5675450Z      );
+2026-06-25T10:01:59.5675550Z -// Create exactly MAX_FUND_BATCH entries
+2026-06-25T10:01:59.5675663Z +    // Create exactly MAX_FUND_BATCH entries
+2026-06-25T10:01:59.5675768Z      let mut entries = SorobanVec::new(&env);
+2026-06-25T10:01:59.5675867Z      for _ in 0..MAX_FUND_BATCH {
+2026-06-25T10:01:59.5675975Z          let inv = Address::generate(&env);
+2026-06-25T10:01:59.5676246Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/funding.rs:3277:
+2026-06-25T10:01:59.5676326Z          &None,
+2026-06-25T10:01:59.5676412Z          &None,
+2026-06-25T10:01:59.5676495Z      );
+2026-06-25T10:01:59.5676591Z -let inv1 = Address::generate(&env);
+2026-06-25T10:01:59.5676696Z +    let inv1 = Address::generate(&env);
+2026-06-25T10:01:59.5676790Z      let inv2 = Address::generate(&env);
+2026-06-25T10:01:59.5676878Z  
+2026-06-25T10:01:59.5676980Z      let mut entries = SorobanVec::new(&env);
+2026-06-25T10:01:59.5677248Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/init.rs:28:
+2026-06-25T10:01:59.5677329Z          &None,
+2026-06-25T10:01:59.5677413Z          &None,
+2026-06-25T10:01:59.5677490Z      );
+2026-06-25T10:01:59.5677647Z -assert_eq!(escrow.invoice_id, symbol_short!("INV001"));
+2026-06-25T10:01:59.5677802Z +    assert_eq!(escrow.invoice_id, symbol_short!("INV001"));
+2026-06-25T10:01:59.5677903Z      assert_eq!(escrow.admin, admin);
+2026-06-25T10:01:59.5678006Z      assert_eq!(escrow.sme_address, sme);
+2026-06-25T10:01:59.5678106Z      assert_eq!(escrow.amount, TARGET);
+2026-06-25T10:01:59.5678363Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/init.rs:61:
+2026-06-25T10:01:59.5678443Z          &None,
+2026-06-25T10:01:59.5678528Z          &None,
+2026-06-25T10:01:59.5678604Z      );
+2026-06-25T10:01:59.5678711Z -let got = client.get_escrow();
+2026-06-25T10:01:59.5678815Z +    let got = client.get_escrow();
+2026-06-25T10:01:59.5678908Z      assert_eq!(got, escrow);
+2026-06-25T10:01:59.5678990Z  }
+2026-06-25T10:01:59.5679065Z  
+2026-06-25T10:01:59.5679320Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/init.rs:87:
+2026-06-25T10:01:59.5679397Z          &None,
+2026-06-25T10:01:59.5679481Z          &None,
+2026-06-25T10:01:59.5679557Z      );
+2026-06-25T10:01:59.5679742Z -assert!(
+2026-06-25T10:01:59.5679825Z +    assert!(
+2026-06-25T10:01:59.5679965Z          env.auths().iter().any(|(addr, _)| *addr == admin),
+2026-06-25T10:01:59.5680078Z          "admin auth was not recorded for init"
+2026-06-25T10:01:59.5680163Z      );
+2026-06-25T10:01:59.5680428Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/init.rs:139:
+2026-06-25T10:01:59.5680512Z              &None,
+2026-06-25T10:01:59.5680597Z              &None,
+2026-06-25T10:01:59.5680765Z              &None,
+2026-06-25T10:01:59.5680848Z -        &None,
+2026-06-25T10:01:59.5680926Z -    );
+2026-06-25T10:01:59.5681008Z -}));
+2026-06-25T10:01:59.5681086Z +            &None,
+2026-06-25T10:01:59.5681174Z +        );
+2026-06-25T10:01:59.5681252Z +    }));
+2026-06-25T10:01:59.5681546Z      assert!(result.is_err(), "Expected panic without auth");
+2026-06-25T10:01:59.5681631Z  }
+2026-06-25T10:01:59.5681709Z  
+2026-06-25T10:01:59.5681984Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/init.rs:396:
+2026-06-25T10:01:59.5682061Z  
+2026-06-25T10:01:59.5682154Z      client.init(
+2026-06-25T10:01:59.5682370Z          &admin, &s, &sme, &1000i128, &500i64, &0u64, &t, &None, &tr, &None, &None, &None, &None,
+2026-06-25T10:01:59.5682462Z -        &None, &None,
+2026-06-25T10:01:59.5682540Z -        &None,
+2026-06-25T10:01:59.5682637Z +        &None, &None, &None,
+2026-06-25T10:01:59.5682713Z      );
+2026-06-25T10:01:59.5682798Z  }
+2026-06-25T10:01:59.5682874Z  
+2026-06-25T10:01:59.5683145Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/init.rs:429:
+2026-06-25T10:01:59.5683228Z          &None,
+2026-06-25T10:01:59.5683304Z          &None,
+2026-06-25T10:01:59.5683387Z      );
+2026-06-25T10:01:59.5683514Z -assert_eq!(client.get_registry_ref(), Some(reg));
+2026-06-25T10:01:59.5683647Z +    assert_eq!(client.get_registry_ref(), Some(reg));
+2026-06-25T10:01:59.5683767Z      assert_eq!(client.get_funding_token(), token);
+2026-06-25T10:01:59.5683896Z      assert_eq!(client.get_treasury(), treasury);
+2026-06-25T10:01:59.5683971Z  }
+2026-06-25T10:01:59.5684229Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/init.rs:463:
+2026-06-25T10:01:59.5684324Z          &None,
+2026-06-25T10:01:59.5684401Z          &None,
+2026-06-25T10:01:59.5684483Z      );
+2026-06-25T10:01:59.5684629Z -assert_eq!(client.get_min_contribution_floor(), 1_000i128);
+2026-06-25T10:01:59.5684785Z +    assert_eq!(client.get_min_contribution_floor(), 1_000i128);
+2026-06-25T10:01:59.5684867Z  }
+2026-06-25T10:01:59.5684951Z  
+2026-06-25T10:01:59.5685094Z  /// Floor defaults to 0 when `min_contribution` is `None`.
+2026-06-25T10:01:59.5685354Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/init.rs:493:
+2026-06-25T10:01:59.5685431Z          &None,
+2026-06-25T10:01:59.5685531Z          &None,
+2026-06-25T10:01:59.5685615Z      );
+2026-06-25T10:01:59.5685754Z -assert_eq!(client.get_min_contribution_floor(), 0i128);
+2026-06-25T10:01:59.5685897Z +    assert_eq!(client.get_min_contribution_floor(), 0i128);
+2026-06-25T10:01:59.5685972Z  }
+2026-06-25T10:01:59.5686056Z  
+2026-06-25T10:01:59.5686373Z  /// `min_contribution = Some(0)` is rejected — the value must be positive when supplied.
+2026-06-25T10:01:59.5686636Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/init.rs:583:
+2026-06-25T10:01:59.5686716Z          &None,
+2026-06-25T10:01:59.5686804Z          &None,
+2026-06-25T10:01:59.5686883Z      );
+2026-06-25T10:01:59.5687039Z -assert_eq!(client.get_min_contribution_floor(), 5_000i128);
+2026-06-25T10:01:59.5687192Z +    assert_eq!(client.get_min_contribution_floor(), 5_000i128);
+2026-06-25T10:01:59.5687269Z  }
+2026-06-25T10:01:59.5687351Z  
+2026-06-25T10:01:59.5687430Z  #[test]
+2026-06-25T10:01:59.5687684Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/init.rs:626:
+2026-06-25T10:01:59.5687761Z          &None,
+2026-06-25T10:01:59.5687845Z          &None,
+2026-06-25T10:01:59.5688065Z      );
+2026-06-25T10:01:59.5688192Z -assert_eq!(client.get_funding_token(), token);
+2026-06-25T10:01:59.5688307Z +    assert_eq!(client.get_funding_token(), token);
+2026-06-25T10:01:59.5688395Z  }
+2026-06-25T10:01:59.5688477Z  
+2026-06-25T10:01:59.5688557Z  #[test]
+2026-06-25T10:01:59.5688810Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/init.rs:652:
+2026-06-25T10:01:59.5688888Z          &None,
+2026-06-25T10:01:59.5688972Z          &None,
+2026-06-25T10:01:59.5689162Z      );
+2026-06-25T10:01:59.5689282Z -assert_eq!(client.get_treasury(), treasury);
+2026-06-25T10:01:59.5689394Z +    assert_eq!(client.get_treasury(), treasury);
+2026-06-25T10:01:59.5689480Z  }
+2026-06-25T10:01:59.5689554Z  
+2026-06-25T10:01:59.5689638Z  #[test]
+2026-06-25T10:01:59.5705624Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/init.rs:689:
+2026-06-25T10:01:59.5705796Z          &None,
+2026-06-25T10:01:59.5705928Z          &None,
+2026-06-25T10:01:59.5706018Z      );
+2026-06-25T10:01:59.5706166Z -assert_eq!(client.get_registry_ref(), None);
+2026-06-25T10:01:59.5706298Z +    assert_eq!(client.get_registry_ref(), None);
+2026-06-25T10:01:59.5706384Z  }
+2026-06-25T10:01:59.5706459Z  
+2026-06-25T10:01:59.5706547Z  #[test]
+2026-06-25T10:01:59.5706845Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/init.rs:724:
+2026-06-25T10:01:59.5706928Z          &None,
+2026-06-25T10:01:59.5707011Z          &None,
+2026-06-25T10:01:59.5707095Z      );
+2026-06-25T10:01:59.5707183Z -assert_eq!(
+2026-06-25T10:01:59.5707265Z +    assert_eq!(
+2026-06-25T10:01:59.5707363Z          env.events().all(),
+2026-06-25T10:01:59.5707485Z          std::vec![EscrowInitialized {
+2026-06-25T10:01:59.5707606Z              name: symbol_short!("escrow_ii"),
+2026-06-25T10:01:59.5707866Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/init.rs:769:
+2026-06-25T10:01:59.5707952Z          &None,
+2026-06-25T10:01:59.5708034Z          &None,
+2026-06-25T10:01:59.5708113Z      );
+2026-06-25T10:01:59.5708197Z -assert_eq!(
+2026-06-25T10:01:59.5708275Z +    assert_eq!(
+2026-06-25T10:01:59.5708372Z          env.events().all(),
+2026-06-25T10:01:59.5708473Z          std::vec![EscrowInitialized {
+2026-06-25T10:01:59.5708580Z              name: symbol_short!("escrow_ii"),
+2026-06-25T10:01:59.5708832Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/init.rs:811:
+2026-06-25T10:01:59.5708922Z              &None,
+2026-06-25T10:01:59.5709003Z              &None,
+2026-06-25T10:01:59.5709086Z              &None,
+2026-06-25T10:01:59.5709170Z -        &None,
+2026-06-25T10:01:59.5709246Z -    );
+2026-06-25T10:01:59.5709327Z -}));
+2026-06-25T10:01:59.5709404Z +            &None,
+2026-06-25T10:01:59.5709484Z +        );
+2026-06-25T10:01:59.5709561Z +    }));
+2026-06-25T10:01:59.5709670Z      result.map(|_| ()).map_err(|_| ())
+2026-06-25T10:01:59.5709745Z  }
+2026-06-25T10:01:59.5709827Z  
+2026-06-25T10:01:59.5710105Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/init.rs:1071:
+2026-06-25T10:01:59.5710186Z          &None,
+2026-06-25T10:01:59.5710260Z          &None,
+2026-06-25T10:01:59.5710348Z      );
+2026-06-25T10:01:59.5710494Z -assert_eq!(client.get_distributed_principal(), 0i128);
+2026-06-25T10:01:59.5710644Z +    assert_eq!(client.get_distributed_principal(), 0i128);
+2026-06-25T10:01:59.5710720Z  
+2026-06-25T10:01:59.5710855Z      token.stellar.mint(&client.address, &500i128);
+2026-06-25T10:01:59.5710954Z      client.fund(&investor, &500i128);
+2026-06-25T10:01:59.5711408Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/integration.rs:58:
+2026-06-25T10:01:59.5711496Z          &None,
+2026-06-25T10:01:59.5711573Z          &None,
+2026-06-25T10:01:59.5711658Z      );
+2026-06-25T10:01:59.5711973Z -// We will not fund or settle — just exercise legal hold at multiple points.
+2026-06-25T10:01:59.5712446Z +    // We will not fund or settle — just exercise legal hold at multiple points.
+2026-06-25T10:01:59.5712643Z      // The contract id is derived from the deploy_and_init sequence, so we
+2026-06-25T10:01:59.5712742Z      // capture it for auth mock setup.
+2026-06-25T10:01:59.5712822Z  
+2026-06-25T10:01:59.5713125Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/integration.rs:164:
+2026-06-25T10:01:59.5713211Z          &None,
+2026-06-25T10:01:59.5713291Z          &None,
+2026-06-25T10:01:59.5713377Z      );
+2026-06-25T10:01:59.5713487Z -let initial_escrow = client.get_escrow();
+2026-06-25T10:01:59.5713734Z +    let initial_escrow = client.get_escrow();
+2026-06-25T10:01:59.5713818Z      assert_eq!(
+2026-06-25T10:01:59.5713924Z          initial_escrow.status, 0,
+2026-06-25T10:01:59.5714034Z          "Escrow should start in Open status"
+2026-06-25T10:01:59.5714315Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/integration.rs:393:
+2026-06-25T10:01:59.5714400Z          &None,
+2026-06-25T10:01:59.5714476Z          &None,
+2026-06-25T10:01:59.5714562Z      );
+2026-06-25T10:01:59.5714680Z -let investor_base = Address::generate(&env);
+2026-06-25T10:01:59.5714809Z +    let investor_base = Address::generate(&env);
+2026-06-25T10:01:59.5714933Z      let investor_tier1 = Address::generate(&env);
+2026-06-25T10:01:59.5715052Z      let investor_tier2 = Address::generate(&env);
+2026-06-25T10:01:59.5715166Z      let investor_tier3 = Address::generate(&env);
+2026-06-25T10:01:59.5715437Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/integration.rs:519:
+2026-06-25T10:01:59.5715522Z          &None,
+2026-06-25T10:01:59.5715596Z          &None,
+2026-06-25T10:01:59.5715676Z      );
+2026-06-25T10:01:59.5715930Z -let commitment = client.record_sme_collateral_commitment(&symbol_short!("USDC"), &5_000i128);
+2026-06-25T10:01:59.5716180Z +    let commitment = client.record_sme_collateral_commitment(&symbol_short!("USDC"), &5_000i128);
+2026-06-25T10:01:59.5716319Z      assert_eq!(commitment.asset, symbol_short!("USDC"));
+2026-06-25T10:01:59.5716432Z      assert_eq!(commitment.amount, 5_000i128);
+2026-06-25T10:01:59.5716589Z      assert!(client.get_sme_collateral_commitment().is_some());
+2026-06-25T10:01:59.5716867Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/integration.rs:750:
+2026-06-25T10:01:59.5716951Z          &None,
+2026-06-25T10:01:59.5717026Z          &None,
+2026-06-25T10:01:59.5717103Z      );
+2026-06-25T10:01:59.5717217Z -// Initial funding succeeds while hold is off.
+2026-06-25T10:01:59.5717341Z +    // Initial funding succeeds while hold is off.
+2026-06-25T10:01:59.5717469Z      let open_state = client.fund(&investor, &4_000i128);
+2026-06-25T10:01:59.5717574Z      assert_eq!(open_state.status, 0);
+2026-06-25T10:01:59.5717654Z  
+2026-06-25T10:01:59.5717929Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/integration.rs:873:
+2026-06-25T10:01:59.5718011Z          &None,
+2026-06-25T10:01:59.5718087Z          &None,
+2026-06-25T10:01:59.5718171Z      );
+2026-06-25T10:01:59.5718301Z -let investor = soroban_sdk::Address::generate(env);
+2026-06-25T10:01:59.5718438Z +    let investor = soroban_sdk::Address::generate(env);
+2026-06-25T10:01:59.5718536Z      client.fund(&investor, &target);
+2026-06-25T10:01:59.5718615Z  
+2026-06-25T10:01:59.5718820Z      // Mint the funded amount into the escrow contract so withdraw() can send it.
+2026-06-25T10:01:59.5719101Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/integration.rs:989:
+2026-06-25T10:01:59.5719184Z          &None,
+2026-06-25T10:01:59.5719258Z          &None,
+2026-06-25T10:01:59.5719337Z      );
+2026-06-25T10:01:59.5719480Z -// No funding — status is 0.
+2026-06-25T10:01:59.5719615Z +    // No funding — status is 0.
+2026-06-25T10:01:59.5719758Z      client.withdraw(); // must panic: WithdrawalNotFunded
+2026-06-25T10:01:59.5719841Z  }
+2026-06-25T10:01:59.5719915Z  
+2026-06-25T10:01:59.5720332Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/integration.rs:1031:
+2026-06-25T10:01:59.5720413Z          &None,
+2026-06-25T10:01:59.5720500Z          &None,
+2026-06-25T10:01:59.5720579Z      );
+2026-06-25T10:01:59.5720713Z -let investor = soroban_sdk::Address::generate(&env);
+2026-06-25T10:01:59.5720850Z +    let investor = soroban_sdk::Address::generate(&env);
+2026-06-25T10:01:59.5720944Z      client.fund(&investor, &target);
+2026-06-25T10:01:59.5721023Z  
+2026-06-25T10:01:59.5721194Z      // Mint only half — contract balance < funded_amount.
+2026-06-25T10:01:59.5721848Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/legal_hold.rs:53:
+2026-06-25T10:01:59.5721923Z          &None,
+2026-06-25T10:01:59.5722003Z          &None,
+2026-06-25T10:01:59.5722076Z      );
+2026-06-25T10:01:59.5722164Z -(token, treasury)
+2026-06-25T10:01:59.5722253Z +    (token, treasury)
+2026-06-25T10:01:59.5722326Z  }
+2026-06-25T10:01:59.5722402Z  
+2026-06-25T10:01:59.5722590Z  /// Initialise an open escrow with a configured legal-hold clear delay.
+2026-06-25T10:01:59.5722871Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/legal_hold.rs:85:
+2026-06-25T10:01:59.5722947Z          &None,
+2026-06-25T10:01:59.5723027Z          &None,
+2026-06-25T10:01:59.5723097Z      );
+2026-06-25T10:01:59.5723188Z -(token, treasury)
+2026-06-25T10:01:59.5723268Z +    (token, treasury)
+2026-06-25T10:01:59.5723346Z  }
+2026-06-25T10:01:59.5723421Z  
+2026-06-25T10:01:59.5723618Z  /// Initialise with a real SAC token, fund to target, and mint `TARGET` tokens
+2026-06-25T10:01:59.5723907Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/legal_hold.rs:121:
+2026-06-25T10:01:59.5723980Z          &None,
+2026-06-25T10:01:59.5724062Z          &None,
+2026-06-25T10:01:59.5724138Z      );
+2026-06-25T10:01:59.5724244Z -client.fund(investor, &TARGET);
+2026-06-25T10:01:59.5724340Z +    client.fund(investor, &TARGET);
+2026-06-25T10:01:59.5724442Z      sac_admin.mint(&escrow_id, &TARGET);
+2026-06-25T10:01:59.5724534Z      (client, escrow_id)
+2026-06-25T10:01:59.5724616Z  }
+2026-06-25T10:01:59.5724892Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/legal_hold.rs:171:
+2026-06-25T10:01:59.5724967Z          &None,
+2026-06-25T10:01:59.5725048Z          &None,
+2026-06-25T10:01:59.5725122Z      );
+2026-06-25T10:01:59.5725215Z -client.fund(investor, &TARGET);
+2026-06-25T10:01:59.5725306Z +    client.fund(investor, &TARGET);
+2026-06-25T10:01:59.5725397Z      client.settle();
+2026-06-25T10:01:59.5725497Z      (client, escrow_id, token, treasury)
+2026-06-25T10:01:59.5725574Z  }
+2026-06-25T10:01:59.5823311Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/settlement.rs:1797:
+2026-06-25T10:01:59.5823567Z          "settled_at must equal the ledger timestamp when settle() succeeds with maturity gate"
+2026-06-25T10:01:59.5823654Z      );
+2026-06-25T10:01:59.5823728Z  }
+2026-06-25T10:01:59.5823806Z -
+2026-06-25T10:01:59.5823879Z  
+2026-06-25T10:01:59.5980599Z ##[error]Process completed with exit code 1.
+2026-06-25T10:01:59.6115434Z Node 20 is being deprecated. This workflow is running with Node 24 by default. If you need to temporarily use Node 20, you can set the ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true environment variable. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+2026-06-25T10:01:59.6115615Z Post job cleanup.
+2026-06-25T10:01:59.6967051Z [command]/usr/bin/git version
+2026-06-25T10:01:59.7004272Z git version 2.54.0
+2026-06-25T10:01:59.7039867Z Temporarily overriding HOME='/home/runner/work/_temp/b3b285e1-2f63-48a5-bdf0-05ac3304e3be' before making global git config changes
+2026-06-25T10:01:59.7040288Z Adding repository directory to the temporary git global config as a safe directory
+2026-06-25T10:01:59.7045502Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/Liquifact-contracts/Liquifact-contracts
+2026-06-25T10:01:59.7082655Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-06-25T10:01:59.7117091Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-06-25T10:01:59.7345709Z fatal: No url found for submodule path 'Liquifact-contracts' in .gitmodules
+2026-06-25T10:01:59.7384126Z ##[warning]The process '/usr/bin/git' failed with exit code 128
+2026-06-25T10:01:59.7490871Z Cleaning up orphan processes
+2026-06-25T10:01:59.7761085Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/

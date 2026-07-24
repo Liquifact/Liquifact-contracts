@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 2ce8dfef3a0e95cd4e37cb6e818f3dc3b4c815d67f368dd6b5b09bdcc43410f6 # shrinks to investor_count = 2, seq_len = 2, funding_target = 50000, max_each = 1, caps_present = false, per_inv_cap = 1, uniq_cap = 1, investor_ixs = [2, 2], amounts = [1, 1], use_commitments = [false, true], lock_secs = [0, 0]

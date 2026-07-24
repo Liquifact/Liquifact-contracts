@@ -1,0 +1,460 @@
+﻿2026-06-25T03:40:00.2296481Z Current runner version: '2.335.1'
+2026-06-25T03:40:00.2322684Z ##[group]Runner Image Provisioner
+2026-06-25T03:40:00.2323637Z Hosted Compute Agent
+2026-06-25T03:40:00.2324272Z Version: 20260611.554
+2026-06-25T03:40:00.2324907Z Commit: 5e0782fdc9014723d3be820dd114dd31555c2bd1
+2026-06-25T03:40:00.2325731Z Build Date: 2026-06-11T21:40:46Z
+2026-06-25T03:40:00.2326454Z Worker ID: {fe555bbb-6400-4cef-95d2-068a1d9dc635}
+2026-06-25T03:40:00.2327222Z Azure Region: westcentralus
+2026-06-25T03:40:00.2327853Z ##[endgroup]
+2026-06-25T03:40:00.2329337Z ##[group]Operating System
+2026-06-25T03:40:00.2330065Z Ubuntu
+2026-06-25T03:40:00.2330636Z 24.04.4
+2026-06-25T03:40:00.2331138Z LTS
+2026-06-25T03:40:00.2331767Z ##[endgroup]
+2026-06-25T03:40:00.2332543Z ##[group]Runner Image
+2026-06-25T03:40:00.2333533Z Image: ubuntu-24.04
+2026-06-25T03:40:00.2334190Z Version: 20260615.205.1
+2026-06-25T03:40:00.2335508Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260615.205/images/ubuntu/Ubuntu2404-Readme.md
+2026-06-25T03:40:00.2337034Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20260615.205
+2026-06-25T03:40:00.2338048Z ##[endgroup]
+2026-06-25T03:40:00.2339355Z ##[group]GITHUB_TOKEN Permissions
+2026-06-25T03:40:00.2341496Z Contents: read
+2026-06-25T03:40:00.2342662Z Metadata: read
+2026-06-25T03:40:00.2343266Z Packages: read
+2026-06-25T03:40:00.2343957Z ##[endgroup]
+2026-06-25T03:40:00.2346198Z Secret source: Actions
+2026-06-25T03:40:00.2347058Z Prepare workflow directory
+2026-06-25T03:40:00.2706734Z Prepare all required actions
+2026-06-25T03:40:00.2764035Z Getting action download info
+2026-06-25T03:40:00.6422435Z Download action repository 'actions/checkout@v4' (SHA:34e114876b0b11c390a56381ad16ebd13914f8d5)
+2026-06-25T03:40:00.7478580Z Download action repository 'dtolnay/rust-toolchain@stable' (SHA:29eef336d9b2848a0b548edc03f92a220660cdb8)
+2026-06-25T03:40:00.9833196Z Download action repository 'Swatinem/rust-cache@v2' (SHA:e18b497796c12c097a38f9edb9d0641fb99eee32)
+2026-06-25T03:40:02.0054574Z Download action repository 'taiki-e/install-action@cargo-llvm-cov' (SHA:901c6c5742b8b5bab0a7cf0bf63286ad5e3120f3)
+2026-06-25T03:40:02.8925531Z Complete job name: fmt-build-test
+2026-06-25T03:40:02.9876441Z Node 20 is being deprecated. This workflow is running with Node 24 by default. If you need to temporarily use Node 20, you can set the ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true environment variable. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+2026-06-25T03:40:02.9888016Z ##[group]Run actions/checkout@v4
+2026-06-25T03:40:02.9889231Z with:
+2026-06-25T03:40:02.9890082Z   repository: Liquifact/Liquifact-contracts
+2026-06-25T03:40:02.9900427Z   token: ***
+2026-06-25T03:40:02.9901233Z   ssh-strict: true
+2026-06-25T03:40:02.9902176Z   ssh-user: git
+2026-06-25T03:40:02.9903008Z   persist-credentials: true
+2026-06-25T03:40:02.9903921Z   clean: true
+2026-06-25T03:40:02.9904749Z   sparse-checkout-cone-mode: true
+2026-06-25T03:40:02.9905845Z   fetch-depth: 1
+2026-06-25T03:40:02.9906653Z   fetch-tags: false
+2026-06-25T03:40:02.9907492Z   show-progress: true
+2026-06-25T03:40:02.9908337Z   lfs: false
+2026-06-25T03:40:02.9909126Z   submodules: false
+2026-06-25T03:40:02.9909967Z   set-safe-directory: true
+2026-06-25T03:40:02.9911153Z ##[endgroup]
+2026-06-25T03:40:03.0925095Z Syncing repository: Liquifact/Liquifact-contracts
+2026-06-25T03:40:03.0928610Z ##[group]Getting Git version info
+2026-06-25T03:40:03.0930315Z Working directory is '/home/runner/work/Liquifact-contracts/Liquifact-contracts'
+2026-06-25T03:40:03.0932954Z [command]/usr/bin/git version
+2026-06-25T03:40:03.0998385Z git version 2.54.0
+2026-06-25T03:40:03.1022217Z ##[endgroup]
+2026-06-25T03:40:03.1038669Z Temporarily overriding HOME='/home/runner/work/_temp/3625da43-85c7-48a8-a6c6-4b27f319c2fe' before making global git config changes
+2026-06-25T03:40:03.1043900Z Adding repository directory to the temporary git global config as a safe directory
+2026-06-25T03:40:03.1048353Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/Liquifact-contracts/Liquifact-contracts
+2026-06-25T03:40:03.1099395Z Deleting the contents of '/home/runner/work/Liquifact-contracts/Liquifact-contracts'
+2026-06-25T03:40:03.1104186Z ##[group]Initializing the repository
+2026-06-25T03:40:03.1109540Z [command]/usr/bin/git init /home/runner/work/Liquifact-contracts/Liquifact-contracts
+2026-06-25T03:40:03.1224573Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-06-25T03:40:03.1227450Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-06-25T03:40:03.1299444Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-06-25T03:40:03.1301153Z hint: call:
+2026-06-25T03:40:03.1302157Z hint:
+2026-06-25T03:40:03.1303112Z hint: 	git config --global init.defaultBranch <name>
+2026-06-25T03:40:03.1304266Z hint:
+2026-06-25T03:40:03.1305331Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-06-25T03:40:03.1307152Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-06-25T03:40:03.1308593Z hint:
+2026-06-25T03:40:03.1309909Z hint: 	git branch -m <name>
+2026-06-25T03:40:03.1311312Z hint:
+2026-06-25T03:40:03.1313658Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-06-25T03:40:03.1315999Z Initialized empty Git repository in /home/runner/work/Liquifact-contracts/Liquifact-contracts/.git/
+2026-06-25T03:40:03.1319608Z [command]/usr/bin/git remote add origin https://github.com/Liquifact/Liquifact-contracts
+2026-06-25T03:40:03.1324030Z ##[endgroup]
+2026-06-25T03:40:03.1325472Z ##[group]Disabling automatic garbage collection
+2026-06-25T03:40:03.1327293Z [command]/usr/bin/git config --local gc.auto 0
+2026-06-25T03:40:03.1331158Z ##[endgroup]
+2026-06-25T03:40:03.1332892Z ##[group]Setting up auth
+2026-06-25T03:40:03.1335792Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-06-25T03:40:03.1371343Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-06-25T03:40:03.1749753Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-06-25T03:40:03.1781561Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-06-25T03:40:03.2011768Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-06-25T03:40:03.2050451Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-06-25T03:40:03.2280305Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-06-25T03:40:03.2316336Z ##[endgroup]
+2026-06-25T03:40:03.2317814Z ##[group]Fetching the repository
+2026-06-25T03:40:03.2326029Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +f3c49bc43a4afd486efc2e2beb59bd144adb5029:refs/remotes/origin/main
+2026-06-25T03:40:04.1902937Z From https://github.com/Liquifact/Liquifact-contracts
+2026-06-25T03:40:04.1905404Z  * [new ref]         f3c49bc43a4afd486efc2e2beb59bd144adb5029 -> origin/main
+2026-06-25T03:40:04.1939038Z ##[endgroup]
+2026-06-25T03:40:04.1939828Z ##[group]Determining the checkout info
+2026-06-25T03:40:04.1941581Z ##[endgroup]
+2026-06-25T03:40:04.1947170Z [command]/usr/bin/git sparse-checkout disable
+2026-06-25T03:40:04.1995055Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-06-25T03:40:04.2022899Z ##[group]Checking out the ref
+2026-06-25T03:40:04.2027457Z [command]/usr/bin/git checkout --progress --force -B main refs/remotes/origin/main
+2026-06-25T03:40:04.2420646Z Switched to a new branch 'main'
+2026-06-25T03:40:04.2422416Z branch 'main' set up to track 'origin/main'.
+2026-06-25T03:40:04.2429668Z ##[endgroup]
+2026-06-25T03:40:04.2473687Z [command]/usr/bin/git log -1 --format=%H
+2026-06-25T03:40:04.2496659Z f3c49bc43a4afd486efc2e2beb59bd144adb5029
+2026-06-25T03:40:04.2840189Z ##[group]Run dtolnay/rust-toolchain@stable
+2026-06-25T03:40:04.2840633Z with:
+2026-06-25T03:40:04.2840936Z   components: rustfmt, clippy, llvm-tools-preview
+2026-06-25T03:40:04.2841302Z   toolchain: stable
+2026-06-25T03:40:04.2841568Z ##[endgroup]
+2026-06-25T03:40:04.2966157Z ##[group]Run : parse toolchain version
+2026-06-25T03:40:04.2966618Z [36;1m: parse toolchain version[0m
+2026-06-25T03:40:04.2966961Z [36;1mif [[ -z $toolchain ]]; then[0m
+2026-06-25T03:40:04.2967581Z [36;1m  # GitHub does not enforce `required: true` inputs itself. https://github.com/actions/runner/issues/1070[0m
+2026-06-25T03:40:04.2968224Z [36;1m  echo "'toolchain' is a required input" >&2[0m
+2026-06-25T03:40:04.2968575Z [36;1m  exit 1[0m
+2026-06-25T03:40:04.2968991Z [36;1melif [[ $toolchain =~ ^stable' '[0-9]+' '(year|month|week|day)s?' 'ago$ ]]; then[0m
+2026-06-25T03:40:04.2969465Z [36;1m  if [[ Linux == macOS ]]; then[0m
+2026-06-25T03:40:04.2970096Z [36;1m    echo "toolchain=1.$((($(date -v-$(sed 's/stable \([0-9]*\) \(.\).*/\1\2/' <<< $toolchain) +%s)/60/60/24-16569)/7/6))" >> $GITHUB_OUTPUT[0m
+2026-06-25T03:40:04.2970664Z [36;1m  else[0m
+2026-06-25T03:40:04.2971128Z [36;1m    echo "toolchain=1.$((($(date --date "${toolchain#stable }" +%s)/60/60/24-16569)/7/6))" >> $GITHUB_OUTPUT[0m
+2026-06-25T03:40:04.2971642Z [36;1m  fi[0m
+2026-06-25T03:40:04.2972466Z [36;1melif [[ $toolchain =~ ^stable' 'minus' '[0-9]+' 'releases?$ ]]; then[0m
+2026-06-25T03:40:04.2973102Z [36;1m  echo "toolchain=1.$((($(date +%s)/60/60/24-16569)/7/6-${toolchain//[^0-9]/}))" >> $GITHUB_OUTPUT[0m
+2026-06-25T03:40:04.2973629Z [36;1melif [[ $toolchain =~ ^1\.[0-9]+$ ]]; then[0m
+2026-06-25T03:40:04.2974218Z [36;1m  echo "toolchain=1.$((i=${toolchain#1.}, c=($(date +%s)/60/60/24-16569)/7/6, i+9*i*(10*i<=c)+90*i*(100*i<=c)))" >> $GITHUB_OUTPUT[0m
+2026-06-25T03:40:04.2974786Z [36;1melse[0m
+2026-06-25T03:40:04.2975084Z [36;1m  echo "toolchain=$toolchain" >> $GITHUB_OUTPUT[0m
+2026-06-25T03:40:04.2975439Z [36;1mfi[0m
+2026-06-25T03:40:04.3172281Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-06-25T03:40:04.3172765Z env:
+2026-06-25T03:40:04.3173043Z   toolchain: stable
+2026-06-25T03:40:04.3173337Z ##[endgroup]
+2026-06-25T03:40:04.3321384Z ##[group]Run : construct rustup command line
+2026-06-25T03:40:04.3321790Z [36;1m: construct rustup command line[0m
+2026-06-25T03:40:04.3322834Z [36;1mecho "targets=$(for t in ${targets//,/ }; do echo -n ' --target' $t; done)" >> $GITHUB_OUTPUT[0m
+2026-06-25T03:40:04.3323559Z [36;1mecho "components=$(for c in ${components//,/ }; do echo -n ' --component' $c; done)" >> $GITHUB_OUTPUT[0m
+2026-06-25T03:40:04.3324108Z [36;1mecho "downgrade=" >> $GITHUB_OUTPUT[0m
+2026-06-25T03:40:04.3353497Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-06-25T03:40:04.3353928Z env:
+2026-06-25T03:40:04.3354164Z   targets: 
+2026-06-25T03:40:04.3354463Z   components: rustfmt, clippy, llvm-tools-preview
+2026-06-25T03:40:04.3354817Z ##[endgroup]
+2026-06-25T03:40:04.3439515Z ##[group]Run : set $CARGO_HOME
+2026-06-25T03:40:04.3439852Z [36;1m: set $CARGO_HOME[0m
+2026-06-25T03:40:04.3440231Z [36;1mecho CARGO_HOME=${CARGO_HOME:-"$HOME/.cargo"} >> $GITHUB_ENV[0m
+2026-06-25T03:40:04.3467896Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-06-25T03:40:04.3468304Z ##[endgroup]
+2026-06-25T03:40:04.3550574Z ##[group]Run : install rustup if needed
+2026-06-25T03:40:04.3550946Z [36;1m: install rustup if needed[0m
+2026-06-25T03:40:04.3551302Z [36;1mif ! command -v rustup &>/dev/null; then[0m
+2026-06-25T03:40:04.3552415Z [36;1m  curl --proto '=https' --tlsv1.2 --retry 10 --retry-connrefused --location --silent --show-error --fail https://sh.rustup.rs | sh -s -- --default-toolchain none -y[0m
+2026-06-25T03:40:04.3553216Z [36;1m  echo "$CARGO_HOME/bin" >> $GITHUB_PATH[0m
+2026-06-25T03:40:04.3553736Z [36;1mfi[0m
+2026-06-25T03:40:04.3581290Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-06-25T03:40:04.3581689Z env:
+2026-06-25T03:40:04.3582410Z   CARGO_HOME: /home/runner/.cargo
+2026-06-25T03:40:04.3582739Z ##[endgroup]
+2026-06-25T03:40:04.3665439Z ##[group]Run rustup toolchain install stable --component rustfmt --component clippy --component llvm-tools-preview --profile minimal --no-self-update
+2026-06-25T03:40:04.3666550Z [36;1mrustup toolchain install stable --component rustfmt --component clippy --component llvm-tools-preview --profile minimal --no-self-update[0m
+2026-06-25T03:40:04.3694592Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-06-25T03:40:04.3694992Z env:
+2026-06-25T03:40:04.3695251Z   CARGO_HOME: /home/runner/.cargo
+2026-06-25T03:40:04.3695572Z   RUSTUP_PERMIT_COPY_RENAME: 1
+2026-06-25T03:40:04.3695859Z ##[endgroup]
+2026-06-25T03:40:07.5268860Z info: syncing channel updates for stable-x86_64-unknown-linux-gnu
+2026-06-25T03:40:07.8337278Z info: latest update on 2026-05-28 for version 1.96.0 (ac68faa20 2026-05-25)
+2026-06-25T03:40:07.8465458Z info: component clippy is up to date
+2026-06-25T03:40:07.8466243Z info: component rustfmt is up to date
+2026-06-25T03:40:07.8476022Z info: downloading component llvm-tools
+2026-06-25T03:40:11.0726954Z 
+2026-06-25T03:40:11.0812784Z   stable-x86_64-unknown-linux-gnu updated - rustc 1.96.0 (ac68faa20 2026-05-25) (from rustc 1.96.0 (ac68faa20 2026-05-25))
+2026-06-25T03:40:11.0813576Z 
+2026-06-25T03:40:11.0881425Z ##[group]Run rustup default stable
+2026-06-25T03:40:11.0881740Z [36;1mrustup default stable[0m
+2026-06-25T03:40:11.0913094Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-06-25T03:40:11.0913450Z env:
+2026-06-25T03:40:11.0913683Z   CARGO_HOME: /home/runner/.cargo
+2026-06-25T03:40:11.0913946Z ##[endgroup]
+2026-06-25T03:40:11.1021166Z info: using existing install for stable-x86_64-unknown-linux-gnu
+2026-06-25T03:40:11.1028365Z info: default toolchain set to stable-x86_64-unknown-linux-gnu
+2026-06-25T03:40:11.1028795Z 
+2026-06-25T03:40:11.1113750Z   stable-x86_64-unknown-linux-gnu unchanged - rustc 1.96.0 (ac68faa20 2026-05-25)
+2026-06-25T03:40:11.1114301Z 
+2026-06-25T03:40:11.1175852Z ##[group]Run : create cachekey
+2026-06-25T03:40:11.1176356Z [36;1m: create cachekey[0m
+2026-06-25T03:40:11.1177292Z [36;1mDATE=$(rustc +stable --version --verbose | sed -ne 's/^commit-date: \(20[0-9][0-9]\)-\([01][0-9]\)-\([0-3][0-9]\)$/\1\2\3/p')[0m
+2026-06-25T03:40:11.1178494Z [36;1mHASH=$(rustc +stable --version --verbose | sed -ne 's/^commit-hash: //p')[0m
+2026-06-25T03:40:11.1179258Z [36;1mecho "cachekey=$(echo $DATE$HASH | head -c12)" >> $GITHUB_OUTPUT[0m
+2026-06-25T03:40:11.1210265Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-06-25T03:40:11.1210617Z env:
+2026-06-25T03:40:11.1210827Z   CARGO_HOME: /home/runner/.cargo
+2026-06-25T03:40:11.1211086Z ##[endgroup]
+2026-06-25T03:40:11.2619398Z ##[group]Run : disable incremental compilation
+2026-06-25T03:40:11.2619818Z [36;1m: disable incremental compilation[0m
+2026-06-25T03:40:11.2620155Z [36;1mif [ -z "${CARGO_INCREMENTAL+set}" ]; then[0m
+2026-06-25T03:40:11.2620508Z [36;1m  echo CARGO_INCREMENTAL=0 >> $GITHUB_ENV[0m
+2026-06-25T03:40:11.2620803Z [36;1mfi[0m
+2026-06-25T03:40:11.2651527Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-06-25T03:40:11.2652242Z env:
+2026-06-25T03:40:11.2652472Z   CARGO_HOME: /home/runner/.cargo
+2026-06-25T03:40:11.2652732Z ##[endgroup]
+2026-06-25T03:40:11.2723541Z ##[group]Run : enable colors in Cargo output
+2026-06-25T03:40:11.2723875Z [36;1m: enable colors in Cargo output[0m
+2026-06-25T03:40:11.2724186Z [36;1mif [ -z "${CARGO_TERM_COLOR+set}" ]; then[0m
+2026-06-25T03:40:11.2724525Z [36;1m  echo CARGO_TERM_COLOR=always >> $GITHUB_ENV[0m
+2026-06-25T03:40:11.2724823Z [36;1mfi[0m
+2026-06-25T03:40:11.2754032Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-06-25T03:40:11.2754373Z env:
+2026-06-25T03:40:11.2754747Z   CARGO_HOME: /home/runner/.cargo
+2026-06-25T03:40:11.2755019Z   CARGO_INCREMENTAL: 0
+2026-06-25T03:40:11.2755238Z ##[endgroup]
+2026-06-25T03:40:11.2824962Z ##[group]Run : enable Cargo sparse registry
+2026-06-25T03:40:11.2825480Z [36;1m: enable Cargo sparse registry[0m
+2026-06-25T03:40:11.2825856Z [36;1m# implemented in 1.66, stabilized in 1.68, made default in 1.70[0m
+2026-06-25T03:40:11.2826560Z [36;1mif [ -z "${CARGO_REGISTRIES_CRATES_IO_PROTOCOL+set}" -o -f "/home/runner/work/_temp"/.implicit_cargo_registries_crates_io_protocol ]; then[0m
+2026-06-25T03:40:11.2827286Z [36;1m  if rustc +stable --version --verbose | grep -q '^release: 1\.6[89]\.'; then[0m
+2026-06-25T03:40:11.2827850Z [36;1m    touch "/home/runner/work/_temp"/.implicit_cargo_registries_crates_io_protocol || true[0m
+2026-06-25T03:40:11.2828391Z [36;1m    echo CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse >> $GITHUB_ENV[0m
+2026-06-25T03:40:11.2828899Z [36;1m  elif rustc +stable --version --verbose | grep -q '^release: 1\.6[67]\.'; then[0m
+2026-06-25T03:40:11.2829483Z [36;1m    touch "/home/runner/work/_temp"/.implicit_cargo_registries_crates_io_protocol || true[0m
+2026-06-25T03:40:11.2830009Z [36;1m    echo CARGO_REGISTRIES_CRATES_IO_PROTOCOL=git >> $GITHUB_ENV[0m
+2026-06-25T03:40:11.2830362Z [36;1m  fi[0m
+2026-06-25T03:40:11.2830561Z [36;1mfi[0m
+2026-06-25T03:40:11.2859687Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-06-25T03:40:11.2860035Z env:
+2026-06-25T03:40:11.2860243Z   CARGO_HOME: /home/runner/.cargo
+2026-06-25T03:40:11.2860512Z   CARGO_INCREMENTAL: 0
+2026-06-25T03:40:11.2860739Z   CARGO_TERM_COLOR: always
+2026-06-25T03:40:11.2860964Z ##[endgroup]
+2026-06-25T03:40:11.3239075Z ##[group]Run : work around spurious network errors in curl 8.0
+2026-06-25T03:40:11.3239530Z [36;1m: work around spurious network errors in curl 8.0[0m
+2026-06-25T03:40:11.3240091Z [36;1m# https://rust-lang.zulipchat.com/#narrow/stream/246057-t-cargo/topic/timeout.20investigation[0m
+2026-06-25T03:40:11.3240738Z [36;1mif rustc +stable --version --verbose | grep -q '^release: 1\.7[01]\.'; then[0m
+2026-06-25T03:40:11.3241217Z [36;1m  echo CARGO_HTTP_MULTIPLEXING=false >> $GITHUB_ENV[0m
+2026-06-25T03:40:11.3241533Z [36;1mfi[0m
+2026-06-25T03:40:11.3272498Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-06-25T03:40:11.3272848Z env:
+2026-06-25T03:40:11.3273050Z   CARGO_HOME: /home/runner/.cargo
+2026-06-25T03:40:11.3273305Z   CARGO_INCREMENTAL: 0
+2026-06-25T03:40:11.3273527Z   CARGO_TERM_COLOR: always
+2026-06-25T03:40:11.3273752Z ##[endgroup]
+2026-06-25T03:40:11.3490829Z ##[group]Run rustc +stable --version --verbose
+2026-06-25T03:40:11.3491189Z [36;1mrustc +stable --version --verbose[0m
+2026-06-25T03:40:11.3521645Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-06-25T03:40:11.3522268Z env:
+2026-06-25T03:40:11.3522487Z   CARGO_HOME: /home/runner/.cargo
+2026-06-25T03:40:11.3522749Z   CARGO_INCREMENTAL: 0
+2026-06-25T03:40:11.3522982Z   CARGO_TERM_COLOR: always
+2026-06-25T03:40:11.3523207Z ##[endgroup]
+2026-06-25T03:40:11.3696253Z rustc 1.96.0 (ac68faa20 2026-05-25)
+2026-06-25T03:40:11.3697075Z binary: rustc
+2026-06-25T03:40:11.3697684Z commit-hash: ac68faa20c58cbccd01ee7208bf3b6e93a7d7f96
+2026-06-25T03:40:11.3698372Z commit-date: 2026-05-25
+2026-06-25T03:40:11.3698921Z host: x86_64-unknown-linux-gnu
+2026-06-25T03:40:11.3699342Z release: 1.96.0
+2026-06-25T03:40:11.3699601Z LLVM version: 22.1.2
+2026-06-25T03:40:11.3825620Z ##[group]Run Swatinem/rust-cache@v2
+2026-06-25T03:40:11.3825930Z with:
+2026-06-25T03:40:11.3826134Z   prefix-key: v0-rust
+2026-06-25T03:40:11.3826371Z   add-job-id-key: true
+2026-06-25T03:40:11.3826617Z   add-rust-environment-hash-key: true
+2026-06-25T03:40:11.3826893Z   cache-targets: true
+2026-06-25T03:40:11.3827113Z   cache-all-crates: false
+2026-06-25T03:40:11.3827353Z   cache-workspace-crates: false
+2026-06-25T03:40:11.3827596Z   save-if: true
+2026-06-25T03:40:11.3827806Z   cache-provider: github
+2026-06-25T03:40:11.3828033Z   cache-bin: true
+2026-06-25T03:40:11.3828244Z   lookup-only: false
+2026-06-25T03:40:11.3828649Z   cmd-format: {0}
+2026-06-25T03:40:11.3828846Z env:
+2026-06-25T03:40:11.3829043Z   CARGO_HOME: /home/runner/.cargo
+2026-06-25T03:40:11.3829302Z   CARGO_INCREMENTAL: 0
+2026-06-25T03:40:11.3829525Z   CARGO_TERM_COLOR: always
+2026-06-25T03:40:11.3829749Z ##[endgroup]
+2026-06-25T03:40:11.6961538Z (node:2433) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-06-25T03:40:11.6963474Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-06-25T03:40:15.8135105Z ##[group]Cache Configuration
+2026-06-25T03:40:15.8135998Z Cache Provider:
+2026-06-25T03:40:15.8136548Z     github
+2026-06-25T03:40:15.8137055Z Workspaces:
+2026-06-25T03:40:15.8137719Z     /home/runner/work/Liquifact-contracts/Liquifact-contracts
+2026-06-25T03:40:15.8138483Z Cache Paths:
+2026-06-25T03:40:15.8139017Z     /home/runner/.cargo/bin
+2026-06-25T03:40:15.8139640Z     /home/runner/.cargo/.crates.toml
+2026-06-25T03:40:15.8140270Z     /home/runner/.cargo/.crates2.json
+2026-06-25T03:40:15.8140878Z     /home/runner/.cargo/registry
+2026-06-25T03:40:15.8141461Z     /home/runner/.cargo/git
+2026-06-25T03:40:15.8142664Z     /home/runner/work/Liquifact-contracts/Liquifact-contracts/target
+2026-06-25T03:40:15.8143361Z Restore Key:
+2026-06-25T03:40:15.8143777Z     v0-rust-fmt-build-test-Linux-x64-4107bf91
+2026-06-25T03:40:15.8144308Z Cache Key:
+2026-06-25T03:40:15.8144759Z     v0-rust-fmt-build-test-Linux-x64-4107bf91-e1b782ec
+2026-06-25T03:40:15.8145317Z .. Prefix:
+2026-06-25T03:40:15.8145693Z   - v0-rust-fmt-build-test-Linux-x64
+2026-06-25T03:40:15.8146194Z .. Environment considered:
+2026-06-25T03:40:15.8146597Z   - Rust Versions:
+2026-06-25T03:40:15.8147169Z     - 1.96.0 x86_64-unknown-linux-gnu ac68faa20c58cbccd01ee7208bf3b6e93a7d7f96
+2026-06-25T03:40:15.8148025Z     - 1.96.0 x86_64-unknown-linux-gnu ac68faa20c58cbccd01ee7208bf3b6e93a7d7f96
+2026-06-25T03:40:15.8148667Z   - CARGO_HOME
+2026-06-25T03:40:15.8149006Z   - CARGO_INCREMENTAL
+2026-06-25T03:40:15.8149387Z   - CARGO_TERM_COLOR
+2026-06-25T03:40:15.8149758Z .. Lockfiles considered:
+2026-06-25T03:40:15.8150351Z   - /home/runner/work/Liquifact-contracts/Liquifact-contracts/Cargo.lock
+2026-06-25T03:40:15.8151424Z   - /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/Cargo.toml
+2026-06-25T03:40:15.8152690Z ##[endgroup]
+2026-06-25T03:40:15.8152894Z 
+2026-06-25T03:40:15.8153054Z ... Restoring cache ...
+2026-06-25T03:40:16.0323653Z No cache found.
+2026-06-25T03:40:16.0447536Z ##[group]Run cargo fmt -p liquifact_escrow -- --check
+2026-06-25T03:40:16.0448268Z [36;1mcargo fmt -p liquifact_escrow -- --check[0m
+2026-06-25T03:40:16.0480289Z shell: /usr/bin/bash -e {0}
+2026-06-25T03:40:16.0480539Z env:
+2026-06-25T03:40:16.0480738Z   CARGO_HOME: /home/runner/.cargo
+2026-06-25T03:40:16.0481003Z   CARGO_INCREMENTAL: 0
+2026-06-25T03:40:16.0481227Z   CARGO_TERM_COLOR: always
+2026-06-25T03:40:16.0481460Z   CACHE_ON_FAILURE: false
+2026-06-25T03:40:16.0481679Z ##[endgroup]
+2026-06-25T03:40:19.5050588Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/lib.rs:2201:
+2026-06-25T03:40:19.5051767Z          let n = entries.len();
+2026-06-25T03:40:19.5052676Z  
+2026-06-25T03:40:19.5059096Z          ensure(&env, n > 0, EscrowError::FundingBatchEmpty);
+2026-06-25T03:40:19.5059484Z -        ensure(
+2026-06-25T03:40:19.5059714Z -            &env,
+2026-06-25T03:40:19.5059952Z -            n <= MAX_FUND_BATCH,
+2026-06-25T03:40:19.5060333Z -            EscrowError::FundingBatchTooLarge,
+2026-06-25T03:40:19.5060647Z -        );
+2026-06-25T03:40:19.5060977Z +        ensure(&env, n <= MAX_FUND_BATCH, EscrowError::FundingBatchTooLarge);
+2026-06-25T03:40:19.5061382Z  
+2026-06-25T03:40:19.5061630Z          let mut escrow = Self::get_escrow(env.clone());
+2026-06-25T03:40:19.5062392Z  
+2026-06-25T03:40:19.5310027Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/admin.rs:777:
+2026-06-25T03:40:19.5310957Z  fn test_update_funding_target_fails_when_withdrawn() {
+2026-06-25T03:40:19.5312151Z      let env = Env::default();
+2026-06-25T03:40:19.5312618Z      env.mock_all_auths();
+2026-06-25T03:40:19.5313044Z -    let (client, _escrow_id, _sme) =
+2026-06-25T03:40:19.5313624Z -        init_and_fund_with_real_token(&env, 5_000i128, "WD001");
+2026-06-25T03:40:19.5314458Z +    let (client, _escrow_id, _sme) = init_and_fund_with_real_token(&env, 5_000i128, "WD001");
+2026-06-25T03:40:19.5315554Z      client.withdraw(); // status → 3 (withdrawn)
+2026-06-25T03:40:19.5316164Z      client.update_funding_target(&6_000i128);
+2026-06-25T03:40:19.5316647Z  }
+2026-06-25T03:40:19.5317334Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/admin.rs:984:
+2026-06-25T03:40:19.5318256Z  fn test_update_maturity_fails_when_withdrawn() {
+2026-06-25T03:40:19.5318817Z      let env = Env::default();
+2026-06-25T03:40:19.5319240Z      env.mock_all_auths();
+2026-06-25T03:40:19.5319656Z -    let (client, _escrow_id, _sme) =
+2026-06-25T03:40:19.5320230Z -        init_and_fund_with_real_token(&env, 5_000i128, "MAT004");
+2026-06-25T03:40:19.5321095Z +    let (client, _escrow_id, _sme) = init_and_fund_with_real_token(&env, 5_000i128, "MAT004");
+2026-06-25T03:40:19.5322182Z      client.withdraw(); // status → 3
+2026-06-25T03:40:19.5322677Z      client.update_maturity(&2000u64);
+2026-06-25T03:40:19.5323119Z  }
+2026-06-25T03:40:19.6332450Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/init.rs:581:
+2026-06-25T03:40:19.6333538Z  fn test_get_treasury_before_init_fails_with_typed_error() {
+2026-06-25T03:40:19.6334206Z      let env = Env::default();
+2026-06-25T03:40:19.6334724Z      let client = deploy(&env);
+2026-06-25T03:40:19.6335165Z -    assert_contract_error(
+2026-06-25T03:40:19.6335594Z -        client.try_get_treasury(),
+2026-06-25T03:40:19.6336112Z -        EscrowError::TreasuryNotSet,
+2026-06-25T03:40:19.6336568Z -    );
+2026-06-25T03:40:19.6337151Z +    assert_contract_error(client.try_get_treasury(), EscrowError::TreasuryNotSet);
+2026-06-25T03:40:19.6337884Z  }
+2026-06-25T03:40:19.6338177Z  
+2026-06-25T03:40:19.6338476Z  #[test]
+2026-06-25T03:40:19.6386203Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/integration.rs:890:
+2026-06-25T03:40:19.6387128Z      env.mock_all_auths();
+2026-06-25T03:40:19.6387539Z  
+2026-06-25T03:40:19.6387872Z      let target = 50_000_000i128;
+2026-06-25T03:40:19.6388340Z -    let (client, escrow_id, token, sme) =
+2026-06-25T03:40:19.6389396Z -        setup_withdraw_with_token(&env, target, "WD_BAL001");
+2026-06-25T03:40:19.6390291Z +    let (client, escrow_id, token, sme) = setup_withdraw_with_token(&env, target, "WD_BAL001");
+2026-06-25T03:40:19.6391106Z  
+2026-06-25T03:40:19.6391444Z      let sme_before = token.balance(&sme);
+2026-06-25T03:40:19.6392279Z      let contract_before = token.balance(&escrow_id);
+2026-06-25T03:40:19.6393250Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/integration.rs:898:
+2026-06-25T03:40:19.6394498Z -    assert_eq!(contract_before, target, "escrow must hold exactly funded_amount before withdraw");
+2026-06-25T03:40:19.6395327Z +    assert_eq!(
+2026-06-25T03:40:19.6395699Z +        contract_before, target,
+2026-06-25T03:40:19.6396254Z +        "escrow must hold exactly funded_amount before withdraw"
+2026-06-25T03:40:19.6396988Z +    );
+2026-06-25T03:40:19.6397299Z  
+2026-06-25T03:40:19.6397615Z      client.withdraw();
+2026-06-25T03:40:19.6397987Z  
+2026-06-25T03:40:19.6398714Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/integration.rs:911:
+2026-06-25T03:40:19.6399604Z          contract_after, 0,
+2026-06-25T03:40:19.6400141Z          "escrow contract balance must be zero after disbursement"
+2026-06-25T03:40:19.6400744Z      );
+2026-06-25T03:40:19.6401322Z -    assert_eq!(client.get_escrow().status, 3u32, "status must be 3 after withdraw");
+2026-06-25T03:40:19.6402384Z +    assert_eq!(
+2026-06-25T03:40:19.6402879Z +        client.get_escrow().status,
+2026-06-25T03:40:19.6403565Z +        3u32,
+2026-06-25T03:40:19.6403949Z +        "status must be 3 after withdraw"
+2026-06-25T03:40:19.6404407Z +    );
+2026-06-25T03:40:19.6404707Z  }
+2026-06-25T03:40:19.6405002Z  
+2026-06-25T03:40:19.6405483Z  /// `withdraw` increments `DistributedPrincipal` by `funded_amount`.
+2026-06-25T03:40:19.6406533Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/integration.rs:921:
+2026-06-25T03:40:19.6407420Z      env.mock_all_auths();
+2026-06-25T03:40:19.6407817Z  
+2026-06-25T03:40:19.6408141Z      let target = 20_000_000i128;
+2026-06-25T03:40:19.6408615Z -    let (client, _escrow_id, _token, _sme) =
+2026-06-25T03:40:19.6409215Z -        setup_withdraw_with_token(&env, target, "WD_DP001");
+2026-06-25T03:40:19.6410071Z +    let (client, _escrow_id, _token, _sme) = setup_withdraw_with_token(&env, target, "WD_DP001");
+2026-06-25T03:40:19.6410817Z  
+2026-06-25T03:40:19.6411132Z      client.withdraw();
+2026-06-25T03:40:19.6411505Z  
+2026-06-25T03:40:19.6412468Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/integration.rs:1058:
+2026-06-25T03:40:19.6413388Z      env.mock_all_auths();
+2026-06-25T03:40:19.6413770Z  
+2026-06-25T03:40:19.6414092Z      let target = 5_000_000i128;
+2026-06-25T03:40:19.6414548Z -    let (client, escrow_id, _token, sme) =
+2026-06-25T03:40:19.6415147Z -        setup_withdraw_with_token(&env, target, "WD_EV001");
+2026-06-25T03:40:19.6415985Z +    let (client, escrow_id, _token, sme) = setup_withdraw_with_token(&env, target, "WD_EV001");
+2026-06-25T03:40:19.6416714Z  
+2026-06-25T03:40:19.6417033Z      client.withdraw();
+2026-06-25T03:40:19.6417402Z  
+2026-06-25T03:40:19.6418131Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/integration.rs:1074:
+2026-06-25T03:40:19.6419127Z      .to_xdr(&env, &escrow_id);
+2026-06-25T03:40:19.6419569Z  
+2026-06-25T03:40:19.6420046Z      let all_events = env.events().all().filter_by_contract(&escrow_id);
+2026-06-25T03:40:19.6420684Z -    let found = all_events
+2026-06-25T03:40:19.6421089Z -        .events()
+2026-06-25T03:40:19.6421438Z -        .iter()
+2026-06-25T03:40:19.6421807Z -        .any(|e| *e == expected_xdr);
+2026-06-25T03:40:19.6422935Z -    assert!(found, "SmeWithdrew event with correct recipient and amount must be emitted");
+2026-06-25T03:40:19.6423872Z +    let found = all_events.events().iter().any(|e| *e == expected_xdr);
+2026-06-25T03:40:19.6424483Z +    assert!(
+2026-06-25T03:40:19.6424805Z +        found,
+2026-06-25T03:40:19.6425583Z +        "SmeWithdrew event with correct recipient and amount must be emitted"
+2026-06-25T03:40:19.6426274Z +    );
+2026-06-25T03:40:19.6426576Z  }
+2026-06-25T03:40:19.6426912Z  
+2026-06-25T03:40:19.6722991Z Diff in /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/src/tests/settlement.rs:45:
+2026-06-25T03:40:19.6724159Z  /// actually transfer them.  Returns `(client, sme, sac_admin_client)`.
+2026-06-25T03:40:19.6724833Z  fn setup_funded_with_token<'a>(
+2026-06-25T03:40:19.6725256Z      env: &'a Env,
+2026-06-25T03:40:19.6725906Z -) -> (super::LiquifactEscrowClient<'a>, Address, StellarAssetClient<'a>) {
+2026-06-25T03:40:19.6726608Z +) -> (
+2026-06-25T03:40:19.6726992Z +    super::LiquifactEscrowClient<'a>,
+2026-06-25T03:40:19.6727472Z +    Address,
+2026-06-25T03:40:19.6727844Z +    StellarAssetClient<'a>,
+2026-06-25T03:40:19.6728266Z +) {
+2026-06-25T03:40:19.6728809Z      let sac = env.register_stellar_asset_contract_v2(Address::generate(env));
+2026-06-25T03:40:19.6729515Z      let token_id = sac.address();
+2026-06-25T03:40:19.6730091Z      let sac_admin = StellarAssetClient::new(env, &token_id);
+2026-06-25T03:40:19.7226918Z ##[error]Process completed with exit code 1.
+2026-06-25T03:40:19.7383981Z Node 20 is being deprecated. This workflow is running with Node 24 by default. If you need to temporarily use Node 20, you can set the ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true environment variable. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+2026-06-25T03:40:19.7385704Z Post job cleanup.
+2026-06-25T03:40:19.8216988Z [command]/usr/bin/git version
+2026-06-25T03:40:19.8254551Z git version 2.54.0
+2026-06-25T03:40:19.8293850Z Temporarily overriding HOME='/home/runner/work/_temp/76f73d27-fd7a-4a1a-a125-312b33576101' before making global git config changes
+2026-06-25T03:40:19.8295942Z Adding repository directory to the temporary git global config as a safe directory
+2026-06-25T03:40:19.8300433Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/Liquifact-contracts/Liquifact-contracts
+2026-06-25T03:40:19.8336411Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-06-25T03:40:19.8367535Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-06-25T03:40:19.8582644Z fatal: No url found for submodule path 'Liquifact-contracts' in .gitmodules
+2026-06-25T03:40:19.8622458Z ##[warning]The process '/usr/bin/git' failed with exit code 128
+2026-06-25T03:40:19.8721676Z Cleaning up orphan processes
+2026-06-25T03:40:19.8989100Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/

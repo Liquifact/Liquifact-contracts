@@ -1,0 +1,1441 @@
+﻿2026-06-25T09:52:42.1855218Z Current runner version: '2.335.1'
+2026-06-25T09:52:42.1876747Z ##[group]Runner Image Provisioner
+2026-06-25T09:52:42.1877777Z Hosted Compute Agent
+2026-06-25T09:52:42.1878313Z Version: 20260611.554
+2026-06-25T09:52:42.1878882Z Commit: 5e0782fdc9014723d3be820dd114dd31555c2bd1
+2026-06-25T09:52:42.1879468Z Build Date: 2026-06-11T21:40:46Z
+2026-06-25T09:52:42.1880060Z Worker ID: {294dac7c-7d02-458d-b6c6-e8d870859988}
+2026-06-25T09:52:42.1880644Z Azure Region: westus
+2026-06-25T09:52:42.1881090Z ##[endgroup]
+2026-06-25T09:52:42.1882317Z ##[group]Operating System
+2026-06-25T09:52:42.1882808Z Ubuntu
+2026-06-25T09:52:42.1883263Z 24.04.4
+2026-06-25T09:52:42.1883693Z LTS
+2026-06-25T09:52:42.1884103Z ##[endgroup]
+2026-06-25T09:52:42.1884614Z ##[group]Runner Image
+2026-06-25T09:52:42.1885116Z Image: ubuntu-24.04
+2026-06-25T09:52:42.1885637Z Version: 20260615.205.1
+2026-06-25T09:52:42.1886640Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260615.205/images/ubuntu/Ubuntu2404-Readme.md
+2026-06-25T09:52:42.1888153Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20260615.205
+2026-06-25T09:52:42.1888918Z ##[endgroup]
+2026-06-25T09:52:42.1889908Z ##[group]GITHUB_TOKEN Permissions
+2026-06-25T09:52:42.1891472Z Contents: read
+2026-06-25T09:52:42.1891963Z Metadata: read
+2026-06-25T09:52:42.1892538Z Packages: read
+2026-06-25T09:52:42.1892986Z ##[endgroup]
+2026-06-25T09:52:42.1894743Z Secret source: None
+2026-06-25T09:52:42.1895405Z Prepare workflow directory
+2026-06-25T09:52:42.2159623Z Prepare all required actions
+2026-06-25T09:52:42.2190424Z Getting action download info
+2026-06-25T09:52:42.6360104Z Download action repository 'actions/checkout@v4' (SHA:34e114876b0b11c390a56381ad16ebd13914f8d5)
+2026-06-25T09:52:42.7823836Z Download action repository 'dtolnay/rust-toolchain@stable' (SHA:29eef336d9b2848a0b548edc03f92a220660cdb8)
+2026-06-25T09:52:42.9893924Z Download action repository 'Swatinem/rust-cache@v2' (SHA:e18b497796c12c097a38f9edb9d0641fb99eee32)
+2026-06-25T09:52:43.6462473Z Download action repository 'taiki-e/install-action@cargo-llvm-cov' (SHA:901c6c5742b8b5bab0a7cf0bf63286ad5e3120f3)
+2026-06-25T09:52:44.2167543Z Complete job name: fmt-build-test
+2026-06-25T09:52:44.2896211Z Node 20 is being deprecated. This workflow is running with Node 24 by default. If you need to temporarily use Node 20, you can set the ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true environment variable. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+2026-06-25T09:52:44.2904856Z ##[group]Run actions/checkout@v4
+2026-06-25T09:52:44.2905829Z with:
+2026-06-25T09:52:44.2906577Z   repository: Liquifact/Liquifact-contracts
+2026-06-25T09:52:44.2914334Z   token: ***
+2026-06-25T09:52:44.2915027Z   ssh-strict: true
+2026-06-25T09:52:44.2915729Z   ssh-user: git
+2026-06-25T09:52:44.2916447Z   persist-credentials: true
+2026-06-25T09:52:44.2917379Z   clean: true
+2026-06-25T09:52:44.2918111Z   sparse-checkout-cone-mode: true
+2026-06-25T09:52:44.2918976Z   fetch-depth: 1
+2026-06-25T09:52:44.2919684Z   fetch-tags: false
+2026-06-25T09:52:44.2920414Z   show-progress: true
+2026-06-25T09:52:44.2921153Z   lfs: false
+2026-06-25T09:52:44.2921862Z   submodules: false
+2026-06-25T09:52:44.2922595Z   set-safe-directory: true
+2026-06-25T09:52:44.2923568Z ##[endgroup]
+2026-06-25T09:52:44.3915334Z Syncing repository: Liquifact/Liquifact-contracts
+2026-06-25T09:52:44.3917797Z ##[group]Getting Git version info
+2026-06-25T09:52:44.3919600Z Working directory is '/home/runner/work/Liquifact-contracts/Liquifact-contracts'
+2026-06-25T09:52:44.3921545Z [command]/usr/bin/git version
+2026-06-25T09:52:44.3969361Z git version 2.54.0
+2026-06-25T09:52:44.3996072Z ##[endgroup]
+2026-06-25T09:52:44.4007881Z Temporarily overriding HOME='/home/runner/work/_temp/0d98d104-20dc-4af5-bf2e-f66b2853a948' before making global git config changes
+2026-06-25T09:52:44.4011129Z Adding repository directory to the temporary git global config as a safe directory
+2026-06-25T09:52:44.4014087Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/Liquifact-contracts/Liquifact-contracts
+2026-06-25T09:52:44.4042555Z Deleting the contents of '/home/runner/work/Liquifact-contracts/Liquifact-contracts'
+2026-06-25T09:52:44.4048488Z ##[group]Initializing the repository
+2026-06-25T09:52:44.4052206Z [command]/usr/bin/git init /home/runner/work/Liquifact-contracts/Liquifact-contracts
+2026-06-25T09:52:44.4142107Z hint: Using 'master' as the name for the initial branch. This default branch name
+2026-06-25T09:52:44.4144393Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+2026-06-25T09:52:44.4146546Z hint: to use in all of your new repositories, which will suppress this warning,
+2026-06-25T09:52:44.4148556Z hint: call:
+2026-06-25T09:52:44.4149637Z hint:
+2026-06-25T09:52:44.4150744Z hint: 	git config --global init.defaultBranch <name>
+2026-06-25T09:52:44.4152219Z hint:
+2026-06-25T09:52:44.4153588Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+2026-06-25T09:52:44.4155691Z hint: 'development'. The just-created branch can be renamed via this command:
+2026-06-25T09:52:44.4157493Z hint:
+2026-06-25T09:52:44.4158498Z hint: 	git branch -m <name>
+2026-06-25T09:52:44.4159512Z hint:
+2026-06-25T09:52:44.4160472Z hint: Disable this message with "git config set advice.defaultBranchName false"
+2026-06-25T09:52:44.4162187Z Initialized empty Git repository in /home/runner/work/Liquifact-contracts/Liquifact-contracts/.git/
+2026-06-25T09:52:44.4165550Z [command]/usr/bin/git remote add origin https://github.com/Liquifact/Liquifact-contracts
+2026-06-25T09:52:44.4182284Z ##[endgroup]
+2026-06-25T09:52:44.4184083Z ##[group]Disabling automatic garbage collection
+2026-06-25T09:52:44.4185776Z [command]/usr/bin/git config --local gc.auto 0
+2026-06-25T09:52:44.4209873Z ##[endgroup]
+2026-06-25T09:52:44.4211646Z ##[group]Setting up auth
+2026-06-25T09:52:44.4215527Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-06-25T09:52:44.4242240Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-06-25T09:52:44.4498282Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+2026-06-25T09:52:44.4525830Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+2026-06-25T09:52:44.4793831Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+2026-06-25T09:52:44.4845721Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+2026-06-25T09:52:44.5108123Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+2026-06-25T09:52:44.5139680Z ##[endgroup]
+2026-06-25T09:52:44.5140882Z ##[group]Fetching the repository
+2026-06-25T09:52:44.5146726Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules --depth=1 origin +9ebfdcb1f609307caea8b492101bf30bf0fa138e:refs/remotes/pull/427/merge
+2026-06-25T09:52:45.1074622Z From https://github.com/Liquifact/Liquifact-contracts
+2026-06-25T09:52:45.1075686Z  * [new ref]         9ebfdcb1f609307caea8b492101bf30bf0fa138e -> pull/427/merge
+2026-06-25T09:52:45.1095807Z ##[endgroup]
+2026-06-25T09:52:45.1096350Z ##[group]Determining the checkout info
+2026-06-25T09:52:45.1098435Z ##[endgroup]
+2026-06-25T09:52:45.1102814Z [command]/usr/bin/git sparse-checkout disable
+2026-06-25T09:52:45.1134995Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+2026-06-25T09:52:45.1157178Z ##[group]Checking out the ref
+2026-06-25T09:52:45.1160230Z [command]/usr/bin/git checkout --progress --force refs/remotes/pull/427/merge
+2026-06-25T09:52:45.1458535Z Note: switching to 'refs/remotes/pull/427/merge'.
+2026-06-25T09:52:45.1459141Z 
+2026-06-25T09:52:45.1459376Z You are in 'detached HEAD' state. You can look around, make experimental
+2026-06-25T09:52:45.1459800Z changes and commit them, and you can discard any commits you make in this
+2026-06-25T09:52:45.1460218Z state without impacting any branches by switching back to a branch.
+2026-06-25T09:52:45.1460466Z 
+2026-06-25T09:52:45.1460643Z If you want to create a new branch to retain commits you create, you may
+2026-06-25T09:52:45.1461032Z do so (now or later) by using -c with the switch command. Example:
+2026-06-25T09:52:45.1461247Z 
+2026-06-25T09:52:45.1461357Z   git switch -c <new-branch-name>
+2026-06-25T09:52:45.1461525Z 
+2026-06-25T09:52:45.1461626Z Or undo this operation with:
+2026-06-25T09:52:45.1461781Z 
+2026-06-25T09:52:45.1461870Z   git switch -
+2026-06-25T09:52:45.1462026Z 
+2026-06-25T09:52:45.1462229Z Turn off this advice by setting config variable advice.detachedHead to false
+2026-06-25T09:52:45.1462521Z 
+2026-06-25T09:52:45.1462823Z HEAD is now at 9ebfdcb Merge b1ad78ade1243fe49437d3f8a6fd17128cb6a4ca into f3c49bc43a4afd486efc2e2beb59bd144adb5029
+2026-06-25T09:52:45.1464670Z ##[endgroup]
+2026-06-25T09:52:45.1498891Z [command]/usr/bin/git log -1 --format=%H
+2026-06-25T09:52:45.1517863Z 9ebfdcb1f609307caea8b492101bf30bf0fa138e
+2026-06-25T09:52:45.1803421Z ##[group]Run dtolnay/rust-toolchain@stable
+2026-06-25T09:52:45.1803743Z with:
+2026-06-25T09:52:45.1803988Z   components: rustfmt, clippy, llvm-tools-preview
+2026-06-25T09:52:45.1804274Z   toolchain: stable
+2026-06-25T09:52:45.1804487Z ##[endgroup]
+2026-06-25T09:52:45.1908208Z ##[group]Run : parse toolchain version
+2026-06-25T09:52:45.1908587Z [36;1m: parse toolchain version[0m
+2026-06-25T09:52:45.1908862Z [36;1mif [[ -z $toolchain ]]; then[0m
+2026-06-25T09:52:45.1909332Z [36;1m  # GitHub does not enforce `required: true` inputs itself. https://github.com/actions/runner/issues/1070[0m
+2026-06-25T09:52:45.1909827Z [36;1m  echo "'toolchain' is a required input" >&2[0m
+2026-06-25T09:52:45.1910103Z [36;1m  exit 1[0m
+2026-06-25T09:52:45.1910426Z [36;1melif [[ $toolchain =~ ^stable' '[0-9]+' '(year|month|week|day)s?' 'ago$ ]]; then[0m
+2026-06-25T09:52:45.1910784Z [36;1m  if [[ Linux == macOS ]]; then[0m
+2026-06-25T09:52:45.1911271Z [36;1m    echo "toolchain=1.$((($(date -v-$(sed 's/stable \([0-9]*\) \(.\).*/\1\2/' <<< $toolchain) +%s)/60/60/24-16569)/7/6))" >> $GITHUB_OUTPUT[0m
+2026-06-25T09:52:45.1911717Z [36;1m  else[0m
+2026-06-25T09:52:45.1912086Z [36;1m    echo "toolchain=1.$((($(date --date "${toolchain#stable }" +%s)/60/60/24-16569)/7/6))" >> $GITHUB_OUTPUT[0m
+2026-06-25T09:52:45.1912482Z [36;1m  fi[0m
+2026-06-25T09:52:45.1912777Z [36;1melif [[ $toolchain =~ ^stable' 'minus' '[0-9]+' 'releases?$ ]]; then[0m
+2026-06-25T09:52:45.1913224Z [36;1m  echo "toolchain=1.$((($(date +%s)/60/60/24-16569)/7/6-${toolchain//[^0-9]/}))" >> $GITHUB_OUTPUT[0m
+2026-06-25T09:52:45.1913612Z [36;1melif [[ $toolchain =~ ^1\.[0-9]+$ ]]; then[0m
+2026-06-25T09:52:45.1914044Z [36;1m  echo "toolchain=1.$((i=${toolchain#1.}, c=($(date +%s)/60/60/24-16569)/7/6, i+9*i*(10*i<=c)+90*i*(100*i<=c)))" >> $GITHUB_OUTPUT[0m
+2026-06-25T09:52:45.1914482Z [36;1melse[0m
+2026-06-25T09:52:45.1914730Z [36;1m  echo "toolchain=$toolchain" >> $GITHUB_OUTPUT[0m
+2026-06-25T09:52:45.1915013Z [36;1mfi[0m
+2026-06-25T09:52:45.2094810Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-06-25T09:52:45.2095170Z env:
+2026-06-25T09:52:45.2095384Z   toolchain: stable
+2026-06-25T09:52:45.2095615Z ##[endgroup]
+2026-06-25T09:52:45.2225434Z ##[group]Run : construct rustup command line
+2026-06-25T09:52:45.2225779Z [36;1m: construct rustup command line[0m
+2026-06-25T09:52:45.2226194Z [36;1mecho "targets=$(for t in ${targets//,/ }; do echo -n ' --target' $t; done)" >> $GITHUB_OUTPUT[0m
+2026-06-25T09:52:45.2226741Z [36;1mecho "components=$(for c in ${components//,/ }; do echo -n ' --component' $c; done)" >> $GITHUB_OUTPUT[0m
+2026-06-25T09:52:45.2227566Z [36;1mecho "downgrade=" >> $GITHUB_OUTPUT[0m
+2026-06-25T09:52:45.2253454Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-06-25T09:52:45.2253912Z env:
+2026-06-25T09:52:45.2254105Z   targets: 
+2026-06-25T09:52:45.2254345Z   components: rustfmt, clippy, llvm-tools-preview
+2026-06-25T09:52:45.2254626Z ##[endgroup]
+2026-06-25T09:52:45.2332298Z ##[group]Run : set $CARGO_HOME
+2026-06-25T09:52:45.2332578Z [36;1m: set $CARGO_HOME[0m
+2026-06-25T09:52:45.2332886Z [36;1mecho CARGO_HOME=${CARGO_HOME:-"$HOME/.cargo"} >> $GITHUB_ENV[0m
+2026-06-25T09:52:45.2357203Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-06-25T09:52:45.2357605Z ##[endgroup]
+2026-06-25T09:52:45.2433025Z ##[group]Run : install rustup if needed
+2026-06-25T09:52:45.2433333Z [36;1m: install rustup if needed[0m
+2026-06-25T09:52:45.2433612Z [36;1mif ! command -v rustup &>/dev/null; then[0m
+2026-06-25T09:52:45.2434267Z [36;1m  curl --proto '=https' --tlsv1.2 --retry 10 --retry-connrefused --location --silent --show-error --fail https://sh.rustup.rs | sh -s -- --default-toolchain none -y[0m
+2026-06-25T09:52:45.2434899Z [36;1m  echo "$CARGO_HOME/bin" >> $GITHUB_PATH[0m
+2026-06-25T09:52:45.2435161Z [36;1mfi[0m
+2026-06-25T09:52:45.2459249Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-06-25T09:52:45.2459563Z env:
+2026-06-25T09:52:45.2459939Z   CARGO_HOME: /home/runner/.cargo
+2026-06-25T09:52:45.2460192Z ##[endgroup]
+2026-06-25T09:52:45.2535122Z ##[group]Run rustup toolchain install stable --component rustfmt --component clippy --component llvm-tools-preview --profile minimal --no-self-update
+2026-06-25T09:52:45.2535986Z [36;1mrustup toolchain install stable --component rustfmt --component clippy --component llvm-tools-preview --profile minimal --no-self-update[0m
+2026-06-25T09:52:45.2560675Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-06-25T09:52:45.2560996Z env:
+2026-06-25T09:52:45.2561204Z   CARGO_HOME: /home/runner/.cargo
+2026-06-25T09:52:45.2561454Z   RUSTUP_PERMIT_COPY_RENAME: 1
+2026-06-25T09:52:45.2561688Z ##[endgroup]
+2026-06-25T09:52:45.8233700Z info: syncing channel updates for stable-x86_64-unknown-linux-gnu
+2026-06-25T09:52:45.9303194Z info: latest update on 2026-05-28 for version 1.96.0 (ac68faa20 2026-05-25)
+2026-06-25T09:52:45.9396327Z info: component clippy is up to date
+2026-06-25T09:52:45.9396963Z info: component rustfmt is up to date
+2026-06-25T09:52:45.9399892Z info: downloading component llvm-tools
+2026-06-25T09:52:48.3959726Z 
+2026-06-25T09:52:48.4037824Z   stable-x86_64-unknown-linux-gnu updated - rustc 1.96.0 (ac68faa20 2026-05-25) (from rustc 1.96.0 (ac68faa20 2026-05-25))
+2026-06-25T09:52:48.4038245Z 
+2026-06-25T09:52:48.4097574Z ##[group]Run rustup default stable
+2026-06-25T09:52:48.4097852Z [36;1mrustup default stable[0m
+2026-06-25T09:52:48.4124658Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-06-25T09:52:48.4124948Z env:
+2026-06-25T09:52:48.4125121Z   CARGO_HOME: /home/runner/.cargo
+2026-06-25T09:52:48.4125329Z ##[endgroup]
+2026-06-25T09:52:48.4214273Z info: using existing install for stable-x86_64-unknown-linux-gnu
+2026-06-25T09:52:48.4220650Z info: default toolchain set to stable-x86_64-unknown-linux-gnu
+2026-06-25T09:52:48.4221034Z 
+2026-06-25T09:52:48.4297086Z   stable-x86_64-unknown-linux-gnu unchanged - rustc 1.96.0 (ac68faa20 2026-05-25)
+2026-06-25T09:52:48.4297508Z 
+2026-06-25T09:52:48.4329591Z ##[group]Run : create cachekey
+2026-06-25T09:52:48.4329891Z [36;1m: create cachekey[0m
+2026-06-25T09:52:48.4330297Z [36;1mDATE=$(rustc +stable --version --verbose | sed -ne 's/^commit-date: \(20[0-9][0-9]\)-\([01][0-9]\)-\([0-3][0-9]\)$/\1\2\3/p')[0m
+2026-06-25T09:52:48.4330798Z [36;1mHASH=$(rustc +stable --version --verbose | sed -ne 's/^commit-hash: //p')[0m
+2026-06-25T09:52:48.4331185Z [36;1mecho "cachekey=$(echo $DATE$HASH | head -c12)" >> $GITHUB_OUTPUT[0m
+2026-06-25T09:52:48.4358056Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-06-25T09:52:48.4358327Z env:
+2026-06-25T09:52:48.4358503Z   CARGO_HOME: /home/runner/.cargo
+2026-06-25T09:52:48.4358727Z ##[endgroup]
+2026-06-25T09:52:48.4695626Z ##[group]Run : disable incremental compilation
+2026-06-25T09:52:48.4695981Z [36;1m: disable incremental compilation[0m
+2026-06-25T09:52:48.4696248Z [36;1mif [ -z "${CARGO_INCREMENTAL+set}" ]; then[0m
+2026-06-25T09:52:48.4696567Z [36;1m  echo CARGO_INCREMENTAL=0 >> $GITHUB_ENV[0m
+2026-06-25T09:52:48.4697199Z [36;1mfi[0m
+2026-06-25T09:52:48.4723693Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-06-25T09:52:48.4724017Z env:
+2026-06-25T09:52:48.4724203Z   CARGO_HOME: /home/runner/.cargo
+2026-06-25T09:52:48.4724416Z ##[endgroup]
+2026-06-25T09:52:48.4784735Z ##[group]Run : enable colors in Cargo output
+2026-06-25T09:52:48.4785016Z [36;1m: enable colors in Cargo output[0m
+2026-06-25T09:52:48.4785298Z [36;1mif [ -z "${CARGO_TERM_COLOR+set}" ]; then[0m
+2026-06-25T09:52:48.4785569Z [36;1m  echo CARGO_TERM_COLOR=always >> $GITHUB_ENV[0m
+2026-06-25T09:52:48.4785806Z [36;1mfi[0m
+2026-06-25T09:52:48.4809212Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-06-25T09:52:48.4809492Z env:
+2026-06-25T09:52:48.4809658Z   CARGO_HOME: /home/runner/.cargo
+2026-06-25T09:52:48.4809861Z   CARGO_INCREMENTAL: 0
+2026-06-25T09:52:48.4810037Z ##[endgroup]
+2026-06-25T09:52:48.4869911Z ##[group]Run : enable Cargo sparse registry
+2026-06-25T09:52:48.4870344Z [36;1m: enable Cargo sparse registry[0m
+2026-06-25T09:52:48.4870640Z [36;1m# implemented in 1.66, stabilized in 1.68, made default in 1.70[0m
+2026-06-25T09:52:48.4871219Z [36;1mif [ -z "${CARGO_REGISTRIES_CRATES_IO_PROTOCOL+set}" -o -f "/home/runner/work/_temp"/.implicit_cargo_registries_crates_io_protocol ]; then[0m
+2026-06-25T09:52:48.4871771Z [36;1m  if rustc +stable --version --verbose | grep -q '^release: 1\.6[89]\.'; then[0m
+2026-06-25T09:52:48.4872204Z [36;1m    touch "/home/runner/work/_temp"/.implicit_cargo_registries_crates_io_protocol || true[0m
+2026-06-25T09:52:48.4872615Z [36;1m    echo CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse >> $GITHUB_ENV[0m
+2026-06-25T09:52:48.4872990Z [36;1m  elif rustc +stable --version --verbose | grep -q '^release: 1\.6[67]\.'; then[0m
+2026-06-25T09:52:48.4873419Z [36;1m    touch "/home/runner/work/_temp"/.implicit_cargo_registries_crates_io_protocol || true[0m
+2026-06-25T09:52:48.4873814Z [36;1m    echo CARGO_REGISTRIES_CRATES_IO_PROTOCOL=git >> $GITHUB_ENV[0m
+2026-06-25T09:52:48.4874081Z [36;1m  fi[0m
+2026-06-25T09:52:48.4874249Z [36;1mfi[0m
+2026-06-25T09:52:48.4897034Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-06-25T09:52:48.4897337Z env:
+2026-06-25T09:52:48.4897508Z   CARGO_HOME: /home/runner/.cargo
+2026-06-25T09:52:48.4897724Z   CARGO_INCREMENTAL: 0
+2026-06-25T09:52:48.4897908Z   CARGO_TERM_COLOR: always
+2026-06-25T09:52:48.4898095Z ##[endgroup]
+2026-06-25T09:52:48.5208154Z ##[group]Run : work around spurious network errors in curl 8.0
+2026-06-25T09:52:48.5208531Z [36;1m: work around spurious network errors in curl 8.0[0m
+2026-06-25T09:52:48.5209002Z [36;1m# https://rust-lang.zulipchat.com/#narrow/stream/246057-t-cargo/topic/timeout.20investigation[0m
+2026-06-25T09:52:48.5209496Z [36;1mif rustc +stable --version --verbose | grep -q '^release: 1\.7[01]\.'; then[0m
+2026-06-25T09:52:48.5209852Z [36;1m  echo CARGO_HTTP_MULTIPLEXING=false >> $GITHUB_ENV[0m
+2026-06-25T09:52:48.5210101Z [36;1mfi[0m
+2026-06-25T09:52:48.5236262Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-06-25T09:52:48.5236532Z env:
+2026-06-25T09:52:48.5236698Z   CARGO_HOME: /home/runner/.cargo
+2026-06-25T09:52:48.5236997Z   CARGO_INCREMENTAL: 0
+2026-06-25T09:52:48.5237183Z   CARGO_TERM_COLOR: always
+2026-06-25T09:52:48.5237372Z ##[endgroup]
+2026-06-25T09:52:48.5425162Z ##[group]Run rustc +stable --version --verbose
+2026-06-25T09:52:48.5425479Z [36;1mrustc +stable --version --verbose[0m
+2026-06-25T09:52:48.5452098Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+2026-06-25T09:52:48.5452371Z env:
+2026-06-25T09:52:48.5452540Z   CARGO_HOME: /home/runner/.cargo
+2026-06-25T09:52:48.5452750Z   CARGO_INCREMENTAL: 0
+2026-06-25T09:52:48.5452942Z   CARGO_TERM_COLOR: always
+2026-06-25T09:52:48.5453285Z ##[endgroup]
+2026-06-25T09:52:48.5603613Z rustc 1.96.0 (ac68faa20 2026-05-25)
+2026-06-25T09:52:48.5604015Z binary: rustc
+2026-06-25T09:52:48.5604248Z commit-hash: ac68faa20c58cbccd01ee7208bf3b6e93a7d7f96
+2026-06-25T09:52:48.5604556Z commit-date: 2026-05-25
+2026-06-25T09:52:48.5604757Z host: x86_64-unknown-linux-gnu
+2026-06-25T09:52:48.5604987Z release: 1.96.0
+2026-06-25T09:52:48.5605490Z LLVM version: 22.1.2
+2026-06-25T09:52:48.5715942Z ##[group]Run Swatinem/rust-cache@v2
+2026-06-25T09:52:48.5716182Z with:
+2026-06-25T09:52:48.5716579Z   prefix-key: v0-rust
+2026-06-25T09:52:48.5717023Z   add-job-id-key: true
+2026-06-25T09:52:48.5717311Z   add-rust-environment-hash-key: true
+2026-06-25T09:52:48.5717665Z   cache-targets: true
+2026-06-25T09:52:48.5717968Z   cache-all-crates: false
+2026-06-25T09:52:48.5718241Z   cache-workspace-crates: false
+2026-06-25T09:52:48.5718583Z   save-if: true
+2026-06-25T09:52:48.5718846Z   cache-provider: github
+2026-06-25T09:52:48.5719214Z   cache-bin: true
+2026-06-25T09:52:48.5719515Z   lookup-only: false
+2026-06-25T09:52:48.5719760Z   cmd-format: {0}
+2026-06-25T09:52:48.5720060Z env:
+2026-06-25T09:52:48.5720312Z   CARGO_HOME: /home/runner/.cargo
+2026-06-25T09:52:48.5720625Z   CARGO_INCREMENTAL: 0
+2026-06-25T09:52:48.5720940Z   CARGO_TERM_COLOR: always
+2026-06-25T09:52:48.5721217Z ##[endgroup]
+2026-06-25T09:52:48.7979883Z (node:2151) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+2026-06-25T09:52:48.7980999Z (Use `node --trace-deprecation ...` to show where the warning was created)
+2026-06-25T09:52:48.9776350Z ##[group]Cache Configuration
+2026-06-25T09:52:48.9777269Z Cache Provider:
+2026-06-25T09:52:48.9777974Z     github
+2026-06-25T09:52:48.9778481Z Workspaces:
+2026-06-25T09:52:48.9779067Z     /home/runner/work/Liquifact-contracts/Liquifact-contracts
+2026-06-25T09:52:48.9779684Z Cache Paths:
+2026-06-25T09:52:48.9780156Z     /home/runner/.cargo/bin
+2026-06-25T09:52:48.9780656Z     /home/runner/.cargo/.crates.toml
+2026-06-25T09:52:48.9781242Z     /home/runner/.cargo/.crates2.json
+2026-06-25T09:52:48.9781778Z     /home/runner/.cargo/registry
+2026-06-25T09:52:48.9782287Z     /home/runner/.cargo/git
+2026-06-25T09:52:48.9782905Z     /home/runner/work/Liquifact-contracts/Liquifact-contracts/target
+2026-06-25T09:52:48.9783568Z Restore Key:
+2026-06-25T09:52:48.9784058Z     v0-rust-fmt-build-test-Linux-x64-4107bf91
+2026-06-25T09:52:48.9784638Z Cache Key:
+2026-06-25T09:52:48.9785151Z     v0-rust-fmt-build-test-Linux-x64-4107bf91-e1b782ec
+2026-06-25T09:52:48.9785732Z .. Prefix:
+2026-06-25T09:52:48.9786186Z   - v0-rust-fmt-build-test-Linux-x64
+2026-06-25T09:52:48.9786729Z .. Environment considered:
+2026-06-25T09:52:48.9787437Z   - Rust Versions:
+2026-06-25T09:52:48.9788053Z     - 1.96.0 x86_64-unknown-linux-gnu ac68faa20c58cbccd01ee7208bf3b6e93a7d7f96
+2026-06-25T09:52:48.9788846Z     - 1.96.0 x86_64-unknown-linux-gnu ac68faa20c58cbccd01ee7208bf3b6e93a7d7f96
+2026-06-25T09:52:48.9789515Z   - CARGO_HOME
+2026-06-25T09:52:48.9789977Z   - CARGO_INCREMENTAL
+2026-06-25T09:52:48.9790471Z   - CARGO_TERM_COLOR
+2026-06-25T09:52:48.9790932Z .. Lockfiles considered:
+2026-06-25T09:52:48.9791546Z   - /home/runner/work/Liquifact-contracts/Liquifact-contracts/Cargo.lock
+2026-06-25T09:52:48.9792371Z   - /home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow/Cargo.toml
+2026-06-25T09:52:48.9793301Z ##[endgroup]
+2026-06-25T09:52:48.9793605Z 
+2026-06-25T09:52:48.9793899Z ... Restoring cache ...
+2026-06-25T09:52:49.2292302Z No cache found.
+2026-06-25T09:52:49.2388231Z ##[group]Run cargo fmt -p liquifact_escrow -- --check
+2026-06-25T09:52:49.2388557Z [36;1mcargo fmt -p liquifact_escrow -- --check[0m
+2026-06-25T09:52:49.2417044Z shell: /usr/bin/bash -e {0}
+2026-06-25T09:52:49.2417248Z env:
+2026-06-25T09:52:49.2417419Z   CARGO_HOME: /home/runner/.cargo
+2026-06-25T09:52:49.2417639Z   CARGO_INCREMENTAL: 0
+2026-06-25T09:52:49.2417822Z   CARGO_TERM_COLOR: always
+2026-06-25T09:52:49.2418004Z   CACHE_ON_FAILURE: false
+2026-06-25T09:52:49.2418346Z ##[endgroup]
+2026-06-25T09:52:49.4579163Z ##[group]Run cargo clippy -p liquifact_escrow -- -D warnings
+2026-06-25T09:52:49.4579734Z [36;1mcargo clippy -p liquifact_escrow -- -D warnings[0m
+2026-06-25T09:52:49.4618267Z shell: /usr/bin/bash -e {0}
+2026-06-25T09:52:49.4618580Z env:
+2026-06-25T09:52:49.4618827Z   CARGO_HOME: /home/runner/.cargo
+2026-06-25T09:52:49.4619160Z   CARGO_INCREMENTAL: 0
+2026-06-25T09:52:49.4619444Z   CARGO_TERM_COLOR: always
+2026-06-25T09:52:49.4619733Z   CACHE_ON_FAILURE: false
+2026-06-25T09:52:49.4620011Z ##[endgroup]
+2026-06-25T09:52:49.7247834Z [1m[92m    Updating[0m crates.io index
+2026-06-25T09:52:49.9795354Z [1m[92m Downloading[0m crates ...
+2026-06-25T09:52:50.1313987Z [1m[92m  Downloaded[0m ark-bn254 v0.4.0
+2026-06-25T09:52:50.1355740Z [1m[92m  Downloaded[0m arbitrary v1.3.2
+2026-06-25T09:52:50.1376437Z [1m[92m  Downloaded[0m serde_derive v1.0.228
+2026-06-25T09:52:50.1405687Z [1m[92m  Downloaded[0m sha2 v0.10.9
+2026-06-25T09:52:50.1431438Z [1m[92m  Downloaded[0m time-macros v0.2.27
+2026-06-25T09:52:50.1453050Z [1m[92m  Downloaded[0m static_assertions v1.1.0
+2026-06-25T09:52:50.1469847Z [1m[92m  Downloaded[0m soroban-builtin-sdk-macros v25.0.1
+2026-06-25T09:52:50.1480674Z [1m[92m  Downloaded[0m typenum v1.19.0
+2026-06-25T09:52:50.1508877Z [1m[92m  Downloaded[0m subtle v2.6.1
+2026-06-25T09:52:50.1522811Z [1m[92m  Downloaded[0m escape-bytes v0.1.1
+2026-06-25T09:52:50.1539603Z [1m[92m  Downloaded[0m wasmi_core v0.13.0
+2026-06-25T09:52:50.1556628Z [1m[92m  Downloaded[0m version_check v0.9.5
+2026-06-25T09:52:50.1572231Z [1m[92m  Downloaded[0m time-core v0.1.8
+2026-06-25T09:52:50.1585325Z [1m[92m  Downloaded[0m strsim v0.11.1
+2026-06-25T09:52:50.1600785Z [1m[92m  Downloaded[0m zeroize_derive v1.4.3
+2026-06-25T09:52:50.1614136Z [1m[92m  Downloaded[0m soroban-env-common v25.0.1
+2026-06-25T09:52:50.1642479Z [1m[92m  Downloaded[0m zmij v1.0.21
+2026-06-25T09:52:50.1661771Z [1m[92m  Downloaded[0m zeroize v1.8.2
+2026-06-25T09:52:50.1678478Z [1m[92m  Downloaded[0m stellar-strkey v0.0.13
+2026-06-25T09:52:50.1705729Z [1m[92m  Downloaded[0m smallvec v1.15.1
+2026-06-25T09:52:50.1728080Z [1m[92m  Downloaded[0m heapless v0.8.0
+2026-06-25T09:52:50.1762969Z [1m[92m  Downloaded[0m unicode-ident v1.0.24
+2026-06-25T09:52:50.1789742Z [1m[92m  Downloaded[0m darling v0.20.11
+2026-06-25T09:52:50.1834338Z [1m[92m  Downloaded[0m num-conv v0.2.0
+2026-06-25T09:52:50.1843171Z [1m[92m  Downloaded[0m ppv-lite86 v0.2.21
+2026-06-25T09:52:50.1857261Z [1m[92m  Downloaded[0m rand_chacha v0.3.1
+2026-06-25T09:52:50.1870640Z [1m[92m  Downloaded[0m ark-ff v0.4.2
+2026-06-25T09:52:50.1907160Z [1m[92m  Downloaded[0m wasmparser-nostd v0.100.2
+2026-06-25T09:52:50.1951221Z [1m[92m  Downloaded[0m serde_with v3.12.0
+2026-06-25T09:52:50.2020400Z [1m[92m  Downloaded[0m soroban-wasmi v0.31.1-soroban.20.0.1
+2026-06-25T09:52:50.2076251Z [1m[92m  Downloaded[0m time v0.3.47
+2026-06-25T09:52:50.2180670Z [1m[92m  Downloaded[0m wasmparser v0.116.1
+2026-06-25T09:52:50.2225984Z [1m[92m  Downloaded[0m libm v0.2.16
+2026-06-25T09:52:50.2314875Z [1m[92m  Downloaded[0m itertools v0.10.5
+2026-06-25T09:52:50.2367541Z [1m[92m  Downloaded[0m indexmap v2.13.0
+2026-06-25T09:52:50.2404814Z [1m[92m  Downloaded[0m syn v2.0.117
+2026-06-25T09:52:50.2490307Z [1m[92m  Downloaded[0m zerocopy v0.8.42
+2026-06-25T09:52:50.2622734Z [1m[92m  Downloaded[0m hashbrown v0.16.1
+2026-06-25T09:52:50.2663311Z [1m[92m  Downloaded[0m syn v1.0.109
+2026-06-25T09:52:50.2738411Z [1m[92m  Downloaded[0m chrono v0.4.44
+2026-06-25T09:52:50.2791569Z [1m[92m  Downloaded[0m soroban-sdk v25.2.0
+2026-06-25T09:52:50.2837972Z [1m[92m  Downloaded[0m curve25519-dalek v4.1.3
+2026-06-25T09:52:50.2929304Z [1m[92m  Downloaded[0m k256 v0.13.4
+2026-06-25T09:52:50.2972092Z [1m[92m  Downloaded[0m memchr v2.8.0
+2026-06-25T09:52:50.3019016Z [1m[92m  Downloaded[0m hmac v0.12.1
+2026-06-25T09:52:50.3035398Z [1m[92m  Downloaded[0m ethnum v1.5.2
+2026-06-25T09:52:50.3069622Z [1m[92m  Downloaded[0m schemars v0.8.22
+2026-06-25T09:52:50.3173379Z [1m[92m  Downloaded[0m getrandom v0.2.17
+2026-06-25T09:52:50.3200195Z [1m[92m  Downloaded[0m base64ct v1.8.3
+2026-06-25T09:52:50.3223558Z [1m[92m  Downloaded[0m p256 v0.13.2
+2026-06-25T09:52:50.3251069Z [1m[92m  Downloaded[0m indexmap v1.9.3
+2026-06-25T09:52:50.3277040Z [1m[92m  Downloaded[0m iana-time-zone v0.1.65
+2026-06-25T09:52:50.3300355Z [1m[92m  Downloaded[0m ff v0.13.1
+2026-06-25T09:52:50.3312862Z [1m[92m  Downloaded[0m rand v0.8.5
+2026-06-25T09:52:50.3341435Z [1m[92m  Downloaded[0m proc-macro2 v1.0.106
+2026-06-25T09:52:50.3364910Z [1m[92m  Downloaded[0m soroban-env-host v25.0.1
+2026-06-25T09:52:50.3554336Z [1m[92m  Downloaded[0m primeorder v0.13.6
+2026-06-25T09:52:50.3565431Z [1m[92m  Downloaded[0m paste v1.0.15
+2026-06-25T09:52:50.3590757Z [1m[92m  Downloaded[0m num-traits v0.2.19
+2026-06-25T09:52:50.3612194Z [1m[92m  Downloaded[0m num-integer v0.1.46
+2026-06-25T09:52:50.3625188Z [1m[92m  Downloaded[0m ecdsa v0.16.9
+2026-06-25T09:52:50.3639495Z [1m[92m  Downloaded[0m der v0.7.10
+2026-06-25T09:52:50.3680767Z [1m[92m  Downloaded[0m serde_json v1.0.149
+2026-06-25T09:52:50.3739268Z [1m[92m  Downloaded[0m rand_core v0.6.4
+2026-06-25T09:52:50.3750161Z [1m[92m  Downloaded[0m macro-string v0.1.4
+2026-06-25T09:52:50.3765167Z [1m[92m  Downloaded[0m indexmap-nostd v0.4.0
+2026-06-25T09:52:50.3775279Z [1m[92m  Downloaded[0m fnv v1.0.7
+2026-06-25T09:52:50.3782999Z [1m[92m  Downloaded[0m sha3 v0.10.8
+2026-06-25T09:52:50.3817935Z [1m[92m  Downloaded[0m powerfmt v0.2.0
+2026-06-25T09:52:50.3827313Z [1m[92m  Downloaded[0m num-bigint v0.4.6
+2026-06-25T09:52:50.3865138Z [1m[92m  Downloaded[0m hex v0.4.3
+2026-06-25T09:52:50.3878499Z [1m[92m  Downloaded[0m hashbrown v0.13.2
+2026-06-25T09:52:50.3908847Z [1m[92m  Downloaded[0m hashbrown v0.12.3
+2026-06-25T09:52:50.3938286Z [1m[92m  Downloaded[0m either v1.15.0
+2026-06-25T09:52:50.3951112Z [1m[92m  Downloaded[0m digest v0.10.7
+2026-06-25T09:52:50.3965582Z [1m[92m  Downloaded[0m deranged v0.5.8
+2026-06-25T09:52:50.3977357Z [1m[92m  Downloaded[0m libc v0.2.183
+2026-06-25T09:52:50.4284132Z [1m[92m  Downloaded[0m byteorder v1.5.0
+2026-06-25T09:52:50.4296653Z [1m[92m  Downloaded[0m generic-array v0.14.9
+2026-06-25T09:52:50.4308272Z [1m[92m  Downloaded[0m darling_macro v0.20.11
+2026-06-25T09:52:50.4313051Z [1m[92m  Downloaded[0m hash32 v0.3.1
+2026-06-25T09:52:50.4324353Z [1m[92m  Downloaded[0m dtor v0.1.1
+2026-06-25T09:52:50.4332564Z [1m[92m  Downloaded[0m downcast-rs v1.2.1
+2026-06-25T09:52:50.4342745Z [1m[92m  Downloaded[0m ctor v0.5.0
+2026-06-25T09:52:50.4350916Z [1m[92m  Downloaded[0m cpufeatures v0.2.17
+2026-06-25T09:52:50.4361383Z [1m[92m  Downloaded[0m ark-std v0.4.0
+2026-06-25T09:52:50.4372777Z [1m[92m  Downloaded[0m keccak v0.1.6
+2026-06-25T09:52:50.4381922Z [1m[92m  Downloaded[0m ed25519-dalek v2.2.0
+2026-06-25T09:52:50.4406274Z [1m[92m  Downloaded[0m const-oid v0.9.6
+2026-06-25T09:52:50.4421140Z [1m[92m  Downloaded[0m soroban-env-macros v25.0.1
+2026-06-25T09:52:50.4429860Z [1m[92m  Downloaded[0m serde_with_macros v3.12.0
+2026-06-25T09:52:50.4443858Z [1m[92m  Downloaded[0m cfg_eval v0.1.2
+2026-06-25T09:52:50.4457109Z [1m[92m  Downloaded[0m ark-poly v0.4.2
+2026-06-25T09:52:50.4478729Z [1m[92m  Downloaded[0m once_cell v1.21.4
+2026-06-25T09:52:50.4498275Z [1m[92m  Downloaded[0m ctor-proc-macro v0.0.6
+2026-06-25T09:52:50.4504546Z [1m[92m  Downloaded[0m thiserror-impl v1.0.69
+2026-06-25T09:52:50.4514756Z [1m[92m  Downloaded[0m thiserror v1.0.69
+2026-06-25T09:52:50.4558318Z [1m[92m  Downloaded[0m prettyplease v0.2.37
+2026-06-25T09:52:50.4586097Z [1m[92m  Downloaded[0m serde_core v1.0.228
+2026-06-25T09:52:50.4607800Z [1m[92m  Downloaded[0m quote v1.0.45
+2026-06-25T09:52:50.4629589Z [1m[92m  Downloaded[0m pkcs8 v0.10.2
+2026-06-25T09:52:50.4651152Z [1m[92m  Downloaded[0m itoa v1.0.17
+2026-06-25T09:52:50.4662343Z [1m[92m  Downloaded[0m group v0.13.0
+2026-06-25T09:52:50.4675197Z [1m[92m  Downloaded[0m derivative v2.2.0
+2026-06-25T09:52:50.4736653Z [1m[92m  Downloaded[0m wasmi_arena v0.4.1
+2026-06-25T09:52:50.4743880Z [1m[92m  Downloaded[0m visibility v0.1.1
+2026-06-25T09:52:50.4754524Z [1m[92m  Downloaded[0m soroban-spec-rust v25.3.0
+2026-06-25T09:52:50.4761763Z [1m[92m  Downloaded[0m soroban-spec v25.3.0
+2026-06-25T09:52:50.4768918Z [1m[92m  Downloaded[0m num-derive v0.4.2
+2026-06-25T09:52:50.4782935Z [1m[92m  Downloaded[0m ident_case v1.0.1
+2026-06-25T09:52:50.4789485Z [1m[92m  Downloaded[0m hex-literal v0.4.1
+2026-06-25T09:52:50.4797226Z [1m[92m  Downloaded[0m elliptic-curve v0.13.8
+2026-06-25T09:52:50.4827520Z [1m[92m  Downloaded[0m rustc_version v0.4.1
+2026-06-25T09:52:50.4838279Z [1m[92m  Downloaded[0m darling_core v0.20.11
+2026-06-25T09:52:50.4878518Z [1m[92m  Downloaded[0m crypto-bigint v0.5.5
+2026-06-25T09:52:50.4934458Z [1m[92m  Downloaded[0m base64 v0.22.1
+2026-06-25T09:52:50.4964544Z [1m[92m  Downloaded[0m soroban-sdk-macros v25.3.0
+2026-06-25T09:52:50.4982265Z [1m[92m  Downloaded[0m rfc6979 v0.4.0
+2026-06-25T09:52:50.4990466Z [1m[92m  Downloaded[0m heck v0.5.0
+2026-06-25T09:52:50.5000567Z [1m[92m  Downloaded[0m stellar-strkey v0.0.16
+2026-06-25T09:52:50.5025690Z [1m[92m  Downloaded[0m ed25519 v2.2.3
+2026-06-25T09:52:50.5039923Z [1m[92m  Downloaded[0m derive_arbitrary v1.3.2
+2026-06-25T09:52:50.5047756Z [1m[92m  Downloaded[0m data-encoding v2.10.0
+2026-06-25T09:52:50.5054902Z [1m[92m  Downloaded[0m crypto-common v0.1.6
+2026-06-25T09:52:50.5062368Z [1m[92m  Downloaded[0m ark-bls12-381 v0.4.0
+2026-06-25T09:52:50.5090013Z [1m[92m  Downloaded[0m equivalent v1.0.2
+2026-06-25T09:52:50.5097381Z [1m[92m  Downloaded[0m crate-git-revision v0.0.6
+2026-06-25T09:52:50.5107166Z [1m[92m  Downloaded[0m autocfg v1.5.0
+2026-06-25T09:52:50.5122465Z [1m[92m  Downloaded[0m ark-ff-macros v0.4.2
+2026-06-25T09:52:50.5133597Z [1m[92m  Downloaded[0m soroban-ledger-snapshot v25.3.0
+2026-06-25T09:52:50.5141890Z [1m[92m  Downloaded[0m signature v2.2.0
+2026-06-25T09:52:50.5152914Z [1m[92m  Downloaded[0m dyn-clone v1.0.20
+2026-06-25T09:52:50.5165549Z [1m[92m  Downloaded[0m curve25519-dalek-derive v0.1.1
+2026-06-25T09:52:50.5173505Z [1m[92m  Downloaded[0m base16ct v0.2.0
+2026-06-25T09:52:50.5184136Z [1m[92m  Downloaded[0m ark-serialize v0.4.2
+2026-06-25T09:52:50.5192639Z [1m[92m  Downloaded[0m stable_deref_trait v1.2.1
+2026-06-25T09:52:50.5199245Z [1m[92m  Downloaded[0m sec1 v0.7.3
+2026-06-25T09:52:50.5211821Z [1m[92m  Downloaded[0m dtor-proc-macro v0.0.6
+2026-06-25T09:52:50.5220589Z [1m[92m  Downloaded[0m cfg-if v1.0.4
+2026-06-25T09:52:50.5237492Z [1m[92m  Downloaded[0m bytes-lit v0.0.5
+2026-06-25T09:52:50.5240382Z [1m[92m  Downloaded[0m block-buffer v0.10.4
+2026-06-25T09:52:50.5248856Z [1m[92m  Downloaded[0m ark-serialize-derive v0.4.2
+2026-06-25T09:52:50.5255849Z [1m[92m  Downloaded[0m spki v0.7.3
+2026-06-25T09:52:50.5269944Z [1m[92m  Downloaded[0m spin v0.9.8
+2026-06-25T09:52:50.5289385Z [1m[92m  Downloaded[0m ark-ff-asm v0.4.2
+2026-06-25T09:52:50.5296518Z [1m[92m  Downloaded[0m serde v1.0.228
+2026-06-25T09:52:50.5324315Z [1m[92m  Downloaded[0m ark-ec v0.4.2
+2026-06-25T09:52:50.5357253Z [1m[92m  Downloaded[0m stellar-xdr v25.0.0
+2026-06-25T09:52:50.6095448Z [1m[92m  Downloaded[0m ahash v0.8.12
+2026-06-25T09:52:50.6113411Z [1m[92m  Downloaded[0m semver v1.0.27
+2026-06-25T09:52:50.7021261Z [1m[92m   Compiling[0m proc-macro2 v1.0.106
+2026-06-25T09:52:50.7021977Z [1m[92m   Compiling[0m unicode-ident v1.0.24
+2026-06-25T09:52:50.7022629Z [1m[92m   Compiling[0m quote v1.0.45
+2026-06-25T09:52:50.7023086Z [1m[92m   Compiling[0m version_check v0.9.5
+2026-06-25T09:52:50.8161049Z [1m[92m   Compiling[0m typenum v1.19.0
+2026-06-25T09:52:50.9535477Z [1m[92m   Compiling[0m serde_core v1.0.228
+2026-06-25T09:52:50.9878612Z [1m[92m   Compiling[0m zmij v1.0.21
+2026-06-25T09:52:50.9958532Z [1m[92m   Compiling[0m serde v1.0.228
+2026-06-25T09:52:51.1270886Z [1m[92m   Compiling[0m serde_json v1.0.149
+2026-06-25T09:52:51.2198176Z [1m[92m   Compiling[0m itoa v1.0.17
+2026-06-25T09:52:51.3083343Z [1m[92m   Compiling[0m memchr v2.8.0
+2026-06-25T09:52:51.4918185Z [1m[92m   Compiling[0m syn v2.0.117
+2026-06-25T09:52:51.5145084Z [1m[92m   Compiling[0m generic-array v0.14.9
+2026-06-25T09:52:51.6279350Z [1m[92m    Checking[0m cfg-if v1.0.4
+2026-06-25T09:52:51.8177654Z [1m[92m    Checking[0m subtle v2.6.1
+2026-06-25T09:52:51.8818720Z [1m[92m   Compiling[0m autocfg v1.5.0
+2026-06-25T09:52:52.1398138Z [1m[92m    Checking[0m const-oid v0.9.6
+2026-06-25T09:52:52.1728077Z [1m[92m   Compiling[0m libc v0.2.183
+2026-06-25T09:52:52.2148338Z [1m[92m   Compiling[0m num-traits v0.2.19
+2026-06-25T09:52:52.3168165Z [1m[92m   Compiling[0m zerocopy v0.8.42
+2026-06-25T09:52:53.0940333Z [1m[92m    Checking[0m getrandom v0.2.17
+2026-06-25T09:52:53.1688068Z [1m[92m    Checking[0m rand_core v0.6.4
+2026-06-25T09:52:53.8290057Z [1m[92m   Compiling[0m fnv v1.0.7
+2026-06-25T09:52:53.8375172Z [1m[92m   Compiling[0m syn v1.0.109
+2026-06-25T09:52:53.8650542Z [1m[92m   Compiling[0m ident_case v1.0.1
+2026-06-25T09:52:53.9140288Z [1m[92m   Compiling[0m strsim v0.11.1
+2026-06-25T09:52:54.1448247Z [1m[92m   Compiling[0m darling_core v0.20.11
+2026-06-25T09:52:54.9778518Z [1m[92m   Compiling[0m semver v1.0.27
+2026-06-25T09:52:55.3078186Z [1m[92m   Compiling[0m serde_derive v1.0.228
+2026-06-25T09:52:56.0547995Z [1m[92m   Compiling[0m zeroize_derive v1.4.3
+2026-06-25T09:52:56.0818125Z [1m[92m   Compiling[0m darling_macro v0.20.11
+2026-06-25T09:52:56.2908255Z [1m[92m   Compiling[0m paste v1.0.15
+2026-06-25T09:52:56.4158603Z [1m[92m    Checking[0m zeroize v1.8.2
+2026-06-25T09:52:56.4316608Z [1m[92m   Compiling[0m schemars v0.8.22
+2026-06-25T09:52:56.5408264Z [1m[92m   Compiling[0m darling v0.20.11
+2026-06-25T09:52:56.5743867Z [1m[92m    Checking[0m ppv-lite86 v0.2.21
+2026-06-25T09:52:56.7968332Z [1m[92m   Compiling[0m crypto-common v0.1.6
+2026-06-25T09:52:56.8508430Z [1m[92m   Compiling[0m block-buffer v0.10.4
+2026-06-25T09:52:56.9557369Z [1m[92m   Compiling[0m dyn-clone v1.0.20
+2026-06-25T09:52:56.9668349Z [1m[92m    Checking[0m digest v0.10.7
+2026-06-25T09:52:57.0828810Z [1m[92m    Checking[0m rand_chacha v0.3.1
+2026-06-25T09:52:57.1338393Z [1m[92m   Compiling[0m serde_with_macros v3.12.0
+2026-06-25T09:52:57.4994497Z [1m[92m   Compiling[0m cfg_eval v0.1.2
+2026-06-25T09:52:57.6728604Z [1m[92m   Compiling[0m num-integer v0.1.46
+2026-06-25T09:52:57.8756462Z [1m[92m   Compiling[0m data-encoding v2.10.0
+2026-06-25T09:52:57.9138444Z [1m[92m   Compiling[0m cpufeatures v0.2.17
+2026-06-25T09:52:57.9416451Z [1m[92m   Compiling[0m sha2 v0.10.9
+2026-06-25T09:52:58.1708277Z [1m[92m   Compiling[0m crate-git-revision v0.0.6
+2026-06-25T09:52:58.3138450Z [1m[92m   Compiling[0m stellar-strkey v0.0.13
+2026-06-25T09:52:58.3668259Z [1m[92m   Compiling[0m stellar-xdr v25.0.0
+2026-06-25T09:52:58.4729679Z [1m[92m   Compiling[0m hex v0.4.3
+2026-06-25T09:52:58.6349298Z [1m[92m   Compiling[0m num-bigint v0.4.6
+2026-06-25T09:52:58.6518604Z [1m[92m    Checking[0m rand v0.8.5
+2026-06-25T09:52:59.0313114Z [1m[92m   Compiling[0m serde_with v3.12.0
+2026-06-25T09:52:59.0798969Z [1m[92m   Compiling[0m ahash v0.8.12
+2026-06-25T09:52:59.1768310Z [1m[92m   Compiling[0m ethnum v1.5.2
+2026-06-25T09:52:59.2568285Z [1m[92m   Compiling[0m escape-bytes v0.1.1
+2026-06-25T09:52:59.3618136Z [1m[92m    Checking[0m ark-std v0.4.0
+2026-06-25T09:52:59.7530677Z [1m[92m   Compiling[0m ark-serialize-derive v0.4.2
+2026-06-25T09:52:59.7698666Z [1m[92m    Checking[0m der v0.7.10
+2026-06-25T09:53:00.0037256Z [1m[92m   Compiling[0m rustc_version v0.4.1
+2026-06-25T09:53:00.1863369Z [1m[92m    Checking[0m ff v0.13.1
+2026-06-25T09:53:00.1965704Z [1m[92m    Checking[0m either v1.15.0
+2026-06-25T09:53:00.2237941Z [1m[92m    Checking[0m once_cell v1.21.4
+2026-06-25T09:53:00.2977149Z [1m[92m    Checking[0m base16ct v0.2.0
+2026-06-25T09:53:00.3018587Z [1m[92m    Checking[0m itertools v0.10.5
+2026-06-25T09:53:00.3448851Z [1m[92m    Checking[0m sec1 v0.7.3
+2026-06-25T09:53:00.5058085Z [1m[92m    Checking[0m group v0.13.0
+2026-06-25T09:53:00.5947978Z [1m[92m    Checking[0m ark-serialize v0.4.2
+2026-06-25T09:53:00.7210533Z [1m[92m   Compiling[0m ark-ff-macros v0.4.2
+2026-06-25T09:53:01.0763111Z [1m[92m   Compiling[0m ark-ff-asm v0.4.2
+2026-06-25T09:53:01.3178792Z [1m[92m   Compiling[0m derivative v2.2.0
+2026-06-25T09:53:01.3299762Z [1m[92m    Checking[0m signature v2.2.0
+2026-06-25T09:53:01.3800801Z [1m[92m    Checking[0m crypto-bigint v0.5.5
+2026-06-25T09:53:01.4098177Z [1m[92m   Compiling[0m libm v0.2.16
+2026-06-25T09:53:01.5717285Z [1m[92m    Checking[0m hashbrown v0.13.2
+2026-06-25T09:53:01.9115521Z [1m[92m    Checking[0m hmac v0.12.1
+2026-06-25T09:53:01.9718822Z [1m[92m   Compiling[0m equivalent v1.0.2
+2026-06-25T09:53:02.1880197Z [1m[92m   Compiling[0m thiserror v1.0.69
+2026-06-25T09:53:02.2154322Z [1m[92m    Checking[0m elliptic-curve v0.13.8
+2026-06-25T09:53:02.3277961Z [1m[92m   Compiling[0m hashbrown v0.16.1
+2026-06-25T09:53:02.4448034Z [1m[92m    Checking[0m rfc6979 v0.4.0
+2026-06-25T09:53:02.6038080Z [1m[92m    Checking[0m ark-ff v0.4.2
+2026-06-25T09:53:02.7573109Z [1m[92m   Compiling[0m indexmap v2.13.0
+2026-06-25T09:53:03.0748279Z [1m[92m   Compiling[0m curve25519-dalek v4.1.3
+2026-06-25T09:53:03.2648379Z [1m[92m   Compiling[0m num-derive v0.4.2
+2026-06-25T09:53:03.2667597Z [1m[92m   Compiling[0m thiserror-impl v1.0.69
+2026-06-25T09:53:03.8403259Z [1m[92m    Checking[0m downcast-rs v1.2.1
+2026-06-25T09:53:03.8674959Z [1m[92m    Checking[0m indexmap-nostd v0.4.0
+2026-06-25T09:53:04.3248332Z [1m[92m   Compiling[0m prettyplease v0.2.37
+2026-06-25T09:53:04.4718274Z [1m[92m    Checking[0m wasmparser-nostd v0.100.2
+2026-06-25T09:53:04.7988448Z [1m[92m    Checking[0m wasmi_core v0.13.0
+2026-06-25T09:53:05.0018220Z [1m[92m   Compiling[0m wasmparser v0.116.1
+2026-06-25T09:53:06.3068911Z [1m[92m    Checking[0m ark-poly v0.4.2
+2026-06-25T09:53:06.4548244Z [1m[92m    Checking[0m ecdsa v0.16.9
+2026-06-25T09:53:06.7878720Z [1m[92m    Checking[0m ark-ec v0.4.2
+2026-06-25T09:53:06.8058279Z [1m[92m   Compiling[0m soroban-env-common v25.0.1
+2026-06-25T09:53:06.9808795Z [1m[92m   Compiling[0m curve25519-dalek-derive v0.1.1
+2026-06-25T09:53:07.3408342Z [1m[92m   Compiling[0m base64 v0.22.1
+2026-06-25T09:53:07.8498308Z [1m[92m   Compiling[0m heapless v0.8.0
+2026-06-25T09:53:08.1398563Z [1m[92m    Checking[0m smallvec v1.15.1
+2026-06-25T09:53:08.2568229Z [1m[92m    Checking[0m byteorder v1.5.0
+2026-06-25T09:53:08.3228865Z [1m[92m    Checking[0m wasmi_arena v0.4.1
+2026-06-25T09:53:08.3478241Z [1m[92m    Checking[0m spin v0.9.8
+2026-06-25T09:53:08.3938563Z [1m[92m    Checking[0m hash32 v0.3.1
+2026-06-25T09:53:08.4168783Z [1m[92m    Checking[0m soroban-wasmi v0.31.1-soroban.20.0.1
+2026-06-25T09:53:12.0942621Z [1m[92m    Checking[0m primeorder v0.13.6
+2026-06-25T09:53:12.2608152Z [1m[92m    Checking[0m ed25519 v2.2.3
+2026-06-25T09:53:12.3229497Z [1m[92m   Compiling[0m stellar-strkey v0.0.16
+2026-06-25T09:53:12.3678547Z [1m[92m   Compiling[0m static_assertions v1.1.0
+2026-06-25T09:53:12.3958387Z [1m[92m    Checking[0m stable_deref_trait v1.2.1
+2026-06-25T09:53:12.4218386Z [1m[92m   Compiling[0m soroban-env-host v25.0.1
+2026-06-25T09:53:12.4448091Z [1m[92m    Checking[0m keccak v0.1.6
+2026-06-25T09:53:12.5478759Z [1m[92m    Checking[0m sha3 v0.10.8
+2026-06-25T09:53:12.6868595Z [1m[92m    Checking[0m ed25519-dalek v2.2.0
+2026-06-25T09:53:12.7818746Z [1m[92m    Checking[0m p256 v0.13.2
+2026-06-25T09:53:12.9469134Z [1m[92m    Checking[0m ark-bn254 v0.4.0
+2026-06-25T09:53:12.9507984Z [1m[92m    Checking[0m ark-bls12-381 v0.4.0
+2026-06-25T09:53:13.1510086Z [1m[92m    Checking[0m k256 v0.13.4
+2026-06-25T09:53:13.3963329Z [1m[92m   Compiling[0m soroban-builtin-sdk-macros v25.0.1
+2026-06-25T09:53:13.3986674Z [1m[92m   Compiling[0m soroban-sdk v25.2.0
+2026-06-25T09:53:13.4998336Z [1m[92m   Compiling[0m macro-string v0.1.4
+2026-06-25T09:53:13.8755120Z [1m[92m    Checking[0m hex-literal v0.4.1
+2026-06-25T09:53:13.9047756Z [1m[92m   Compiling[0m heck v0.5.0
+2026-06-25T09:53:14.5198232Z [1m[92m   Compiling[0m bytes-lit v0.0.5
+2026-06-25T09:53:14.7068229Z [1m[92m   Compiling[0m visibility v0.1.1
+2026-06-25T09:53:16.5717516Z [1m[92m   Compiling[0m soroban-spec v25.3.0
+2026-06-25T09:53:16.6654650Z [1m[92m   Compiling[0m soroban-spec-rust v25.3.0
+2026-06-25T09:53:17.0329236Z [1m[92m   Compiling[0m soroban-env-macros v25.0.1
+2026-06-25T09:53:18.7284705Z [1m[92m   Compiling[0m soroban-sdk-macros v25.3.0
+2026-06-25T09:53:21.6407587Z [1m[92m    Checking[0m liquifact_escrow v0.1.0 (/home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow)
+2026-06-25T09:53:22.2518470Z [1m[92m    Finished[0m `dev` profile [unoptimized + debuginfo] target(s) in 32.73s
+2026-06-25T09:53:22.3057608Z ##[group]Run cargo build
+2026-06-25T09:53:22.3058094Z [36;1mcargo build[0m
+2026-06-25T09:53:22.3098291Z shell: /usr/bin/bash -e {0}
+2026-06-25T09:53:22.3098559Z env:
+2026-06-25T09:53:22.3098760Z   CARGO_HOME: /home/runner/.cargo
+2026-06-25T09:53:22.3099028Z   CARGO_INCREMENTAL: 0
+2026-06-25T09:53:22.3099258Z   CARGO_TERM_COLOR: always
+2026-06-25T09:53:22.3099502Z   CACHE_ON_FAILURE: false
+2026-06-25T09:53:22.3099741Z ##[endgroup]
+2026-06-25T09:53:22.5207531Z [1m[92m   Compiling[0m cfg-if v1.0.4
+2026-06-25T09:53:22.5208080Z [1m[92m   Compiling[0m typenum v1.19.0
+2026-06-25T09:53:22.5236714Z [1m[92m   Compiling[0m zmij v1.0.21
+2026-06-25T09:53:22.5239505Z [1m[92m   Compiling[0m itoa v1.0.17
+2026-06-25T09:53:22.5486952Z [1m[92m   Compiling[0m memchr v2.8.0
+2026-06-25T09:53:22.6365993Z [1m[92m   Compiling[0m zeroize v1.8.2
+2026-06-25T09:53:22.7468794Z [1m[92m   Compiling[0m subtle v2.6.1
+2026-06-25T09:53:22.7498986Z [1m[92m   Compiling[0m const-oid v0.9.6
+2026-06-25T09:53:22.8290706Z [1m[92m   Compiling[0m libc v0.2.183
+2026-06-25T09:53:22.8708754Z [1m[92m   Compiling[0m cpufeatures v0.2.17
+2026-06-25T09:53:22.9058370Z [1m[92m   Compiling[0m num-traits v0.2.19
+2026-06-25T09:53:23.0498254Z [1m[92m   Compiling[0m serde_json v1.0.149
+2026-06-25T09:53:23.1777949Z [1m[92m   Compiling[0m generic-array v0.14.9
+2026-06-25T09:53:23.4579151Z [1m[92m   Compiling[0m zerocopy v0.8.42
+2026-06-25T09:53:23.5272799Z [1m[92m   Compiling[0m getrandom v0.2.17
+2026-06-25T09:53:23.6129689Z [1m[92m   Compiling[0m crypto-common v0.1.6
+2026-06-25T09:53:23.6428307Z [1m[92m   Compiling[0m block-buffer v0.10.4
+2026-06-25T09:53:23.6648207Z [1m[92m   Compiling[0m rand_core v0.6.4
+2026-06-25T09:53:23.7058260Z [1m[92m   Compiling[0m digest v0.10.7
+2026-06-25T09:53:23.7968256Z [1m[92m   Compiling[0m crate-git-revision v0.0.6
+2026-06-25T09:53:23.8419311Z [1m[92m   Compiling[0m semver v1.0.27
+2026-06-25T09:53:24.0718954Z [1m[92m   Compiling[0m data-encoding v2.10.0
+2026-06-25T09:53:24.1362772Z [1m[92m   Compiling[0m stellar-strkey v0.0.13
+2026-06-25T09:53:24.2328246Z [1m[92m   Compiling[0m schemars v0.8.22
+2026-06-25T09:53:24.7958271Z [1m[92m   Compiling[0m stellar-xdr v25.0.0
+2026-06-25T09:53:24.8738080Z [1m[92m   Compiling[0m escape-bytes v0.1.1
+2026-06-25T09:53:24.8828415Z [1m[92m   Compiling[0m ethnum v1.5.2
+2026-06-25T09:53:24.9408278Z [1m[92m   Compiling[0m sha2 v0.10.9
+2026-06-25T09:53:25.2232551Z [1m[92m   Compiling[0m serde_with v3.12.0
+2026-06-25T09:53:25.3138225Z [1m[92m   Compiling[0m num-integer v0.1.46
+2026-06-25T09:53:25.5268244Z [1m[92m   Compiling[0m num-bigint v0.4.6
+2026-06-25T09:53:25.5508594Z [1m[92m   Compiling[0m rustc_version v0.4.1
+2026-06-25T09:53:25.7619958Z [1m[92m   Compiling[0m ff v0.13.1
+2026-06-25T09:53:25.8234187Z [1m[92m   Compiling[0m der v0.7.10
+2026-06-25T09:53:26.4870030Z [1m[92m   Compiling[0m ppv-lite86 v0.2.21
+2026-06-25T09:53:26.5858549Z [1m[92m   Compiling[0m either v1.15.0
+2026-06-25T09:53:26.6988427Z [1m[92m   Compiling[0m base16ct v0.2.0
+2026-06-25T09:53:26.7458301Z [1m[92m   Compiling[0m rand_chacha v0.3.1
+2026-06-25T09:53:26.7868498Z [1m[92m   Compiling[0m once_cell v1.21.4
+2026-06-25T09:53:26.8048052Z [1m[92m   Compiling[0m hashbrown v0.16.1
+2026-06-25T09:53:26.8588236Z [1m[92m   Compiling[0m equivalent v1.0.2
+2026-06-25T09:53:26.8868265Z [1m[92m   Compiling[0m rand v0.8.5
+2026-06-25T09:53:27.1192333Z [1m[92m   Compiling[0m ahash v0.8.12
+2026-06-25T09:53:27.2148013Z [1m[92m   Compiling[0m sec1 v0.7.3
+2026-06-25T09:53:27.2521494Z [1m[92m   Compiling[0m indexmap v2.13.0
+2026-06-25T09:53:27.3888270Z [1m[92m   Compiling[0m ark-std v0.4.0
+2026-06-25T09:53:27.4408975Z [1m[92m   Compiling[0m itertools v0.10.5
+2026-06-25T09:53:27.5128897Z [1m[92m   Compiling[0m ark-serialize v0.4.2
+2026-06-25T09:53:27.6628290Z [1m[92m   Compiling[0m group v0.13.0
+2026-06-25T09:53:27.7068095Z [1m[92m   Compiling[0m signature v2.2.0
+2026-06-25T09:53:27.8008997Z [1m[92m   Compiling[0m crypto-bigint v0.5.5
+2026-06-25T09:53:28.1043185Z [1m[92m   Compiling[0m base64 v0.22.1
+2026-06-25T09:53:28.1570192Z [1m[92m   Compiling[0m ark-ff v0.4.2
+2026-06-25T09:53:28.3388427Z [1m[92m   Compiling[0m wasmparser v0.116.1
+2026-06-25T09:53:28.8599458Z [1m[92m   Compiling[0m elliptic-curve v0.13.8
+2026-06-25T09:53:29.0668989Z [1m[92m   Compiling[0m hashbrown v0.13.2
+2026-06-25T09:53:29.4378198Z [1m[92m   Compiling[0m hmac v0.12.1
+2026-06-25T09:53:29.5068277Z [1m[92m   Compiling[0m rfc6979 v0.4.0
+2026-06-25T09:53:29.5578096Z [1m[92m   Compiling[0m libm v0.2.16
+2026-06-25T09:53:30.6628296Z [1m[92m   Compiling[0m curve25519-dalek v4.1.3
+2026-06-25T09:53:30.8648149Z [1m[92m   Compiling[0m indexmap-nostd v0.4.0
+2026-06-25T09:53:30.9928259Z [1m[92m   Compiling[0m downcast-rs v1.2.1
+2026-06-25T09:53:31.0228337Z [1m[92m   Compiling[0m static_assertions v1.1.0
+2026-06-25T09:53:31.0498613Z [1m[92m   Compiling[0m wasmi_core v0.13.0
+2026-06-25T09:53:31.4258066Z [1m[92m   Compiling[0m wasmparser-nostd v0.100.2
+2026-06-25T09:53:32.0048633Z [1m[92m   Compiling[0m ark-poly v0.4.2
+2026-06-25T09:53:32.6560664Z [1m[92m   Compiling[0m ark-ec v0.4.2
+2026-06-25T09:53:33.8753211Z [1m[92m   Compiling[0m ecdsa v0.16.9
+2026-06-25T09:53:33.9100323Z [1m[92m   Compiling[0m soroban-env-common v25.0.1
+2026-06-25T09:53:34.0948678Z [1m[92m   Compiling[0m spin v0.9.8
+2026-06-25T09:53:34.1568194Z [1m[92m   Compiling[0m hex v0.4.3
+2026-06-25T09:53:34.1748233Z [1m[92m   Compiling[0m smallvec v1.15.1
+2026-06-25T09:53:34.2968165Z [1m[92m   Compiling[0m byteorder v1.5.0
+2026-06-25T09:53:34.3298255Z [1m[92m   Compiling[0m wasmi_arena v0.4.1
+2026-06-25T09:53:34.4018318Z [1m[92m   Compiling[0m hash32 v0.3.1
+2026-06-25T09:53:34.4208674Z [1m[92m   Compiling[0m soroban-wasmi v0.31.1-soroban.20.0.1
+2026-06-25T09:53:36.8598214Z [1m[92m   Compiling[0m serde_core v1.0.228
+2026-06-25T09:53:38.2038201Z [1m[92m   Compiling[0m primeorder v0.13.6
+2026-06-25T09:53:38.3758242Z [1m[92m   Compiling[0m ed25519 v2.2.3
+2026-06-25T09:53:38.4828434Z [1m[92m   Compiling[0m stellar-strkey v0.0.16
+2026-06-25T09:53:38.5748262Z [1m[92m   Compiling[0m keccak v0.1.6
+2026-06-25T09:53:38.6538237Z [1m[92m   Compiling[0m stable_deref_trait v1.2.1
+2026-06-25T09:53:38.6788179Z [1m[92m   Compiling[0m heapless v0.8.0
+2026-06-25T09:53:38.7353847Z [1m[92m   Compiling[0m sha3 v0.10.8
+2026-06-25T09:53:38.9568530Z [1m[92m   Compiling[0m ed25519-dalek v2.2.0
+2026-06-25T09:53:39.0048830Z [1m[92m   Compiling[0m p256 v0.13.2
+2026-06-25T09:53:39.1368053Z [1m[92m   Compiling[0m k256 v0.13.4
+2026-06-25T09:53:39.2958306Z [1m[92m   Compiling[0m ark-bls12-381 v0.4.0
+2026-06-25T09:53:39.6638336Z [1m[92m   Compiling[0m ark-bn254 v0.4.0
+2026-06-25T09:53:39.8848455Z [1m[92m   Compiling[0m soroban-sdk v25.2.0
+2026-06-25T09:53:40.0017489Z [1m[92m   Compiling[0m hex-literal v0.4.1
+2026-06-25T09:53:40.3302466Z [1m[92m   Compiling[0m serde v1.0.228
+2026-06-25T09:53:42.6077284Z [1m[92m   Compiling[0m soroban-spec v25.3.0
+2026-06-25T09:53:42.8998322Z [1m[92m   Compiling[0m soroban-spec-rust v25.3.0
+2026-06-25T09:53:43.1748051Z [1m[92m   Compiling[0m soroban-env-macros v25.0.1
+2026-06-25T09:53:45.1080863Z [1m[92m   Compiling[0m soroban-sdk-macros v25.3.0
+2026-06-25T09:53:45.2725821Z [1m[92m   Compiling[0m soroban-env-host v25.0.1
+2026-06-25T09:53:51.5188238Z [1m[92m   Compiling[0m liquifact_escrow v0.1.0 (/home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow)
+2026-06-25T09:53:52.4405538Z [1m[92m    Finished[0m `dev` profile [unoptimized + debuginfo] target(s) in 30.05s
+2026-06-25T09:53:52.4532306Z ##[group]Run cargo test
+2026-06-25T09:53:52.4532520Z [36;1mcargo test[0m
+2026-06-25T09:53:52.4559155Z shell: /usr/bin/bash -e {0}
+2026-06-25T09:53:52.4559353Z env:
+2026-06-25T09:53:52.4559511Z   CARGO_HOME: /home/runner/.cargo
+2026-06-25T09:53:52.4559722Z   CARGO_INCREMENTAL: 0
+2026-06-25T09:53:52.4559893Z   CARGO_TERM_COLOR: always
+2026-06-25T09:53:52.4560082Z   CACHE_ON_FAILURE: false
+2026-06-25T09:53:52.4560256Z ##[endgroup]
+2026-06-25T09:53:52.5054368Z [1m[92m Downloading[0m crates ...
+2026-06-25T09:53:52.6652052Z [1m[92m  Downloaded[0m bit-vec v0.8.0
+2026-06-25T09:53:52.6668051Z [1m[92m  Downloaded[0m rand_chacha v0.9.0
+2026-06-25T09:53:52.6678995Z [1m[92m  Downloaded[0m unarray v0.1.4
+2026-06-25T09:53:52.6690554Z [1m[92m  Downloaded[0m wait-timeout v0.2.1
+2026-06-25T09:53:52.6705039Z [1m[92m  Downloaded[0m rusty-fork v0.3.1
+2026-06-25T09:53:52.6719115Z [1m[92m  Downloaded[0m tempfile v3.27.0
+2026-06-25T09:53:52.6740369Z [1m[92m  Downloaded[0m rand_core v0.9.5
+2026-06-25T09:53:52.6753032Z [1m[92m  Downloaded[0m rand v0.9.2
+2026-06-25T09:53:52.6783264Z [1m[92m  Downloaded[0m bitflags v2.11.0
+2026-06-25T09:53:52.6818079Z [1m[92m  Downloaded[0m proptest v1.10.0
+2026-06-25T09:53:52.6894416Z [1m[92m  Downloaded[0m bit-set v0.8.0
+2026-06-25T09:53:52.6904955Z [1m[92m  Downloaded[0m getrandom v0.4.2
+2026-06-25T09:53:52.6936077Z [1m[92m  Downloaded[0m getrandom v0.3.4
+2026-06-25T09:53:52.6963451Z [1m[92m  Downloaded[0m rand_xorshift v0.4.0
+2026-06-25T09:53:52.6971993Z [1m[92m  Downloaded[0m fastrand v2.3.0
+2026-06-25T09:53:52.6982441Z [1m[92m  Downloaded[0m quick-error v1.2.3
+2026-06-25T09:53:52.6992726Z [1m[92m  Downloaded[0m errno v0.3.14
+2026-06-25T09:53:52.7035910Z [1m[92m  Downloaded[0m rustix v1.1.4
+2026-06-25T09:53:52.7245308Z [1m[92m  Downloaded[0m regex-syntax v0.8.10
+2026-06-25T09:53:52.7354501Z [1m[92m  Downloaded[0m linux-raw-sys v0.12.1
+2026-06-25T09:53:52.8245289Z [1m[92m   Compiling[0m libc v0.2.183
+2026-06-25T09:53:52.8245939Z [1m[92m   Compiling[0m serde_core v1.0.228
+2026-06-25T09:53:52.8247027Z [1m[92m   Compiling[0m serde v1.0.228
+2026-06-25T09:53:52.8301991Z [1m[92m   Compiling[0m fnv v1.0.7
+2026-06-25T09:53:52.8400738Z [1m[92m   Compiling[0m schemars v0.8.22
+2026-06-25T09:53:52.8430294Z [1m[92m   Compiling[0m dyn-clone v1.0.20
+2026-06-25T09:53:52.8614448Z [1m[92m   Compiling[0m darling_core v0.20.11
+2026-06-25T09:53:52.9010279Z [1m[92m   Compiling[0m once_cell v1.21.4
+2026-06-25T09:53:53.0270469Z [1m[92m   Compiling[0m ahash v0.8.12
+2026-06-25T09:53:53.1258067Z [1m[92m   Compiling[0m hashbrown v0.13.2
+2026-06-25T09:53:53.5592887Z [1m[92m   Compiling[0m thiserror v1.0.69
+2026-06-25T09:53:53.5928134Z [1m[92m   Compiling[0m derive_arbitrary v1.3.2
+2026-06-25T09:53:53.7428065Z [1m[92m   Compiling[0m getrandom v0.2.17
+2026-06-25T09:53:53.8819293Z [1m[92m   Compiling[0m rand_core v0.6.4
+2026-06-25T09:53:54.0198249Z [1m[92m   Compiling[0m rand_chacha v0.3.1
+2026-06-25T09:53:54.1098357Z [1m[92m   Compiling[0m ff v0.13.1
+2026-06-25T09:53:54.1663602Z [1m[92m   Compiling[0m rand v0.8.5
+2026-06-25T09:53:54.4003392Z [1m[92m   Compiling[0m group v0.13.0
+2026-06-25T09:53:54.4528237Z [1m[92m   Compiling[0m signature v2.2.0
+2026-06-25T09:53:54.5208973Z [1m[92m   Compiling[0m crypto-bigint v0.5.5
+2026-06-25T09:53:54.6968657Z [1m[92m   Compiling[0m serde_json v1.0.149
+2026-06-25T09:53:54.8168212Z [1m[92m   Compiling[0m darling_macro v0.20.11
+2026-06-25T09:53:55.0218551Z [1m[92m   Compiling[0m darling v0.20.11
+2026-06-25T09:53:55.0558648Z [1m[92m   Compiling[0m serde_with_macros v3.12.0
+2026-06-25T09:53:55.1368193Z [1m[92m   Compiling[0m hex v0.4.3
+2026-06-25T09:53:55.3124444Z [1m[92m   Compiling[0m ark-std v0.4.0
+2026-06-25T09:53:55.4291769Z [1m[92m   Compiling[0m crate-git-revision v0.0.6
+2026-06-25T09:53:55.6238157Z [1m[92m   Compiling[0m ark-serialize v0.4.2
+2026-06-25T09:53:55.7789032Z [1m[92m   Compiling[0m stellar-strkey v0.0.13
+2026-06-25T09:53:55.7858576Z [1m[92m   Compiling[0m stellar-xdr v25.0.0
+2026-06-25T09:53:55.7877708Z [1m[92m   Compiling[0m ark-ff v0.4.2
+2026-06-25T09:53:55.8767405Z [1m[92m   Compiling[0m elliptic-curve v0.13.8
+2026-06-25T09:53:56.1098358Z [1m[92m   Compiling[0m getrandom v0.3.4
+2026-06-25T09:53:56.2227229Z [1m[92m   Compiling[0m ecdsa v0.16.9
+2026-06-25T09:53:56.2848862Z [1m[92m   Compiling[0m serde_with v3.12.0
+2026-06-25T09:53:56.9293607Z [1m[92m   Compiling[0m soroban-env-common v25.0.1
+2026-06-25T09:53:57.0318207Z [1m[92m   Compiling[0m arbitrary v1.3.2
+2026-06-25T09:53:57.8178004Z [1m[92m   Compiling[0m primeorder v0.13.6
+2026-06-25T09:53:58.1308123Z [1m[92m   Compiling[0m ed25519 v2.2.3
+2026-06-25T09:53:58.2358178Z [1m[92m   Compiling[0m soroban-env-host v25.0.1
+2026-06-25T09:53:58.3323456Z [1m[92m   Compiling[0m getrandom v0.4.2
+2026-06-25T09:53:58.4408228Z [1m[92m   Compiling[0m rustix v1.1.4
+2026-06-25T09:53:58.7181007Z [1m[92m   Compiling[0m ed25519-dalek v2.2.0
+2026-06-25T09:53:58.8899460Z [1m[92m   Compiling[0m p256 v0.13.2
+2026-06-25T09:53:59.1578520Z [1m[92m   Compiling[0m rand_core v0.9.5
+2026-06-25T09:53:59.2888021Z [1m[92m   Compiling[0m k256 v0.13.4
+2026-06-25T09:53:59.7658239Z [1m[92m   Compiling[0m stellar-strkey v0.0.16
+2026-06-25T09:53:59.8254308Z [1m[92m   Compiling[0m ark-poly v0.4.2
+2026-06-25T09:53:59.8749072Z [1m[92m   Compiling[0m dtor-proc-macro v0.0.6
+2026-06-25T09:54:00.0348353Z [1m[92m   Compiling[0m bitflags v2.11.0
+2026-06-25T09:54:00.1768259Z [1m[92m   Compiling[0m linux-raw-sys v0.12.1
+2026-06-25T09:54:00.4218924Z [1m[92m   Compiling[0m ark-ec v0.4.2
+2026-06-25T09:54:01.5988191Z [1m[92m   Compiling[0m ark-bn254 v0.4.0
+2026-06-25T09:54:01.8188533Z [1m[92m   Compiling[0m ark-bls12-381 v0.4.0
+2026-06-25T09:54:01.9598159Z [1m[92m   Compiling[0m dtor v0.1.1
+2026-06-25T09:54:02.0858299Z [1m[92m   Compiling[0m soroban-sdk v25.2.0
+2026-06-25T09:54:02.1908221Z [1m[92m   Compiling[0m ctor-proc-macro v0.0.6
+2026-06-25T09:54:02.3268341Z [1m[92m   Compiling[0m fastrand v2.3.0
+2026-06-25T09:54:02.4698375Z [1m[92m   Compiling[0m tempfile v3.27.0
+2026-06-25T09:54:02.8028278Z [1m[92m   Compiling[0m ctor v0.5.0
+2026-06-25T09:54:03.0138489Z [1m[92m   Compiling[0m wait-timeout v0.2.1
+2026-06-25T09:54:03.1128289Z [1m[92m   Compiling[0m bit-vec v0.8.0
+2026-06-25T09:54:03.2128111Z [1m[92m   Compiling[0m quick-error v1.2.3
+2026-06-25T09:54:03.2528504Z [1m[92m   Compiling[0m rusty-fork v0.3.1
+2026-06-25T09:54:03.2585153Z [1m[92m   Compiling[0m bit-set v0.8.0
+2026-06-25T09:54:03.3447228Z [1m[92m   Compiling[0m rand_xorshift v0.4.0
+2026-06-25T09:54:03.4168367Z [1m[92m   Compiling[0m rand v0.9.2
+2026-06-25T09:54:03.5488118Z [1m[92m   Compiling[0m rand_chacha v0.9.0
+2026-06-25T09:54:03.7328054Z [1m[92m   Compiling[0m unarray v0.1.4
+2026-06-25T09:54:03.7748074Z [1m[92m   Compiling[0m regex-syntax v0.8.10
+2026-06-25T09:54:04.7051478Z [1m[92m   Compiling[0m proptest v1.10.0
+2026-06-25T09:54:12.1690314Z [1m[92m   Compiling[0m soroban-spec v25.3.0
+2026-06-25T09:54:12.4480068Z [1m[92m   Compiling[0m soroban-spec-rust v25.3.0
+2026-06-25T09:54:12.7509555Z [1m[92m   Compiling[0m soroban-env-macros v25.0.1
+2026-06-25T09:54:14.5309362Z [1m[92m   Compiling[0m soroban-sdk-macros v25.3.0
+2026-06-25T09:54:22.9205964Z [1m[92m   Compiling[0m soroban-ledger-snapshot v25.3.0
+2026-06-25T09:54:27.1708471Z [1m[92m   Compiling[0m liquifact_escrow v0.1.0 (/home/runner/work/Liquifact-contracts/Liquifact-contracts/escrow)
+2026-06-25T09:54:27.6135804Z [1m[91merror[E0106][0m[1m: missing lifetime specifiers[0m
+2026-06-25T09:54:27.6137023Z    [1m[94m--> [0mescrow/src/tests/integration.rs:839:27
+2026-06-25T09:54:27.6137703Z     [1m[94m|[0m
+2026-06-25T09:54:27.6138060Z [1m[94m835[0m [1m[94m|[0m     env: &Env,
+2026-06-25T09:54:27.6138471Z     [1m[94m|[0m          [1m[94m----[0m
+2026-06-25T09:54:27.6138874Z [1m[94m836[0m [1m[94m|[0m     target: i128,
+2026-06-25T09:54:27.6139575Z [1m[94m837[0m [1m[94m|[0m     invoice_id: &str,
+2026-06-25T09:54:27.6139998Z     [1m[94m|[0m                 [1m[94m----[0m
+2026-06-25T09:54:27.6140362Z [1m[94m838[0m [1m[94m|[0m ) -> (
+2026-06-25T09:54:27.6140779Z [1m[94m839[0m [1m[94m|[0m     LiquifactEscrowClient<'_>,
+2026-06-25T09:54:27.6143675Z     [1m[94m|[0m                           [1m[91m^^[0m [1m[91mexpected named lifetime parameter[0m
+2026-06-25T09:54:27.6150889Z [1m[94m840[0m [1m[94m|[0m     soroban_sdk::Address,
+2026-06-25T09:54:27.6151490Z [1m[94m841[0m [1m[94m|[0m     soroban_sdk::token::TokenClient<'_>,
+2026-06-25T09:54:27.6152117Z     [1m[94m|[0m                                     [1m[91m^^[0m [1m[91mexpected named lifetime parameter[0m
+2026-06-25T09:54:27.6152659Z     [1m[94m|[0m
+2026-06-25T09:54:27.6153438Z     [1m[94m= [0m[1mhelp[0m: this function's return type contains a borrowed value, but the signature does not say whether it is borrowed from `env` or `invoice_id`
+2026-06-25T09:54:27.6154346Z [1m[96mhelp[0m: consider introducing a named lifetime parameter
+2026-06-25T09:54:27.6154766Z     [1m[94m|[0m
+2026-06-25T09:54:27.6155144Z [1m[94m834[0m [92m~ [0mfn setup_withdraw_with_token[92m<'a>[0m(
+2026-06-25T09:54:27.6155600Z [1m[94m835[0m [92m~ [0m    env: &[92m'a [0mEnv,
+2026-06-25T09:54:27.6156014Z [1m[94m836[0m [1m[94m|[0m     target: i128,
+2026-06-25T09:54:27.6156459Z [1m[94m837[0m [92m~ [0m    invoice_id: &[92m'a [0mstr,
+2026-06-25T09:54:27.6157015Z [1m[94m838[0m [1m[94m|[0m ) -> (
+2026-06-25T09:54:27.6157433Z [1m[94m839[0m [92m~ [0m    LiquifactEscrowClient<[92m'a[0m>,
+2026-06-25T09:54:27.6157941Z [1m[94m840[0m [1m[94m|[0m     soroban_sdk::Address,
+2026-06-25T09:54:27.6158473Z [1m[94m841[0m [92m~ [0m    soroban_sdk::token::TokenClient<[92m'a[0m>,
+2026-06-25T09:54:27.6158895Z     [1m[94m|[0m
+2026-06-25T09:54:27.6159040Z 
+2026-06-25T09:54:27.6452221Z [1m[33mwarning[0m[1m: unused doc comment[0m
+2026-06-25T09:54:27.6452803Z    [1m[94m--> [0mescrow/src/tests/properties.rs:114:1
+2026-06-25T09:54:27.6453170Z     [1m[94m|[0m
+2026-06-25T09:54:27.6453662Z [1m[94m114[0m [1m[94m|[0m /// Property tests for funding accounting invariants (issue #325).
+2026-06-25T09:54:27.6454657Z     [1m[94m|[0m [1m[33m^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m [1m[33mrustdoc does not generate documentation for macro invocations[0m
+2026-06-25T09:54:27.6455326Z     [1m[94m|[0m
+2026-06-25T09:54:27.6455983Z     [1m[94m= [0m[1mhelp[0m: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+2026-06-25T09:54:27.6457019Z     [1m[94m= [0m[1mnote[0m: `#[warn(unused_doc_comments)]` (part of `#[warn(unused)]`) on by default
+2026-06-25T09:54:27.6457618Z 
+2026-06-25T09:54:27.6458191Z [1m[33mwarning[0m[1m: unused doc comment[0m
+2026-06-25T09:54:27.6459819Z     [1m[94m--> [0mescrow/src/tests/properties.rs:1151:1
+2026-06-25T09:54:27.6460625Z      [1m[94m|[0m
+2026-06-25T09:54:27.6461400Z [1m[94m1151[0m [1m[94m|[0m [1m[33m/[0m /// Property: sum of all computed payouts never exceeds settle_pool.
+2026-06-25T09:54:27.6462603Z [1m[94m1152[0m [1m[94m|[0m [1m[33m|[0m /// Covers single investor, equal splits, and prime-denominator splits.
+2026-06-25T09:54:27.6463569Z      [1m[94m|[0m [1m[33m|_[0m[1m[94m----------------------------------------------------------------------[0m[1m[33m^[0m
+2026-06-25T09:54:27.6464540Z      [1m[94m|[0m   [1m[94m|[0m
+2026-06-25T09:54:27.6465125Z      [1m[94m|[0m   [1m[94mrustdoc does not generate documentation for macro invocations[0m
+2026-06-25T09:54:27.6465643Z      [1m[94m|[0m
+2026-06-25T09:54:27.6466339Z      [1m[94m= [0m[1mhelp[0m: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+2026-06-25T09:54:27.6467104Z 
+2026-06-25T09:54:27.6467459Z [1m[33mwarning[0m[1m: unnecessary parentheses around block return value[0m
+2026-06-25T09:54:27.6468294Z    [1m[94m--> [0mescrow/src/tests/properties.rs:100:5
+2026-06-25T09:54:27.6468712Z     [1m[94m|[0m
+2026-06-25T09:54:27.6469034Z [1m[94m100[0m [1m[94m|[0m     (1i128..=max)
+2026-06-25T09:54:27.6469474Z     [1m[94m|[0m     [1m[33m^[0m           [1m[33m^[0m
+2026-06-25T09:54:27.6469822Z     [1m[94m|[0m
+2026-06-25T09:54:27.6470309Z     [1m[94m= [0m[1mnote[0m: `#[warn(unused_parens)]` (part of `#[warn(unused)]`) on by default
+2026-06-25T09:54:27.6470886Z [1m[96mhelp[0m: remove these parentheses
+2026-06-25T09:54:27.6471248Z     [1m[94m|[0m
+2026-06-25T09:54:27.6471642Z [1m[94m100[0m [91m- [0m    [91m([0m1i128..=max[91m)[0m
+2026-06-25T09:54:27.6472101Z [1m[94m100[0m [92m+ [0m    1i128..=max[92m [0m
+2026-06-25T09:54:27.6472456Z     [1m[94m|[0m
+2026-06-25T09:54:27.6472585Z 
+2026-06-25T09:54:28.1710214Z [1m[91merror[E0599][0m[1m: no method named `is_settleable` found for struct `LiquifactEscrowClient<'a>` in the current scope[0m
+2026-06-25T09:54:28.1727778Z     [1m[94m--> [0mescrow/src/tests/coverage.rs:2462:21
+2026-06-25T09:54:28.1757404Z      [1m[94m|[0m
+2026-06-25T09:54:28.1777484Z [1m[94m2462[0m [1m[94m|[0m     assert!(!client.is_settleable());
+2026-06-25T09:54:28.1787739Z      [1m[94m|[0m                     [1m[91m^^^^^^^^^^^^^[0m [1m[91mmethod not found in `LiquifactEscrowClient<'_>`[0m
+2026-06-25T09:54:28.1817397Z      [1m[94m|[0m
+2026-06-25T09:54:28.1837448Z     [1m[94m::: [0mescrow/src/lib.rs:892:1
+2026-06-25T09:54:28.1867280Z      [1m[94m|[0m
+2026-06-25T09:54:28.1877545Z [1m[94m 892[0m [1m[94m|[0m #[contract]
+2026-06-25T09:54:28.1907672Z      [1m[94m|[0m [1m[94m-----------[0m [1m[94mmethod `is_settleable` not found for this struct[0m
+2026-06-25T09:54:28.1927072Z 
+2026-06-25T09:54:28.1957792Z [1m[91merror[E0599][0m[1m: no method named `is_settleable` found for struct `LiquifactEscrowClient<'a>` in the current scope[0m
+2026-06-25T09:54:28.1961175Z     [1m[94m--> [0mescrow/src/tests/coverage.rs:2473:20
+2026-06-25T09:54:28.1987392Z      [1m[94m|[0m
+2026-06-25T09:54:28.1997853Z [1m[94m2473[0m [1m[94m|[0m     assert!(client.is_settleable());
+2026-06-25T09:54:28.2001307Z      [1m[94m|[0m                    [1m[91m^^^^^^^^^^^^^[0m [1m[91mmethod not found in `LiquifactEscrowClient<'_>`[0m
+2026-06-25T09:54:28.2002384Z      [1m[94m|[0m
+2026-06-25T09:54:28.2003092Z     [1m[94m::: [0mescrow/src/lib.rs:892:1
+2026-06-25T09:54:28.2003612Z      [1m[94m|[0m
+2026-06-25T09:54:28.2004083Z [1m[94m 892[0m [1m[94m|[0m #[contract]
+2026-06-25T09:54:28.2004853Z      [1m[94m|[0m [1m[94m-----------[0m [1m[94mmethod `is_settleable` not found for this struct[0m
+2026-06-25T09:54:28.2005432Z 
+2026-06-25T09:54:28.2006198Z [1m[91merror[E0599][0m[1m: no method named `is_settleable` found for struct `LiquifactEscrowClient<'a>` in the current scope[0m
+2026-06-25T09:54:28.2007363Z     [1m[94m--> [0mescrow/src/tests/coverage.rs:2486:21
+2026-06-25T09:54:28.2007924Z      [1m[94m|[0m
+2026-06-25T09:54:28.2008474Z [1m[94m2486[0m [1m[94m|[0m     assert!(!client.is_settleable());
+2026-06-25T09:54:28.2009349Z      [1m[94m|[0m                     [1m[91m^^^^^^^^^^^^^[0m [1m[91mmethod not found in `LiquifactEscrowClient<'_>`[0m
+2026-06-25T09:54:28.2010033Z      [1m[94m|[0m
+2026-06-25T09:54:28.2010531Z     [1m[94m::: [0mescrow/src/lib.rs:892:1
+2026-06-25T09:54:28.2011323Z      [1m[94m|[0m
+2026-06-25T09:54:28.2011759Z [1m[94m 892[0m [1m[94m|[0m #[contract]
+2026-06-25T09:54:28.2012480Z      [1m[94m|[0m [1m[94m-----------[0m [1m[94mmethod `is_settleable` not found for this struct[0m
+2026-06-25T09:54:28.2013011Z 
+2026-06-25T09:54:28.2148553Z [1m[91merror[E0599][0m[1m: no method named `is_settleable` found for struct `LiquifactEscrowClient<'a>` in the current scope[0m
+2026-06-25T09:54:28.2167496Z     [1m[94m--> [0mescrow/src/tests/coverage.rs:2498:20
+2026-06-25T09:54:28.2197585Z      [1m[94m|[0m
+2026-06-25T09:54:28.2228315Z [1m[94m2498[0m [1m[94m|[0m     assert!(client.is_settleable());
+2026-06-25T09:54:28.2257939Z      [1m[94m|[0m                    [1m[91m^^^^^^^^^^^^^[0m [1m[91mmethod not found in `LiquifactEscrowClient<'_>`[0m
+2026-06-25T09:54:28.2262989Z      [1m[94m|[0m
+2026-06-25T09:54:28.2263662Z     [1m[94m::: [0mescrow/src/lib.rs:892:1
+2026-06-25T09:54:28.2264182Z      [1m[94m|[0m
+2026-06-25T09:54:28.2264695Z [1m[94m 892[0m [1m[94m|[0m #[contract]
+2026-06-25T09:54:28.2265449Z      [1m[94m|[0m [1m[94m-----------[0m [1m[94mmethod `is_settleable` not found for this struct[0m
+2026-06-25T09:54:28.2266006Z 
+2026-06-25T09:54:28.2273399Z [1m[91merror[E0599][0m[1m: no method named `is_settleable` found for struct `LiquifactEscrowClient<'a>` in the current scope[0m
+2026-06-25T09:54:28.2274468Z     [1m[94m--> [0mescrow/src/tests/coverage.rs:2509:21
+2026-06-25T09:54:28.2275057Z      [1m[94m|[0m
+2026-06-25T09:54:28.2275656Z [1m[94m2509[0m [1m[94m|[0m     assert!(!client.is_settleable());
+2026-06-25T09:54:28.2276575Z      [1m[94m|[0m                     [1m[91m^^^^^^^^^^^^^[0m [1m[91mmethod not found in `LiquifactEscrowClient<'_>`[0m
+2026-06-25T09:54:28.2277520Z      [1m[94m|[0m
+2026-06-25T09:54:28.2278127Z     [1m[94m::: [0mescrow/src/lib.rs:892:1
+2026-06-25T09:54:28.2278691Z      [1m[94m|[0m
+2026-06-25T09:54:28.2279176Z [1m[94m 892[0m [1m[94m|[0m #[contract]
+2026-06-25T09:54:28.2279966Z      [1m[94m|[0m [1m[94m-----------[0m [1m[94mmethod `is_settleable` not found for this struct[0m
+2026-06-25T09:54:28.2280540Z 
+2026-06-25T09:54:28.2448493Z [1m[91merror[E0599][0m[1m: no method named `is_settleable` found for struct `LiquifactEscrowClient<'a>` in the current scope[0m
+2026-06-25T09:54:28.2477699Z     [1m[94m--> [0mescrow/src/tests/coverage.rs:2520:21
+2026-06-25T09:54:28.2507508Z      [1m[94m|[0m
+2026-06-25T09:54:28.2537516Z [1m[94m2520[0m [1m[94m|[0m     assert!(!client.is_settleable());
+2026-06-25T09:54:28.2567811Z      [1m[94m|[0m                     [1m[91m^^^^^^^^^^^^^[0m [1m[91mmethod not found in `LiquifactEscrowClient<'_>`[0m
+2026-06-25T09:54:28.2597362Z      [1m[94m|[0m
+2026-06-25T09:54:28.2598103Z     [1m[94m::: [0mescrow/src/lib.rs:892:1
+2026-06-25T09:54:28.2598549Z      [1m[94m|[0m
+2026-06-25T09:54:28.2598928Z [1m[94m 892[0m [1m[94m|[0m #[contract]
+2026-06-25T09:54:28.2599601Z      [1m[94m|[0m [1m[94m-----------[0m [1m[94mmethod `is_settleable` not found for this struct[0m
+2026-06-25T09:54:28.2600110Z 
+2026-06-25T09:54:28.2600832Z [1m[91merror[E0599][0m[1m: no method named `is_settleable` found for struct `LiquifactEscrowClient<'a>` in the current scope[0m
+2026-06-25T09:54:28.2601612Z     [1m[94m--> [0mescrow/src/tests/coverage.rs:2531:21
+2026-06-25T09:54:28.2602011Z      [1m[94m|[0m
+2026-06-25T09:54:28.2602423Z [1m[94m2531[0m [1m[94m|[0m     assert!(!client.is_settleable());
+2026-06-25T09:54:28.2603161Z      [1m[94m|[0m                     [1m[91m^^^^^^^^^^^^^[0m [1m[91mmethod not found in `LiquifactEscrowClient<'_>`[0m
+2026-06-25T09:54:28.2603708Z      [1m[94m|[0m
+2026-06-25T09:54:28.2604089Z     [1m[94m::: [0mescrow/src/lib.rs:892:1
+2026-06-25T09:54:28.2604429Z      [1m[94m|[0m
+2026-06-25T09:54:28.2604724Z [1m[94m 892[0m [1m[94m|[0m #[contract]
+2026-06-25T09:54:28.2605299Z      [1m[94m|[0m [1m[94m-----------[0m [1m[94mmethod `is_settleable` not found for this struct[0m
+2026-06-25T09:54:28.2606036Z 
+2026-06-25T09:54:28.2678175Z [1m[91merror[E0599][0m[1m: no method named `is_settleable` found for struct `LiquifactEscrowClient<'a>` in the current scope[0m
+2026-06-25T09:54:28.2679222Z     [1m[94m--> [0mescrow/src/tests/coverage.rs:2540:16
+2026-06-25T09:54:28.2679740Z      [1m[94m|[0m
+2026-06-25T09:54:28.2680237Z [1m[94m2540[0m [1m[94m|[0m         client.is_settleable();
+2026-06-25T09:54:28.2681118Z      [1m[94m|[0m                [1m[91m^^^^^^^^^^^^^[0m [1m[91mmethod not found in `LiquifactEscrowClient<'_>`[0m
+2026-06-25T09:54:28.2682107Z      [1m[94m|[0m
+2026-06-25T09:54:28.2682707Z     [1m[94m::: [0mescrow/src/lib.rs:892:1
+2026-06-25T09:54:28.2683216Z      [1m[94m|[0m
+2026-06-25T09:54:28.2683664Z [1m[94m 892[0m [1m[94m|[0m #[contract]
+2026-06-25T09:54:28.2684408Z      [1m[94m|[0m [1m[94m-----------[0m [1m[94mmethod `is_settleable` not found for this struct[0m
+2026-06-25T09:54:28.2684950Z 
+2026-06-25T09:54:28.2762324Z [1m[91merror[E0599][0m[1m: no method named `is_settleable` found for struct `LiquifactEscrowClient<'a>` in the current scope[0m
+2026-06-25T09:54:28.2763737Z     [1m[94m--> [0mescrow/src/tests/coverage.rs:2557:17
+2026-06-25T09:54:28.2764314Z      [1m[94m|[0m
+2026-06-25T09:54:28.2764826Z [1m[94m2557[0m [1m[94m|[0m         !client.is_settleable(),
+2026-06-25T09:54:28.2765611Z      [1m[94m|[0m                 [1m[91m^^^^^^^^^^^^^[0m [1m[91mmethod not found in `LiquifactEscrowClient<'_>`[0m
+2026-06-25T09:54:28.2766259Z      [1m[94m|[0m
+2026-06-25T09:54:28.2766976Z     [1m[94m::: [0mescrow/src/lib.rs:892:1
+2026-06-25T09:54:28.2767453Z      [1m[94m|[0m
+2026-06-25T09:54:28.2767880Z [1m[94m 892[0m [1m[94m|[0m #[contract]
+2026-06-25T09:54:28.2768573Z      [1m[94m|[0m [1m[94m-----------[0m [1m[94mmethod `is_settleable` not found for this struct[0m
+2026-06-25T09:54:28.2769112Z 
+2026-06-25T09:54:28.2845452Z [1m[91merror[E0599][0m[1m: no method named `all` found for struct `soroban_sdk::events::Events` in the current scope[0m
+2026-06-25T09:54:28.2846320Z     [1m[94m--> [0mescrow/src/tests/coverage.rs:2597:40
+2026-06-25T09:54:28.2846714Z      [1m[94m|[0m
+2026-06-25T09:54:28.2847344Z [1m[94m2597[0m [1m[94m|[0m     let contract_events = env.events().all();
+2026-06-25T09:54:28.2848198Z      [1m[94m|[0m                                        [1m[91m^^^[0m [1m[91mmethod not found in `soroban_sdk::events::Events`[0m
+2026-06-25T09:54:28.2848729Z      [1m[94m|[0m
+2026-06-25T09:54:28.2849380Z     [1m[94m::: [0m/home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-25.2.0/src/testutils.rs:543:8
+2026-06-25T09:54:28.2849958Z      [1m[94m|[0m
+2026-06-25T09:54:28.2850303Z [1m[94m 543[0m [1m[94m|[0m     fn all(&self) -> ContractEvents;
+2026-06-25T09:54:28.2851063Z      [1m[94m|[0m        [1m[94m---[0m [1m[94mthe method is available for `soroban_sdk::events::Events` here[0m
+2026-06-25T09:54:28.2851607Z      [1m[94m|[0m
+2026-06-25T09:54:28.2852056Z      [1m[94m= [0m[1mhelp[0m: items from traits can only be used if the trait is in scope
+2026-06-25T09:54:28.2852889Z [1m[96mhelp[0m: trait `Events` which provides `all` is implemented but not in scope; perhaps you want to import it
+2026-06-25T09:54:28.2853688Z      [1m[94m|[0m
+2026-06-25T09:54:28.2854154Z [1m[94m   1[0m [92m+ use soroban_sdk::testutils::Events;[0m
+2026-06-25T09:54:28.2854535Z      [1m[94m|[0m
+2026-06-25T09:54:28.2854668Z 
+2026-06-25T09:54:28.2903412Z [1m[91merror[E0599][0m[1m: no method named `all` found for struct `soroban_sdk::events::Events` in the current scope[0m
+2026-06-25T09:54:28.2904226Z     [1m[94m--> [0mescrow/src/tests/coverage.rs:2634:40
+2026-06-25T09:54:28.2904642Z      [1m[94m|[0m
+2026-06-25T09:54:28.2905084Z [1m[94m2634[0m [1m[94m|[0m     let contract_events = env.events().all();
+2026-06-25T09:54:28.2905962Z      [1m[94m|[0m                                        [1m[91m^^^[0m [1m[91mmethod not found in `soroban_sdk::events::Events`[0m
+2026-06-25T09:54:28.2907021Z      [1m[94m|[0m
+2026-06-25T09:54:28.2907929Z     [1m[94m::: [0m/home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/soroban-sdk-25.2.0/src/testutils.rs:543:8
+2026-06-25T09:54:28.2908624Z      [1m[94m|[0m
+2026-06-25T09:54:28.2909033Z [1m[94m 543[0m [1m[94m|[0m     fn all(&self) -> ContractEvents;
+2026-06-25T09:54:28.2909837Z      [1m[94m|[0m        [1m[94m---[0m [1m[94mthe method is available for `soroban_sdk::events::Events` here[0m
+2026-06-25T09:54:28.2910385Z      [1m[94m|[0m
+2026-06-25T09:54:28.2911087Z      [1m[94m= [0m[1mhelp[0m: items from traits can only be used if the trait is in scope
+2026-06-25T09:54:28.2911966Z [1m[96mhelp[0m: trait `Events` which provides `all` is implemented but not in scope; perhaps you want to import it
+2026-06-25T09:54:28.2912589Z      [1m[94m|[0m
+2026-06-25T09:54:28.2913024Z [1m[94m   1[0m [92m+ use soroban_sdk::testutils::Events;[0m
+2026-06-25T09:54:28.2913417Z      [1m[94m|[0m
+2026-06-25T09:54:28.2913557Z 
+2026-06-25T09:54:28.3038621Z [1m[91merror[E0599][0m[1m: no method named `is_settleable` found for struct `LiquifactEscrowClient<'a>` in the current scope[0m
+2026-06-25T09:54:28.3039759Z     [1m[94m--> [0mescrow/src/tests/coverage.rs:2694:17
+2026-06-25T09:54:28.3040195Z      [1m[94m|[0m
+2026-06-25T09:54:28.3040607Z [1m[94m2694[0m [1m[94m|[0m         !client.is_settleable(),
+2026-06-25T09:54:28.3041332Z      [1m[94m|[0m                 [1m[91m^^^^^^^^^^^^^[0m [1m[91mmethod not found in `LiquifactEscrowClient<'_>`[0m
+2026-06-25T09:54:28.3041925Z      [1m[94m|[0m
+2026-06-25T09:54:28.3042413Z     [1m[94m::: [0mescrow/src/lib.rs:892:1
+2026-06-25T09:54:28.3042901Z      [1m[94m|[0m
+2026-06-25T09:54:28.3043245Z [1m[94m 892[0m [1m[94m|[0m #[contract]
+2026-06-25T09:54:28.3043865Z      [1m[94m|[0m [1m[94m-----------[0m [1m[94mmethod `is_settleable` not found for this struct[0m
+2026-06-25T09:54:28.3044283Z 
+2026-06-25T09:54:28.3122465Z [1m[91merror[E0599][0m[1m: no method named `is_settleable` found for struct `LiquifactEscrowClient<'a>` in the current scope[0m
+2026-06-25T09:54:28.3123591Z     [1m[94m--> [0mescrow/src/tests/coverage.rs:2701:16
+2026-06-25T09:54:28.3124274Z      [1m[94m|[0m
+2026-06-25T09:54:28.3124676Z [1m[94m2701[0m [1m[94m|[0m         client.is_settleable(),
+2026-06-25T09:54:28.3125350Z      [1m[94m|[0m                [1m[91m^^^^^^^^^^^^^[0m [1m[91mmethod not found in `LiquifactEscrowClient<'_>`[0m
+2026-06-25T09:54:28.3125903Z      [1m[94m|[0m
+2026-06-25T09:54:28.3126338Z     [1m[94m::: [0mescrow/src/lib.rs:892:1
+2026-06-25T09:54:28.3126686Z      [1m[94m|[0m
+2026-06-25T09:54:28.3127106Z [1m[94m 892[0m [1m[94m|[0m #[contract]
+2026-06-25T09:54:28.3127699Z      [1m[94m|[0m [1m[94m-----------[0m [1m[94mmethod `is_settleable` not found for this struct[0m
+2026-06-25T09:54:28.3128103Z 
+2026-06-25T09:54:28.3205475Z [1m[91merror[E0599][0m[1m: no method named `is_settleable` found for struct `LiquifactEscrowClient<'a>` in the current scope[0m
+2026-06-25T09:54:28.3206628Z     [1m[94m--> [0mescrow/src/tests/coverage.rs:2708:17
+2026-06-25T09:54:28.3207464Z      [1m[94m|[0m
+2026-06-25T09:54:28.3208041Z [1m[94m2708[0m [1m[94m|[0m         !client.is_settleable(),
+2026-06-25T09:54:28.3209019Z      [1m[94m|[0m                 [1m[91m^^^^^^^^^^^^^[0m [1m[91mmethod not found in `LiquifactEscrowClient<'_>`[0m
+2026-06-25T09:54:28.3209729Z      [1m[94m|[0m
+2026-06-25T09:54:28.3210356Z     [1m[94m::: [0mescrow/src/lib.rs:892:1
+2026-06-25T09:54:28.3210886Z      [1m[94m|[0m
+2026-06-25T09:54:28.3211387Z [1m[94m 892[0m [1m[94m|[0m #[contract]
+2026-06-25T09:54:28.3212143Z      [1m[94m|[0m [1m[94m-----------[0m [1m[94mmethod `is_settleable` not found for this struct[0m
+2026-06-25T09:54:28.3212700Z 
+2026-06-25T09:54:28.4880467Z [1m[91merror[E0061][0m[1m: this method takes 15 arguments but 16 arguments were supplied[0m
+2026-06-25T09:54:28.4881686Z     [1m[94m--> [0mescrow/src/tests/properties.rs:20:16
+2026-06-25T09:54:28.4882163Z      [1m[94m|[0m
+2026-06-25T09:54:28.4882567Z [1m[94m  20[0m [1m[94m|[0m         client.init(
+2026-06-25T09:54:28.4883075Z      [1m[94m|[0m                [1m[91m^^^^[0m
+2026-06-25T09:54:28.4883496Z [1m[94m...[0m
+2026-06-25T09:54:28.4883857Z [1m[94m  36[0m [1m[94m|[0m             &None,
+2026-06-25T09:54:28.4884813Z      [1m[94m|[0m             [1m[94m-----[0m [1m[94munexpected argument #16 of type `&std::option::Option<_>`[0m
+2026-06-25T09:54:28.4885463Z      [1m[94m|[0m
+2026-06-25T09:54:28.4886213Z [1m[92mnote[0m: method defined here
+2026-06-25T09:54:28.4886687Z     [1m[94m--> [0mescrow/src/lib.rs:1039:12
+2026-06-25T09:54:28.4887243Z      [1m[94m|[0m
+2026-06-25T09:54:28.4887585Z [1m[94m1039[0m [1m[94m|[0m     pub fn init(
+2026-06-25T09:54:28.4888002Z      [1m[94m|[0m            [1m[92m^^^^[0m
+2026-06-25T09:54:28.4888409Z [1m[96mhelp[0m: remove the extra argument
+2026-06-25T09:54:28.4888769Z      [1m[94m|[0m
+2026-06-25T09:54:28.4889080Z [1m[94m  35[0m [91m-             &None,[0m
+2026-06-25T09:54:28.4889426Z      [1m[94m|[0m
+2026-06-25T09:54:28.4889571Z 
+2026-06-25T09:54:28.4924918Z [1m[91merror[E0061][0m[1m: this method takes 15 arguments but 16 arguments were supplied[0m
+2026-06-25T09:54:28.4925636Z     [1m[94m--> [0mescrow/src/tests/properties.rs:63:29
+2026-06-25T09:54:28.4926070Z      [1m[94m|[0m
+2026-06-25T09:54:28.4926439Z [1m[94m  63[0m [1m[94m|[0m         let escrow = client.init(
+2026-06-25T09:54:28.4927102Z      [1m[94m|[0m                             [1m[91m^^^^[0m
+2026-06-25T09:54:28.4927526Z [1m[94m...[0m
+2026-06-25T09:54:28.4927850Z [1m[94m  79[0m [1m[94m|[0m             &None,
+2026-06-25T09:54:28.4928706Z      [1m[94m|[0m             [1m[94m-----[0m [1m[94munexpected argument #16 of type `&std::option::Option<_>`[0m
+2026-06-25T09:54:28.4929345Z      [1m[94m|[0m
+2026-06-25T09:54:28.4929666Z [1m[92mnote[0m: method defined here
+2026-06-25T09:54:28.4930067Z     [1m[94m--> [0mescrow/src/lib.rs:1039:12
+2026-06-25T09:54:28.4930417Z      [1m[94m|[0m
+2026-06-25T09:54:28.4930710Z [1m[94m1039[0m [1m[94m|[0m     pub fn init(
+2026-06-25T09:54:28.4931154Z      [1m[94m|[0m            [1m[92m^^^^[0m
+2026-06-25T09:54:28.4931562Z [1m[96mhelp[0m: remove the extra argument
+2026-06-25T09:54:28.4931922Z      [1m[94m|[0m
+2026-06-25T09:54:28.4932204Z [1m[94m  78[0m [91m-             &None,[0m
+2026-06-25T09:54:28.4932555Z      [1m[94m|[0m
+2026-06-25T09:54:28.4932694Z 
+2026-06-25T09:54:28.4996565Z [1m[91merror[E0061][0m[1m: this method takes 15 arguments but 16 arguments were supplied[0m
+2026-06-25T09:54:28.5012507Z     [1m[94m--> [0mescrow/src/tests/properties.rs:149:16
+2026-06-25T09:54:28.5012930Z      [1m[94m|[0m
+2026-06-25T09:54:28.5013264Z [1m[94m 149[0m [1m[94m|[0m         client.init(
+2026-06-25T09:54:28.5013693Z      [1m[94m|[0m                [1m[91m^^^^[0m
+2026-06-25T09:54:28.5014061Z [1m[94m...[0m
+2026-06-25T09:54:28.5014416Z [1m[94m 163[0m [1m[94m|[0m             &max_unique_investors,
+2026-06-25T09:54:28.5015359Z      [1m[94m|[0m             [1m[94m---------------------[0m [1m[94munexpected argument #14 of type `&std::option::Option<u32>`[0m
+2026-06-25T09:54:28.5015951Z      [1m[94m|[0m
+2026-06-25T09:54:28.5016247Z [1m[92mnote[0m: method defined here
+2026-06-25T09:54:28.5016620Z     [1m[94m--> [0mescrow/src/lib.rs:1039:12
+2026-06-25T09:54:28.5017263Z      [1m[94m|[0m
+2026-06-25T09:54:28.5017573Z [1m[94m1039[0m [1m[94m|[0m     pub fn init(
+2026-06-25T09:54:28.5017976Z      [1m[94m|[0m            [1m[92m^^^^[0m
+2026-06-25T09:54:28.5018354Z [1m[96mhelp[0m: remove the extra argument
+2026-06-25T09:54:28.5018687Z      [1m[94m|[0m
+2026-06-25T09:54:28.5019059Z [1m[94m 162[0m [91m- [0m            &max_per_investor[91m,[0m
+2026-06-25T09:54:28.5019546Z [1m[94m 163[0m [91m-             &max_unique_investors[0m,
+2026-06-25T09:54:28.5020323Z [1m[94m 162[0m [92m+ [0m            &max_per_investor,
+2026-06-25T09:54:28.5020692Z      [1m[94m|[0m
+2026-06-25T09:54:28.5020835Z 
+2026-06-25T09:54:28.5105465Z [1m[91merror[E0061][0m[1m: this method takes 15 arguments but 16 arguments were supplied[0m
+2026-06-25T09:54:28.5106191Z     [1m[94m--> [0mescrow/src/tests/properties.rs:323:12
+2026-06-25T09:54:28.5106606Z      [1m[94m|[0m
+2026-06-25T09:54:28.5107131Z [1m[94m 323[0m [1m[94m|[0m     client.init(
+2026-06-25T09:54:28.5107554Z      [1m[94m|[0m            [1m[91m^^^^[0m
+2026-06-25T09:54:28.5108213Z [1m[94m...[0m
+2026-06-25T09:54:28.5108524Z [1m[94m 339[0m [1m[94m|[0m         &None,
+2026-06-25T09:54:28.5109371Z      [1m[94m|[0m         [1m[94m-----[0m [1m[94munexpected argument #16 of type `&std::option::Option<_>`[0m
+2026-06-25T09:54:28.5109954Z      [1m[94m|[0m
+2026-06-25T09:54:28.5110266Z [1m[92mnote[0m: method defined here
+2026-06-25T09:54:28.5110677Z     [1m[94m--> [0mescrow/src/lib.rs:1039:12
+2026-06-25T09:54:28.5111039Z      [1m[94m|[0m
+2026-06-25T09:54:28.5111364Z [1m[94m1039[0m [1m[94m|[0m     pub fn init(
+2026-06-25T09:54:28.5111768Z      [1m[94m|[0m            [1m[92m^^^^[0m
+2026-06-25T09:54:28.5112183Z [1m[96mhelp[0m: remove the extra argument
+2026-06-25T09:54:28.5112558Z      [1m[94m|[0m
+2026-06-25T09:54:28.5112861Z [1m[94m 338[0m [91m-         &None,[0m
+2026-06-25T09:54:28.5113210Z      [1m[94m|[0m
+2026-06-25T09:54:28.5113356Z 
+2026-06-25T09:54:28.5149332Z [1m[91merror[E0061][0m[1m: this method takes 15 arguments but 16 arguments were supplied[0m
+2026-06-25T09:54:28.5149991Z     [1m[94m--> [0mescrow/src/tests/properties.rs:363:12
+2026-06-25T09:54:28.5150349Z      [1m[94m|[0m
+2026-06-25T09:54:28.5150661Z [1m[94m 363[0m [1m[94m|[0m     client.init(
+2026-06-25T09:54:28.5151028Z      [1m[94m|[0m            [1m[91m^^^^[0m
+2026-06-25T09:54:28.5151371Z [1m[94m...[0m
+2026-06-25T09:54:28.5151663Z [1m[94m 379[0m [1m[94m|[0m         &None,
+2026-06-25T09:54:28.5152428Z      [1m[94m|[0m         [1m[94m-----[0m [1m[94munexpected argument #16 of type `&std::option::Option<_>`[0m
+2026-06-25T09:54:28.5152904Z      [1m[94m|[0m
+2026-06-25T09:54:28.5153180Z [1m[92mnote[0m: method defined here
+2026-06-25T09:54:28.5153535Z     [1m[94m--> [0mescrow/src/lib.rs:1039:12
+2026-06-25T09:54:28.5153846Z      [1m[94m|[0m
+2026-06-25T09:54:28.5154144Z [1m[94m1039[0m [1m[94m|[0m     pub fn init(
+2026-06-25T09:54:28.5154493Z      [1m[94m|[0m            [1m[92m^^^^[0m
+2026-06-25T09:54:28.5154932Z [1m[96mhelp[0m: remove the extra argument
+2026-06-25T09:54:28.5155242Z      [1m[94m|[0m
+2026-06-25T09:54:28.5155496Z [1m[94m 378[0m [91m-         &None,[0m
+2026-06-25T09:54:28.5155797Z      [1m[94m|[0m
+2026-06-25T09:54:28.5155912Z 
+2026-06-25T09:54:28.5195512Z [1m[91merror[E0061][0m[1m: this method takes 15 arguments but 16 arguments were supplied[0m
+2026-06-25T09:54:28.5196193Z     [1m[94m--> [0mescrow/src/tests/properties.rs:401:12
+2026-06-25T09:54:28.5196574Z      [1m[94m|[0m
+2026-06-25T09:54:28.5197048Z [1m[94m 401[0m [1m[94m|[0m     client.init(
+2026-06-25T09:54:28.5197436Z      [1m[94m|[0m            [1m[91m^^^^[0m
+2026-06-25T09:54:28.5197777Z [1m[94m...[0m
+2026-06-25T09:54:28.5198064Z [1m[94m 417[0m [1m[94m|[0m         &None,
+2026-06-25T09:54:28.5198827Z      [1m[94m|[0m         [1m[94m-----[0m [1m[94munexpected argument #16 of type `&std::option::Option<_>`[0m
+2026-06-25T09:54:28.5199348Z      [1m[94m|[0m
+2026-06-25T09:54:28.5199640Z [1m[92mnote[0m: method defined here
+2026-06-25T09:54:28.5200008Z     [1m[94m--> [0mescrow/src/lib.rs:1039:12
+2026-06-25T09:54:28.5200338Z      [1m[94m|[0m
+2026-06-25T09:54:28.5200640Z [1m[94m1039[0m [1m[94m|[0m     pub fn init(
+2026-06-25T09:54:28.5200999Z      [1m[94m|[0m            [1m[92m^^^^[0m
+2026-06-25T09:54:28.5201369Z [1m[96mhelp[0m: remove the extra argument
+2026-06-25T09:54:28.5201957Z      [1m[94m|[0m
+2026-06-25T09:54:28.5202246Z [1m[94m 416[0m [91m-         &None,[0m
+2026-06-25T09:54:28.5202564Z      [1m[94m|[0m
+2026-06-25T09:54:28.5202697Z 
+2026-06-25T09:54:28.5235171Z [1m[91merror[E0061][0m[1m: this method takes 15 arguments but 16 arguments were supplied[0m
+2026-06-25T09:54:28.5236161Z     [1m[94m--> [0mescrow/src/tests/properties.rs:443:12
+2026-06-25T09:54:28.5236771Z      [1m[94m|[0m
+2026-06-25T09:54:28.5237542Z [1m[94m 443[0m [1m[94m|[0m     client.init(
+2026-06-25T09:54:28.5238126Z      [1m[94m|[0m            [1m[91m^^^^[0m
+2026-06-25T09:54:28.5238863Z [1m[94m...[0m
+2026-06-25T09:54:28.5239357Z [1m[94m 459[0m [1m[94m|[0m         &None,
+2026-06-25T09:54:28.5240275Z      [1m[94m|[0m         [1m[94m-----[0m [1m[94munexpected argument #16 of type `&std::option::Option<_>`[0m
+2026-06-25T09:54:28.5240977Z      [1m[94m|[0m
+2026-06-25T09:54:28.5241433Z [1m[92mnote[0m: method defined here
+2026-06-25T09:54:28.5241977Z     [1m[94m--> [0mescrow/src/lib.rs:1039:12
+2026-06-25T09:54:28.5242495Z      [1m[94m|[0m
+2026-06-25T09:54:28.5242975Z [1m[94m1039[0m [1m[94m|[0m     pub fn init(
+2026-06-25T09:54:28.5243549Z      [1m[94m|[0m            [1m[92m^^^^[0m
+2026-06-25T09:54:28.5244107Z [1m[96mhelp[0m: remove the extra argument
+2026-06-25T09:54:28.5244622Z      [1m[94m|[0m
+2026-06-25T09:54:28.5245093Z [1m[94m 458[0m [91m-         &None,[0m
+2026-06-25T09:54:28.5245594Z      [1m[94m|[0m
+2026-06-25T09:54:28.5245941Z 
+2026-06-25T09:54:28.5273490Z [1m[91merror[E0061][0m[1m: this method takes 15 arguments but 16 arguments were supplied[0m
+2026-06-25T09:54:28.5274620Z     [1m[94m--> [0mescrow/src/tests/properties.rs:483:12
+2026-06-25T09:54:28.5275345Z      [1m[94m|[0m
+2026-06-25T09:54:28.5275873Z [1m[94m 483[0m [1m[94m|[0m     client.init(
+2026-06-25T09:54:28.5276495Z      [1m[94m|[0m            [1m[91m^^^^[0m
+2026-06-25T09:54:28.5277185Z [1m[94m...[0m
+2026-06-25T09:54:28.5277684Z [1m[94m 499[0m [1m[94m|[0m         &None,
+2026-06-25T09:54:28.5278798Z      [1m[94m|[0m         [1m[94m-----[0m [1m[94munexpected argument #16 of type `&std::option::Option<_>`[0m
+2026-06-25T09:54:28.5279630Z      [1m[94m|[0m
+2026-06-25T09:54:28.5280105Z [1m[92mnote[0m: method defined here
+2026-06-25T09:54:28.5280684Z     [1m[94m--> [0mescrow/src/lib.rs:1039:12
+2026-06-25T09:54:28.5281248Z      [1m[94m|[0m
+2026-06-25T09:54:28.5281747Z [1m[94m1039[0m [1m[94m|[0m     pub fn init(
+2026-06-25T09:54:28.5282378Z      [1m[94m|[0m            [1m[92m^^^^[0m
+2026-06-25T09:54:28.5282965Z [1m[96mhelp[0m: remove the extra argument
+2026-06-25T09:54:28.5283519Z      [1m[94m|[0m
+2026-06-25T09:54:28.5284021Z [1m[94m 498[0m [91m-         &None,[0m
+2026-06-25T09:54:28.5284739Z      [1m[94m|[0m
+2026-06-25T09:54:28.5285046Z 
+2026-06-25T09:54:28.5334931Z [1m[91merror[E0061][0m[1m: this method takes 15 arguments but 16 arguments were supplied[0m
+2026-06-25T09:54:28.5335959Z     [1m[94m--> [0mescrow/src/tests/properties.rs:521:12
+2026-06-25T09:54:28.5336612Z      [1m[94m|[0m
+2026-06-25T09:54:28.5337246Z [1m[94m 521[0m [1m[94m|[0m     client.init(
+2026-06-25T09:54:28.5337643Z      [1m[94m|[0m            [1m[91m^^^^[0m
+2026-06-25T09:54:28.5337974Z [1m[94m...[0m
+2026-06-25T09:54:28.5338267Z [1m[94m 537[0m [1m[94m|[0m         &None,
+2026-06-25T09:54:28.5339004Z      [1m[94m|[0m         [1m[94m-----[0m [1m[94munexpected argument #16 of type `&std::option::Option<_>`[0m
+2026-06-25T09:54:28.5339526Z      [1m[94m|[0m
+2026-06-25T09:54:28.5339821Z [1m[92mnote[0m: method defined here
+2026-06-25T09:54:28.5340181Z     [1m[94m--> [0mescrow/src/lib.rs:1039:12
+2026-06-25T09:54:28.5340521Z      [1m[94m|[0m
+2026-06-25T09:54:28.5340846Z [1m[94m1039[0m [1m[94m|[0m     pub fn init(
+2026-06-25T09:54:28.5341244Z      [1m[94m|[0m            [1m[92m^^^^[0m
+2026-06-25T09:54:28.5341626Z [1m[96mhelp[0m: remove the extra argument
+2026-06-25T09:54:28.5342303Z      [1m[94m|[0m
+2026-06-25T09:54:28.5342599Z [1m[94m 536[0m [91m-         &None,[0m
+2026-06-25T09:54:28.5342935Z      [1m[94m|[0m
+2026-06-25T09:54:28.5343071Z 
+2026-06-25T09:54:28.5369818Z [1m[91merror[E0061][0m[1m: this method takes 15 arguments but 16 arguments were supplied[0m
+2026-06-25T09:54:28.5370497Z     [1m[94m--> [0mescrow/src/tests/properties.rs:557:12
+2026-06-25T09:54:28.5370893Z      [1m[94m|[0m
+2026-06-25T09:54:28.5371215Z [1m[94m 557[0m [1m[94m|[0m     client.init(
+2026-06-25T09:54:28.5371608Z      [1m[94m|[0m            [1m[91m^^^^[0m
+2026-06-25T09:54:28.5372181Z [1m[94m...[0m
+2026-06-25T09:54:28.5372495Z [1m[94m 573[0m [1m[94m|[0m         &None,
+2026-06-25T09:54:28.5373233Z      [1m[94m|[0m         [1m[94m-----[0m [1m[94munexpected argument #16 of type `&std::option::Option<_>`[0m
+2026-06-25T09:54:28.5373766Z      [1m[94m|[0m
+2026-06-25T09:54:28.5374074Z [1m[92mnote[0m: method defined here
+2026-06-25T09:54:28.5374467Z     [1m[94m--> [0mescrow/src/lib.rs:1039:12
+2026-06-25T09:54:28.5374823Z      [1m[94m|[0m
+2026-06-25T09:54:28.5375142Z [1m[94m1039[0m [1m[94m|[0m     pub fn init(
+2026-06-25T09:54:28.5375539Z      [1m[94m|[0m            [1m[92m^^^^[0m
+2026-06-25T09:54:28.5375936Z [1m[96mhelp[0m: remove the extra argument
+2026-06-25T09:54:28.5376282Z      [1m[94m|[0m
+2026-06-25T09:54:28.5376585Z [1m[94m 572[0m [91m-         &None,[0m
+2026-06-25T09:54:28.5377109Z      [1m[94m|[0m
+2026-06-25T09:54:28.5377256Z 
+2026-06-25T09:54:28.5402535Z [1m[91merror[E0061][0m[1m: this method takes 15 arguments but 16 arguments were supplied[0m
+2026-06-25T09:54:28.5403205Z     [1m[94m--> [0mescrow/src/tests/properties.rs:593:12
+2026-06-25T09:54:28.5403591Z      [1m[94m|[0m
+2026-06-25T09:54:28.5403909Z [1m[94m 593[0m [1m[94m|[0m     client.init(
+2026-06-25T09:54:28.5404298Z      [1m[94m|[0m            [1m[91m^^^^[0m
+2026-06-25T09:54:28.5404623Z [1m[94m...[0m
+2026-06-25T09:54:28.5404922Z [1m[94m 609[0m [1m[94m|[0m         &None,
+2026-06-25T09:54:28.5405657Z      [1m[94m|[0m         [1m[94m-----[0m [1m[94munexpected argument #16 of type `&std::option::Option<_>`[0m
+2026-06-25T09:54:28.5406200Z      [1m[94m|[0m
+2026-06-25T09:54:28.5406499Z [1m[92mnote[0m: method defined here
+2026-06-25T09:54:28.5407072Z     [1m[94m--> [0mescrow/src/lib.rs:1039:12
+2026-06-25T09:54:28.5407411Z      [1m[94m|[0m
+2026-06-25T09:54:28.5407729Z [1m[94m1039[0m [1m[94m|[0m     pub fn init(
+2026-06-25T09:54:28.5408128Z      [1m[94m|[0m            [1m[92m^^^^[0m
+2026-06-25T09:54:28.5408504Z [1m[96mhelp[0m: remove the extra argument
+2026-06-25T09:54:28.5408828Z      [1m[94m|[0m
+2026-06-25T09:54:28.5409113Z [1m[94m 608[0m [91m-         &None,[0m
+2026-06-25T09:54:28.5409438Z      [1m[94m|[0m
+2026-06-25T09:54:28.5409578Z 
+2026-06-25T09:54:28.5436758Z [1m[91merror[E0061][0m[1m: this method takes 15 arguments but 16 arguments were supplied[0m
+2026-06-25T09:54:28.5437527Z     [1m[94m--> [0mescrow/src/tests/properties.rs:635:12
+2026-06-25T09:54:28.5437918Z      [1m[94m|[0m
+2026-06-25T09:54:28.5438222Z [1m[94m 635[0m [1m[94m|[0m     client.init(
+2026-06-25T09:54:28.5438620Z      [1m[94m|[0m            [1m[91m^^^^[0m
+2026-06-25T09:54:28.5438943Z [1m[94m...[0m
+2026-06-25T09:54:28.5439236Z [1m[94m 651[0m [1m[94m|[0m         &None,
+2026-06-25T09:54:28.5439953Z      [1m[94m|[0m         [1m[94m-----[0m [1m[94munexpected argument #16 of type `&std::option::Option<_>`[0m
+2026-06-25T09:54:28.5440470Z      [1m[94m|[0m
+2026-06-25T09:54:28.5440781Z [1m[92mnote[0m: method defined here
+2026-06-25T09:54:28.5441159Z     [1m[94m--> [0mescrow/src/lib.rs:1039:12
+2026-06-25T09:54:28.5441505Z      [1m[94m|[0m
+2026-06-25T09:54:28.5441819Z [1m[94m1039[0m [1m[94m|[0m     pub fn init(
+2026-06-25T09:54:28.5442204Z      [1m[94m|[0m            [1m[92m^^^^[0m
+2026-06-25T09:54:28.5442588Z [1m[96mhelp[0m: remove the extra argument
+2026-06-25T09:54:28.5443181Z      [1m[94m|[0m
+2026-06-25T09:54:28.5443471Z [1m[94m 650[0m [91m-         &None,[0m
+2026-06-25T09:54:28.5443793Z      [1m[94m|[0m
+2026-06-25T09:54:28.5443936Z 
+2026-06-25T09:54:28.5475055Z [1m[91merror[E0061][0m[1m: this method takes 15 arguments but 16 arguments were supplied[0m
+2026-06-25T09:54:28.5475785Z     [1m[94m--> [0mescrow/src/tests/properties.rs:687:12
+2026-06-25T09:54:28.5476227Z      [1m[94m|[0m
+2026-06-25T09:54:28.5476618Z [1m[94m 687[0m [1m[94m|[0m     client.init(
+2026-06-25T09:54:28.5477238Z      [1m[94m|[0m            [1m[91m^^^^[0m
+2026-06-25T09:54:28.5477873Z [1m[94m...[0m
+2026-06-25T09:54:28.5478234Z [1m[94m 703[0m [1m[94m|[0m         &None,
+2026-06-25T09:54:28.5479048Z      [1m[94m|[0m         [1m[94m-----[0m [1m[94munexpected argument #16 of type `&std::option::Option<_>`[0m
+2026-06-25T09:54:28.5479665Z      [1m[94m|[0m
+2026-06-25T09:54:28.5480012Z [1m[92mnote[0m: method defined here
+2026-06-25T09:54:28.5480441Z     [1m[94m--> [0mescrow/src/lib.rs:1039:12
+2026-06-25T09:54:28.5480872Z      [1m[94m|[0m
+2026-06-25T09:54:28.5481235Z [1m[94m1039[0m [1m[94m|[0m     pub fn init(
+2026-06-25T09:54:28.5481620Z      [1m[94m|[0m            [1m[92m^^^^[0m
+2026-06-25T09:54:28.5481998Z [1m[96mhelp[0m: remove the extra argument
+2026-06-25T09:54:28.5482323Z      [1m[94m|[0m
+2026-06-25T09:54:28.5482606Z [1m[94m 702[0m [91m-         &None,[0m
+2026-06-25T09:54:28.5482931Z      [1m[94m|[0m
+2026-06-25T09:54:28.5483067Z 
+2026-06-25T09:54:28.5511582Z [1m[91merror[E0061][0m[1m: this method takes 15 arguments but 16 arguments were supplied[0m
+2026-06-25T09:54:28.5512234Z     [1m[94m--> [0mescrow/src/tests/properties.rs:727:12
+2026-06-25T09:54:28.5512624Z      [1m[94m|[0m
+2026-06-25T09:54:28.5512930Z [1m[94m 727[0m [1m[94m|[0m     client.init(
+2026-06-25T09:54:28.5513319Z      [1m[94m|[0m            [1m[91m^^^^[0m
+2026-06-25T09:54:28.5513651Z [1m[94m...[0m
+2026-06-25T09:54:28.5513932Z [1m[94m 743[0m [1m[94m|[0m         &None,
+2026-06-25T09:54:28.5514689Z      [1m[94m|[0m         [1m[94m-----[0m [1m[94munexpected argument #16 of type `&std::option::Option<_>`[0m
+2026-06-25T09:54:28.5515226Z      [1m[94m|[0m
+2026-06-25T09:54:28.5515520Z [1m[92mnote[0m: method defined here
+2026-06-25T09:54:28.5515890Z     [1m[94m--> [0mescrow/src/lib.rs:1039:12
+2026-06-25T09:54:28.5516227Z      [1m[94m|[0m
+2026-06-25T09:54:28.5516541Z [1m[94m1039[0m [1m[94m|[0m     pub fn init(
+2026-06-25T09:54:28.5517140Z      [1m[94m|[0m            [1m[92m^^^^[0m
+2026-06-25T09:54:28.5517552Z [1m[96mhelp[0m: remove the extra argument
+2026-06-25T09:54:28.5517881Z      [1m[94m|[0m
+2026-06-25T09:54:28.5518161Z [1m[94m 742[0m [91m-         &None,[0m
+2026-06-25T09:54:28.5518469Z      [1m[94m|[0m
+2026-06-25T09:54:28.5518593Z 
+2026-06-25T09:54:28.5547427Z [1m[91merror[E0061][0m[1m: this method takes 15 arguments but 16 arguments were supplied[0m
+2026-06-25T09:54:28.5548159Z     [1m[94m--> [0mescrow/src/tests/properties.rs:781:12
+2026-06-25T09:54:28.5548624Z      [1m[94m|[0m
+2026-06-25T09:54:28.5548990Z [1m[94m 781[0m [1m[94m|[0m     client.init(
+2026-06-25T09:54:28.5549444Z      [1m[94m|[0m            [1m[91m^^^^[0m
+2026-06-25T09:54:28.5549858Z [1m[94m...[0m
+2026-06-25T09:54:28.5550191Z [1m[94m 797[0m [1m[94m|[0m         &None,
+2026-06-25T09:54:28.5550972Z      [1m[94m|[0m         [1m[94m-----[0m [1m[94munexpected argument #16 of type `&std::option::Option<_>`[0m
+2026-06-25T09:54:28.5551571Z      [1m[94m|[0m
+2026-06-25T09:54:28.5551968Z [1m[92mnote[0m: method defined here
+2026-06-25T09:54:28.5552338Z     [1m[94m--> [0mescrow/src/lib.rs:1039:12
+2026-06-25T09:54:28.5552697Z      [1m[94m|[0m
+2026-06-25T09:54:28.5552989Z [1m[94m1039[0m [1m[94m|[0m     pub fn init(
+2026-06-25T09:54:28.5553325Z      [1m[94m|[0m            [1m[92m^^^^[0m
+2026-06-25T09:54:28.5553644Z [1m[96mhelp[0m: remove the extra argument
+2026-06-25T09:54:28.5554160Z      [1m[94m|[0m
+2026-06-25T09:54:28.5554428Z [1m[94m 796[0m [91m-         &None,[0m
+2026-06-25T09:54:28.5554729Z      [1m[94m|[0m
+2026-06-25T09:54:28.5554857Z 
+2026-06-25T09:54:28.6122317Z [1m[91merror[E0308][0m[1m: arguments to this method are incorrect[0m
+2026-06-25T09:54:28.6122858Z     [1m[94m--> [0mescrow/src/tests/settlement.rs:1772:12
+2026-06-25T09:54:28.6123191Z      [1m[94m|[0m
+2026-06-25T09:54:28.6123468Z [1m[94m1772[0m [1m[94m|[0m     client.init(
+2026-06-25T09:54:28.6123809Z      [1m[94m|[0m            [1m[91m^^^^[0m
+2026-06-25T09:54:28.6124384Z [1m[94m1773[0m [1m[94m|[0m         &admin_addr,
+2026-06-25T09:54:28.6124742Z [1m[94m1774[0m [1m[94m|[0m         &sme_addr,
+2026-06-25T09:54:28.6125482Z      [1m[94m|[0m         [1m[94m---------[0m [1m[94margument #2 of type `&soroban_sdk::String` is missing[0m
+2026-06-25T09:54:28.6125999Z [1m[94m1775[0m [1m[94m|[0m         &100_000i128,
+2026-06-25T09:54:28.6126487Z      [1m[94m|[0m         [1m[94m------------[0m [1m[94munexpected argument #3 of type `&i128`[0m
+2026-06-25T09:54:28.6127058Z [1m[94m...[0m
+2026-06-25T09:54:28.6127404Z [1m[94m1780[0m [1m[94m|[0m         &Address::generate(&env),
+2026-06-25T09:54:28.6128203Z      [1m[94m|[0m         [1m[94m------------------------[0m [1m[94mexpected `&std::option::Option<soroban_sdk::Address>`, found `&soroban_sdk::Address`[0m
+2026-06-25T09:54:28.6128824Z [1m[94m1781[0m [1m[94m|[0m         &None,
+2026-06-25T09:54:28.6129427Z      [1m[94m|[0m         [1m[94m-----[0m [1m[94mexpected `&soroban_sdk::Address`, found `&std::option::Option<_>`[0m
+2026-06-25T09:54:28.6129913Z      [1m[94m|[0m
+2026-06-25T09:54:28.6130161Z [1m[92mnote[0m: method defined here
+2026-06-25T09:54:28.6130480Z     [1m[94m--> [0mescrow/src/lib.rs:1039:12
+2026-06-25T09:54:28.6130765Z      [1m[94m|[0m
+2026-06-25T09:54:28.6131029Z [1m[94m1039[0m [1m[94m|[0m     pub fn init(
+2026-06-25T09:54:28.6131359Z      [1m[94m|[0m            [1m[92m^^^^[0m
+2026-06-25T09:54:28.6131669Z [1m[94m...[0m
+2026-06-25T09:54:28.6131953Z [1m[94m1042[0m [1m[94m|[0m         invoice_id: String,
+2026-06-25T09:54:28.6132329Z      [1m[94m|[0m         [1m[94m------------------[0m
+2026-06-25T09:54:28.6132655Z [1m[96mhelp[0m: did you mean
+2026-06-25T09:54:28.6132909Z      [1m[94m|[0m
+2026-06-25T09:54:28.6133187Z [1m[94m1772[0m [92m~ [0m    client.init[92m([0m
+2026-06-25T09:54:28.6133541Z [1m[94m1773[0m [92m+         &admin_addr,[0m
+2026-06-25T09:54:28.6133978Z [1m[94m1774[0m [92m+         /* &soroban_sdk::String */,[0m
+2026-06-25T09:54:28.6134422Z [1m[94m1775[0m [92m+         &sme_addr,[0m
+2026-06-25T09:54:28.6134825Z [1m[94m1776[0m [92m+         &TARGET,[0m
+2026-06-25T09:54:28.6135229Z [1m[94m1777[0m [92m+         &500i64,[0m
+2026-06-25T09:54:28.6135622Z [1m[94m1778[0m [92m+         &maturity,[0m
+2026-06-25T09:54:28.6136052Z [1m[94m1779[0m [92m+         &token_id,[0m
+2026-06-25T09:54:28.6137012Z [1m[94m1780[0m [92m+         &None,[0m
+2026-06-25T09:54:28.6137576Z [1m[94m1781[0m [92m+         &Address::generate(&env),[0m
+2026-06-25T09:54:28.6138090Z [1m[94m1782[0m [92m+         &None,[0m
+2026-06-25T09:54:28.6138449Z [1m[94m1783[0m [92m+         &None,[0m
+2026-06-25T09:54:28.6138786Z [1m[94m1784[0m [92m+         &None,[0m
+2026-06-25T09:54:28.6139151Z [1m[94m1785[0m [92m+         &None,[0m
+2026-06-25T09:54:28.6139550Z [1m[94m1786[0m [92m+         &None,[0m
+2026-06-25T09:54:28.6139952Z [1m[94m1787[0m [92m+         &None,[0m
+2026-06-25T09:54:28.6140349Z [1m[94m1788[0m [92m~     )[0m;
+2026-06-25T09:54:28.6140722Z      [1m[94m|[0m
+2026-06-25T09:54:28.6140883Z 
+2026-06-25T09:54:28.6142336Z [1m[91merror[E0061][0m[1m: this function takes 1 argument but 4 arguments were supplied[0m
+2026-06-25T09:54:28.6143008Z     [1m[94m--> [0mescrow/src/tests/settlement.rs:1791:5
+2026-06-25T09:54:28.6143397Z      [1m[94m|[0m
+2026-06-25T09:54:28.6143872Z [1m[94m1791[0m [1m[94m|[0m     install_stellar_asset_token(&env, &sac, &investor, TARGET);
+2026-06-25T09:54:28.6145070Z      [1m[94m|[0m     [1m[91m^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m       [1m[94m----[0m  [1m[94m---------[0m  [1m[94m------[0m [1m[94munexpected argument #4 of type `i128`[0m
+2026-06-25T09:54:28.6145901Z      [1m[94m|[0m                                       [1m[94m|[0m     [1m[94m|[0m
+2026-06-25T09:54:28.6146777Z      [1m[94m|[0m                                       [1m[94m|[0m     [1m[94munexpected argument #3 of type `&soroban_sdk::Address`[0m
+2026-06-25T09:54:28.6147939Z      [1m[94m|[0m                                       [1m[94munexpected argument #2 of type `&StellarAssetContract`[0m
+2026-06-25T09:54:28.6148475Z      [1m[94m|[0m
+2026-06-25T09:54:28.6148770Z [1m[92mnote[0m: function defined here
+2026-06-25T09:54:28.6149158Z     [1m[94m--> [0mescrow/src/tests.rs:108:8
+2026-06-25T09:54:28.6149509Z      [1m[94m|[0m
+2026-06-25T09:54:28.6150201Z [1m[94m 108[0m [1m[94m|[0m pub fn install_stellar_asset_token<'a>(env: &'a Env) -> StellarTestToken<'a> {
+2026-06-25T09:54:28.6150949Z      [1m[94m|[0m        [1m[92m^^^^^^^^^^^^^^^^^^^^^^^^^^^[0m
+2026-06-25T09:54:28.6151449Z [1m[96mhelp[0m: remove the extra arguments
+2026-06-25T09:54:28.6151856Z      [1m[94m|[0m
+2026-06-25T09:54:28.6152425Z [1m[94m1791[0m [91m- [0m    install_stellar_asset_token(&env[91m, &sac, &investor, TARGET[0m);
+2026-06-25T09:54:28.6153163Z [1m[94m1791[0m [92m+ [0m    install_stellar_asset_token(&env);
+2026-06-25T09:54:28.6153640Z      [1m[94m|[0m
+2026-06-25T09:54:28.6153833Z 
+2026-06-25T09:54:29.2654404Z [1mSome errors have detailed explanations: E0061, E0106, E0308, E0599.[0m
+2026-06-25T09:54:29.2654903Z [1mFor more information about an error, try `rustc --explain E0061`.[0m
+2026-06-25T09:54:29.2720910Z [1m[33mwarning[0m: `liquifact_escrow` (lib test) generated 3 warnings
+2026-06-25T09:54:29.2721668Z [1m[91merror[0m: could not compile `liquifact_escrow` (lib test) due to 32 previous errors; 3 warnings emitted
+2026-06-25T09:54:29.2851809Z ##[error]Process completed with exit code 101.
+2026-06-25T09:54:29.2953823Z Node 20 is being deprecated. This workflow is running with Node 24 by default. If you need to temporarily use Node 20, you can set the ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION=true environment variable. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+2026-06-25T09:54:29.2954761Z Post job cleanup.
+2026-06-25T09:54:29.3635780Z [command]/usr/bin/git version
+2026-06-25T09:54:29.3698187Z git version 2.54.0
+2026-06-25T09:54:29.3726201Z Temporarily overriding HOME='/home/runner/work/_temp/25401bb8-7284-43bf-8587-10a412bbc247' before making global git config changes
+2026-06-25T09:54:29.3727250Z Adding repository directory to the temporary git global config as a safe directory
+2026-06-25T09:54:29.3730145Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/Liquifact-contracts/Liquifact-contracts
+2026-06-25T09:54:29.3760026Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+2026-06-25T09:54:29.3787165Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+2026-06-25T09:54:29.3964432Z fatal: No url found for submodule path 'Liquifact-contracts' in .gitmodules
+2026-06-25T09:54:29.3995296Z ##[warning]The process '/usr/bin/git' failed with exit code 128
+2026-06-25T09:54:29.4102207Z Cleaning up orphan processes
+2026-06-25T09:54:29.4328084Z ##[warning]Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/

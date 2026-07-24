@@ -43,6 +43,7 @@ WASM.
 | 6 | Moved per-investor keys to persistent storage to bound instance footprint and decouple per-address TTL | **Redeploy required** — prior instances must be redeployed to pick up new storage locations |
 
 > **Current:** `SCHEMA_VERSION = 6`
+> See the detailed schema version contract in [Escrow schema versioning](docs/escrow-schema-versioning.md).
 
 ---
 
@@ -133,37 +134,105 @@ cargo build --target wasm32v1-none --release -p liquifact_escrow
 # Artifact (typical):
 # target/wasm32v1-none/release/liquifact_escrow.wasm
 ```
-
-### Lint
-
-```bash
-# Escrow crate only (mirrors CI)
-cargo clippy -p liquifact_escrow -- -D warnings
-
-# Entire workspace
-cargo clippy --all-targets -- -D warnings
+liquifact-contracts/
+├── Cargo.toml           # Workspace definition
+├── docs/
+│   └── escrow-sme-collateral.md  # Collateral flow spec
+├── escrow/
+│   ├── Cargo.toml       # Escrow contract crate
+│   └── src/
+│       ├── lib.rs       # LiquiFact escrow contract
+│       ├── test.rs      # Legacy unit tests
+│       └── tests/
+│           ├── mod.rs
+│           └── coverage.rs  # Collateral flow coverage tests
+└── .github/workflows/
+    └── ci.yml           # CI: fmt, build, test
 ```
+
+### Escrow contract entrypoints
+
+| Entrypoint | Auth Role | Description |
+|---|---|---|
+| `init` | Admin (implicit) | Create an invoice escrow (invoice id, SME, amount, yield bps, maturity). |
+| `fund` | Investor | Record investor principal and atomically pull the funding token from the investor; marks escrow funded when target is met. |
+| `fund_with_commitment` | Investor | First deposit with optional lock period (atomically pulling the funding token); selects tiered yield. |
+| `fund_batch` | Investor | Batch-record up to `MAX_FUND_BATCH` investor contributions in a single call. Rejects the entire batch atomically on any duplicate investor address (`FundingBatchDuplicateInvestor`, code 84), non-positive amount, or other per-entry invariant violation. |
+| `settle` | SME | Mark a funded escrow as settled (SME auth required; maturity enforced). |
+| `partial_settle` | SME | SME marks a portion of the escrow as settled before full settlement. |
+| `withdraw` | SME | SME pulls funded liquidity (accounting record). |
+| `cancel_funding` | Admin | Admin cancels an open escrow (transitions status 0 → 4). |
+| `refund` | Investor | Investor pulls contributed liquidity from a cancelled escrow. Increments `DistributedPrincipal` liability. |
+| `extend_funding_deadline` | Admin | Extend-only push of the funding deadline while the escrow is open. |
+| `claim_investor_payout` | Investor | Investor records a payout claim after settlement. |
+| `claim_payouts_batch` | Investor / Any | Batch-record payout claims for up to `MAX_CLAIM_BATCH` investors in one transaction. |
+| `sweep_terminal_dust` | Treasury | Treasury sweeps rounding residue from a terminal escrow. |
+| `migrate` | Admin | Schema version gate — **typed errors on all paths** in the current release (codes 90–92). |
+| `set_legal_hold` | Admin | Admin activates/clears compliance hold. |
+| `set_paused` | Admin | Admin toggles a lightweight operational pause (incident response) that blocks `fund`, `settle`, `withdraw`, and `claim_investor_payout`. Orthogonal to legal hold; single-call toggle with no clear delay. |
+| `is_paused` | — | Read the current operational pause flag (defaults to `false`). |
+| `set_allowlist_active` | Admin | Admin enables/disables the investor allowlist gate. |
+| `set_investor_allowlisted` | Admin | Admin sets per-address allowlist status. |
+| `set_investors_allowlisted` | Admin | Admin batch-sets allowlist status for multiple addresses. |
+| `bind_primary_attestation_hash` | Admin | Admin sets a single-write 32-byte digest (single-set guarantee). |
+| `append_attestation_digest` | Admin | Admin appends to bounded audit log. |
+| `record_sme_collateral_commitment` | SME | SME records collateral pledge (metadata only). |
+| `get_sme_collateral_commitment` | — | Return current pledge record, or `None`. |
+| `clear_sme_collateral_commitment` | SME | Retire a recorded pledge; emits `CollateralClearedEvt`. Returns `NoCollateralToClear` if none exists. |
+| `propose_admin` | Admin | Step 1 of admin handover — sets `PendingAdmin` and proposal expiry. |
+| `accept_admin` | Pending Admin | Step 2 of admin handover — pending address accepts proposal before expiry. |
+| `cancel_pending_admin` | Admin | Admin withdraws an unaccepted proposal. |
+| `get_escrow` | — | Read current escrow state. |
+| `get_version` | — | Read stored `DataKey::Version`. |
+| `get_remaining_investor_slots` | — | Read remaining unique investor capacity before reaching the cap. |
+| `get_reconciliation` | — | Read solvency position: live token balance, outstanding liability, and surplus/deficit. See [`docs/escrow-read-api.md`](docs/escrow-read-api.md). |
+
+| `rebind_registry_ref` | Admin | Set or update the off-chain registry hint (`DataKey::RegistryRef`). Emits `RegistryRefRebound`. |
+| `clear_registry_ref` | Admin | Convenience alias for `rebind_registry_ref(None)`. Clears the registry pointer. |
+| `get_registry_ref` | — | Return the current registry hint, or `None` when unbound. |
 
 ---
 
-## Escrow contract — public entrypoints
+## Off-chain registry-reference pointer
 
-| Entrypoint | Description |
-|------------|-------------|
-| `init` | Create an invoice escrow; binds funding token, treasury, optional registry. |
-| `fund` | Record investor principal; marks escrow funded when target is met. |
-| `fund_with_commitment` | First deposit with optional lock period; selects tiered yield. |
-| `settle` | Mark a funded escrow as settled (SME auth required; maturity enforced). |
-| `withdraw` | SME pulls funded liquidity (accounting record). |
-| `claim_investor_payout` | Investor records a payout claim after settlement. |
-| `sweep_terminal_dust` | Treasury sweeps rounding residue from a terminal escrow. |
-| `migrate` | Schema version gate — **typed errors on all paths** in the current release (codes 90–92). |
-| `set_legal_hold` | Admin activates/clears compliance hold. |
-| `bind_primary_attestation_hash` | Admin sets a single-write 32-byte digest. |
-| `append_attestation_digest` | Admin appends to bounded audit log. |
-| `record_sme_collateral_commitment` | SME records collateral pledge (metadata only). |
-| `get_escrow` | Read current escrow state. |
-| `get_version` | Read stored `DataKey::Version`. |
+The escrow stores an optional `Option<Address>` under `DataKey::RegistryRef` as a
+**discoverability hint** for off-chain indexers. It is set at `init` (optional) and
+can be updated or cleared at any time by the admin via `rebind_registry_ref` /
+`clear_registry_ref`.
+
+### Non-authority guarantee
+
+**The registry pointer confers no control over on-chain funds, settlement, or
+authorization.** No entrypoint that moves tokens or changes escrow status reads
+`DataKey::RegistryRef`. Integrators must not treat its presence as proof of registry
+membership or as a security boundary.
+
+### Pointer states
+
+| State | `get_registry_ref` returns | Meaning |
+|-------|---------------------------|---------|
+| Unbound | `None` | No off-chain registry is associated with this escrow. |
+| Bound | `Some(addr)` | `addr` is a hint to an off-chain registry contract. Verify membership directly with that contract if authoritative state is needed. |
+
+### Mutation path
+
+Only the current escrow admin may call `rebind_registry_ref` or `clear_registry_ref`.
+Each call emits a `RegistryRefRebound` event (topic: `reg_rebind`) carrying the new
+`Option<Address>` value. Off-chain indexers should subscribe to this event to re-sync
+their cached pointer without polling.
+
+### Lifecycle summary
+
+1. **Init (optional bind):** `init` accepts an optional `registry: Option<Address>`.
+   Passing `Some(addr)` stores the hint immediately; `None` leaves the pointer unset.
+2. **Rebind:** Admin calls `rebind_registry_ref(Some(new_addr))` to change the hint.
+   The `RegistryRefRebound` event fires with the new address.
+3. **Clear:** Admin calls `clear_registry_ref()` (or `rebind_registry_ref(None)`) to
+   delete the key. The `RegistryRefRebound` event fires with `registry = None`.
+
+See [`docs/escrow-registry-ref.md`](docs/escrow-registry-ref.md) for the full lifecycle
+specification and integrator guidance, and [`docs/escrow-events.md`](docs/escrow-events.md)
+for the `RegistryRefRebound` event schema.
 
 ---
 
@@ -192,7 +261,7 @@ Escrow tests are organized by feature area under
 | `funding.rs` | Funding, contribution accounting, snapshots, tier selection |
 | `settlement.rs` | Settlement, withdrawal, investor claims, maturity boundaries, dust sweep |
 | `admin.rs` | Admin-governed state changes, legal hold, migration guards, collateral metadata |
-| `integration.rs` | External token-wrapper assumptions, metadata-only integration checks |
+| `integration.rs` | External token-wrapper assumptions, metadata-only integration checks, `cancel_funding` transition matrix |
 | `properties.rs` | Proptest-based invariants |
 
 Shared helpers live in [`escrow/src/test.rs`](escrow/src/test.rs). Each test
@@ -207,7 +276,7 @@ Core design decisions are captured in [`docs/adr/`](docs/adr/):
 
 | ADR | Decision |
 |-----|---------|
-| [ADR-001](docs/adr/ADR-001-state-model.md) | Escrow state model (`status` 0–3, forward-only transitions) |
+| [ADR-001](docs/adr/ADR-001-state-model.md) | Escrow state model (`status` 0–4, forward-only transitions) |
 | [ADR-002](docs/adr/ADR-002-auth-boundaries.md) | Authorization boundaries per role (admin, SME, investor, treasury) |
 | [ADR-003](docs/adr/ADR-003-settlement-flow.md) | Two-phase settlement flow and funding-close snapshot |
 | [ADR-004](docs/adr/ADR-004-legal-hold.md) | Legal / compliance hold mechanism |
@@ -225,9 +294,37 @@ external token contracts.
 
 ---
 
+## SEP-41 token-safety wrappers
+
+See [`docs/escrow-token-safety.md`](docs/escrow-token-safety.md) for the threat model,
+invariants, and error codes (`EscrowError` codes 36–41) for the funding-token
+transfer wrapper `transfer_funding_token_with_balance_checks`. The wrapper detects
+fee-on-transfer, rebasing, hook, and lying token behaviors at the host-call boundary.
+
+---
+
 ## SME collateral metadata
 
 See [`docs/escrow-sme-collateral.md`](docs/escrow-sme-collateral.md) for the risk-team handling rules for `record_sme_collateral_commitment` and `CollateralRecordedEvt`. The record is SME-reported metadata only; it is not proof of custody, token movement, or an enforceable on-chain claim.
+
+## Investor allowlist
+
+The escrow supports an optional investor allowlist gate that controls which addresses may fund. See [`docs/escrow-allowlist.md`](docs/escrow-allowlist.md) for the complete allowlist model documentation, including:
+
+- Active/inactive toggle behavior and interaction with per-address entries
+- Persistent storage model and TTL/archival implications
+- Fund-gate enforcement rules and default-to-deny semantics
+- Batch operations and equivalence to single calls
+- Security considerations for TTL management and admin key security
+
+## Escrow cancellation and refund lifecycle
+
+The escrow supports cancellation by the admin under specific criteria, unlocking investor refunds and a residual dust sweep with liability-floor protection. See [`docs/escrow-cancellation-refunds.md`](docs/escrow-cancellation-refunds.md) for the end-to-end documentation, including:
+
+- Transitioning into status 4 via `cancel_funding`
+- Refund mechanisms (auth, idempotency, and `DistributedPrincipal` tracking)
+- Residual dust sweeping and the liability floor protecting un-refunded investors
+- A worked execution sequence with multiple investors
 
 ## Security notes
 
@@ -239,6 +336,11 @@ See [`docs/escrow-sme-collateral.md`](docs/escrow-sme-collateral.md) for the ris
 - **Legal hold:** governance-controlled; misuse risk is mitigated by using a
   multisig `admin` and operational policy (see
   [`docs/OPERATOR_RUNBOOK.md`](docs/OPERATOR_RUNBOOK.md)).
+- **Operational pause:** admin-only `set_paused` is a lightweight incident-response
+  circuit breaker, **orthogonal to legal hold** — no compliance semantics and no
+  clear delay. It gates `fund`, `settle`, `withdraw`, and `claim_investor_payout`
+  as a read-only precondition before `require_auth` (typed errors 201–204). Either
+  flag blocks independently; clearing one never clears the other.
 - **Collateral record:** SME-reported metadata only; not proof of custody,
   token movement, reserved balance, or an enforceable on-chain claim.
 - **Token integration:** fee-on-transfer, rebasing, and hook tokens are
@@ -254,6 +356,11 @@ See [`docs/escrow-sme-collateral.md`](docs/escrow-sme-collateral.md) for the ris
   an investor's tier after their initial leg; claim timestamps are ledger-based.
 - **Funding snapshot:** single-write immutability avoids shifting pro-rata
   denominators after close.
+- **Target-lowering promotion:** `update_funding_target` re-evaluates the funded threshold after
+  every target change. If `funded_amount >= new_target > 0`, the escrow is immediately promoted to
+  funded (`status = 1`) and `FundingCloseSnapshot` is written exactly once — identical semantics
+  to the promotion that occurs inside `fund`/`fund_with_commitment`. The snapshot denominator is
+  captured atomically with the status transition and cannot be overwritten.
 - **Registry ref:** stored for discoverability only; must not be used as
   authority without verifying the registry contract independently.
 - **migrate:** emits typed errors on all paths in the current release — no silent

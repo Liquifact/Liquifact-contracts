@@ -87,3 +87,19 @@ Balance-delta invariant tests live in `escrow/src/tests/external_calls_mocked.rs
 | `test_balance_delta_invariants_with_multiple_recipients` | Two sequential transfers | Passes |
 
 **Core invariant:** value is always conserved exactly, or the call panics. There is no partial-credit success path.
+
+## On-chain custody reconciliation view
+
+The `get_token_balance()` view function exposes the contract's SEP-41 token balance directly for auditor convenience. This eliminates the need for auditors to independently query the token contract with the funding-token address.
+
+```
+balance = get_token_balance()
+outstanding = get_escrow().funded_amount - get_distributed_principal()
+excess = balance - outstanding   // tokens that may be swept as dust
+
+// In cancelled escrows, sweep_terminal_dust enforces: balance - sweep_amt >= outstanding
+```
+
+- `get_token_balance()` **reads only**; it does not mutate state or require authorization.
+- It fails with `FundingTokenNotSet` if the escrow has not been initialized, matching the behavior of `get_funding_token()`.
+- Integrations custodying principal on-chain should verify `balance >= funded_amount - distributed_principal` at any point in time.

@@ -1,0 +1,1099 @@
+﻿cargo :    Compiling 
+liquifact_escrow 
+v0.1.0 (C:\Users\ADMIN
+\Desktop\mide-drips\Li
+quifact-contracts\escr
+ow)
+At line:1 char:1
++ cargo test --color 
+never 2>&1 | Out-File 
+-Encoding utf8 
+test_out_utf8 ...
++ ~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~
+    + CategoryInfo    
+          : NotSpeci  
+  fied: (   Compili   
+ ng li...ntracts\e    
+scrow):String) []    
+, RemoteException
+    + FullyQualifiedE 
+   rrorId : NativeCo  
+  mmandError
+ 
+error[E0106]: missing 
+lifetime specifiers
+   --> escrow\src\test
+s\integration.rs:839:2
+7
+    |
+835 |     env: &Env,
+    |          ----
+836 |     target: 
+i128,
+837 |     invoice_id: 
+&str,
+    |                 
+----
+838 | ) -> (
+839 |     LiquifactEsc
+rowClient<'_>,
+    |                 
+          ^^ expected 
+named lifetime 
+parameter
+840 |     
+soroban_sdk::Address,
+841 |     soroban_sdk:
+:token::TokenClient<'_
+>,
+    |                 
+                    
+^^ expected named 
+lifetime parameter
+    |
+    = help: this 
+function's return 
+type contains a 
+borrowed value, but 
+the signature does 
+not say whether it is 
+borrowed from `env` 
+or `invoice_id`
+help: consider 
+introducing a named 
+lifetime parameter
+    |
+834 ~ fn setup_withdra
+w_with_token<'a>(
+835 ~     env: &'a 
+Env,
+836 |     target: 
+i128,
+837 ~     invoice_id: 
+&'a str,
+838 | ) -> (
+839 ~     LiquifactEsc
+rowClient<'a>,
+840 |     
+soroban_sdk::Address,
+841 ~     soroban_sdk:
+:token::TokenClient<'a
+>,
+    |
+
+warning: unused doc 
+comment
+   --> escrow\src\test
+s\properties.rs:114:1
+    |
+114 | /// Property 
+tests for funding 
+accounting invariants 
+(issue #325).
+    | ^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^ rustdoc does 
+not generate 
+documentation for 
+macro invocations
+    |
+    = help: to 
+document an item 
+produced by a macro, 
+the macro must 
+produce the 
+documentation as part 
+of its expansion
+    = note: `#[warn(un
+used_doc_comments)]` 
+(part of 
+`#[warn(unused)]`) on 
+by default
+
+warning: unused doc 
+comment
+    --> escrow\src\tes
+ts\properties.rs:1151:
+1
+     |
+1151 | / /// 
+Property: sum of all 
+computed payouts 
+never exceeds 
+settle_pool.
+1152 | | /// Covers 
+single investor, 
+equal splits, and 
+prime-denominator 
+splits.
+     | |_-------------
+----------------------
+----------------------
+-------------^
+     |   |
+     |   rustdoc does 
+not generate 
+documentation for 
+macro invocations
+     |
+     = help: to 
+document an item 
+produced by a macro, 
+the macro must 
+produce the 
+documentation as part 
+of its expansion
+
+warning: unnecessary 
+parentheses around 
+block return value
+   --> escrow\src\test
+s\properties.rs:100:5
+    |
+100 |     
+(1i128..=max)
+    |     ^           
+^
+    |
+    = note: `#[warn(un
+used_parens)]` (part 
+of `#[warn(unused)]`) 
+on by default
+help: remove these 
+parentheses
+    |
+100 -     
+(1i128..=max)
+100 +     1i128..=max 
+    |
+
+error[E0599]: no 
+method named 
+`is_settleable` found 
+for struct `LiquifactE
+scrowClient<'a>` in 
+the current scope
+    --> escrow\src\tes
+ts\coverage.rs:2462:21
+     |
+2462 |     assert!(!cl
+ient.is_settleable());
+     |                
+     ^^^^^^^^^^^^^ 
+method not found in `L
+iquifactEscrowClient<'
+_>`
+     |
+    ::: escrow\src\lib
+.rs:902:1
+     |
+ 902 | #[contract]
+     | ----------- 
+method 
+`is_settleable` not 
+found for this struct
+
+error[E0599]: no 
+method named 
+`is_settleable` found 
+for struct `LiquifactE
+scrowClient<'a>` in 
+the current scope
+    --> escrow\src\tes
+ts\coverage.rs:2473:20
+     |
+2473 |     assert!(cli
+ent.is_settleable());
+     |                
+    ^^^^^^^^^^^^^ 
+method not found in `L
+iquifactEscrowClient<'
+_>`
+     |
+    ::: escrow\src\lib
+.rs:902:1
+     |
+ 902 | #[contract]
+     | ----------- 
+method 
+`is_settleable` not 
+found for this struct
+
+error[E0599]: no 
+method named 
+`is_settleable` found 
+for struct `LiquifactE
+scrowClient<'a>` in 
+the current scope
+    --> escrow\src\tes
+ts\coverage.rs:2486:21
+     |
+2486 |     assert!(!cl
+ient.is_settleable());
+     |                
+     ^^^^^^^^^^^^^ 
+method not found in `L
+iquifactEscrowClient<'
+_>`
+     |
+    ::: escrow\src\lib
+.rs:902:1
+     |
+ 902 | #[contract]
+     | ----------- 
+method 
+`is_settleable` not 
+found for this struct
+
+error[E0599]: no 
+method named 
+`is_settleable` found 
+for struct `LiquifactE
+scrowClient<'a>` in 
+the current scope
+    --> escrow\src\tes
+ts\coverage.rs:2498:20
+     |
+2498 |     assert!(cli
+ent.is_settleable());
+     |                
+    ^^^^^^^^^^^^^ 
+method not found in `L
+iquifactEscrowClient<'
+_>`
+     |
+    ::: escrow\src\lib
+.rs:902:1
+     |
+ 902 | #[contract]
+     | ----------- 
+method 
+`is_settleable` not 
+found for this struct
+
+error[E0599]: no 
+method named 
+`is_settleable` found 
+for struct `LiquifactE
+scrowClient<'a>` in 
+the current scope
+    --> escrow\src\tes
+ts\coverage.rs:2509:21
+     |
+2509 |     assert!(!cl
+ient.is_settleable());
+     |                
+     ^^^^^^^^^^^^^ 
+method not found in `L
+iquifactEscrowClient<'
+_>`
+     |
+    ::: escrow\src\lib
+.rs:902:1
+     |
+ 902 | #[contract]
+     | ----------- 
+method 
+`is_settleable` not 
+found for this struct
+
+error[E0599]: no 
+method named 
+`is_settleable` found 
+for struct `LiquifactE
+scrowClient<'a>` in 
+the current scope
+    --> escrow\src\tes
+ts\coverage.rs:2520:21
+     |
+2520 |     assert!(!cl
+ient.is_settleable());
+     |                
+     ^^^^^^^^^^^^^ 
+method not found in `L
+iquifactEscrowClient<'
+_>`
+     |
+    ::: escrow\src\lib
+.rs:902:1
+     |
+ 902 | #[contract]
+     | ----------- 
+method 
+`is_settleable` not 
+found for this struct
+
+error[E0599]: no 
+method named 
+`is_settleable` found 
+for struct `LiquifactE
+scrowClient<'a>` in 
+the current scope
+    --> escrow\src\tes
+ts\coverage.rs:2531:21
+     |
+2531 |     assert!(!cl
+ient.is_settleable());
+     |                
+     ^^^^^^^^^^^^^ 
+method not found in `L
+iquifactEscrowClient<'
+_>`
+     |
+    ::: escrow\src\lib
+.rs:902:1
+     |
+ 902 | #[contract]
+     | ----------- 
+method 
+`is_settleable` not 
+found for this struct
+
+error[E0599]: no 
+method named 
+`is_settleable` found 
+for struct `LiquifactE
+scrowClient<'a>` in 
+the current scope
+    --> escrow\src\tes
+ts\coverage.rs:2540:16
+     |
+2540 |         client.
+is_settleable();
+     |                
+^^^^^^^^^^^^^ method 
+not found in `Liquifac
+tEscrowClient<'_>`
+     |
+    ::: escrow\src\lib
+.rs:902:1
+     |
+ 902 | #[contract]
+     | ----------- 
+method 
+`is_settleable` not 
+found for this struct
+
+error[E0599]: no 
+method named 
+`is_settleable` found 
+for struct `LiquifactE
+scrowClient<'a>` in 
+the current scope
+    --> escrow\src\tes
+ts\coverage.rs:2557:17
+     |
+2557 |         !client
+.is_settleable(),
+     |                
+ ^^^^^^^^^^^^^ method 
+not found in `Liquifac
+tEscrowClient<'_>`
+     |
+    ::: escrow\src\lib
+.rs:902:1
+     |
+ 902 | #[contract]
+     | ----------- 
+method 
+`is_settleable` not 
+found for this struct
+
+error[E0599]: no 
+method named `all` 
+found for struct `soro
+ban_sdk::events::Event
+s` in the current 
+scope
+    --> escrow\src\tes
+ts\coverage.rs:2597:40
+     |
+2597 |     let 
+contract_events = 
+env.events().all();
+     |                
+                      
+  ^^^ method not 
+found in `soroban_sdk:
+:events::Events`
+     |
+    ::: C:\Users\ADMIN
+\.cargo\registry\src\i
+ndex.crates.io-1949cf8
+c6b5b557f\soroban-sdk-
+25.2.0\src\testutils.r
+s:543:8
+     |
+ 543 |     fn 
+all(&self) -> 
+ContractEvents;
+     |        --- the 
+method is available 
+for `soroban_sdk::even
+ts::Events` here
+     |
+     = help: items 
+from traits can only 
+be used if the trait 
+is in scope
+help: trait `Events` 
+which provides `all` 
+is implemented but 
+not in scope; perhaps 
+you want to import it
+     |
+   1 + use soroban_sdk
+::testutils::Events;
+     |
+
+error[E0599]: no 
+method named `all` 
+found for struct `soro
+ban_sdk::events::Event
+s` in the current 
+scope
+    --> escrow\src\tes
+ts\coverage.rs:2634:40
+     |
+2634 |     let 
+contract_events = 
+env.events().all();
+     |                
+                      
+  ^^^ method not 
+found in `soroban_sdk:
+:events::Events`
+     |
+    ::: C:\Users\ADMIN
+\.cargo\registry\src\i
+ndex.crates.io-1949cf8
+c6b5b557f\soroban-sdk-
+25.2.0\src\testutils.r
+s:543:8
+     |
+ 543 |     fn 
+all(&self) -> 
+ContractEvents;
+     |        --- the 
+method is available 
+for `soroban_sdk::even
+ts::Events` here
+     |
+     = help: items 
+from traits can only 
+be used if the trait 
+is in scope
+help: trait `Events` 
+which provides `all` 
+is implemented but 
+not in scope; perhaps 
+you want to import it
+     |
+   1 + use soroban_sdk
+::testutils::Events;
+     |
+
+error[E0599]: no 
+method named 
+`is_settleable` found 
+for struct `LiquifactE
+scrowClient<'a>` in 
+the current scope
+    --> escrow\src\tes
+ts\coverage.rs:2694:17
+     |
+2694 |         !client
+.is_settleable(),
+     |                
+ ^^^^^^^^^^^^^ method 
+not found in `Liquifac
+tEscrowClient<'_>`
+     |
+    ::: escrow\src\lib
+.rs:902:1
+     |
+ 902 | #[contract]
+     | ----------- 
+method 
+`is_settleable` not 
+found for this struct
+
+error[E0599]: no 
+method named 
+`is_settleable` found 
+for struct `LiquifactE
+scrowClient<'a>` in 
+the current scope
+    --> escrow\src\tes
+ts\coverage.rs:2701:16
+     |
+2701 |         client.
+is_settleable(),
+     |                
+^^^^^^^^^^^^^ method 
+not found in `Liquifac
+tEscrowClient<'_>`
+     |
+    ::: escrow\src\lib
+.rs:902:1
+     |
+ 902 | #[contract]
+     | ----------- 
+method 
+`is_settleable` not 
+found for this struct
+
+error[E0599]: no 
+method named 
+`is_settleable` found 
+for struct `LiquifactE
+scrowClient<'a>` in 
+the current scope
+    --> escrow\src\tes
+ts\coverage.rs:2708:17
+     |
+2708 |         !client
+.is_settleable(),
+     |                
+ ^^^^^^^^^^^^^ method 
+not found in `Liquifac
+tEscrowClient<'_>`
+     |
+    ::: escrow\src\lib
+.rs:902:1
+     |
+ 902 | #[contract]
+     | ----------- 
+method 
+`is_settleable` not 
+found for this struct
+
+error[E0061]: this 
+method takes 15 
+arguments but 16 
+arguments were 
+supplied
+    --> escrow\src\tes
+ts\properties.rs:20:16
+     |
+  20 |         
+client.init(
+     |                
+^^^^
+...
+  36 |             
+&None,
+     |             
+----- unexpected 
+argument #16 of type `
+&std::option::Option<_
+>`
+     |
+note: method defined 
+here
+    --> escrow\src\lib
+.rs:1049:12
+     |
+1049 |     pub fn 
+init(
+     |            ^^^^
+help: remove the 
+extra argument
+     |
+  35 -             
+&None,
+     |
+
+error[E0061]: this 
+method takes 15 
+arguments but 16 
+arguments were 
+supplied
+    --> escrow\src\tes
+ts\properties.rs:63:29
+     |
+  63 |         let 
+escrow = client.init(
+     |                
+             ^^^^
+...
+  79 |             
+&None,
+     |             
+----- unexpected 
+argument #16 of type `
+&std::option::Option<_
+>`
+     |
+note: method defined 
+here
+    --> escrow\src\lib
+.rs:1049:12
+     |
+1049 |     pub fn 
+init(
+     |            ^^^^
+help: remove the 
+extra argument
+     |
+  78 -             
+&None,
+     |
+
+error[E0061]: this 
+method takes 15 
+arguments but 16 
+arguments were 
+supplied
+    --> escrow\src\tes
+ts\properties.rs:149:1
+6
+     |
+ 149 |         
+client.init(
+     |                
+^^^^
+...
+ 163 |             
+&max_unique_investors,
+     |             
+--------------------- 
+unexpected argument 
+#14 of type `&std::opt
+ion::Option<u32>`
+     |
+note: method defined 
+here
+    --> escrow\src\lib
+.rs:1049:12
+     |
+1049 |     pub fn 
+init(
+     |            ^^^^
+help: remove the 
+extra argument
+     |
+ 162 -             
+&max_per_investor,
+ 163 -             
+&max_unique_investors,
+ 162 +             
+&max_per_investor,
+     |
+
+error[E0061]: this 
+method takes 15 
+arguments but 16 
+arguments were 
+supplied
+    --> escrow\src\tes
+ts\properties.rs:323:1
+2
+     |
+ 323 |     
+client.init(
+     |            ^^^^
+...
+ 339 |         &None,
+     |         ----- 
+unexpected argument 
+#16 of type `&std::opt
+ion::Option<_>`
+     |
+note: method defined 
+here
+    --> escrow\src\lib
+.rs:1049:12
+     |
+1049 |     pub fn 
+init(
+     |            ^^^^
+help: remove the 
+extra argument
+     |
+ 338 -         &None,
+     |
+
+error[E0061]: this 
+method takes 15 
+arguments but 16 
+arguments were 
+supplied
+    --> escrow\src\tes
+ts\properties.rs:363:1
+2
+     |
+ 363 |     
+client.init(
+     |            ^^^^
+...
+ 379 |         &None,
+     |         ----- 
+unexpected argument 
+#16 of type `&std::opt
+ion::Option<_>`
+     |
+note: method defined 
+here
+    --> escrow\src\lib
+.rs:1049:12
+     |
+1049 |     pub fn 
+init(
+     |            ^^^^
+help: remove the 
+extra argument
+     |
+ 378 -         &None,
+     |
+
+error[E0061]: this 
+method takes 15 
+arguments but 16 
+arguments were 
+supplied
+    --> escrow\src\tes
+ts\properties.rs:401:1
+2
+     |
+ 401 |     
+client.init(
+     |            ^^^^
+...
+ 417 |         &None,
+     |         ----- 
+unexpected argument 
+#16 of type `&std::opt
+ion::Option<_>`
+     |
+note: method defined 
+here
+    --> escrow\src\lib
+.rs:1049:12
+     |
+1049 |     pub fn 
+init(
+     |            ^^^^
+help: remove the 
+extra argument
+     |
+ 416 -         &None,
+     |
+
+error[E0061]: this 
+method takes 15 
+arguments but 16 
+arguments were 
+supplied
+    --> escrow\src\tes
+ts\properties.rs:443:1
+2
+     |
+ 443 |     
+client.init(
+     |            ^^^^
+...
+ 459 |         &None,
+     |         ----- 
+unexpected argument 
+#16 of type `&std::opt
+ion::Option<_>`
+     |
+note: method defined 
+here
+    --> escrow\src\lib
+.rs:1049:12
+     |
+1049 |     pub fn 
+init(
+     |            ^^^^
+help: remove the 
+extra argument
+     |
+ 458 -         &None,
+     |
+
+error[E0061]: this 
+method takes 15 
+arguments but 16 
+arguments were 
+supplied
+    --> escrow\src\tes
+ts\properties.rs:483:1
+2
+     |
+ 483 |     
+client.init(
+     |            ^^^^
+...
+ 499 |         &None,
+     |         ----- 
+unexpected argument 
+#16 of type `&std::opt
+ion::Option<_>`
+     |
+note: method defined 
+here
+    --> escrow\src\lib
+.rs:1049:12
+     |
+1049 |     pub fn 
+init(
+     |            ^^^^
+help: remove the 
+extra argument
+     |
+ 498 -         &None,
+     |
+
+error[E0061]: this 
+method takes 15 
+arguments but 16 
+arguments were 
+supplied
+    --> escrow\src\tes
+ts\properties.rs:521:1
+2
+     |
+ 521 |     
+client.init(
+     |            ^^^^
+...
+ 537 |         &None,
+     |         ----- 
+unexpected argument 
+#16 of type `&std::opt
+ion::Option<_>`
+     |
+note: method defined 
+here
+    --> escrow\src\lib
+.rs:1049:12
+     |
+1049 |     pub fn 
+init(
+     |            ^^^^
+help: remove the 
+extra argument
+     |
+ 536 -         &None,
+     |
+
+error[E0061]: this 
+method takes 15 
+arguments but 16 
+arguments were 
+supplied
+    --> escrow\src\tes
+ts\properties.rs:557:1
+2
+     |
+ 557 |     
+client.init(
+     |            ^^^^
+...
+ 573 |         &None,
+     |         ----- 
+unexpected argument 
+#16 of type `&std::opt
+ion::Option<_>`
+     |
+note: method defined 
+here
+    --> escrow\src\lib
+.rs:1049:12
+     |
+1049 |     pub fn 
+init(
+     |            ^^^^
+help: remove the 
+extra argument
+     |
+ 572 -         &None,
+     |
+
+error[E0061]: this 
+method takes 15 
+arguments but 16 
+arguments were 
+supplied
+    --> escrow\src\tes
+ts\properties.rs:593:1
+2
+     |
+ 593 |     
+client.init(
+     |            ^^^^
+...
+ 609 |         &None,
+     |         ----- 
+unexpected argument 
+#16 of type `&std::opt
+ion::Option<_>`
+     |
+note: method defined 
+here
+    --> escrow\src\lib
+.rs:1049:12
+     |
+1049 |     pub fn 
+init(
+     |            ^^^^
+help: remove the 
+extra argument
+     |
+ 608 -         &None,
+     |
+
+error[E0061]: this 
+method takes 15 
+arguments but 16 
+arguments were 
+supplied
+    --> escrow\src\tes
+ts\properties.rs:635:1
+2
+     |
+ 635 |     
+client.init(
+     |            ^^^^
+...
+ 651 |         &None,
+     |         ----- 
+unexpected argument 
+#16 of type `&std::opt
+ion::Option<_>`
+     |
+note: method defined 
+here
+    --> escrow\src\lib
+.rs:1049:12
+     |
+1049 |     pub fn 
+init(
+     |            ^^^^
+help: remove the 
+extra argument
+     |
+ 650 -         &None,
+     |
+
+error[E0061]: this 
+method takes 15 
+arguments but 16 
+arguments were 
+supplied
+    --> escrow\src\tes
+ts\properties.rs:687:1
+2
+     |
+ 687 |     
+client.init(
+     |            ^^^^
+...
+ 703 |         &None,
+     |         ----- 
+unexpected argument 
+#16 of type `&std::opt
+ion::Option<_>`
+     |
+note: method defined 
+here
+    --> escrow\src\lib
+.rs:1049:12
+     |
+1049 |     pub fn 
+init(
+     |            ^^^^
+help: remove the 
+extra argument
+     |
+ 702 -         &None,
+     |
+
+error[E0061]: this 
+method takes 15 
+arguments but 16 
+arguments were 
+supplied
+    --> escrow\src\tes
+ts\properties.rs:727:1
+2
+     |
+ 727 |     
+client.init(
+     |            ^^^^
+...
+ 743 |         &None,
+     |         ----- 
+unexpected argument 
+#16 of type `&std::opt
+ion::Option<_>`
+     |
+note: method defined 
+here
+    --> escrow\src\lib
+.rs:1049:12
+     |
+1049 |     pub fn 
+init(
+     |            ^^^^
+help: remove the 
+extra argument
+     |
+ 742 -         &None,
+     |
+
+error[E0061]: this 
+method takes 15 
+arguments but 16 
+arguments were 
+supplied
+    --> escrow\src\tes
+ts\properties.rs:781:1
+2
+     |
+ 781 |     
+client.init(
+     |            ^^^^
+...
+ 797 |         &None,
+     |         ----- 
+unexpected argument 
+#16 of type `&std::opt
+ion::Option<_>`
+     |
+note: method defined 
+here
+    --> escrow\src\lib
+.rs:1049:12
+     |
+1049 |     pub fn 
+init(
+     |            ^^^^
+help: remove the 
+extra argument
+     |
+ 796 -         &None,
+     |
+
+Some errors have 
+detailed 
+explanations: E0061, 
+E0106, E0599.
+For more information 
+about an error, try 
+`rustc --explain 
+E0061`.
+warning: 
+`liquifact_escrow` 
+(lib test) generated 
+3 warnings
+error: could not 
+compile 
+`liquifact_escrow` 
+(lib test) due to 30 
+previous errors; 3 
+warnings emitted
