@@ -22,8 +22,8 @@ use super::{
     install_stellar_asset_token, setup, StellarTestToken, MAX_DUST_SWEEP_AMOUNT, TARGET,
 };
 use crate::{
-    EscrowError, EscrowSettled, InvoiceEscrow, LiquifactEscrow, SettlementReadiness,
-    SettledAtTimestamp, YieldTier,
+    EscrowError, EscrowSettled, InvoiceEscrow, LiquifactEscrow, SettledAtTimestamp,
+    SettlementReadiness, YieldTier,
 };
 use soroban_sdk::{
     symbol_short,
@@ -2671,10 +2671,7 @@ fn settlement_state_legal_hold_blocks_settleable() {
 
     let state = client.get_settlement_state();
 
-    assert!(
-        !state.is_settleable,
-        "legal hold must block settleability"
-    );
+    assert!(!state.is_settleable, "legal hold must block settleability");
     assert_eq!(state.settled_at, SettledAtTimestamp::None);
     assert!(!state.is_settled);
 }
@@ -2714,18 +2711,12 @@ fn settlement_state_maturity_gate() {
     // Before maturity
     env.ledger().with_mut(|l| l.timestamp = maturity - 1);
     let state = client.get_settlement_state();
-    assert!(
-        !state.is_settleable,
-        "before maturity — not settleable"
-    );
+    assert!(!state.is_settleable, "before maturity — not settleable");
 
     // At maturity
     env.ledger().with_mut(|l| l.timestamp = maturity);
     let state2 = client.get_settlement_state();
-    assert!(
-        state2.is_settleable,
-        "at maturity — settleable"
-    );
+    assert!(state2.is_settleable, "at maturity — settleable");
 }
 
 /// `get_settlement_state` after `partial_settle`: not settleable before maturity,
