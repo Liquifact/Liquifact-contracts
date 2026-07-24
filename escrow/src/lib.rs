@@ -1405,6 +1405,21 @@ pub struct FundingDeadlineExtended {
     pub new_deadline: u64,
 }
 
+/// Emitted by [`LiquifactEscrow::update_funding_deadline`] when the admin sets,
+/// changes, or clears the funding deadline while the escrow is open.
+///
+/// `old_deadline` is `None` when no deadline was configured before the call;
+/// `new_deadline` is `None` when the admin cleared the deadline.
+#[contractevent]
+pub struct FundingDeadlineUpdated {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    pub old_deadline: Option<u64>,
+    pub new_deadline: Option<u64>,
+}
+
 #[contractevent]
 pub struct LegalHoldChanged {
     #[topic]
@@ -5706,6 +5721,87 @@ impl LiquifactEscrow {
         .publish(&env);
 
         escrow
+    }
+    /// Set, change, or clear the funding deadline while the escrow is still open.
+    ///
+    /// This is the general-purpose admin setter for the funding window, and is
+    /// consistent with the other open-state setters
+    /// ([`LiquifactEscrow::update_funding_target`], [`LiquifactEscrow::update_maturity`]).
+    /// Unlike [`LiquifactEscrow::extend_funding_deadline`], which only ever pushes an
+    /// existing deadline forward, this entrypoint accepts an `Option<u64>` and can:
+    ///
+    /// - set a deadline when none was configured at `init`,
+    /// - move an existing deadline forward or backward, provided it stays in the future,
+    /// - clear the deadline entirely by passing `None`, restoring the
+    ///   "no deadline" semantics that [`LiquifactEscrow::is_funding_expired`] reads as
+    ///   never expired.
+    ///
+    /// Validation mirrors the `funding_deadline` branch of [`LiquifactEscrow::init`]:
+    /// a supplied deadline must be strictly in the future, and must fall strictly
+    /// before a non-zero maturity.
+    ///
+    /// # Authorization
+    /// Requires the signature of the current [`InvoiceEscrow::admin`].
+    ///
+    /// # Errors
+    /// - [`EscrowError::FundingDeadlineUpdateNotOpen`] if the escrow is not status `0`.
+    /// - [`EscrowError::FundingDeadlinePassed`] if `new_deadline` is `Some(d)` and
+    ///   `d` is not strictly greater than the current ledger timestamp.
+    /// - [`EscrowError::FundingDeadlineBeyondMaturity`] if `new_deadline` is `Some(d)`,
+    ///   a non-zero maturity is configured, and `d >= maturity`.
+    ///
+    /// # Events
+    /// Emits [`FundingDeadlineUpdated`] with `invoice_id`, `old_deadline`, and
+    /// `new_deadline`, either of which may be `None`.
+    pub fn update_funding_deadline(env: Env, new_deadline: Option<u64>) -> Option<u64> {
+        let escrow = Self::load_escrow_require_admin(&env);
+
+        guard_status_eq(
+            &env,
+            escrow.status,
+            0,
+            EscrowError::FundingDeadlineUpdateNotOpen,
+        );
+
+        let old_deadline = env
+            .storage()
+            .instance()
+            .get::<DataKey, u64>(&DataKey::FundingDeadline);
+
+        match new_deadline {
+            Some(deadline) => {
+                let now = env.ledger().timestamp();
+                ensure(&env, deadline > now, EscrowError::FundingDeadlinePassed);
+                if escrow.maturity > 0 {
+                    ensure(
+                        &env,
+                        deadline < escrow.maturity,
+                        EscrowError::FundingDeadlineBeyondMaturity,
+                    );
+                }
+                env.storage()
+                    .instance()
+                    .set(&DataKey::FundingDeadline, &deadline);
+            }
+            None => {
+                env.storage().instance().remove(&DataKey::FundingDeadline);
+            }
+        }
+
+        env.storage().instance().extend_ttl(
+            INSTANCE_TTL_MIN_EXTENSION_LEDGERS,
+            INSTANCE_TTL_MIN_EXTENSION_LEDGERS,
+        );
+
+        FundingDeadlineUpdated {
+            name: symbol_short!("fund_upd"),
+            invoice_id: escrow.invoice_id,
+            old_deadline,
+            new_deadline,
+        }
+        .publish(&env);
+
+        new_deadline
     }
 
     /// Extend the configured funding deadline while the escrow is still open.

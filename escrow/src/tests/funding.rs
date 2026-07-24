@@ -8604,3 +8604,244 @@ fn test_funding_reached_not_emitted_after_already_funded() {
     let result = client.try_fund(&investor2, &1_000i128);
     assert_contract_error(result, EscrowError::EscrowNotOpenForFunding);
 }
+
+// ── Issue #637: update_funding_deadline ──────────────────────────────────────
+// General-purpose admin setter for the funding window. Unlike
+// `extend_funding_deadline` (issue #551, forward-only), this accepts an
+// `Option<u64>` and can set from none, move in either direction while the
+// value stays in the future, or clear the deadline entirely.
+
+fn init_with_optional_deadline<'a>(
+    env: &'a Env,
+    client: &LiquifactEscrowClient<'a>,
+    admin: &Address,
+    sme: &Address,
+    deadline: Option<u64>,
+    maturity: u64,
+) -> StellarTestToken<'a> {
+    let token = install_stellar_asset_token(env);
+    let treasury = Address::generate(env);
+    client.init(
+        admin,
+        &String::from_str(env, "FDU01"),
+        sme,
+        &TARGET,
+        &800i64,
+        &maturity,
+        &token.id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &deadline,
+        &None,
+        &None::<i64>,
+    );
+    token
+}
+
+#[test]
+fn test_update_funding_deadline_sets_from_none() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    init_with_optional_deadline(&env, &client, &admin, &sme, None, 0);
+
+    assert_eq!(client.get_funding_deadline(), None);
+
+    let target = env.ledger().timestamp() + 500;
+    let returned = client.update_funding_deadline(&Some(target));
+
+    assert_eq!(returned, Some(target));
+    assert_eq!(client.get_funding_deadline(), Some(target));
+}
+
+#[test]
+fn test_update_funding_deadline_extends_forward() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let initial = env.ledger().timestamp() + 100;
+    init_with_optional_deadline(&env, &client, &admin, &sme, Some(initial), 0);
+
+    let extended = initial + 400;
+    assert_eq!(
+        client.update_funding_deadline(&Some(extended)),
+        Some(extended)
+    );
+    assert_eq!(client.get_funding_deadline(), Some(extended));
+}
+
+#[test]
+fn test_update_funding_deadline_shortens_while_future() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let initial = env.ledger().timestamp() + 1_000;
+    init_with_optional_deadline(&env, &client, &admin, &sme, Some(initial), 0);
+
+    // Pulling the deadline back is allowed as long as it stays in the future.
+    // This is the case `extend_funding_deadline` deliberately rejects.
+    let shortened = env.ledger().timestamp() + 50;
+    assert_eq!(
+        client.update_funding_deadline(&Some(shortened)),
+        Some(shortened)
+    );
+    assert_eq!(client.get_funding_deadline(), Some(shortened));
+}
+
+#[test]
+fn test_update_funding_deadline_clears_to_none() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let initial = env.ledger().timestamp() + 200;
+    init_with_optional_deadline(&env, &client, &admin, &sme, Some(initial), 0);
+
+    assert_eq!(client.update_funding_deadline(&None::<u64>), None);
+    assert_eq!(client.get_funding_deadline(), None);
+    assert!(
+        !client.is_funding_expired(),
+        "an absent deadline must read as never expired"
+    );
+}
+
+#[test]
+fn test_update_funding_deadline_rejects_past_deadline() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let initial = env.ledger().timestamp() + 500;
+    init_with_optional_deadline(&env, &client, &admin, &sme, Some(initial), 0);
+
+    let mut ledger_info = env.ledger().get();
+    ledger_info.timestamp = 1_000;
+    env.ledger().set(ledger_info);
+
+    let past = env.ledger().timestamp() - 1;
+    assert_contract_error(
+        client.try_update_funding_deadline(&Some(past)),
+        EscrowError::FundingDeadlinePassed,
+    );
+    assert_eq!(
+        client.get_funding_deadline(),
+        Some(initial),
+        "a rejected update must not alter the stored deadline"
+    );
+}
+
+#[test]
+fn test_update_funding_deadline_rejects_current_timestamp() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let initial = env.ledger().timestamp() + 500;
+    init_with_optional_deadline(&env, &client, &admin, &sme, Some(initial), 0);
+
+    let now = env.ledger().timestamp();
+    assert_contract_error(
+        client.try_update_funding_deadline(&Some(now)),
+        EscrowError::FundingDeadlinePassed,
+    );
+}
+
+#[test]
+fn test_update_funding_deadline_rejects_at_or_after_maturity() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let maturity = env.ledger().timestamp() + 10_000;
+    let initial = env.ledger().timestamp() + 100;
+    init_with_optional_deadline(&env, &client, &admin, &sme, Some(initial), maturity);
+
+    assert_contract_error(
+        client.try_update_funding_deadline(&Some(maturity)),
+        EscrowError::FundingDeadlineBeyondMaturity,
+    );
+    assert_contract_error(
+        client.try_update_funding_deadline(&Some(maturity + 1)),
+        EscrowError::FundingDeadlineBeyondMaturity,
+    );
+    assert_eq!(client.get_funding_deadline(), Some(initial));
+}
+
+#[test]
+fn test_update_funding_deadline_rejects_when_not_open() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    let initial = env.ledger().timestamp() + 500;
+    let token = init_with_optional_deadline(&env, &client, &admin, &sme, Some(initial), 0);
+
+    // Fill the target to promote the escrow out of status 0.
+    token.stellar.mint(&investor, &TARGET);
+    client.fund(&investor, &TARGET);
+    assert_eq!(client.get_escrow().status, 1);
+
+    assert_contract_error(
+        client.try_update_funding_deadline(&Some(initial + 100)),
+        EscrowError::FundingDeadlineUpdateNotOpen,
+    );
+}
+
+#[test]
+fn test_update_funding_deadline_reflected_by_is_funding_expired() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let initial = env.ledger().timestamp() + 100;
+    init_with_optional_deadline(&env, &client, &admin, &sme, Some(initial), 0);
+
+    assert!(!client.is_funding_expired());
+
+    // Push the window out, then advance past the original deadline.
+    let extended = initial + 1_000;
+    client.update_funding_deadline(&Some(extended));
+
+    let mut ledger_info = env.ledger().get();
+    ledger_info.timestamp = initial + 10;
+    env.ledger().set(ledger_info);
+
+    assert!(
+        !client.is_funding_expired(),
+        "is_funding_expired must read the updated deadline, not the original"
+    );
+
+    let mut ledger_info = env.ledger().get();
+    ledger_info.timestamp = extended + 1;
+    env.ledger().set(ledger_info);
+
+    assert!(client.is_funding_expired());
+}
+
+#[test]
+fn test_update_funding_deadline_emits_event() {
+    use soroban_sdk::testutils::Events as _;
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let initial = env.ledger().timestamp() + 100;
+    init_with_optional_deadline(&env, &client, &admin, &sme, Some(initial), 0);
+
+    let updated = initial + 500;
+    client.update_funding_deadline(&Some(updated));
+
+    let last = env.events().all().events().last().unwrap().clone();
+    let expected = crate::FundingDeadlineUpdated {
+        name: symbol_short!("fund_upd"),
+        invoice_id: client.get_escrow().invoice_id.clone(),
+        old_deadline: Some(initial),
+        new_deadline: Some(updated),
+    }
+    .to_xdr(&env, &client.address);
+    assert_eq!(
+        last, expected,
+        "update_funding_deadline must publish FundingDeadlineUpdated"
+    );
+    assert_eq!(client.get_funding_deadline(), Some(updated));
+}

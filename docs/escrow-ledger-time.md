@@ -280,6 +280,32 @@ and the current deadline has not elapsed:
 
 Indexers should listen for this event to track extended countdowns per invoice.
 
+### `update_funding_deadline` — set, change, or clear
+
+`update_funding_deadline(new_deadline: Option<u64>)` is the general-purpose setter and is also
+restricted to the Open state (status == 0). It does not require a prior deadline and does not
+require the new value to be later than the old one.
+
+| Status | `update_funding_deadline` result |
+|--------|----------------------------------|
+| 0 — Open | ✅ Allowed |
+| 1 — Funded | ❌ `FundingDeadlineUpdateNotOpen` |
+| 2 — Settled | ❌ `FundingDeadlineUpdateNotOpen` |
+| 3 — Withdrawn | ❌ `FundingDeadlineUpdateNotOpen` |
+| 4 — Cancelled | ❌ `FundingDeadlineUpdateNotOpen` |
+
+**Validation:**
+- No deadline need already exist.
+- `Some(d)` requires `d > env.ledger().timestamp()` (`FundingDeadlinePassed`).
+- If `maturity > 0`, `Some(d)` requires `d < maturity` (`FundingDeadlineBeyondMaturity`).
+- `None` clears the deadline; `is_funding_expired()` then returns `false`.
+
+**Event:** `FundingDeadlineUpdated` carries `invoice_id`, `old_deadline`, and `new_deadline`,
+either of which may be `None`.
+
+Indexers tracking countdowns should handle a `new_deadline` of `None` as removal of the
+funding window rather than as an expiry.
+
 ---
 
 ## `MaturityUpdatedEvent`
