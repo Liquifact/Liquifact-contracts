@@ -2779,10 +2779,10 @@ impl LiquifactEscrow {
         }
 
         // Guard 7: allowlist (fund_impl lines 4028-4034).
-        if Self::is_allowlist_active(env.clone()) {
-            if !Self::is_investor_allowlisted(env.clone(), investor.clone()) {
-                return EscrowError::InvestorNotAllowlisted as u32;
-            }
+        if Self::is_allowlist_active(env.clone())
+            && !Self::is_investor_allowlisted(env.clone(), investor.clone())
+        {
+            return EscrowError::InvestorNotAllowlisted as u32;
         }
 
         // Guard 8: contribution overflow (fund_impl lines 4036-4039).
