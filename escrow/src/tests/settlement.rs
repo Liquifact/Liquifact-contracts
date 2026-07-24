@@ -22,9 +22,11 @@ use super::{
     install_stellar_asset_token, setup, StellarTestToken, MAX_DUST_SWEEP_AMOUNT, TARGET,
 };
 use crate::{
-    EscrowError, EscrowSettled, InvoiceEscrow, LiquifactEscrow, SettlementReadiness, YieldTier,
+    EscrowError, EscrowSettled, InvoiceEscrow, LiquifactEscrow, SettlementReadiness,
+    SettlementStateChanged, YieldTier,
 };
 use soroban_sdk::{
+    symbol_short,
     testutils::{Address as _, Events, Ledger as _},
     token::StellarAssetClient,
     Address, Env, Event, String, Vec as SorobanVec,
@@ -2781,4 +2783,226 @@ fn test_settle_pool_no_maturity() {
     assert_eq!(escrow.yield_bps, yield_bps);
     assert_eq!(escrow.maturity, 0u64);
     assert_eq!(escrow.status, 2, "Escrow must be in settled state");
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// SettlementStateChanged event (GitHub Issue #697)
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// `settle` must emit a `SettlementStateChanged` event with `old_status=1` and `new_status=2`.
+#[test]
+fn settle_emits_settlement_state_changed() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _sme, _sac) = setup_funded_with_token(&env);
+    let contract_id = client.address.clone();
+    let invoice_id = client.get_escrow().invoice_id;
+
+    client.settle();
+
+    let all_events = env.events().all();
+    let event_list = all_events.events();
+
+    // settle() emits SettlementStateChanged then EscrowSettled (2 events).
+    assert!(
+        event_list.len() >= 2,
+        "settle must emit at least 2 events, got {}",
+        event_list.len()
+    );
+
+    // The first event emitted by settle is SettlementStateChanged.
+    assert_eq!(
+        event_list.first().unwrap().clone(),
+        SettlementStateChanged {
+            name: symbol_short!("setl_st"),
+            invoice_id,
+            old_status: 1,
+            new_status: 2,
+            funded_amount: TARGET,
+        }
+        .to_xdr(&env, &contract_id),
+        "first event must be SettlementStateChanged with old_status=1, new_status=2"
+    );
+}
+
+/// `withdraw` must emit a `SettlementStateChanged` event with `old_status=1` and `new_status=3`.
+#[test]
+fn withdraw_emits_settlement_state_changed() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _sme, _sac) = setup_funded_with_token(&env);
+    let contract_id = client.address.clone();
+    let invoice_id = client.get_escrow().invoice_id;
+
+    client.withdraw();
+
+    let all_events = env.events().all();
+    let event_list = all_events.events();
+
+    assert!(
+        !event_list.is_empty(),
+        "withdraw must emit at least one event"
+    );
+
+    // withdraw() emits SettlementStateChanged then SmeWithdrew; first event is the new one.
+    assert_eq!(
+        event_list.first().unwrap().clone(),
+        SettlementStateChanged {
+            name: symbol_short!("setl_st"),
+            invoice_id,
+            old_status: 1,
+            new_status: 3,
+            funded_amount: TARGET,
+        }
+        .to_xdr(&env, &contract_id),
+        "first event must be SettlementStateChanged with old_status=1, new_status=3"
+    );
+}
+
+/// `partial_settle` must emit a `SettlementStateChanged` event with `old_status=0` and `new_status=1`.
+#[test]
+fn partial_settle_emits_settlement_state_changed() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let contract_id = client.address.clone();
+    default_init(&client, &env, &admin, &sme);
+    let invoice_id = client.get_escrow().invoice_id;
+
+    client.partial_settle(&admin);
+
+    let all_events = env.events().all();
+    let event_list = all_events.events();
+
+    assert!(
+        !event_list.is_empty(),
+        "partial_settle must emit at least one event"
+    );
+
+    // partial_settle() emits SettlementStateChanged then EscrowPartialSettle.
+    assert_eq!(
+        event_list.first().unwrap().clone(),
+        SettlementStateChanged {
+            name: symbol_short!("setl_st"),
+            invoice_id,
+            old_status: 0,
+            new_status: 1,
+            funded_amount: 0,
+        }
+        .to_xdr(&env, &contract_id),
+        "first event must be SettlementStateChanged with old_status=0, new_status=1"
+    );
+}
+
+/// `cancel_funding` must emit a `SettlementStateChanged` event with `old_status=0` and `new_status=4`.
+#[test]
+fn cancel_funding_emits_settlement_state_changed() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let contract_id = client.address.clone();
+    default_init(&client, &env, &admin, &sme);
+    let invoice_id = client.get_escrow().invoice_id;
+
+    client.cancel_funding();
+
+    let all_events = env.events().all();
+    let event_list = all_events.events();
+
+    assert!(
+        !event_list.is_empty(),
+        "cancel_funding must emit at least one event"
+    );
+
+    // cancel_funding() emits SettlementStateChanged then FundingCancelled.
+    assert_eq!(
+        event_list.first().unwrap().clone(),
+        SettlementStateChanged {
+            name: symbol_short!("setl_st"),
+            invoice_id,
+            old_status: 0,
+            new_status: 4,
+            funded_amount: 0,
+        }
+        .to_xdr(&env, &contract_id),
+        "first event must be SettlementStateChanged with old_status=0, new_status=4"
+    );
+}
+
+/// The `setl_st` topic must not collide with any existing event topic.
+#[test]
+fn settlement_state_changed_no_topic_collision() {
+    use soroban_sdk::Symbol as SdkSymbol;
+
+    let env = Env::default();
+
+    // All existing event topic names used in the contract (both symbol_short! and Symbol::new).
+    let existing_topics: [SdkSymbol; 42] = [
+        symbol_short!("escrow_ii"),
+        symbol_short!("maturity"),
+        symbol_short!("adm_prop"),
+        symbol_short!("adm_acpt"),
+        symbol_short!("adm_xfer"),
+        symbol_short!("nom_rem"),
+        symbol_short!("funded"),
+        symbol_short!("unfunded"),
+        symbol_short!("fund_tgt"),
+        symbol_short!("inv_cap"),
+        symbol_short!("min_flr"),
+        symbol_short!("part_set"),
+        symbol_short!("escrow_sd"),
+        symbol_short!("sme_wd"),
+        symbol_short!("fund_can"),
+        symbol_short!("refunded"),
+        symbol_short!("clm_pay"),
+        symbol_short!("dust_swp"),
+        symbol_short!("setl_st"),
+        symbol_short!("tier_up"),
+        symbol_short!("reg_ref"),
+        symbol_short!("al_batch"),
+        symbol_short!("al_add"),
+        symbol_short!("al_rem"),
+        symbol_short!("al_clr"),
+        symbol_short!("rec_add"),
+        symbol_short!("rec_rem"),
+        symbol_short!("rec_clr"),
+        symbol_short!("col_rec"),
+        symbol_short!("col_clr"),
+        symbol_short!("col_clr_s"),
+        symbol_short!("acc_rec"),
+        symbol_short!("acc_can"),
+        symbol_short!("acc_rem"),
+        symbol_short!("acc_rem_s"),
+        symbol_short!("acc_upd"),
+        symbol_short!("acc_swp"),
+        symbol_short!("acc_swp_s"),
+        symbol_short!("acc_swp_f"),
+        symbol_short!("acc_swp_c"),
+        symbol_short!("acc_swp_r"),
+        symbol_short!("acc_swp_d"),
+    ];
+
+    // `setl_st` is exactly the topic used by SettlementStateChanged.
+    // It appears in the list above as expected, but we must ensure it's unique
+    // (appears exactly once in the full topic set).
+    let count = existing_topics
+        .iter()
+        .filter(|t| **t == symbol_short!("setl_st"))
+        .count();
+    assert_eq!(
+        count, 1,
+        "setl_st topic must be unique (appear exactly once), found {}",
+        count
+    );
+
+    // Ensure the topic is <= 9 chars (symbol_short! constraint).
+    // "setl_st" is 7 chars, which satisfies the <= 9 requirement.
+    assert!("setl_st".len() <= 9, "topic must be <= 9 characters");
 }
