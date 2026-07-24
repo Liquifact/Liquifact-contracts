@@ -1560,6 +1560,28 @@ pub struct SmeWithdrew {
     pub fee: i128,
 }
 
+/// Emitted from [`LiquifactEscrow::withdraw`] when a non-zero protocol fee is
+/// transferred to [`DataKey::Treasury`].
+///
+/// This event records the treasury leg separately from [`SmeWithdrew`] so
+/// accounting integrations can observe the exact fee amount, effective basis
+/// points, treasury recipient, and SME net payout without re-deriving the split.
+#[contractevent]
+pub struct ProtocolFeeWithdrawn {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    /// Protocol fee amount transferred to the immutable treasury address.
+    pub fee_amount: i128,
+    /// Effective protocol fee basis points used for this withdrawal.
+    pub fee_bps: i64,
+    /// Immutable treasury address that received `fee_amount`.
+    pub treasury: Address,
+    /// Net amount transferred to the SME after deducting `fee_amount`.
+    pub sme_net_amount: i128,
+}
+
 #[contractevent]
 pub struct InvestorPayoutClaimed {
     #[topic]
@@ -5250,7 +5272,7 @@ impl LiquifactEscrow {
     /// 6. Status transition to 3, `DistributedPrincipal` update (by the full gross
     ///    `funded_amount`), storage write.
     /// 7. SEP-41 token transfers (fee → treasury, net → SME) with balance-delta verification.
-    /// 8. Event emission ([`SmeWithdrew`], carrying `amount = sme_payout` and `fee`).
+    /// 8. Event emission ([`ProtocolFeeWithdrawn`] when `fee > 0`, then [`SmeWithdrew`]).
     ///
     /// # Errors
     /// - [`EscrowError::LegalHoldBlocksWithdrawal`] — hold is active.
@@ -5370,6 +5392,15 @@ impl LiquifactEscrow {
                 &treasury,
                 fee,
             );
+            ProtocolFeeWithdrawn {
+                name: symbol_short!("prot_fee"),
+                invoice_id: escrow.invoice_id.clone(),
+                fee_amount: fee,
+                fee_bps,
+                treasury,
+                sme_net_amount: net,
+            }
+            .publish(&env);
         }
         if net > 0 {
             external_calls::transfer_funding_token_with_balance_checks(

@@ -33,7 +33,7 @@ short routing symbol passed with `symbol_short!(...)`, such as `funded` or
 
 ## Event Catalog
 
-The current contract defines 36 event structs.
+The current contract defines 37 event structs.
 
 | Rust event | `name` symbol | Entrypoint(s) |
 |---|---:|---|
@@ -74,6 +74,7 @@ The current contract defines 36 event structs.
 | `MaxUniqueInvestorsCapRaised` | `raise_cap` | `raise_max_unique_investors` |
 | `MinContributionFloorLowered` | `floor_lo` | `lower_min_contribution_floor` |
 | `PrimaryAttestationBound` | `att_bind` | `bind_primary_attestation_hash` |
+| `ProtocolFeeWithdrawn` | `prot_fee` | `withdraw` |
 | `RegistryRefRebound` | `reg_rebind` | `set_registry` |
 | `SmeWithdrew` | `sme_wd` | `withdraw` |
 | `TreasuryDustSwept` | `dust_sw` | `sweep_terminal_dust` |
@@ -372,6 +373,31 @@ Data:
 | Field | Type |
 |---|---|
 | `amount` | `i128` |
+| `recipient` | `Address` |
+| `fee` | `i128` |
+
+### `ProtocolFeeWithdrawn`
+
+Emitted after successful `withdraw` only when the computed protocol fee is
+non-zero. This records the treasury leg separately from the SME net withdrawal
+event so accounting integrations do not need to re-derive the protocol cut.
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `protocol_fee_withdrawn` |
+| 1 | `name` | `Symbol` | `prot_fee` |
+| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
+
+Data:
+
+| Field | Type |
+|---|---|
+| `fee_amount` | `i128` |
+| `fee_bps` | `i64` |
+| `treasury` | `Address` |
+| `sme_net_amount` | `i128` |
 
 ### `InvestorPayoutClaimed`
 
