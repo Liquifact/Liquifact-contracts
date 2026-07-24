@@ -3294,20 +3294,6 @@ impl LiquifactEscrow {
     /// # Panics
     ///
     /// Panics with [`EscrowError::EscrowNotInitialized`] when no escrow has been initialised.
-    pub fn is_settleable(env: Env) -> bool {
-        let escrow = Self::get_escrow(env.clone());
-        if escrow.status != 1 {
-            return false;
-        }
-        if Self::legal_hold_active(&env) {
-            return false;
-        }
-        if escrow.maturity > 0 && env.ledger().timestamp() < escrow.maturity {
-            return false;
-        }
-        true
-    }
-
     /// Read-only entrypoint returning the current settlement state without mutating storage.
     ///
     /// Returns a sensible default (all fields `false` / [`SettledAtTimestamp::None`]) when the
