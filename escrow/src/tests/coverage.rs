@@ -3817,27 +3817,47 @@ fn test_collateral_recorded_evt_first_record_prior_amount_zero() {
     use soroban_sdk::testutils::Events as _;
 
     let env = Env::default();
-    let (client, admin, sme) = setup(&env);
-    let (contract_id, _) = {
-        let id = client.address.clone();
-        (id, init_for_collateral(&env, &client, &admin, &sme, "EVENT_001"))
-    };
+    env.mock_all_auths();
+    let (contract_id, client) = super::deploy_with_id(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (token, treasury) = (Address::generate(&env), Address::generate(&env));
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "BEVT001"),
+        &sme,
+        &10_000i128,
+        &500i64,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
 
     let asset = soroban_sdk::Symbol::new(&env, "GOLD");
     client.record_sme_collateral_commitment(&asset, &5_000i128);
 
-    // Extract the first (and only) event for this contract.
-    let events = env.events().all().filter_by_contract(&contract_id);
-    assert_eq!(events.events().len(), 1, "expected exactly one event");
+    let all_events = env.events().all().filter_by_contract(&contract_id);
+    assert_eq!(all_events.events().len(), 1, "expected exactly one event");
 
     let expected = CollateralRecordedEvt {
         name: symbol_short!("coll_rec"),
-        invoice_id: soroban_sdk::Symbol::new(&env, "EVENT_001"),
+        invoice_id: soroban_sdk::Symbol::new(&env, "BEVT001"),
         amount: 5_000i128,
         prior_amount: 0i128,
     };
     assert_eq!(
-        events.events()[0],
+        all_events.events()[0],
         expected.to_xdr(&env, &contract_id),
         "first record event must have prior_amount=0"
     );
@@ -3849,11 +3869,32 @@ fn test_collateral_recorded_evt_replacement_prior_amount_correct() {
     use soroban_sdk::testutils::Events as _;
 
     let env = Env::default();
-    let (client, admin, sme) = setup(&env);
-    let (contract_id, _) = {
-        let id = client.address.clone();
-        (id, init_for_collateral(&env, &client, &admin, &sme, "EVENT_002"))
-    };
+    env.mock_all_auths();
+    let (contract_id, client) = super::deploy_with_id(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (token, treasury) = (Address::generate(&env), Address::generate(&env));
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "BEVT002"),
+        &sme,
+        &10_000i128,
+        &500i64,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
 
     let asset = soroban_sdk::Symbol::new(&env, "GOLD");
 
@@ -3864,18 +3905,22 @@ fn test_collateral_recorded_evt_replacement_prior_amount_correct() {
     env.ledger().with_mut(|li| li.timestamp = 10_000);
     client.record_sme_collateral_commitment(&asset, &7_000i128);
 
-    // Extract the second event (replacement).
-    let events = env.events().all().filter_by_contract(&contract_id);
-    assert_eq!(events.events().len(), 1, "expected exactly one event from replacement");
+    // filter_by_contract returns only events from the most recent call.
+    let all_events = env.events().all().filter_by_contract(&contract_id);
+    assert_eq!(
+        all_events.events().len(),
+        1,
+        "expected exactly one event from replacement"
+    );
 
     let expected = CollateralRecordedEvt {
         name: symbol_short!("coll_rec"),
-        invoice_id: soroban_sdk::Symbol::new(&env, "EVENT_002"),
+        invoice_id: soroban_sdk::Symbol::new(&env, "BEVT002"),
         amount: 7_000i128,
         prior_amount: 3_000i128,
     };
     assert_eq!(
-        events.events()[0],
+        all_events.events()[0],
         expected.to_xdr(&env, &contract_id),
         "replacement event must have prior_amount=3000"
     );
@@ -3887,18 +3932,38 @@ fn test_collateral_cleared_evt_emitted_with_all_fields() {
     use soroban_sdk::testutils::Events as _;
 
     let env = Env::default();
-    let (client, admin, sme) = setup(&env);
-    let (contract_id, _) = {
-        let id = client.address.clone();
-        (id, init_for_collateral(&env, &client, &admin, &sme, "EVENT_003"))
-    };
+    env.mock_all_auths();
+    let (contract_id, client) = super::deploy_with_id(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (token, treasury) = (Address::generate(&env), Address::generate(&env));
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "BEVT003"),
+        &sme,
+        &10_000i128,
+        &500i64,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
 
     let asset = soroban_sdk::Symbol::new(&env, "USDC");
 
-    // Record a commitment at t=0.
+    // Record a commitment at a known timestamp.
     env.ledger().with_mut(|li| li.timestamp = 12_345);
     client.record_sme_collateral_commitment(&asset, &8_000i128);
-    let commitment_before_clear = client.get_sme_collateral_commitment().unwrap();
 
     // Clear the commitment.
     client.clear_sme_collateral_commitment();
@@ -3909,29 +3974,26 @@ fn test_collateral_cleared_evt_emitted_with_all_fields() {
         "commitment must be cleared"
     );
 
-    // Extract the clear events. There should be two: CollateralClearedEvt and CollateralCommitmentCleared.
-    let events = env.events().all().filter_by_contract(&contract_id);
-    assert!(events.events().len() >= 1, "expected at least one clear event");
+    // Two events are emitted by clear_sme_collateral_commitment:
+    // CollateralClearedEvt and CollateralCommitmentCleared.
+    let all_events = env.events().all().filter_by_contract(&contract_id);
+    assert!(
+        all_events.events().len() >= 1,
+        "expected at least one clear event"
+    );
 
-    // Verify CollateralClearedEvt fields.
+    // The first event from the clear call is CollateralClearedEvt.
     let expected_cleared = CollateralClearedEvt {
         name: symbol_short!("coll_clr"),
-        invoice_id: soroban_sdk::Symbol::new(&env, "EVENT_003"),
+        invoice_id: soroban_sdk::Symbol::new(&env, "BEVT003"),
         asset: asset.clone(),
         amount: 8_000i128,
         recorded_at: 12_345,
     };
-
-    // Find the CollateralClearedEvt in the events (it may be first or second).
-    let cleared_evt = events.events().iter().find(|evt| {
-        // Parse the event and check if it matches expected_cleared.
-        // This is a simplified check; in a real scenario, you'd parse the XDR properly.
-        evt == &expected_cleared.to_xdr(&env, &contract_id)
-    });
-
-    assert!(
-        cleared_evt.is_some(),
-        "CollateralClearedEvt must be emitted with correct fields"
+    assert_eq!(
+        all_events.events()[0],
+        expected_cleared.to_xdr(&env, &contract_id),
+        "CollateralClearedEvt must carry asset, amount, and recorded_at from the cleared commitment"
     );
 }
 
