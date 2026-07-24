@@ -2384,6 +2384,210 @@ fn test_unique_funder_count_with_fund_with_commitment() {
     assert_eq!(client.get_unique_funder_count(), 2);
 }
 
+// --- get_investor_count Tests (issue #677) ---
+//
+// get_investor_count is a thin O(1) alias over the existing UniqueFunderCount
+// counter (see get_unique_funder_count above), so these tests mirror that
+// counter's coverage rather than re-deriving investor-count semantics from
+// scratch: zero before funding, one increment per unique investor, stable
+// across repeat deposits by the same investor, and behavior at the
+// configured unique-investor cap.
+
+#[test]
+
+fn test_get_investor_count_zero_before_funding() {
+    let env = Env::default();
+
+    let (client, admin, sme) = setup(&env);
+
+    // Read-only, must not panic before any funding — even before `init`.
+    assert_eq!(client.get_investor_count(), 0);
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "IC001"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    assert_eq!(client.get_investor_count(), 0);
+}
+
+#[test]
+
+fn test_get_investor_count_increments_once_per_unique_investor() {
+    let env = Env::default();
+
+    let (client, admin, sme) = setup(&env);
+
+    let inv_a = Address::generate(&env);
+
+    let inv_b = Address::generate(&env);
+
+    let inv_c = Address::generate(&env);
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "IC002"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    assert_eq!(client.get_investor_count(), 0);
+
+    client.fund(&inv_a, &(TARGET / 3));
+
+    assert_eq!(client.get_investor_count(), 1);
+
+    client.fund(&inv_b, &(TARGET / 3));
+
+    assert_eq!(client.get_investor_count(), 2);
+
+    client.fund(&inv_c, &(TARGET / 3));
+
+    assert_eq!(client.get_investor_count(), 3);
+}
+
+#[test]
+
+fn test_get_investor_count_stable_across_repeat_deposits() {
+    let env = Env::default();
+
+    let (client, admin, sme) = setup(&env);
+
+    let investor = Address::generate(&env);
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "IC003"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    assert_eq!(client.get_investor_count(), 0);
+
+    client.fund(&investor, &(TARGET / 4));
+
+    assert_eq!(client.get_investor_count(), 1);
+
+    // Repeat deposits from the same investor must not double-count.
+
+    client.fund(&investor, &(TARGET / 4));
+
+    assert_eq!(client.get_investor_count(), 1);
+
+    client.fund(&investor, &(TARGET / 4));
+
+    assert_eq!(client.get_investor_count(), 1);
+}
+
+#[test]
+
+fn test_get_investor_count_matches_unique_funder_count_at_cap() {
+    let env = Env::default();
+
+    let (client, admin, sme) = setup(&env);
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "IC004"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &Some(3u32), // Cap of 3 investors
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    let inv1 = Address::generate(&env);
+
+    let inv2 = Address::generate(&env);
+
+    let inv3 = Address::generate(&env);
+
+    client.fund(&inv1, &(TARGET / 6));
+
+    assert_eq!(client.get_investor_count(), 1);
+
+    client.fund(&inv2, &(TARGET / 6));
+
+    assert_eq!(client.get_investor_count(), 2);
+
+    client.fund(&inv3, &(TARGET / 6));
+
+    // At the configured unique-investor cap: get_investor_count reflects the
+    // reused counter exactly, including once the cap has been reached.
+
+    assert_eq!(client.get_investor_count(), 3);
+
+    assert_eq!(
+        client.get_investor_count(),
+        client.get_unique_funder_count()
+    );
+
+    // A 4th distinct investor is rejected by the cap and must not be counted.
+
+    let inv4 = Address::generate(&env);
+
+    let result = client.try_fund(&inv4, &(TARGET / 6));
+
+    assert_contract_error(result, EscrowError::UniqueInvestorCapReached);
+
+    assert_eq!(client.get_investor_count(), 3);
+}
+
 #[test]
 
 fn test_max_unique_investors_cap_none_allows_unlimited() {

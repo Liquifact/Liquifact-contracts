@@ -2374,6 +2374,21 @@ impl LiquifactEscrow {
             .unwrap_or(0)
     }
 
+    /// Current count of active unique investors, `O(1)`.
+    ///
+    /// A thin read view over [`DataKey::UniqueFunderCount`] — the same counter
+    /// [`LiquifactEscrow::fund`] increments on each investor's first deposit and
+    /// [`LiquifactEscrow::unfund`] decrements when a contribution returns to zero (see
+    /// module docs, "Data model" table, schema version 3). No iteration over investor
+    /// storage occurs; the count is never recomputed from the underlying entries.
+    ///
+    /// Read-only and safe to call before any funding: absent ⇒ `0`, matching
+    /// [`LiquifactEscrow::get_unique_funder_count`]'s additive-key default for instances
+    /// predating this counter.
+    pub fn get_investor_count(env: Env) -> u32 {
+        Self::get_unique_funder_count(env)
+    }
+
     /// Bundles multiple read-only values to return a comprehensive summary of the escrow state
     /// in a single host invocation.
     pub fn get_escrow_summary(env: Env) -> EscrowSummary {
