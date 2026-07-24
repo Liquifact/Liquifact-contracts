@@ -1197,11 +1197,11 @@ fn test_paused_cleared_emits_event() {
     let (client, admin, sme) = setup(&env);
     let contract_id = client.address.clone();
     basic_init(&client, &env, &admin, &sme);
-    let invoice_id = client.get_escrow().invoice_id; // Read invoice_id before set_paused emits events
+    let invoice_id = client.get_escrow().invoice_id;
     client.set_paused(&true);
     client.set_paused(&false);
-    assert!(!client.is_paused());
-    let events = env.events().all(); // Snapshot after the set_paused calls
+    // Snapshot events immediately after set_paused — before any other host call clears the buffer
+    let events = env.events().all();
     assert_eq!(
         events.events().last().unwrap().clone(),
         PausedChanged {
@@ -1211,6 +1211,7 @@ fn test_paused_cleared_emits_event() {
         }
         .to_xdr(&env, &contract_id)
     );
+    assert!(!client.is_paused());
 }
 
 // ── PendingAdmin storage ──────────────────────────────────────────────────────
