@@ -57,13 +57,13 @@ The scenarios below are covered by the focused collateral suite in
 | `test_collateral_first_record_returns_correct_fields_and_prior_amount_is_zero` | First record returns the correct asset/amount/timestamp; `get_sme_collateral_commitment` reflects it. |
 | `test_collateral_first_record_event_prior_amount_is_zero` | `CollateralRecordedEvt` emitted by the first record has `prior_amount = 0`. |
 | `test_collateral_replacement_overwrites_stored_value_and_emits_prior_amount` | Replacement overwrites storage; event carries the previous record's amount as `prior_amount`. |
-| `test_collateral_backwards_timestamp_rejected` | Replacing with a ledger timestamp earlier than `recorded_at` is rejected with `CollateralTimestampBackwards`; original record is preserved. |
+| `test_collateral_backwards_timestamp_rejected` | Replacing with a ledger timestamp earlier than `recorded_at` is rejected with `CollateralTimestampBackwards` (62); original record is preserved. |
 | `test_collateral_same_timestamp_replacement_is_allowed` | Equal timestamps (`now >= prior.recorded_at`) are accepted (monotonic, not strictly increasing). |
-| `test_collateral_zero_amount_rejected` | Zero amount is rejected with `CollateralAmountNotPositive`. |
-| `test_collateral_negative_amount_rejected` | Negative amount is rejected with `CollateralAmountNotPositive`. |
-| `test_collateral_empty_asset_rejected` | Empty asset symbol is rejected with `CollateralAssetEmpty`. |
-| `test_collateral_non_sme_caller_rejected` | A caller that is not the SME address is rejected (auth failure). |
-| `test_collateral_record_does_not_change_token_balances` | No token balances change on the escrow contract, SME, or admin after recording. |
+| `test_collateral_zero_amount_rejected` | Zero amount is rejected with `CollateralAmountNotPositive` (60). |
+| `test_collateral_negative_amount_rejected` | Negative amount is rejected with `CollateralAmountNotPositive` (60). |
+| `test_collateral_empty_asset_rejected_with_typed_error` | Empty asset symbol is rejected with `CollateralAssetEmpty` (61). |
+| `test_collateral_non_sme_caller_rejected` | A caller that is not the SME address is rejected (auth failure); stored record unchanged. |
+| `test_collateral_record_does_not_change_token_balances` | No token balances change on the escrow contract or SME after recording (metadata-only invariant). |
 
 Additional collateral scenarios (happy-path and validation) are also exercised in:
 - [`escrow/src/tests/admin.rs`](../escrow/src/tests/admin.rs) — collateral record in admin-flow baselines.

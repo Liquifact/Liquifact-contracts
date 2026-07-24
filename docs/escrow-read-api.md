@@ -63,6 +63,7 @@ re-implementing storage reads to guarantee identical semantics.
 - [get_attestation_append_log](#get_attestation_append_log--vecbytesn32)
 - [get_attestation_log_stats](#get_attestation_log_stats--u32-u32)
 - [is_attestation_revoked](#is_attestation_revokedindex-u32--bool)
+- [get_revoked_attestation_indices](#get_revoked_attestation_indices--vecu32)
 
 **Collateral Metadata:**
 - [get_sme_collateral_commitment](#get_sme_collateral_commitment--optionsmecollateralcommitment)
@@ -249,17 +250,36 @@ Returns the pending-admin proposal's remaining validity window computed against 
 
 ## `get_remaining_funding_capacity() → i128`
 
-**Storage key:** `DataKey::Escrow`
+**Storage key:** `DataKey::Escrow`  
+**Signature:** `pub fn get_remaining_funding_capacity(env: Env) -> i128`
 
-Returns the remaining funding capacity before the funding target is reached.
+Returns `max(0, funding_target − funded_amount)` — the headroom remaining before the funding
+target is reached. Saturating arithmetic ensures the result is **always non-negative**, even
+when the escrow has been over-funded past the target.
 
-- **Calculation**: `funding_target.saturating_sub(funded_amount)` clamped at `0` (via `.max(0)`) so it never goes negative when over-funded.
-- **Informational only**: This view is for frontend guidance. The `fund` method may still accept deposits that over-fund past the target while the escrow status is `0` (Open).
-- **No authorization**: Pure read; no auth or signature required.
-- **Complexity**:
-  - Time Complexity: $O(1)$ read from storage.
-  - Space Complexity: $O(1)$ in-memory calculation.
-- Panics with `"Escrow not initialized"` before `init`.
+**Informational only:** Front-ends should use this view to size deposit suggestions. The `fund`
+entrypoint does **not** use this value as a gate — it accepts deposits that push `funded_amount`
+past `funding_target` while `status == 0` (open). A return value of `0` means the target has
+already been met or exceeded; it does not mean further deposits are rejected.
+
+**Requires initialization:** Yes — emits [`EscrowError::EscrowNotInitialized`] (code 20) if
+called before `init`.
+
+**No authorization required.** Pure read; no state mutation.
+
+| Escrow state | Return value |
+|---|---|
+| No deposits yet | `funding_target` |
+| Partially funded | `funding_target − funded_amount` |
+| Exactly at target | `0` |
+| Over-funded | `0` (clamped, never negative) |
+
+**Complexity:** O(1) — single instance-storage read.
+
+**Security notes:**
+- The `.max(0)` clamp is redundant given `saturating_sub` but is retained explicitly for
+  auditor clarity.
+- Reads `DataKey::Escrow` directly; no side effects.
 
 ---
 
@@ -869,40 +889,47 @@ Returns the yield-tier ladder configured at `init`, or an empty `Vec` when no ti
 
 ---
 
-## Paginated Enumeration
+## `get_revoked_attestation_indices() → Vec<u32>`
 
-`get_investors`, `get_allowlisted_investors`, and `get_revoked_attestation_digests` share one `(start, limit)` contract. Both args are `u32`; `start` is a zero-based index position and `limit` is clamped (never rejected) to a per-view maximum. See docs/escrow-indexer.md for how indexers poll these.
+**Storage keys:** `DataKey::AttestationAppendLog`, `DataKey::AttestationRevoked(u32)`  
+**Signature:** `pub fn get_revoked_attestation_indices(env: Env) -> Vec<u32>`
 
-All three apply the same guard first:
+Returns the ordered set of indices in the attestation append-log that have been revoked.
+Scans `0..get_attestation_append_log().len()` and collects every index `i` where
+`DataKey::AttestationRevoked(i)` is set. The result is ascending (0-based) and its length
+is bounded by the log length, which is itself capped at `MAX_ATTESTATION_APPEND_ENTRIES` (32).
 
-```text
-len = length of backing index/log   // absent key => 0
-if start >= len || limit == 0 { return empty Vec }
-```
+**Requires initialization:** No  
+**No authorization required.** Pure read; no state mutation.
 
-So `start >= len` or `limit == 0` returns an empty `Vec` (never panics), and an absent backing key behaves as `len == 0`. All three are pure reads (no auth, no writes, no TTL bump). Every backing collection is append-only, so a given `start` keeps addressing the same position as new entries are appended at the tail; already-read pages stay stable.
+**Relation to other attestation views:**
 
-| View | Backing key | Max limit | Page shape |
-|------|-------------|-----------|------------|
-| `get_investors` | `InvestorIndex` | `MAX_INVESTOR_READ_BATCH` = 50 | Unfiltered half-open slice |
-| `get_allowlisted_investors` | `AllowlistIndex` | 50 | Half-open slice, then filtered |
-| `get_revoked_attestation_digests` | `AttestationAppendLog` | `MAX_ATTESTATION_READ_PAGE` = 20 | Forward scan for matches |
+| View | What it returns |
+|---|---|
+| `get_attestation_append_log()` | All digests (revoked and active) in insertion order |
+| `is_attestation_revoked(index)` | Revocation flag for a single index |
+| `get_revoked_attestation_indices()` | Ordered set of all revoked indices |
 
-**get_investors** returns `index[start .. min(start + min(limit,50), len)]` in first-funded order, one address per position. Detect the last page when the returned length is below your page size; otherwise call again with `start += page_size`.
+**Alignment guarantee:** index `i` in the returned `Vec` corresponds to
+`get_attestation_append_log().get(i)` — the same ordering. Integrators can join
+the two views by position without secondary key lookups.
 
-**get_allowlisted_investors** walks the same window over `AllowlistIndex` but drops addresses whose live `InvestorAllowlisted(addr)` flag is no longer true (revoked entries stay in the index and are skipped at read time). A page may be shorter than the window, so a short or empty page is NOT end-of-list. Advance `start` by the page size each call and stop once `start >= len`. Note `get_allowlisted_investors_count` returns only the live count, not the index length.
+**Legacy instances:** instances where no revocations have ever been recorded return an
+empty `Vec`. This is backward-compatible under the additive-key policy (ADR-007).
 
-**get_revoked_attestation_digests** scans forward from `start` collecting up to `min(limit,20)` revoked entries, skipping non-revoked ones; it stops on match count, not positions scanned, and does not report where it stopped. The log is capped at 32 entries, so `start = 0` then `start = 20` covers any instance. Read the log length from `get_attestation_log_stats` or `get_escrow_summary().attestation_log_length`; do not derive the next `start` from the returned length.
+| Log / revocation state | Return value |
+|---|---|
+| Empty log | `[]` |
+| Log with no revocations | `[]` |
+| Some indices revoked | Ascending list of revoked indices, e.g. `[0, 2, 4]` |
+| All indices revoked | `[0, 1, 2, …, log.len()-1]` |
+| After `unrevoke_attestation_digest(i)` | Index `i` no longer appears |
 
-Worked loop (full investor enumeration, 50 at a time):
+**Complexity:** O(N) where N = `get_attestation_append_log().len()` ≤ 32. The scan and
+storage reads are bounded by `MAX_ATTESTATION_APPEND_ENTRIES`.
 
-```text
-start = 0
-page_size = 50
-loop {
-    page = get_investors(start, page_size)
-    process(page)
-    if page.len() < page_size { break }   // last page
-    start += page_size
-}
-```
+**Security notes:**
+- Pure read — no authorization required, no state mutation.
+- Bounded scan — loops at most 32 times regardless of call context.
+- Reads `DataKey::AttestationAppendLog` once for log length, then probes
+  `DataKey::AttestationRevoked(i)` per slot; no writes occur.

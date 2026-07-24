@@ -2196,7 +2196,38 @@ impl LiquifactEscrow {
 
     /// Returns the remaining funding capacity before the funding target is reached.
     ///
-    /// Clamped to `0` via `saturating_sub` if the escrow is over-funded.
+    /// Computes `max(0, funding_target − funded_amount)` using saturating arithmetic
+    /// so the result is **always non-negative**, even when the escrow has been
+    /// over-funded past the target.
+    ///
+    /// # Informational only
+    ///
+    /// This view is a convenience for front-ends sizing a deposit. It does **not**
+    /// gate `fund` — the `fund` entrypoint accepts deposits that push
+    /// `funded_amount` past `funding_target` while `status == 0` (open). A value
+    /// of `0` here means the target has already been met or exceeded; it does not
+    /// mean further deposits are rejected.
+    ///
+    /// # Returns
+    ///
+    /// | Escrow state | Return value |
+    /// |---|---|
+    /// | No deposits yet | `funding_target` |
+    /// | Partially funded | `funding_target − funded_amount` |
+    /// | Exactly at target | `0` |
+    /// | Over-funded | `0` (clamped, never negative) |
+    ///
+    /// # Errors
+    ///
+    /// Panics with [`EscrowError::EscrowNotInitialized`] (code 20) if called
+    /// before [`LiquifactEscrow::init`].
+    ///
+    /// # Security notes
+    ///
+    /// - **Pure read** — no authorization required, no state mutation.
+    /// - **Non-negative invariant** — the `.max(0)` clamp is redundant given
+    ///   `saturating_sub`, but retained for explicitness in audits.
+    /// - Reads [`DataKey::Escrow`] directly; no side effects.
     pub fn get_remaining_funding_capacity(env: Env) -> i128 {
         let escrow = Self::get_escrow(env);
         escrow
@@ -3387,6 +3418,59 @@ impl LiquifactEscrow {
             .instance()
             .get(&DataKey::AttestationRevoked(index))
             .unwrap_or(false)
+    }
+
+    /// Returns the indices in the attestation append-log that have been revoked.
+    ///
+    /// Scans `0..get_attestation_append_log().len()` and collects every index `i`
+    /// where [`DataKey::AttestationRevoked(i)`] is set. The returned [`Vec`] is
+    /// ordered ascending (0-based) and its length is bounded by the append-log
+    /// length, which is itself bounded by [`MAX_ATTESTATION_APPEND_ENTRIES`] (32).
+    ///
+    /// # Relation to other views
+    ///
+    /// | View | What it returns |
+    /// |---|---|
+    /// | [`LiquifactEscrow::get_attestation_append_log`] | All digests (revoked and active) in order |
+    /// | [`LiquifactEscrow::is_attestation_revoked`] | Revocation flag for a single index |
+    /// | **`get_revoked_attestation_indices`** | Ordered set of all revoked indices |
+    ///
+    /// Indices align with the ordering of
+    /// [`LiquifactEscrow::get_attestation_append_log`] — index `i` in the result
+    /// corresponds to `get_attestation_append_log().get(i)`.
+    ///
+    /// # Legacy instances
+    ///
+    /// Instances where no revocations have ever been recorded return an empty [`Vec`].
+    /// This is the same default as [`LiquifactEscrow::get_attestation_append_log`]
+    /// returning an empty log (additive-key policy, ADR-007).
+    ///
+    /// # Security notes
+    ///
+    /// - **Pure read** — no authorization required, no state mutation.
+    /// - **Bounded scan** — the loop runs at most [`MAX_ATTESTATION_APPEND_ENTRIES`]
+    ///   (32) iterations; the storage and CPU cost is constant.
+    /// - Reads [`DataKey::AttestationAppendLog`] once for the log length, then
+    ///   probes [`DataKey::AttestationRevoked(i)`] for each slot; no writes occur.
+    pub fn get_revoked_attestation_indices(env: Env) -> Vec<u32> {
+        let log: Vec<BytesN<32>> = env
+            .storage()
+            .instance()
+            .get(&DataKey::AttestationAppendLog)
+            .unwrap_or_else(|| Vec::new(&env));
+        let len = log.len();
+        let mut result = Vec::new(&env);
+        for i in 0..len {
+            if env
+                .storage()
+                .instance()
+                .get(&DataKey::AttestationRevoked(i))
+                .unwrap_or(false)
+            {
+                result.push_back(i);
+            }
+        }
+        result
     }
 
     pub fn get_revoked_attestation_digests(
