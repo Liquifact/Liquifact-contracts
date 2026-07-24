@@ -7757,7 +7757,7 @@ fn test_preview_fund_legal_hold_returns_102() {
     let investor = Address::generate(&env);
     default_init(&client, &env, &admin, &sme);
 
-    client.set_legal_hold(&true, &0u64);
+    client.set_legal_hold(&true);
 
     let result = client.preview_fund(&investor, &1_000i128);
     assert_eq!(result, EscrowError::LegalHoldBlocksFunding as u32);
@@ -8139,7 +8139,7 @@ fn test_preview_fund_ordering_legal_hold_before_status() {
 
     // Fund the escrow to move status past open, then set legal hold.
     client.fund(&investor, &TARGET); // status → 1 (funded)
-    client.set_legal_hold(&true, &0u64);
+    client.set_legal_hold(&true);
 
     let another = Address::generate(&env);
     let result = client.preview_fund(&another, &1_000i128);
