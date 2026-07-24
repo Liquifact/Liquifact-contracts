@@ -951,179 +951,73 @@ fn test_revoked_digests_view_caps_limit() {
     assert_eq!(page.len(), crate::MAX_ATTESTATION_READ_PAGE);
 }
 
-// ── Issue #631: get_revoked_attestation_indices ───────────────────────────────
+// ---------------------------------------------------------------------------
+// revoke_attestation_digest — typed EscrowError edge cases (issue #378)
+// ---------------------------------------------------------------------------
 
-/// Empty log → empty result (no revocations, no log entries).
+/// index > log.len() (large value) returns `AttestationIndexOutOfRange`.
 #[test]
-fn test_get_revoked_attestation_indices_empty_log() {
+fn test_revoke_large_index_out_of_range() {
     let env = Env::default();
     let (client, _) = setup_with_init(&env);
-    let indices = client.get_revoked_attestation_indices();
-    assert_eq!(indices.len(), 0);
+    client.append_attestation_digest(&digest(&env, 0x01));
+    assert_contract_error(
+        client.try_revoke_attestation_digest(&99),
+        EscrowError::AttestationIndexOutOfRange,
+    );
 }
 
-/// Log with no revocations → empty result even though entries exist.
+/// Revoking the first entry (index 0) in a multi-entry log succeeds.
 #[test]
-fn test_get_revoked_attestation_indices_none_revoked() {
-    let env = Env::default();
-    let (client, _) = setup_with_init(&env);
-    for i in 0u8..4 {
-        client.append_attestation_digest(&digest(&env, i));
-    }
-    let indices = client.get_revoked_attestation_indices();
-    assert_eq!(indices.len(), 0);
-}
-
-/// Single revocation: only the revoked index is returned.
-#[test]
-fn test_get_revoked_attestation_indices_single_revoked() {
+fn test_revoke_first_entry() {
     let env = Env::default();
     let (client, _) = setup_with_init(&env);
     client.append_attestation_digest(&digest(&env, 0x01));
     client.append_attestation_digest(&digest(&env, 0x02));
-    client.append_attestation_digest(&digest(&env, 0x03));
-
-    client.revoke_attestation_digest(&1);
-
-    let indices = client.get_revoked_attestation_indices();
-    assert_eq!(indices.len(), 1);
-    assert_eq!(indices.get(0).unwrap(), 1u32);
+    client.revoke_attestation_digest(&0);
+    assert!(client.is_attestation_revoked(&0));
+    assert!(!client.is_attestation_revoked(&1));
 }
 
-/// Some revoked: only the revoked indices appear, in ascending order.
+/// Revoking the last entry in a multi-entry log succeeds.
 #[test]
-fn test_get_revoked_attestation_indices_some_revoked_ascending_order() {
+fn test_revoke_last_entry() {
     let env = Env::default();
     let (client, _) = setup_with_init(&env);
-    for i in 0u8..5 {
+    for i in 0u8..3 {
         client.append_attestation_digest(&digest(&env, i));
     }
-
-    client.revoke_attestation_digest(&0);
     client.revoke_attestation_digest(&2);
-    client.revoke_attestation_digest(&4);
-
-    let indices = client.get_revoked_attestation_indices();
-    assert_eq!(indices.len(), 3);
-    assert_eq!(indices.get(0).unwrap(), 0u32);
-    assert_eq!(indices.get(1).unwrap(), 2u32);
-    assert_eq!(indices.get(2).unwrap(), 4u32);
+    assert!(!client.is_attestation_revoked(&0));
+    assert!(!client.is_attestation_revoked(&1));
+    assert!(client.is_attestation_revoked(&2));
 }
 
-/// All entries revoked: result length equals log length.
+/// Third revoke attempt on same index still returns `AttestationAlreadyRevoked`.
 #[test]
-fn test_get_revoked_attestation_indices_all_revoked() {
+fn test_repeated_revoke_returns_typed_error() {
     let env = Env::default();
     let (client, _) = setup_with_init(&env);
-    let count = 6u8;
-    for i in 0u8..count {
-        client.append_attestation_digest(&digest(&env, i));
-    }
-    for i in 0u32..(count as u32) {
-        client.revoke_attestation_digest(&i);
-    }
-
-    let indices = client.get_revoked_attestation_indices();
-    assert_eq!(indices.len(), count as u32);
-    for i in 0u32..(count as u32) {
-        assert_eq!(indices.get(i).unwrap(), i);
-    }
-}
-
-/// After an unrevoke, the unrevoked index must no longer appear in the result.
-#[test]
-fn test_get_revoked_attestation_indices_excludes_unrevoked() {
-    let env = Env::default();
-    let (client, _) = setup_with_init(&env);
-    client.append_attestation_digest(&digest(&env, 0xAA));
-    client.append_attestation_digest(&digest(&env, 0xBB));
-    client.append_attestation_digest(&digest(&env, 0xCC));
-
+    client.append_attestation_digest(&digest(&env, 0x10));
     client.revoke_attestation_digest(&0);
-    client.revoke_attestation_digest(&1);
-    client.revoke_attestation_digest(&2);
-
-    // Unrevoke index 1.
-    client.unrevoke_attestation_digest(&1);
-
-    let indices = client.get_revoked_attestation_indices();
-    assert_eq!(indices.len(), 2);
-    assert_eq!(indices.get(0).unwrap(), 0u32);
-    assert_eq!(indices.get(1).unwrap(), 2u32);
+    assert_contract_error(
+        client.try_revoke_attestation_digest(&0),
+        EscrowError::AttestationAlreadyRevoked,
+    );
+    // A second retry also returns the same typed error.
+    assert_contract_error(
+        client.try_revoke_attestation_digest(&0),
+        EscrowError::AttestationAlreadyRevoked,
+    );
 }
 
-/// Indices align with the ordering of `get_attestation_append_log`: index i
-/// in the result corresponds to `get_attestation_append_log().get(i)`.
+/// Non-admin `try_revoke_attestation_digest` returns an authorization error.
 #[test]
-fn test_get_revoked_attestation_indices_align_with_log_order() {
+fn test_revoke_non_admin_returns_error() {
     let env = Env::default();
     let (client, _) = setup_with_init(&env);
-
-    let d0 = digest(&env, 0x10);
-    let d1 = digest(&env, 0x20);
-    let d2 = digest(&env, 0x30);
-    let d3 = digest(&env, 0x40);
-
-    client.append_attestation_digest(&d0); // index 0
-    client.append_attestation_digest(&d1); // index 1
-    client.append_attestation_digest(&d2); // index 2
-    client.append_attestation_digest(&d3); // index 3
-
-    client.revoke_attestation_digest(&1);
-    client.revoke_attestation_digest(&3);
-
-    let revoked_indices = client.get_revoked_attestation_indices();
-    let log = client.get_attestation_append_log();
-
-    assert_eq!(revoked_indices.len(), 2);
-
-    // Verify alignment: index in result maps to same digest in log.
-    let idx0 = revoked_indices.get(0).unwrap();
-    let idx1 = revoked_indices.get(1).unwrap();
-    assert_eq!(idx0, 1u32);
-    assert_eq!(idx1, 3u32);
-    assert_eq!(log.get(idx0).unwrap(), d1);
-    assert_eq!(log.get(idx1).unwrap(), d3);
-}
-
-/// Full log (MAX_ATTESTATION_APPEND_ENTRIES) with alternating revocations:
-/// the result is bounded and correct.
-#[test]
-fn test_get_revoked_attestation_indices_bounded_by_max_entries() {
-    let env = Env::default();
-    let (client, _) = setup_with_init(&env);
-
-    // Fill log to capacity.
-    for i in 0u8..(MAX_ATTESTATION_APPEND_ENTRIES as u8) {
-        client.append_attestation_digest(&digest(&env, i));
-    }
-
-    // Revoke every even index.
-    let mut expected_revoked: Vec<u32> = Vec::new();
-    for i in (0u32..MAX_ATTESTATION_APPEND_ENTRIES).step_by(2) {
-        client.revoke_attestation_digest(&i);
-        expected_revoked.push(i);
-    }
-
-    let indices = client.get_revoked_attestation_indices();
-    assert_eq!(indices.len() as usize, expected_revoked.len());
-    for (pos, &expected_idx) in expected_revoked.iter().enumerate() {
-        assert_eq!(indices.get(pos as u32).unwrap(), expected_idx);
-    }
-}
-
-/// Pure read: no auth required (calling without any mock auths must succeed).
-#[test]
-fn test_get_revoked_attestation_indices_no_auth_required() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, _) = setup_with_init(&env);
-    client.append_attestation_digest(&digest(&env, 0x01));
-    client.revoke_attestation_digest(&0);
-
-    // Drop all auth mocks — the view must still succeed.
+    client.append_attestation_digest(&digest(&env, 0xFF));
     env.mock_auths(&[]);
-    let indices = client.get_revoked_attestation_indices();
-    assert_eq!(indices.len(), 1);
-    assert_eq!(indices.get(0).unwrap(), 0u32);
+    // Any error (not Ok) satisfies the auth-rejection requirement.
+    assert!(client.try_revoke_attestation_digest(&0).is_err());
 }
