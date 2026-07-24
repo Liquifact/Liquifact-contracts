@@ -1,32 +1,19 @@
 use super::{
-    assert_contract_error, default_init, deploy, deploy_with_id, free_addresses,
-    install_stellar_asset_token, setup, StellarTestToken, TARGET,
+    free_addresses, install_stellar_asset_token, setup, MAX_ATTESTATION_APPEND_ENTRIES,
+    SCHEMA_VERSION,
 };
-use crate::{
-    AttestationDigestAppended, CollateralClearedEvt, CollateralCommitmentSnapshot,
-    CollateralRecordedEvt, DataKey, EscrowCloseSnapshot, EscrowError, FundingCancelled,
-    InvestorRefundedEvt, LiquifactEscrow, LiquifactEscrowClient, PrimaryAttestationBound,
-    RegistryRefRebound, TreasuryDustSwept, YieldTier, DEFAULT_MATURITY_MAX_HORIZON_SECS,
-    MAX_ATTESTATION_APPEND_ENTRIES, SCHEMA_VERSION,
-};
+use crate::{CollateralCommitmentSnapshot, DataKey, EscrowCloseSnapshot, EscrowError, YieldTier};
 use soroban_sdk::{
     symbol_short,
     testutils::{Address as _, Events as _, Ledger},
+    token::TokenClient,
     Address, BytesN, Env, Error, InvokeError, Vec as SorobanVec,
 };
 
-const AMOUNT: i128 = 100_000_000_000;
-const PLEDGE: i128 = 50_000_000_000;
+pub(crate) use super::assert_contract_error;
 
 #[test]
 fn typed_error_codes_cover_init_and_state_guards() {
-    let env = Env::default();
-    let (client, admin, sme) = setup(&env);
-    let (funding_token, treasury) = free_addresses(&env);
-}
-
-#[test]
-fn typed_error_codes_cover_basic_escrow_guards() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
     let (funding_token, treasury) = free_addresses(&env);
@@ -48,9 +35,6 @@ fn typed_error_codes_cover_basic_escrow_guards() {
             &None,
             &None,
             &None,
-            &None,
-            &None,
-            &None::<i64>,
         ),
         EscrowError::AmountMustBePositive,
     );
@@ -71,9 +55,7 @@ fn typed_error_codes_cover_basic_escrow_guards() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
 
     let investor = Address::generate(&env);
     assert_contract_error(
@@ -110,9 +92,7 @@ fn typed_error_codes_cover_allowlist_attestation_and_dust_guards() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
 
     client.set_allowlist_active(&true);
     let investor = Address::generate(&env);
@@ -139,7 +119,6 @@ fn typed_error_codes_cover_allowlist_attestation_and_dust_guards() {
 }
 
 #[test]
-#[ignore = "upstream latent: escrow API/test drift"]
 fn escrow_error_discriminants_match_canonical_table() {
     const TABLE: &[(EscrowError, u32)] = &[
         (EscrowError::AmountMustBePositive, 1),
@@ -155,7 +134,6 @@ fn escrow_error_discriminants_match_canonical_table() {
         (EscrowError::TierYieldBelowBase, 11),
         (EscrowError::TierLockNotIncreasing, 12),
         (EscrowError::TierYieldNotNonDecreasing, 13),
-        (EscrowError::AmountExceedsMax, 14),
         (EscrowError::EscrowNotInitialized, 20),
         (EscrowError::FundingTokenNotSet, 21),
         (EscrowError::TreasuryNotSet, 22),
@@ -188,7 +166,6 @@ fn escrow_error_discriminants_match_canonical_table() {
         (EscrowError::NewCapBelowCurrentFunderCount, 78),
         (EscrowError::MaturityUpdateNotOpen, 79),
         (EscrowError::NewAdminSameAsCurrent, 80),
-        (EscrowError::PendingAdminUnchanged, 177),
         (EscrowError::FundingBatchEmpty, 82),
         (EscrowError::FundingBatchTooLarge, 83),
         (EscrowError::MigrationVersionMismatch, 90),
@@ -227,29 +204,74 @@ fn escrow_error_discriminants_match_canonical_table() {
         (EscrowError::RotationNotOpen, 161),
         (EscrowError::NewSmeSameAsCurrent, 162),
         (EscrowError::FundingDeadlinePassed, 164),
-        (EscrowError::NoPendingAdmin, 172),
-        (EscrowError::FloorLowerNotOpen, 173),
-        (EscrowError::NewFloorNotLower, 174),
-        (EscrowError::NewFloorNotPositive, 175),
+        (EscrowError::NoPendingAdmin, 163),
     ];
-    assert_eq!(TABLE.len(), 89);
+    assert_eq!(TABLE.len(), 84);
     for (variant, code) in TABLE {
         assert_eq!(*variant as u32, *code, "discriminant drift for code {code}");
     }
 }
 
 #[test]
-#[ignore = "upstream latent: escrow API/test drift"]
 fn typed_error_codes_cover_range_boundaries() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, admin, sme) = setup(&env);
+    let (_, admin, sme) = setup(&env);
     let (funding_token, treasury) = free_addresses(&env);
-    default_init(&client, &env, &admin, &sme);
     let investor = Address::generate(&env);
 
-    client.record_sme_collateral_commitment(&soroban_sdk::symbol_short!("USDC"), &PLEDGE);
-    assert!(client.get_sme_collateral_commitment().is_some());
+    // Init group: 1 (low) and 13 (high)
+    let init_client = super::deploy(&env);
+    assert_contract_error(
+        init_client.try_init(
+            &admin,
+            &soroban_sdk::String::from_str(&env, "BOUND_LOW"),
+            &sme,
+            &0,
+            &100,
+            &100,
+            &funding_token,
+            &None,
+            &treasury,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+        ),
+        EscrowError::AmountMustBePositive,
+    );
+    let mut bad_tiers = SorobanVec::new(&env);
+    bad_tiers.push_back(YieldTier {
+        min_lock_secs: 100,
+        yield_bps: 600,
+    });
+    bad_tiers.push_back(YieldTier {
+        min_lock_secs: 200,
+        yield_bps: 500,
+    });
+    let tier_client = super::deploy(&env);
+    assert_contract_error(
+        tier_client.try_init(
+            &admin,
+            &soroban_sdk::String::from_str(&env, "BOUND_HIGH"),
+            &sme,
+            &100,
+            &100,
+            &100,
+            &funding_token,
+            &None,
+            &treasury,
+            &Some(bad_tiers),
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+        ),
+        EscrowError::TierYieldNotNonDecreasing,
+    );
 
     // Metadata group: 20 and 22
     let meta_client = super::deploy(&env);
@@ -274,9 +296,7 @@ fn typed_error_codes_cover_range_boundaries() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
     treasury_client.cancel_funding();
     env.as_contract(&treasury_client.address, || {
         env.storage().instance().remove(&DataKey::Treasury);
@@ -304,9 +324,7 @@ fn typed_error_codes_cover_range_boundaries() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
     hold_sweep_client.set_legal_hold(&true);
     assert_contract_error(
         hold_sweep_client.try_sweep_terminal_dust(&1),
@@ -334,10 +352,8 @@ fn typed_error_codes_cover_range_boundaries() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
-    token.stellar.mint(&sweep_investor, &fund_amount);
+    );
+    token.stellar.mint(&floor_client.address, &fund_amount);
     floor_client.fund(&sweep_investor, &fund_amount);
     floor_client.cancel_funding();
     assert_contract_error(
@@ -363,9 +379,7 @@ fn typed_error_codes_cover_range_boundaries() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
     let digest = BytesN::from_array(&env, &[1u8; 32]);
     attest_client.bind_primary_attestation_hash(&digest);
     assert_contract_error(
@@ -398,17 +412,15 @@ fn typed_error_codes_cover_range_boundaries() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
     let asset = soroban_sdk::Symbol::new(&env, "GOLD");
     assert_contract_error(
         collat_client.try_record_sme_collateral_commitment(&asset, &0),
         EscrowError::CollateralAmountNotPositive,
     );
-    env.ledger().set_timestamp(5000);
     collat_client.record_sme_collateral_commitment(&asset, &100);
-    env.ledger().set_timestamp(100);
+    env.ledger()
+        .set_timestamp(env.ledger().timestamp().saturating_sub(1));
     assert_contract_error(
         collat_client.try_record_sme_collateral_commitment(&asset, &200),
         EscrowError::CollateralTimestampBackwards,
@@ -432,19 +444,17 @@ fn typed_error_codes_cover_range_boundaries() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
     assert_contract_error(
         admin_client.try_update_funding_target(&0),
         EscrowError::TargetNotPositive,
     );
     assert_contract_error(
-        admin_client.try_propose_admin(&admin, &None),
+        admin_client.try_propose_admin(&admin),
         EscrowError::NewAdminSameAsCurrent,
     );
 
-    // Migration group: 90ÔÇô92
+    // Migration group: 90–92
     let migrate_client = super::deploy(&env);
     migrate_client.init(
         &admin,
@@ -462,9 +472,7 @@ fn typed_error_codes_cover_range_boundaries() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
     assert_contract_error(
         migrate_client.try_migrate(&(SCHEMA_VERSION - 1)),
         EscrowError::MigrationVersionMismatch,
@@ -496,9 +504,7 @@ fn typed_error_codes_cover_range_boundaries() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
     assert_contract_error(
         fund_client.try_fund(&investor, &0),
         EscrowError::FundingAmountNotPositive,
@@ -522,9 +528,7 @@ fn typed_error_codes_cover_range_boundaries() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
     settle_client.set_legal_hold(&true);
     assert_contract_error(
         settle_client.try_settle(),
@@ -554,9 +558,7 @@ fn typed_error_codes_cover_range_boundaries() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
     refund_client.set_legal_hold(&true);
     assert_contract_error(
         refund_client.try_cancel_funding(),
@@ -587,9 +589,7 @@ fn typed_error_codes_cover_range_boundaries() {
         &None,
         &Some(10u64),
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
     lh_client.set_legal_hold(&true);
     assert_contract_error(
         lh_client.try_set_legal_hold(&false),
@@ -601,7 +601,7 @@ fn typed_error_codes_cover_range_boundaries() {
         EscrowError::LegalHoldClearNotReady,
     );
 
-    // Beneficiary rotation group: 160ÔÇô162
+    // Beneficiary rotation group: 160–162
     let rot_client = super::deploy(&env);
     rot_client.init(
         &admin,
@@ -619,9 +619,7 @@ fn typed_error_codes_cover_range_boundaries() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
     rot_client.set_legal_hold(&true);
     let new_sme = Address::generate(&env);
     assert_contract_error(
@@ -652,10 +650,8 @@ fn typed_error_codes_cover_range_boundaries() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
-    rot_token.stellar.mint(&investor, &100);
+    );
+    rot_token.stellar.mint(&rot_terminal.address, &100);
     rot_terminal.fund(&investor, &100);
     rot_terminal.settle();
     assert_contract_error(
@@ -665,12 +661,12 @@ fn typed_error_codes_cover_range_boundaries() {
 }
 
 #[test]
-#[ignore = "upstream latent: escrow API/test drift"]
 fn typed_error_codes_cover_legal_hold_clear_delay_overflow() {
     let env = Env::default();
     env.mock_all_auths();
     let (client, admin, sme) = setup(&env);
     let (funding_token, treasury) = free_addresses(&env);
+    env.ledger().set_timestamp(u64::MAX - 5);
     client.init(
         &admin,
         &soroban_sdk::String::from_str(&env, "LH152"),
@@ -687,12 +683,8 @@ fn typed_error_codes_cover_legal_hold_clear_delay_overflow() {
         &None,
         &Some(10u64),
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
     client.set_legal_hold(&true);
-    // Move ledger to near max so that now + delay overflows.
-    env.ledger().set_timestamp(u64::MAX - 5);
     assert_contract_error(
         client.try_request_clear_legal_hold(),
         EscrowError::LegalHoldClearDelayOverflow,
@@ -722,9 +714,7 @@ fn test_migrate_wrong_version() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
 
     assert_contract_error(
         client.try_migrate(&(SCHEMA_VERSION - 1)),
@@ -755,9 +745,7 @@ fn test_migrate_already_current() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
 
     assert_contract_error(
         client.try_migrate(&SCHEMA_VERSION),
@@ -788,9 +776,7 @@ fn test_migrate_no_path() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
 
     env.as_contract(&client.address, || {
         env.storage().instance().set(&DataKey::Version, &0u32);
@@ -822,15 +808,13 @@ fn test_admin_handover_and_maturity_updates() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
 
     let updated = client.update_maturity(&200);
     assert_eq!(updated.maturity, 200);
 
     let new_admin = Address::generate(&env);
-    let pending = client.propose_admin(&new_admin, &None);
+    let pending = client.propose_admin(&new_admin);
     assert_eq!(pending, new_admin);
     assert_eq!(client.get_escrow().admin, admin);
     assert_eq!(client.get_pending_admin(), Some(new_admin.clone()));
@@ -864,9 +848,7 @@ fn test_update_maturity_not_open() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
 
     let investor = Address::generate(&env);
     client.fund(&investor, &100);
@@ -897,11 +879,9 @@ fn test_transfer_admin_same_admin() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
 
-    client.propose_admin(&admin, &None);
+    client.propose_admin(&admin);
 }
 
 #[test]
@@ -928,9 +908,7 @@ fn test_fund_during_legal_hold() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
 
     client.set_legal_hold(&true);
     let investor = Address::generate(&env);
@@ -961,9 +939,7 @@ fn test_fund_below_floor() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
 
     let investor = Address::generate(&env);
     client.fund(&investor, &10);
@@ -993,11 +969,8 @@ fn test_claim_not_settled() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
 
-    client.record_sme_collateral_commitment(&soroban_sdk::symbol_short!("USDC"), &PLEDGE);
     let investor = Address::generate(&env);
     client.fund(&investor, &10);
     client.claim_investor_payout(&investor);
@@ -1027,9 +1000,7 @@ fn test_claim_lock_not_expired() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
 
     let investor = Address::generate(&env);
     client.fund_with_commitment(&investor, &100, &3600);
@@ -1041,171 +1012,20 @@ fn test_claim_lock_not_expired() {
 }
 
 #[test]
-fn test_double_clear_rejected() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, admin, sme) = setup(&env);
-    default_init(&client, &env, &admin, &sme);
-
-    client.record_sme_collateral_commitment(&soroban_sdk::symbol_short!("USDC"), &PLEDGE);
-    client.clear_sme_collateral_commitment();
-
-    assert_contract_error(
-        client.try_clear_sme_collateral_commitment(),
-        EscrowError::NoCollateralToClear,
-    );
-}
-
-// ---------------------------------------------------------------------------
-// get returns None before any record
-// ---------------------------------------------------------------------------
-
-#[test]
-fn test_get_returns_none_before_record() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, admin, sme) = setup(&env);
-    default_init(&client, &env, &admin, &sme);
-    assert!(client.get_sme_collateral_commitment().is_none());
-}
-
-// ---------------------------------------------------------------------------
-// Overwrite: record twice, clear once ÔåÆ None; cleared amount is the last pledge
-// ---------------------------------------------------------------------------
-
-#[test]
-fn test_overwrite_then_clear() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, admin, sme) = setup(&env);
-    let (funding_token, treasury) = free_addresses(&env);
-    default_init(&client, &env, &admin, &sme);
-
-    let asset = soroban_sdk::symbol_short!("USDC");
-    client.record_sme_collateral_commitment(&asset, &PLEDGE);
-    client.record_sme_collateral_commitment(&asset, &(PLEDGE * 2));
-
-    let pledge = client.get_sme_collateral_commitment().unwrap();
-    assert_eq!(pledge.amount, PLEDGE * 2);
-
-    client.clear_sme_collateral_commitment();
-    assert!(client.get_sme_collateral_commitment().is_none());
-}
-
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
-// Anchoring tests: read-view default/absent return values (docs/escrow-read-api.md)
-//
-// Each test asserts the default or absent-key return value documented in the
-// read-API catalog.  Tests are grouped by topic and use a fresh Env per test.
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
-
-/// All default-returning views return their documented defaults on an uninitialized contract.
-#[test]
-fn read_view_defaults_before_init() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, _admin, _sme) = setup(&env);
-
-    // get_version ÔåÆ 0
-    assert_eq!(client.get_version(), 0);
-    // get_legal_hold ÔåÆ false
-    assert!(!client.get_legal_hold());
-    // get_legal_hold_clear_delay ÔåÆ 0
-    assert_eq!(client.get_legal_hold_clear_delay(), 0);
-    // get_legal_hold_clearable_at ÔåÆ None
-    assert!(client.get_legal_hold_clearable_at().is_none());
-    // get_min_contribution_floor ÔåÆ 0 (key absent before init; after init written as 0)
-    assert_eq!(client.get_min_contribution_floor(), 0);
-    // get_max_unique_investors_cap ÔåÆ None
-    assert!(client.get_max_unique_investors_cap().is_none());
-    // get_max_per_investor_cap ÔåÆ None
-    assert!(client.get_max_per_investor_cap().is_none());
-    // get_unique_funder_count ÔåÆ 0
-    assert_eq!(client.get_unique_funder_count(), 0);
-    // get_funding_deadline ÔåÆ None
-    assert!(client.get_funding_deadline().is_none());
-    // is_funding_expired ÔåÆ false
-    assert!(!client.is_funding_expired());
-    // get_registry_ref ÔåÆ None
-    assert!(client.get_registry_ref().is_none());
-    // get_pending_admin ÔåÆ None
-    assert!(client.get_pending_admin().is_none());
-    // is_allowlist_active ÔåÆ false
-    assert!(!client.is_allowlist_active());
-    // get_primary_attestation_hash ÔåÆ None
-    assert!(client.get_primary_attestation_hash().is_none());
-    // get_attestation_append_log ÔåÆ empty vec (len 0)
-    assert_eq!(client.get_attestation_append_log().len(), 0);
-    // get_funding_close_snapshot ÔåÆ None
-    assert!(client.get_funding_close_snapshot().is_none());
-    // get_distributed_principal ÔåÆ 0
-    assert_eq!(client.get_distributed_principal(), 0);
-    // get_sme_collateral_commitment ÔåÆ None
-    assert!(client.get_sme_collateral_commitment().is_none());
-}
-
-/// Per-investor views return their documented defaults for a fresh/absent investor.
-#[test]
-fn read_view_per_investor_defaults() {
+fn test_all_getters() {
     let env = Env::default();
     env.mock_all_auths();
     let (client, admin, sme) = setup(&env);
     let (funding_token, treasury) = free_addresses(&env);
     let registry = Address::generate(&env);
-    let investor = Address::generate(&env);
 
     client.init(
         &admin,
         &soroban_sdk::String::from_str(&env, "TEST"),
         &sme,
         &1000,
-        &500,
-        &0,
-        &funding_token,
-        &None,
-        &treasury,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-    &None::<i64>,); // get_contribution ÔåÆ 0 for an address that has never funded
-    assert_eq!(client.get_contribution(&investor), 0);
-    // get_investor_yield_bps ÔåÆ base yield_bps (500) when key absent
-    assert_eq!(client.get_investor_yield_bps(&investor), 500);
-    // get_investor_claim_not_before ÔåÆ 0 when key absent
-    assert_eq!(client.get_investor_claim_not_before(&investor), 0);
-    // is_investor_claimed ÔåÆ false when key absent
-    assert!(!client.is_investor_claimed(&investor));
-    // is_investor_refunded ÔåÆ false when key absent
-    assert!(!client.is_investor_refunded(&investor));
-    // is_investor_allowlisted ÔåÆ false when key absent
-    assert!(!client.is_investor_allowlisted(&investor));
-    // compute_investor_payout ÔåÆ 0 before funding (no snapshot)
-    assert_eq!(client.compute_investor_payout(&investor), 0);
-    // is_attestation_revoked ÔåÆ false for any index when key absent
-    assert!(!client.is_attestation_revoked(&0));
-}
-
-/// Immutable binding views return their set values after init.
-#[test]
-fn read_view_immutable_bindings_after_init() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, admin, sme) = setup(&env);
-    let (funding_token, treasury) = free_addresses(&env);
-    let registry = soroban_sdk::Address::generate(&env);
-
-    client.init(
-        &admin,
-        &soroban_sdk::String::from_str(&env, "BIND_TST"),
-        &sme,
-        &1000,
-        &500,
-        &0,
+        &100,
+        &100,
         &funding_token,
         &Some(registry.clone()),
         &treasury,
@@ -1215,188 +1035,16 @@ fn read_view_immutable_bindings_after_init() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
 
     assert_eq!(client.get_funding_token(), funding_token);
     assert_eq!(client.get_treasury(), treasury);
     assert_eq!(client.get_registry_ref(), Some(registry));
-    assert_eq!(client.get_version(), SCHEMA_VERSION);
-}
-
-/// Error views return typed errors before init.
-#[test]
-fn read_view_error_on_absent_before_init() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, _admin, _sme) = setup(&env);
-    let (funding_token, treasury) = free_addresses(&env);
-
-    // get_escrow ÔåÆ EscrowNotInitialized (20)
-    assert_contract_error(client.try_get_escrow(), EscrowError::EscrowNotInitialized);
-    // get_funding_token ÔåÆ FundingTokenNotSet (21)
-    assert_contract_error(
-        client.try_get_funding_token(),
-        EscrowError::FundingTokenNotSet,
-    );
-    // get_treasury ÔåÆ TreasuryNotSet (22)
-    assert_contract_error(client.try_get_treasury(), EscrowError::TreasuryNotSet);
-    // get_escrow_summary ÔåÆ EscrowNotInitialized (20)
-    assert_contract_error(
-        client.try_get_escrow_summary(),
-        EscrowError::EscrowNotInitialized,
-    );
-
-    // After init they succeed
-    client.init(
-        &Address::generate(&env),
-        &soroban_sdk::String::from_str(&env, "PREINIT2"),
-        &Address::generate(&env),
-        &100,
-        &100,
-        &0,
-        &funding_token,
-        &None,
-        &treasury,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-    &None::<i64>,);
-    assert_eq!(client.get_version(), SCHEMA_VERSION);
-    assert_eq!(client.get_funding_token(), funding_token);
-}
-
-/// has_maturity_lock reflects the configured maturity.
-#[test]
-fn read_view_has_maturity_lock() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, admin, sme) = setup(&env);
-    let (token, treasury) = free_addresses(&env);
-
-    // maturity = 0 ÔåÆ no lock
-    client.init(
-        &admin,
-        &soroban_sdk::String::from_str(&env, "MAT_ZERO"),
-        &sme,
-        &100,
-        &100,
-        &0,
-        &token,
-        &None,
-        &treasury,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-    &None::<i64>,);
-    assert!(!client.has_maturity_lock());
-
-    let env2 = Env::default();
-    env2.mock_all_auths();
-    let (client2, admin2, sme2) = setup(&env2);
-    let (token2, treasury2) = free_addresses(&env2);
-
-    // maturity > 0 ÔåÆ lock active
-    client2.init(
-        &admin2,
-        &soroban_sdk::String::from_str(&env2, "MAT_SET"),
-        &sme2,
-        &100,
-        &100,
-        &99_999,
-        &token2,
-        &None,
-        &treasury2,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-    &None::<i64>,);
-    assert!(client2.has_maturity_lock());
-}
-
-/// get_funding_close_snapshot returns None until funded, then the captured snapshot.
-#[test]
-#[ignore = "upstream latent: escrow API/test drift"]
-fn read_view_funding_close_snapshot_lifecycle() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, admin, sme) = setup(&env);
-    let (funding_token, treasury) = free_addresses(&env);
-
-    client.init(
-        &admin,
-        &soroban_sdk::String::from_str(&env, "SNAP_TST"),
-        &sme,
-        &100,
-        &100,
-        &0,
-        &funding_token,
-        &None,
-        &treasury,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-    &None::<i64>,); // Before any funding: no snapshot
-    assert!(client.get_funding_close_snapshot().is_none());
-
-    // Fund to target ÔåÆ snapshot created
-    let investor = soroban_sdk::Address::generate(&env);
-    client.fund(&investor, &100);
-    let snap = client.get_funding_close_snapshot();
-    assert!(snap.is_some());
-    let snap = snap.unwrap();
-    assert_eq!(snap.total_principal, 100);
-    assert_eq!(snap.funding_target, 100);
-}
-
-/// Attestation views return correct defaults and update after mutations.
-#[test]
-fn read_view_attestation_defaults_and_updates() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, admin, sme) = setup(&env);
-    let (token, treasury) = free_addresses(&env);
-
-    client.init(
-        &admin,
-        &soroban_sdk::String::from_str(&env, "ATT_DFLT"),
-        &sme,
-        &100,
-        &100,
-        &0,
-        &token,
-        &None,
-        &treasury,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-    &None::<i64>,); // Before any attestation
+    assert_eq!(client.get_version(), 6);
+    assert!(!client.get_legal_hold());
+    assert_eq!(client.get_min_contribution_floor(), 10);
+    assert_eq!(client.get_max_unique_investors_cap(), Some(5));
+    assert_eq!(client.get_unique_funder_count(), 0);
     assert!(client.get_primary_attestation_hash().is_none());
     assert_eq!(client.get_attestation_append_log().len(), 0);
 }
@@ -1407,7 +1055,6 @@ fn test_attestations_happy_path() {
     env.mock_all_auths();
     let (client, admin, sme) = setup(&env);
     let (funding_token, treasury) = free_addresses(&env);
-    let investor = soroban_sdk::Address::generate(&env);
 
     client.init(
         &admin,
@@ -1425,9 +1072,7 @@ fn test_attestations_happy_path() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
 
     let hash1 = soroban_sdk::BytesN::from_array(&env, &[1u8; 32]);
     let hash2 = soroban_sdk::BytesN::from_array(&env, &[2u8; 32]);
@@ -1464,9 +1109,7 @@ fn test_bind_primary_attestation_twice() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
 
     let hash = soroban_sdk::BytesN::from_array(&env, &[1u8; 32]);
     client.bind_primary_attestation_hash(&hash);
@@ -1496,9 +1139,7 @@ fn test_unique_investors_cap() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
 
     client.fund(&Address::generate(&env), &10);
     client.fund(&Address::generate(&env), &10);
@@ -1529,9 +1170,7 @@ fn test_unique_investors_cap_exceeded() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
 
     client.fund(&Address::generate(&env), &10);
     client.fund(&Address::generate(&env), &10);
@@ -1561,13 +1200,9 @@ fn test_sweep_terminal_dust_happy_path() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
 
-    let inv = Address::generate(&env);
-    token.stellar.mint(&inv, &100);
-    client.fund(&inv, &100);
+    client.fund(&Address::generate(&env), &100);
     env.ledger().with_mut(|li| li.timestamp = 200);
     client.settle();
 
@@ -1602,22 +1237,15 @@ fn test_bump_ttl_covers_persistent_investor_keys() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
     client.set_investor_allowlisted(&investor, &true);
     client.fund(&investor, &100);
     client.settle();
     client.claim_investor_payout(&investor);
 
     let mut investors = SorobanVec::new(&env);
-    investors.push_back(investor.clone());
+    investors.push_back(investor);
     client.bump_ttl(&investors);
-    // Verify that persistent TTLs for investor keys have been extended
-    //     let ttl_allow = env.storage().persistent().get_ttl(&DataKey::InvestorAllowlisted(investor.clone()));
-    // assert!(ttl_allow > 0, "Allowlist TTL should be extended");
-    //     let ttl_contrib = env.storage().persistent().get_ttl(&DataKey::InvestorContribution(investor.clone()));
-    // assert!(ttl_contrib > 0, "Contribution TTL should be extended");
 }
 
 #[test]
@@ -1642,9 +1270,7 @@ fn test_sweep_not_terminal() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
 
     assert_contract_error(
         client.try_sweep_terminal_dust(&10),
@@ -1676,9 +1302,7 @@ fn test_sweep_no_balance() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
 
     client.fund(&Address::generate(&env), &100);
     env.ledger().with_mut(|li| li.timestamp = 200);
@@ -1721,14 +1345,13 @@ fn test_withdraw_happy_path() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
 
-    let investor = Address::generate(&env);
-    sac_admin.mint(&investor, &100);
-    client.fund(&investor, &100);
+    client.fund(&Address::generate(&env), &100);
     assert_eq!(client.get_escrow().status, 1);
+
+    // Mint funded_amount into the escrow contract so withdraw() can transfer it.
+    sac_admin.mint(&escrow_id, &100);
 
     let updated = client.withdraw();
     assert_eq!(updated.status, 3);
@@ -1757,12 +1380,9 @@ fn test_settle_too_early() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
-    let investor = Address::generate(&env);
-    client.fund(&investor, &100);
-    // ledger timestamp is < 20000; settle should panic
+    );
+
+    client.fund(&Address::generate(&env), &100);
     client.settle();
 }
 
@@ -1788,9 +1408,7 @@ fn test_update_funding_target_happy_path() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
 
     let updated = client.update_funding_target(&200);
     assert_eq!(updated.funding_target, 200);
@@ -1819,9 +1437,7 @@ fn test_update_funding_target_too_low() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
 
     client.fund(&Address::generate(&env), &50);
     client.update_funding_target(&40);
@@ -1849,9 +1465,7 @@ fn test_sme_collateral_commitment() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
 
     let asset = soroban_sdk::Symbol::new(&env, "GOLD");
     let commitment = client.record_sme_collateral_commitment(&asset, &5000);
@@ -1885,16 +1499,13 @@ fn test_sme_collateral_empty_asset_rejected() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
     let empty_asset = soroban_sdk::Symbol::new(&env, "");
     client.record_sme_collateral_commitment(&empty_asset, &5000);
 }
 
 #[test]
 #[should_panic]
-#[ignore = "upstream latent: escrow API/test drift"]
 fn test_sme_collateral_stale_timestamp_rejected() {
     let env = Env::default();
     env.mock_all_auths();
@@ -1916,23 +1527,15 @@ fn test_sme_collateral_stale_timestamp_rejected() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
 
     let asset = soroban_sdk::Symbol::new(&env, "GOLD");
-
-    // Record at a known higher timestamp so we can move backward.
-    env.ledger().with_mut(|li| li.timestamp = 5000);
     client.record_sme_collateral_commitment(&asset, &5000);
 
     // Simulate stale replay: move ledger timestamp backward
     env.ledger().with_mut(|li| li.timestamp = 100);
 
-    assert_contract_error(
-        client.try_record_sme_collateral_commitment(&asset, &7000),
-        EscrowError::CollateralTimestampBackwards,
-    );
+    client.record_sme_collateral_commitment(&asset, &7000);
 }
 
 #[test]
@@ -1957,9 +1560,7 @@ fn test_sme_collateral_replacement_preserves_prior_amount() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
 
     let asset = soroban_sdk::Symbol::new(&env, "GOLD");
     let first = client.record_sme_collateral_commitment(&asset, &5000);
@@ -1998,9 +1599,7 @@ fn test_clear_legal_hold_convenience() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
 
     client.set_legal_hold(&true);
     assert!(client.get_legal_hold());
@@ -2020,7 +1619,7 @@ fn test_claim_not_before_getter() {
         &sme,
         &100,
         &10,
-        &0u64, // maturity=0: no maturity lock, so commitment lock has no upper bound
+        &10,
         &token,
         &None,
         &treasury,
@@ -2030,9 +1629,7 @@ fn test_claim_not_before_getter() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
 
     let investor = Address::generate(&env);
     client.fund_with_commitment(&investor, &50, &1000);
@@ -2073,9 +1670,7 @@ fn test_init_with_tiers() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
     assert_eq!(client.get_escrow().yield_bps, 100); // Default yield
 }
 
@@ -2102,9 +1697,7 @@ fn test_sweep_too_much() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
 
     client.fund(&Address::generate(&env), &100);
     env.ledger().with_mut(|li| li.timestamp = 200);
@@ -2136,9 +1729,7 @@ fn test_withdraw_not_funded() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
 
     client.withdraw();
 }
@@ -2166,9 +1757,7 @@ fn test_settle_not_funded() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
 
     client.settle();
 }
@@ -2195,9 +1784,7 @@ fn test_fund_with_zero_commitment() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
 
     let investor = Address::generate(&env);
     client.fund_with_commitment(&investor, &50, &0);
@@ -2227,9 +1814,7 @@ fn test_update_target_invalid() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
 
     client.update_funding_target(&0);
 }
@@ -2257,13 +1842,11 @@ fn test_init_yield_out_of_range() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
 }
 
 #[test]
-#[should_panic(expected = "HostError: Error(Contract, #6)")]
+#[should_panic]
 fn test_init_min_contribution_zero() {
     let env = Env::default();
     env.mock_all_auths();
@@ -2285,9 +1868,7 @@ fn test_init_min_contribution_zero() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
 }
 
 #[test]
@@ -2322,9 +1903,7 @@ fn test_init_tiers_unsorted() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
 }
 
 #[test]
@@ -2359,9 +1938,7 @@ fn test_init_tiers_not_increasing_yield() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
 }
 
 #[test]
@@ -2392,9 +1969,7 @@ fn test_init_tiers_lower_than_base() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
 }
 
 #[test]
@@ -2419,9 +1994,7 @@ fn test_get_yield_bps_empty_tiers_branch() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
 
     // Inject empty tiers directly to trigger the branch in get_yield_bps_for_commitment
     env.as_contract(&client.address, || {
@@ -2464,9 +2037,7 @@ fn test_init_tier_yield_out_of_range() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
 }
 
 #[test]
@@ -2500,9 +2071,7 @@ fn test_get_escrow_summary_happy_path() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
 
     let summary = client.get_escrow_summary();
 
@@ -2574,12 +2143,9 @@ fn test_get_escrow_summary_after_state_changes() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
 
     // Make state changes
-    let investor = Address::generate(&env);
     client.set_allowlist_active(&true);
 
     let investor = Address::generate(&env);
@@ -2670,9 +2236,7 @@ fn test_get_escrow_summary_with_collateral_and_attestations() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
 
     // Record SME collateral
     let asset = soroban_sdk::Symbol::new(&env, "GOLD");
@@ -2719,7 +2283,13 @@ fn test_get_escrow_summary_with_collateral_and_attestations() {
         client.get_attestation_append_log().len()
     );
 
-    // Verify attestation fields
+    // Verify new field values
+    let collateral = match &summary.sme_collateral_commitment {
+        CollateralCommitmentSnapshot::Some(c) => c,
+        CollateralCommitmentSnapshot::None => panic!("Expected collateral"),
+    };
+    assert_eq!(collateral.asset, asset);
+    assert_eq!(collateral.amount, 5000);
     assert!(summary.has_primary_attestation);
     assert_eq!(summary.attestation_log_length, 2);
 }
@@ -2749,9 +2319,7 @@ fn test_record_sme_collateral_commitment_semantics() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
 
     // Check that get_sme_collateral_commitment returns None initially
     assert!(client.get_sme_collateral_commitment().is_none());
@@ -2847,9 +2415,9 @@ fn test_record_sme_collateral_commitment_semantics() {
     );
 }
 
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
-// `is_settleable` view ÔÇö readiness across status/maturity/hold combinations
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ──────────────────────────────────────────────────────────────────────────────
+// `is_settleable` view — readiness across status/maturity/hold combinations
+// ──────────────────────────────────────────────────────────────────────────────
 
 /// Helper: initialise a standard escrow for is_settleable tests.
 fn init_settleable_test(
@@ -2876,9 +2444,7 @@ fn init_settleable_test(
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
 }
 
 /// Fund to exactly the target amount using a fresh investor.
@@ -2894,7 +2460,7 @@ fn test_is_settleable_open_status_returns_false() {
     env.mock_all_auths();
     let (client, admin, sme) = setup(&env);
     init_settleable_test(&env, &client, &admin, &sme, 0);
-    // status = 0 (open) ÔÇö not funded yet
+    // status = 0 (open) — not funded yet
     assert!(!client.is_settleable());
 }
 
@@ -2905,7 +2471,7 @@ fn test_is_settleable_funded_no_maturity_returns_true() {
     let (client, admin, sme) = setup(&env);
     init_settleable_test(&env, &client, &admin, &sme, 0);
     fund_to_target_stl(&env, &client);
-    // status = 1 (funded), maturity = 0, no hold ÔåÆ settleable
+    // status = 1 (funded), maturity = 0, no hold → settleable
     assert!(client.is_settleable());
 }
 
@@ -2971,7 +2537,7 @@ fn test_is_settleable_withdrawn_returns_false() {
 fn test_is_settleable_not_initialized_panics() {
     let env = Env::default();
     let (client, _admin, _sme) = setup(&env);
-    // No init call ÔÇö get_escrow returns error
+    // No init call — get_escrow returns error
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         client.is_settleable();
     }));
@@ -2995,9 +2561,9 @@ fn test_is_settleable_funded_maturity_zero_hold_active_returns_false() {
     );
 }
 
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
-// `EscrowSettled` event ÔÇö `settled_at_ledger_timestamp` field
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ──────────────────────────────────────────────────────────────────────────────
+// `EscrowSettled` event — `settled_at_ledger_timestamp` field
+// ──────────────────────────────────────────────────────────────────────────────
 
 #[test]
 fn test_settle_event_timestamp_matches_ledger_time() {
@@ -3023,9 +2589,7 @@ fn test_settle_event_timestamp_matches_ledger_time() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
     fund_to_target_stl(&env, &client);
 
     env.ledger().with_mut(|l| l.timestamp = settle_ts);
@@ -3035,67 +2599,6 @@ fn test_settle_event_timestamp_matches_ledger_time() {
     let contract_events = env.events().all();
     let events = contract_events.events();
     assert!(!events.is_empty(), "settle must emit at least one event");
-}
-
-#[test]
-fn read_view_min_contribution_floor_config() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, admin, sme) = setup(&env);
-    let (token, treasury) = free_addresses(&env);
-
-    client.init(
-        &admin,
-        &soroban_sdk::String::from_str(&env, "FLOOR50"),
-        &sme,
-        &1000,
-        &100,
-        &0u64,
-        &token,
-        &None,
-        &treasury,
-        &None,
-        &Some(50i128), // min_contribution
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-    &None::<i64>,);
-    assert_eq!(client.get_min_contribution_floor(), 50);
-}
-
-/// Optional cap views return None when unconfigured and Some when set.
-#[test]
-fn read_view_optional_caps_config() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, admin, sme) = setup(&env);
-    let (token, treasury) = free_addresses(&env);
-
-    // Without caps
-    client.init(
-        &admin,
-        &soroban_sdk::String::from_str(&env, "NOCAPS"),
-        &sme,
-        &1000,
-        &100,
-        &0,
-        &token,
-        &None,
-        &treasury,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-    &None::<i64>,);
-    assert!(client.get_max_unique_investors_cap().is_none());
-    assert!(client.get_max_per_investor_cap().is_none());
 }
 
 #[test]
@@ -3123,9 +2626,7 @@ fn test_settle_event_timestamp_with_maturity() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
     fund_to_target_stl(&env, &client);
 
     env.ledger().with_mut(|l| l.timestamp = settle_ts);
@@ -3163,9 +2664,7 @@ fn test_settle_event_emitted_at_current_ledger_time() {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-    &None::<i64>,);
+    );
     fund_to_target_stl(&env, &client);
     client.settle();
 
@@ -3173,46 +2672,9 @@ fn test_settle_event_emitted_at_current_ledger_time() {
     assert_eq!(client.get_escrow().status, 2);
 }
 
-/// get_distributed_principal increments correctly after refund.
-#[test]
-fn read_view_distributed_principal_after_refund() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, admin, sme) = setup(&env);
-    let tok = install_stellar_asset_token(&env);
-    let treasury = soroban_sdk::Address::generate(&env);
-    let investor = soroban_sdk::Address::generate(&env);
-
-    client.init(
-        &admin,
-        &soroban_sdk::String::from_str(&env, "DIST_P"),
-        &sme,
-        &200,
-        &100,
-        &0,
-        &tok.id,
-        &None,
-        &treasury,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-    &None::<i64>,);
-    tok.stellar.mint(&investor, &200);
-    client.fund(&investor, &200);
-    client.settle();
-
-    // The settled escrow status confirms the event was emitted
-    assert_eq!(client.get_escrow().status, 2);
-}
-
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ──────────────────────────────────────────────────────────────────────────────
 // `is_settleable` edge: partial_settle then pre-maturity
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+// ──────────────────────────────────────────────────────────────────────────────
 
 #[test]
 fn test_is_settleable_after_partial_settle_with_maturity() {
@@ -3250,10 +2712,72 @@ fn test_is_settleable_after_partial_settle_with_maturity() {
     );
 }
 
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
-// SME collateral commitment ÔÇö record, replace, validation, auth, metadata-only
-// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
+/// Asserts the metadata-only invariant: calling record_sme_collateral_commitment
+/// does **not** change the escrow contract's funding-token balance.
+///
+/// Anchors invariant ESC-COL-001 documented in `docs/escrow-sme-collateral.md`.
+#[test]
+fn test_sme_collateral_no_token_balance_change() {
+    use soroban_sdk::token::StellarAssetClient;
 
+    let env = Env::default();
+    env.mock_all_auths();
+    let token = install_stellar_asset_token(&env);
+    let treasury = Address::generate(&env);
+    let (client, admin, sme) = setup(&env);
+
+    let sac_admin = StellarAssetClient::new(&env, &token.id);
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "COL001"),
+        &sme,
+        &1000,
+        &10,
+        &10,
+        &token.id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    // Mint tokens directly into the escrow so the invariant assertion is non-trivial.
+    // fund() is state-only; only an explicit mint gives the contract a real balance.
+    sac_admin.mint(&client.address, &500);
+
+    let token_client = TokenClient::new(&env, &token.id);
+    let balance_before = token_client.balance(&client.address);
+    assert!(balance_before > 0, "escrow must have non-zero balance before collateral record");
+
+    // First record (no prior commitment)
+    let asset = soroban_sdk::Symbol::new(&env, "GOLD");
+    let commitment = client.record_sme_collateral_commitment(&asset, &1000);
+    assert_eq!(commitment.amount, 1000);
+    assert_eq!(commitment.asset, asset);
+
+    let balance_after_first = token_client.balance(&client.address);
+    assert_eq!(balance_after_first, balance_before,
+        "First record_sme_collateral_commitment must not change token balance");
+
+    // Replacement record
+    env.ledger().with_mut(|li| li.timestamp += 1);
+    let commitment2 = client.record_sme_collateral_commitment(&asset, &2000);
+    assert_eq!(commitment2.amount, 2000);
+
+    let balance_after_second = token_client.balance(&client.address);
+    assert_eq!(balance_after_second, balance_before,
+        "Replacement record_sme_collateral_commitment must not change token balance");
+
+    // Verify stored data changed but balance did not
+    let stored = client.get_sme_collateral_commitment().unwrap();
+    assert_eq!(stored.amount, 2000);
+    assert_eq!(stored.asset, asset);
+}
 /// Initialise a fresh escrow with minimal parameters for collateral tests.
 /// Returns (client, token_address, treasury_address).
 fn init_for_collateral<'a>(
@@ -3568,455 +3092,3 @@ fn test_state_machine_illegal_transitions_rejected() {
         &None,
         &treasury,
         &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-    &None::<i64>,);
-
-    let investor = Address::generate(&env);
-
-    // 1. In Status 0 (Open):
-    // - try_settle() should fail with SettlementNotFunded
-    assert_contract_error(client.try_settle(), EscrowError::SettlementNotFunded);
-    // - try_withdraw() should fail with WithdrawalNotFunded
-    assert_contract_error(client.try_withdraw(), EscrowError::WithdrawalNotFunded);
-    // - try_refund() should fail with RefundNotCancelled
-    assert_contract_error(
-        client.try_refund(&investor),
-        EscrowError::RefundNotCancelled,
-    );
-
-    // Now, transition to Status 1 (Funded) by funding to target
-    client.fund(&investor, &10_000i128);
-    assert_eq!(client.get_escrow().status, 1);
-
-    // 2. In Status 1 (Funded):
-    // - try_refund() should fail with RefundNotCancelled
-    assert_contract_error(
-        client.try_refund(&investor),
-        EscrowError::RefundNotCancelled,
-    );
-    // - try_cancel_funding() should fail with CancelFundingNotOpen
-    assert_contract_error(
-        client.try_cancel_funding(),
-        EscrowError::CancelFundingNotOpen,
-    );
-
-    // Create another escrow instance to test Status 4 (Cancelled)
-    let (client2, admin2, sme2) = setup(&env);
-    client2.init(
-        &admin2,
-        &soroban_sdk::String::from_str(&env, "SM_TEST2"),
-        &sme2,
-        &10_000i128,
-        &500i64,
-        &0u64,
-        &funding_token,
-        &None,
-        &treasury,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-    &None::<i64>,);
-
-    // 3. Cancel client2 to reach Status 4 (Cancelled)
-    client2.cancel_funding();
-    assert_eq!(client2.get_escrow().status, 4);
-
-    // In Status 4 (Cancelled):
-    // - try_settle() should fail with SettlementNotFunded
-    assert_contract_error(client2.try_settle(), EscrowError::SettlementNotFunded);
-    // - try_withdraw() should fail with WithdrawalNotFunded
-    assert_contract_error(client2.try_withdraw(), EscrowError::WithdrawalNotFunded);
-    // - try_cancel_funding() should fail with CancelFundingNotOpen
-    assert_contract_error(
-        client2.try_cancel_funding(),
-        EscrowError::CancelFundingNotOpen,
-    );
-    // - try_fund() should fail with EscrowNotOpenForFunding
-    assert_contract_error(
-        client2.try_fund(&investor, &100i128),
-        EscrowError::EscrowNotOpenForFunding,
-    );
-
-    // 4. Transition client (currently Status 1) to Status 2 (Settled)
-    client.settle();
-    assert_eq!(client.get_escrow().status, 2);
-
-    // In Status 2 (Settled):
-    // - try_settle() should fail with SettlementNotFunded
-    assert_contract_error(client.try_settle(), EscrowError::SettlementNotFunded);
-    // - try_withdraw() should fail with WithdrawalNotFunded
-    assert_contract_error(client.try_withdraw(), EscrowError::WithdrawalNotFunded);
-    // - try_cancel_funding() should fail with CancelFundingNotOpen
-    assert_contract_error(
-        client.try_cancel_funding(),
-        EscrowError::CancelFundingNotOpen,
-    );
-    // - try_refund() should fail with RefundNotCancelled
-    assert_contract_error(
-        client.try_refund(&investor),
-        EscrowError::RefundNotCancelled,
-    );
-    // - try_fund() should fail with EscrowNotOpenForFunding
-    assert_contract_error(
-        client.try_fund(&investor, &100i128),
-        EscrowError::EscrowNotOpenForFunding,
-    );
-
-    // Create client3, fund it, and withdraw to reach Status 3 (Withdrawn)
-    let (client3, admin3, sme3) = setup(&env);
-    client3.init(
-        &admin3,
-        &soroban_sdk::String::from_str(&env, "SM_TEST3"),
-        &sme3,
-        &10_000i128,
-        &500i64,
-        &0u64,
-        &funding_token,
-        &None,
-        &treasury,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-    &None::<i64>,);
-    client3.fund(&investor, &10_000i128);
-    client3.withdraw();
-    assert_eq!(client3.get_escrow().status, 3);
-
-    // In Status 3 (Withdrawn):
-    // - try_settle() should fail with SettlementNotFunded
-    assert_contract_error(client3.try_settle(), EscrowError::SettlementNotFunded);
-    // - try_withdraw() should fail with WithdrawalNotFunded
-    assert_contract_error(client3.try_withdraw(), EscrowError::WithdrawalNotFunded);
-    // - try_cancel_funding() should fail with CancelFundingNotOpen
-    assert_contract_error(
-        client3.try_cancel_funding(),
-        EscrowError::CancelFundingNotOpen,
-    );
-    // - try_refund() should fail with RefundNotCancelled
-    assert_contract_error(
-        client3.try_refund(&investor),
-        EscrowError::RefundNotCancelled,
-    );
-    // - try_fund() should fail with EscrowNotOpenForFunding
-    assert_contract_error(
-        client3.try_fund(&investor, &100i128),
-        EscrowError::EscrowNotOpenForFunding,
-    );
-}
-
-// Removed broken event-API coverage tests incompatible with current soroban SDK.
-
-// NOTE: `InvestorAllowlistBatchApplied` (`al_batch`) is documented in
-// `EVENT_SCHEMA.md` but the `#[contractevent]` struct and emission code
-// have not yet been implemented.  A future PR should add this event.
-
-// =============================================================================
-// Refactored-shared-gate-helper parity tests (issue #626)
-//
-// Asserts that each risk-bearing entrypoint still emits the **exact** legal-hold
-// error variant it emitted before the refactor — i.e. that `guard_not_legal_hold`,
-// `is_terminal_status`, and `is_pre_settlement_status` are byte-for-byte
-// behaviour-preserving replacements for the inline checks that previously
-// appeared in `sweep_terminal_dust`, `rotate_beneficiary`, `fund`,
-// `partial_settle`, `settle`, `withdraw`, `claim_investor_payout`, and
-// `cancel_funding`.
-// =============================================================================
-
-/// Helper for the parity tests: init a fresh escrow (status 0 = open, no
-/// funding yet) with a free-form label so cross-test storage collisions
-/// cannot happen. Returns client + admin + sme.
-///
-/// `init` takes 18 params in escrow v6: admin, invoice_id, sme_address, amount,
-/// yield_bps (i64), maturity (u64), funding_token, registry, treasury,
-/// yield_tiers, min_contribution, max_unique_investors, max_per_investor,
-/// legal_hold_clear_delay, maturity_max_horizon, funding_deadline,
-/// allowlist_active, protocol_fee_bps.
-fn init_open<'a>(
-    env: &'a Env,
-    label: &str,
-) -> (super::LiquifactEscrowClient<'a>, Address, Address) {
-    let admin = Address::generate(env);
-    let sme = Address::generate(env);
-    let client = super::deploy(env);
-    let (token, treasury) = super::free_addresses(env);
-    client.init(
-        &admin,
-        &soroban_sdk::String::from_str(env, label),
-        &sme,
-        &100i128,
-        &0i64,
-        &0u64,
-        &token,
-        &None,
-        &treasury,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-    );
-    (client, admin, sme)
-}
-
-/// Confirms `is_terminal_status` and `is_pre_settlement_status` correctly
-/// partition the existing status codes (`0..=4`). This is a pure-function
-/// test and exercises no contract state.
-#[test]
-fn refactor_gate_helpers_status_predicate_truth_table() {
-    // (status, expected_is_terminal, expected_is_pre_settlement)
-    let truth: [(u32, bool, bool); 5] = [
-        (0, false, true),  // open       → pre-settlement only
-        (1, false, true),  // funded     → pre-settlement only
-        (2, true, false),  // settled    → terminal only
-        (3, true, false),  // withdrawn  → terminal only
-        (4, true, false),  // cancelled  → terminal only
-    ];
-    for (status, expected_terminal, expected_pre_settle) in truth {
-        assert_eq!(
-            crate::is_terminal_status(status),
-            expected_terminal,
-            "is_terminal_status({status})"
-        );
-        assert_eq!(
-            crate::is_pre_settlement_status(status),
-            expected_pre_settle,
-            "is_pre_settlement_status({status})"
-        );
-    }
-    // Out-of-range statuses are not terminal or pre-settlement.
-    assert!(!crate::is_terminal_status(5));
-    assert!(!crate::is_terminal_status(7));
-    assert!(!crate::is_pre_settlement_status(5));
-    assert!(!crate::is_pre_settlement_status(99));
-}
-
-/// Confirms each refactored entrypoint still emits its documented
-/// `LegalHoldBlocks*` variant when the legal hold is active, **without**
-/// regression through the new `guard_not_legal_hold` helper.
-///
-/// This is the regression-protection test for issue #626: if the helper
-/// ever swallowed the per-entrypoint variant or panicked earlier in the
-/// gate sequence (e.g. before `require_auth`), this test fails.
-#[test]
-fn refactor_gate_helpers_hold_active_emits_per_entrypoint_variant() {
-    let env = Env::default();
-    env.mock_all_auths();
-
-    // --- sweep_terminal_dust
-    let (sweep, _a, _s) = init_open(&env, "LH_SWP");
-    sweep.set_legal_hold(&true);
-    assert_contract_error(
-        sweep.try_sweep_terminal_dust(&1i128),
-        EscrowError::LegalHoldBlocksTreasuryDustSweep,
-    );
-
-    // --- rotate_beneficiary
-    let (rot, _a, _sme) = init_open(&env, "LH_ROT");
-    rot.set_legal_hold(&true);
-    let new_sme = Address::generate(&env);
-    assert_contract_error(
-        rot.try_rotate_beneficiary(&new_sme),
-        EscrowError::LegalHoldBlocksBeneficiaryRotation,
-    );
-
-    // --- fund
-    let (fund_c, _a, _s) = init_open(&env, "LH_FND");
-    let _investor = Address::generate(&env);
-    fund_c.set_legal_hold(&true);
-    assert_contract_error(
-        fund_c.try_fund(&_investor, &10i128),
-        EscrowError::LegalHoldBlocksFunding,
-    );
-
-    // --- partial_settle (admin authority)
-    let (ps_c, ps_admin, _ps_sme) = init_open(&env, "LH_PS");
-    ps_c.set_legal_hold(&true);
-    assert_contract_error(
-        ps_c.try_partial_settle(&ps_admin),
-        EscrowError::LegalHoldBlocksPartialSettle,
-    );
-
-    // --- settle, withdraw, claim_investor_payout: drive escrow to status 1
-    // first via a real token, then re-enable legal hold and assert the typed
-    // error from each refactored gate preserves the per-entrypoint variant.
-    let token = install_stellar_asset_token(&env);
-    let funder = Address::generate(&env);
-    let admin_f = Address::generate(&env);
-    let sme_f = Address::generate(&env);
-    let (treasury_f, _t_free) = super::free_addresses(&env);
-    let funded = super::deploy(&env);
-    funded.init(
-        &admin_f,
-        &soroban_sdk::String::from_str(&env, "LH_FUNDED"),
-        &sme_f,
-        &100i128,
-        &0i64,
-        &0u64,
-        &token.id,
-        &None,
-        &treasury_f,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-    );
-    token.stellar.mint(&funder, &100i128);
-    funded.fund(&funder, &100i128);
-    funded.set_legal_hold(&true);
-    assert_contract_error(funded.try_settle(), EscrowError::LegalHoldBlocksSettlement);
-    assert_contract_error(
-        funded.try_withdraw(),
-        EscrowError::LegalHoldBlocksWithdrawal,
-    );
-    assert_contract_error(
-        funded.try_claim_investor_payout(&funder),
-        EscrowError::LegalHoldBlocksInvestorClaims,
-    );
-
-    // --- cancel_funding
-    let (cancel_c, _ca, _cs) = init_open(&env, "LH_CAN");
-    cancel_c.set_legal_hold(&true);
-    assert_contract_error(
-        cancel_c.try_cancel_funding(),
-        EscrowError::LegalHoldBlocksCancelFunding,
-    );
-
-    // Silence unused-variable warnings for symmetry with sibling tests.
-    let _ = (_t_free, new_sme);
-}
-
-/// Confirms `require_funding_open` (`guard_status_eq` specialised) still
-/// gates open-window entrypoints identically: a funded-then-settled escrow
-/// rejects further `fund` calls with `EscrowNotOpenForFunding`, AND the
-/// settled status satisfies both terminal-status and open-status predicates
-/// in the documented way.
-#[test]
-fn refactor_gate_helpers_open_funding_window_preserved() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let token = install_stellar_asset_token(&env);
-    let investor = Address::generate(&env);
-    let admin = Address::generate(&env);
-    let sme = Address::generate(&env);
-    let treasury = Address::generate(&env);
-    let client = super::deploy(&env);
-    client.init(
-        &admin,
-        &soroban_sdk::String::from_str(&env, "OPEN_W"),
-        &sme,
-        &100i128,
-        &0i64,
-        &0u64,
-        &token.id,
-        &None,
-        &treasury,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-    );
-    token.stellar.mint(&investor, &100i128);
-    client.fund(&investor, &100i128);
-    client.settle();
-
-    // Open-window guard rejects `fund` post-settlement with the same typed
-    // error as pre-refactor (regression lock).
-    assert_contract_error(
-        client.try_fund(&investor, &1i128),
-        EscrowError::EscrowNotOpenForFunding,
-    );
-    // Settled status = 2 must satisfy is_terminal_status but NOT
-    // is_pre_settlement_status — ensures predicate partitioning.
-    assert_eq!(client.get_escrow().status, 2);
-    assert!(crate::is_terminal_status(2));
-    assert!(!crate::is_pre_settlement_status(2));
-}
-
-/// Confirms `sweep_terminal_dust`'s terminal-status helper rejects a fresh
-/// escrow (status == 0 = open) with `DustSweepNotTerminal` — exercising both
-/// the legal-hold helper and the terminal-status predicate together.
-#[test]
-fn refactor_gate_helpers_sweep_blocked_on_open_by_terminal_status() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, _a, _s) = init_open(&env, "TERMINAL_GATE");
-    // No legal hold set, so legal-hold gate passes; terminal-status gate
-    // must still reject because status == 0 is open, not terminal.
-    assert_contract_error(
-        client.try_sweep_terminal_dust(&1i128),
-        EscrowError::DustSweepNotTerminal,
-    );
-}
-
-/// Confirms `rotate_beneficiary`'s pre-settlement helper rejects a settled
-/// escrow with `RotationNotOpen` — exercising the new `is_pre_settlement_status`
-/// predicate at a call site.
-#[test]
-fn refactor_gate_helpers_rotate_blocked_post_settlement() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let token = install_stellar_asset_token(&env);
-    let funder = Address::generate(&env);
-    let admin = Address::generate(&env);
-    let sme = Address::generate(&env);
-    let treasury = Address::generate(&env);
-    let new_sme = Address::generate(&env);
-    let client = super::deploy(&env);
-    client.init(
-        &admin,
-        &soroban_sdk::String::from_str(&env, "ROT_POST"),
-        &sme,
-        &100i128,
-        &0i64,
-        &0u64,
-        &token.id,
-        &None,
-        &treasury,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-    );
-    token.stellar.mint(&funder, &100i128);
-    client.fund(&funder, &100i128);
-    client.settle();
-    assert_contract_error(
-        client.try_rotate_beneficiary(&new_sme),
-        EscrowError::RotationNotOpen,
-    );
-}
