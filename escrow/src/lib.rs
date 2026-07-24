@@ -3315,7 +3315,7 @@ impl LiquifactEscrow {
         InvestorAllowlistBatchApplied {
             name: symbol_short!("al_batch"),
             invoice_id: escrow.invoice_id.clone(),
-            batch_size: n as u32,
+            batch_size: n,
             allowed: if allowed { 1 } else { 0 },
         }
         .publish(&env);
