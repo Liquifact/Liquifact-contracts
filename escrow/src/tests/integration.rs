@@ -1530,3 +1530,388 @@ fn test_refund_batch_skips_already_refunded() {
     client.refund_batch(&investors);
     assert_eq!(client.get_distributed_principal(), 10_000i128);
 }
+
+// =============================================================================
+// Issue #617 — Admin-configurable dust-sweep per-call ceiling
+// (`DataKey::MaxDustSweepOverride`, `set_max_dust_sweep`, `get_max_dust_sweep`,
+// `MaxDustSweepUpdated`, `EscrowError::MaxDustSweepNotPositive`).
+//
+// These tests verify the additive admin-only override over the compile-time
+// `MAX_DUST_SWEEP_AMOUNT` default without altering the existing liability-floor
+// invariant enforced inside `sweep_terminal_dust`.
+// =============================================================================
+
+/// Reusable helper: deploy an initialized escrow with a real SAC funding token,
+/// an immutable treasury, a single funded investor, and a precise amount of
+/// "dust" sitting on the contract in **cancelled (status 4)** state — the
+/// terminal state required to exercise `sweep_terminal_dust`.
+///
+/// `target` is computed as `funded_amount * 2 + dust_amount` so the open
+/// funding status (0) survives the `fund()` call and the subsequent
+/// `cancel_funding()` succeeds. With `target == funded_amount`, `fund()`
+/// would flip status to 1 (funded) and cancel would panic with
+/// `EscrowError::CancelFundingNotOpen = 141`.
+///
+/// Balance reconciliation: `fund()` pulls `funded_amount` base units from
+/// the investor SAC balance to the escrow contract (matching the existing
+/// `test_cancellation_refund_sweep_lifecycle` pattern). On top of that,
+/// any positive `dust_amount` is minted directly to the contract as
+/// "stray transfer / rounding residue". After `cancel_funding()`, the
+/// escrow holds exactly `funded_amount + dust_amount`, and
+/// `outstanding_liability = funded_amount - distributed_principal =
+/// funded_amount`, so any sweep below `dust_amount` succeeds and any
+/// sweep consuming principal is blocked by the liability floor.
+fn setup_cancel_lifecycle(
+    env: &Env,
+    funded_amount: i128,
+    dust_amount: i128,
+) -> (LiquifactEscrowClient<'_>, Address, Address, Address) {
+    let sac = env.register_stellar_asset_contract_v2(Address::generate(env));
+    let token_id = sac.address();
+    let sac_admin = StellarAssetClient::new(env, &token_id);
+
+    let escrow_id = env.register(LiquifactEscrow, ());
+    let client = LiquifactEscrowClient::new(env, &escrow_id);
+    let admin = Address::generate(env);
+    let sme = Address::generate(env);
+    let treasury = Address::generate(env);
+
+    // Status must stay open (0) across `fund()` so `cancel_funding()` succeeds.
+    let target = funded_amount + funded_amount + dust_amount;
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(env, "ISSUE617"),
+        &sme,
+        &target,
+        &0i64,
+        &0u64,
+        &token_id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    // Single funder for the full funded_amount — the second mint compensates
+    // for `fund()`'s on-chain transfer from investor to escrow, matching
+    // the existing `test_cancellation_refund_sweep_lifecycle` convention.
+    let investor = Address::generate(env);
+    sac_admin.mint(&investor, &funded_amount);
+    sac_admin.mint(&investor, &funded_amount);
+    client.fund(&investor, &funded_amount);
+
+    // Inject extra "dust" on top of the funded principal (the only purpose of
+    // `dust_amount`).
+    if dust_amount > 0 {
+        sac_admin.mint(&escrow_id, &dust_amount);
+    }
+
+    // Move escrow to cancelled (status 4) so sweep_terminal_dust is allowed.
+    client.cancel_funding();
+    assert_eq!(client.get_escrow().status, 4);
+
+    (client, admin, sme, treasury)
+}
+
+/// Default behaviour: with no override configured, the effective cap is the
+/// compile-time `MAX_DUST_SWEEP_AMOUNT`, so the getter returns that constant
+/// and `sweep_terminal_dust` allows up to it.
+#[test]
+fn max_dust_sweep_default_returns_compile_time_constant() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    // Inject 50M of dust on top of the funded principal via the helper.
+    let (client, _admin, _sme, _treasury) =
+        setup_cancel_lifecycle(&env, 1_000_000_000i128, 50_000_000i128);
+
+    // No override has ever been written: getter must fall back to the default.
+    assert_eq!(client.get_max_dust_sweep(), MAX_DUST_SWEEP_AMOUNT);
+
+    // A normal sweep up to the default cap is unaffected by the new override
+    // plumbing — fallback behaviour is byte-for-byte identical to the
+    // pre-#617 contract.
+    let swept = client.sweep_terminal_dust(&50_000_000i128);
+    assert_eq!(swept, 50_000_000i128);
+}
+
+/// `set_max_dust_sweep` stores the override, `get_max_dust_sweep` reflects it
+/// exactly, and the stored value survives across the sweep path (no spurious
+/// reset).
+#[test]
+fn max_dust_sweep_override_getter_round_trip() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, _admin, _sme, _treasury) = setup_cancel_lifecycle(&env, 1_000_000_000i128, 0i128);
+
+    // Before any setter call, the getter returns the default.
+    assert_eq!(client.get_max_dust_sweep(), MAX_DUST_SWEEP_AMOUNT);
+
+    let stored = client.set_max_dust_sweep(&500_000_000i128);
+    assert_eq!(stored, 500_000_000i128);
+    assert_eq!(client.get_max_dust_sweep(), 500_000_000i128);
+
+    // Overwriting with a different value works (no raise-only / lower-only
+    // restriction — issue #617 allows any positive cap).
+    let stored2 = client.set_max_dust_sweep(&750_000_000i128);
+    assert_eq!(stored2, 750_000_000i128);
+    assert_eq!(client.get_max_dust_sweep(), 750_000_000i128);
+}
+
+/// Raised override (above the compile-time default) unblocks larger sweeps.
+/// With 200,000,000 of dust on the contract, raising the cap to 300,000,000
+/// lets the treasury sweep the full 200,000,000 in one call (would have been
+/// capped at 100,000,000 pre-#617).
+#[test]
+fn max_dust_sweep_raise_allows_larger_sweep() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, _admin, _sme, _treasury) =
+        setup_cancel_lifecycle(&env, 1_000_000_000i128, 200_000_000i128);
+
+    // raise the override.
+    client.set_max_dust_sweep(&300_000_000i128);
+    assert_eq!(client.get_max_dust_sweep(), 300_000_000i128);
+
+    // Sweep the full 200,000,000 dust in one call.
+    let swept = client.sweep_terminal_dust(&200_000_000i128);
+    assert_eq!(swept, 200_000_000i128);
+}
+
+/// Lowered override (below the compile-time default) tightens the per-call
+/// ceiling — sweeps larger than the override fail with `SweepAmountExceedsMax`.
+#[test]
+fn max_dust_sweep_lower_rejects_oversized_sweep() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, _admin, _sme, _treasury) =
+        setup_cancel_lifecycle(&env, 1_000_000_000i128, 200_000_000i128);
+
+    // Lower the override to 10,000,000 (well below the default).
+    client.set_max_dust_sweep(&10_000_000i128);
+    assert_eq!(client.get_max_dust_sweep(), 10_000_000i128);
+
+    // 50,000,000 exceeds the override and must be rejected with the same
+    // typed error as the pre-#617 path.
+    assert_contract_error(
+        client.try_sweep_terminal_dust(&50_000_000i128),
+        crate::EscrowError::SweepAmountExceedsMax,
+    );
+}
+
+/// Non-admin callers must be rejected by the `set_max_dust_sweep` admin gate.
+/// `mock_auths(&[])` clears every mock so the contract's
+/// `escrow.admin.require_auth()` cannot be satisfied; the Soroban host aborts
+/// before any storage mutation.
+#[test]
+#[should_panic]
+fn max_dust_sweep_setter_rejects_non_admin() {
+    let env = Env::default();
+    // Allow all auths during setup so `init`/`fund`/`cancel_funding` succeed.
+    env.mock_all_auths();
+    let (client, _admin, _sme, _treasury) = setup_cancel_lifecycle(&env, 1_000_000_000i128, 0i128);
+
+    // Now clear mocks — no one is authorized to sign on behalf of the admin.
+    env.mock_auths(&[]);
+    let _ = client.set_max_dust_sweep(&1_000i128);
+    // Unreachable on the happy path (host panic aborts before this line).
+    // Reading the getter post-call would only run if the host abstained from
+    // authenticating — included as a defensive no-op.
+    assert_eq!(client.get_max_dust_sweep(), MAX_DUST_SWEEP_AMOUNT);
+}
+
+/// Non-positive `cap` is rejected with the new append-only typed error
+/// `MaxDustSweepNotPositive`. Verifies both `0` and negative inputs.
+#[test]
+fn max_dust_sweep_setter_rejects_non_positive_cap() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let sac = env.register_stellar_asset_contract_v2(Address::generate(&env));
+    let token_id = sac.address();
+
+    let escrow_id = env.register(LiquifactEscrow, ());
+    let client = LiquifactEscrowClient::new(&env, &escrow_id);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let treasury = Address::generate(&env);
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "ISSUE617"),
+        &sme,
+        &1_000_000_000i128,
+        &0i64,
+        &0u64,
+        &token_id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    // cap == 0 is rejected.
+    assert_contract_error(
+        client.try_set_max_dust_sweep(&0i128),
+        crate::EscrowError::MaxDustSweepNotPositive,
+    );
+    // Negative cap is rejected.
+    assert_contract_error(
+        client.try_set_max_dust_sweep(&-1i128),
+        crate::EscrowError::MaxDustSweepNotPositive,
+    );
+
+    // Effective cap stays at the default — no storage write occurred.
+    assert_eq!(client.get_max_dust_sweep(), MAX_DUST_SWEEP_AMOUNT);
+}
+
+/// The liability-floor invariant must remain enforced regardless of the
+/// override. The override is raised so a large sweep is *size-wise* allowed,
+/// but it still breaches the cancelled-state outstanding principal and must
+/// panic with `SweepExceedsLiabilityFloor`.
+#[test]
+fn max_dust_sweep_override_does_not_bypass_liability_floor() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    // No dust — funded_amount == balance so any sweep breaches the floor.
+    let (client, _admin, _sme, _treasury) = setup_cancel_lifecycle(&env, 1_000_000_000i128, 0i128);
+
+    // Raise the override so the size gate would allow a giant sweep.
+    client.set_max_dust_sweep(&999_999_999i128);
+    assert_eq!(client.get_max_dust_sweep(), 999_999_999i128);
+
+    // Even with the raised cap, sweeping any of the principal triggers the
+    // liability-floor guard (outstanding == funded_amount == 1,000,000,000).
+    assert_contract_error(
+        client.try_sweep_terminal_dust(&500_000_000i128),
+        crate::EscrowError::SweepExceedsLiabilityFloor,
+    );
+}
+
+/// Boundary check is **inclusive**: sweeping *exactly* at the effective cap
+/// succeeds; sweeping one base unit *above* is rejected with
+/// [`EscrowError::SweepAmountExceedsMax`]. Verifies both directions in a single
+/// scenario so the cap-arithmetic invariant is exercised as a single
+/// boundary pair.
+#[test]
+fn max_dust_sweep_boundary_inclusive_cap_succeeds_above_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, _admin, _sme, _treasury) =
+        setup_cancel_lifecycle(&env, 1_000_000_000i128, 200_000_000i128);
+
+    // Lower override to 30,000,000 (well below the compile-time default of
+    // 100,000,000). 30M is also below the 200M dust so the call is well within
+    // both the override and the contract balance.
+    client.set_max_dust_sweep(&30_000_000i128);
+    assert_eq!(client.get_max_dust_sweep(), 30_000_000i128);
+
+    // `amount == effective_cap` must succeed (boundary is inclusive).
+    let swept = client.sweep_terminal_dust(&30_000_000i128);
+    assert_eq!(swept, 30_000_000i128);
+
+    // `amount == effective_cap + 1` must be rejected with the typed error.
+    assert_contract_error(
+        client.try_sweep_terminal_dust(&30_000_001i128),
+        crate::EscrowError::SweepAmountExceedsMax,
+    );
+}
+
+/// `set_max_dust_sweep` must publish the `MaxDustSweepUpdated` event on every
+/// successful write, and the `old_cap`/`new_cap` payload must reflect the
+/// previously-effective cap (the override if set, otherwise the compile-time
+/// default). Indexers can rely on this event without probing storage.
+#[test]
+fn max_dust_sweep_setter_publishes_event_with_correct_old_cap() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let sac = env.register_stellar_asset_contract_v2(Address::generate(&env));
+    let token_id = sac.address();
+
+    let escrow_id = env.register(LiquifactEscrow, ());
+    let client = LiquifactEscrowClient::new(&env, &escrow_id);
+    let contract_id = client.address.clone();
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let treasury = Address::generate(&env);
+    let invoice_id_str = soroban_sdk::String::from_str(&env, "ISSUE617_EVT");
+
+    client.init(
+        &admin,
+        &invoice_id_str,
+        &sme,
+        &1_000_000_000i128,
+        &0i64,
+        &0u64,
+        &token_id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    let invoice_id = client.get_escrow().invoice_id;
+
+    // First write: previously effective cap is the compile-time default.
+    client.set_max_dust_sweep(&123_456i128);
+    let events_first = env.events().all();
+    let event_list_first = events_first.events();
+    assert_eq!(
+        event_list_first.last().unwrap().clone(),
+        MaxDustSweepUpdated {
+            name: symbol_short!("dust_max"),
+            invoice_id: invoice_id.clone(),
+            old_cap: MAX_DUST_SWEEP_AMOUNT,
+            new_cap: 123_456i128,
+        }
+        .to_xdr(&env, &contract_id)
+    );
+    assert_eq!(client.get_max_dust_sweep(), 123_456i128);
+
+    // Second write: previously effective cap is the prior override
+    // (123_456), not the compile-time default.
+    client.set_max_dust_sweep(&50_000i128);
+    let events_second = env.events().all();
+    let event_list_second = events_second.events();
+    assert_eq!(
+        event_list_second.last().unwrap().clone(),
+        MaxDustSweepUpdated {
+            name: symbol_short!("dust_max"),
+            invoice_id: invoice_id.clone(),
+            old_cap: 123_456i128,
+            new_cap: 50_000i128,
+        }
+        .to_xdr(&env, &contract_id)
+    );
+    assert_eq!(client.get_max_dust_sweep(), 50_000i128);
+}
