@@ -320,6 +320,16 @@ The escrow supports an optional investor allowlist gate that controls which addr
 - Batch operations and equivalence to single calls
 - Security considerations for TTL management and admin key security
 
+## Beneficiary (SME) rotation
+
+The escrow supports on-chain rotation of the SME beneficiary address (the recipient of principal on `withdraw`). Rotation requires **dual authorization** from both the outgoing SME and the admin in a single transaction, preventing unilateral redirection of funds. See [`docs/ESCROW_BENEFICIARY_ROTATION.md`](docs/ESCROW_BENEFICIARY_ROTATION.md) for the complete rotation documentation, including:
+
+- Dual-authorization model and exact guard ordering
+- Allowed states (pre-settlement only: open/funded)
+- Typed error codes and operator-facing rejection scenarios
+- Downstream impact on `withdraw` routing
+- Reconciliation with ADR-002 authorization boundaries
+
 ## Escrow cancellation and refund lifecycle
 
 The escrow supports cancellation by the admin under specific criteria, unlocking investor refunds and a residual dust sweep with liability-floor protection. See [`docs/escrow-cancellation-refunds.md`](docs/escrow-cancellation-refunds.md) for the end-to-end documentation, including:
