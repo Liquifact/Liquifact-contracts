@@ -6811,7 +6811,6 @@ fn test_preview_matches_actual_varying_amounts() {
 
 /// can interfere with tier selection.
 
-
 // ── Issue #551: extend_funding_deadline ──────────────────────────────────────
 
 fn init_with_funding_deadline<'a>(
@@ -7243,10 +7242,7 @@ fn test_fund_batch_duplicate_leaves_no_partial_state() {
 fn setup_unfund_basic(
     env: &Env,
     amount: i128,
-) -> (
-    crate::LiquifactEscrowClient<'_>,
-    soroban_sdk::Address,
-) {
+) -> (crate::LiquifactEscrowClient<'_>, soroban_sdk::Address) {
     let (client, admin, sme) = setup(env);
     let (tok, tre) = free_addresses(env);
     client.init(
@@ -7285,7 +7281,11 @@ fn test_preview_fund_allowlisted_returns_zero() {
     let amount = TARGET / 4;
     let (client, investor) = setup_unfund_basic(&env, amount);
 
-    assert_eq!(client.get_escrow().status, 0, "status must be 0 before unfund");
+    assert_eq!(
+        client.get_escrow().status,
+        0,
+        "status must be 0 before unfund"
+    );
     assert_eq!(client.get_unique_funder_count(), 1);
 
     // Partially unfund half.
@@ -7309,7 +7309,11 @@ fn test_preview_fund_allowlisted_returns_zero() {
         1,
         "UniqueFunderCount must be unchanged after partial unfund"
     );
-    assert_eq!(client.get_escrow().status, 0, "status must remain 0 after partial unfund");
+    assert_eq!(
+        client.get_escrow().status,
+        0,
+        "status must remain 0 after partial unfund"
+    );
 }
 
 /// R6 / full unfund: contribution zeroed; UniqueFunderCount decremented; status stays 0.
@@ -7338,7 +7342,11 @@ fn test_unfund_full() {
         0,
         "UniqueFunderCount must decrease to 0 after full unfund"
     );
-    assert_eq!(client.get_escrow().status, 0, "status must remain 0 after full unfund");
+    assert_eq!(
+        client.get_escrow().status,
+        0,
+        "status must remain 0 after full unfund"
+    );
 }
 
 /// R7 / UniqueFunderCount floor: saturating_sub ensures count never goes below 0.
@@ -7443,7 +7451,11 @@ fn test_unfund_wrong_status_funded() {
     let investor = soroban_sdk::Address::generate(&env);
     // Fund to TARGET so status becomes 1.
     client.fund(&investor, &TARGET);
-    assert_eq!(client.get_escrow().status, 1, "pre-condition: status must be 1");
+    assert_eq!(
+        client.get_escrow().status,
+        1,
+        "pre-condition: status must be 1"
+    );
 
     assert_contract_error(
         client.try_unfund(&investor, &1i128),
@@ -7483,7 +7495,11 @@ fn test_unfund_wrong_status_settled() {
     let investor = soroban_sdk::Address::generate(&env);
     client.fund(&investor, &TARGET);
     client.settle();
-    assert_eq!(client.get_escrow().status, 2, "pre-condition: status must be 2");
+    assert_eq!(
+        client.get_escrow().status,
+        2,
+        "pre-condition: status must be 2"
+    );
 
     assert_contract_error(
         client.try_unfund(&investor, &1i128),
@@ -7497,12 +7513,15 @@ fn test_unfund_wrong_status_withdrawn() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let (client, _escrow_id, _sme) =
-        init_and_fund_with_real_token(&env, TARGET, "STAT03");
+    let (client, _escrow_id, _sme) = init_and_fund_with_real_token(&env, TARGET, "STAT03");
 
     // withdraw() transitions to status 3.
     client.withdraw();
-    assert_eq!(client.get_escrow().status, 3, "pre-condition: status must be 3");
+    assert_eq!(
+        client.get_escrow().status,
+        3,
+        "pre-condition: status must be 3"
+    );
 
     let investor = soroban_sdk::Address::generate(&env);
     assert_contract_error(
@@ -7521,7 +7540,11 @@ fn test_unfund_wrong_status_cancelled() {
     let (client, investor) = setup_unfund_basic(&env, amount);
 
     client.cancel_funding();
-    assert_eq!(client.get_escrow().status, 4, "pre-condition: status must be 4");
+    assert_eq!(
+        client.get_escrow().status,
+        4,
+        "pre-condition: status must be 4"
+    );
 
     assert_contract_error(
         client.try_unfund(&investor, &1i128),
@@ -7615,14 +7638,26 @@ fn test_unfund_multiple_investors_isolation() {
     // inv_a unfunds 10_000.
     client.unfund(&inv_a, &10_000i128);
 
-    assert_eq!(client.get_contribution(&inv_a), 20_000i128, "inv_a contribution must be 20_000");
-    assert_eq!(client.get_contribution(&inv_b), 50_000i128, "inv_b contribution must be unchanged");
+    assert_eq!(
+        client.get_contribution(&inv_a),
+        20_000i128,
+        "inv_a contribution must be 20_000"
+    );
+    assert_eq!(
+        client.get_contribution(&inv_b),
+        50_000i128,
+        "inv_b contribution must be unchanged"
+    );
     assert_eq!(
         client.get_escrow().funded_amount,
         70_000i128,
         "funded_amount must be 70_000 after inv_a partial unfund"
     );
-    assert_eq!(client.get_unique_funder_count(), 2, "funder count must still be 2");
+    assert_eq!(
+        client.get_unique_funder_count(),
+        2,
+        "funder count must still be 2"
+    );
 }
 
 /// Unfund then re-fund: contribution correctly reflects both operations.
@@ -7659,8 +7694,16 @@ fn test_unfund_then_fund_again() {
     client.unfund(&investor, &10_000i128);
     client.fund(&investor, &5_000i128);
 
-    assert_eq!(client.get_contribution(&investor), 15_000i128, "contribution must be 15_000");
-    assert_eq!(client.get_escrow().funded_amount, 15_000i128, "funded_amount must be 15_000");
+    assert_eq!(
+        client.get_contribution(&investor),
+        15_000i128,
+        "contribution must be 15_000"
+    );
+    assert_eq!(
+        client.get_escrow().funded_amount,
+        15_000i128,
+        "funded_amount must be 15_000"
+    );
 }
 
 /// R10 / event: EscrowUnfunded is emitted with correct fields.
@@ -7828,7 +7871,10 @@ fn test_unfund_then_refund_after_cancel() {
     client.unfund(&investor, &unfund_amount);
 
     // Contribution is now fund_amount/2.
-    assert_eq!(client.get_contribution(&investor), fund_amount - unfund_amount);
+    assert_eq!(
+        client.get_contribution(&investor),
+        fund_amount - unfund_amount
+    );
 
     // Cancel the escrow; transition to status 4.
     client.cancel_funding();
@@ -7943,7 +7989,10 @@ fn test_funding_reached_event_emitted_on_threshold_crossing_via_fund() {
         tier_lock_secs: 0,
     }
     .to_xdr(&env, &contract_id);
-    assert_eq!(*funded_event, expected_funded, "EscrowFunded event mismatch");
+    assert_eq!(
+        *funded_event, expected_funded,
+        "EscrowFunded event mismatch"
+    );
 
     // Verify FundingReached has the correct payload.
     let expected_reached = expected_funding_reached_xdr(
