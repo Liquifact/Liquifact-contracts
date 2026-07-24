@@ -1688,6 +1688,34 @@ impl LiquifactEscrow {
     /// tiers = [(min_lock=100, yield=1000), (min_lock=200, yield=900)]
     /// TierYieldNotNonDecreasing: 1000 > 900
     /// ```
+    /// Validates an individual yield tier entry against the base yield.
+    fn validate_yield_tier_entry(env: &Env, tier: &YieldTier, base_yield: i64) {
+        ensure(
+            env,
+            (0..=10_000).contains(&tier.yield_bps),
+            EscrowError::TierYieldOutOfRange,
+        );
+        ensure(
+            env,
+            tier.yield_bps >= base_yield,
+            EscrowError::TierYieldBelowBase,
+        );
+    }
+
+    /// Validates ordering invariants between two adjacent yield tiers.
+    fn validate_yield_tier_ordering(env: &Env, prev: &YieldTier, curr: &YieldTier) {
+        ensure(
+            env,
+            curr.min_lock_secs > prev.min_lock_secs,
+            EscrowError::TierLockNotIncreasing,
+        );
+        ensure(
+            env,
+            curr.yield_bps >= prev.yield_bps,
+            EscrowError::TierYieldNotNonDecreasing,
+        );
+    }
+
     fn validate_yield_tiers_table(env: &Env, tiers: &Option<Vec<YieldTier>>, base_yield: i64) {
         let Some(tiers) = tiers else {
             return;
@@ -1698,28 +1726,10 @@ impl LiquifactEscrow {
         let n = tiers.len();
         for i in 0..n {
             let t = tiers.get(i).unwrap();
-            ensure(
-                env,
-                (0..=10_000).contains(&t.yield_bps),
-                EscrowError::TierYieldOutOfRange,
-            );
-            ensure(
-                env,
-                t.yield_bps >= base_yield,
-                EscrowError::TierYieldBelowBase,
-            );
+            Self::validate_yield_tier_entry(env, &t, base_yield);
             if i > 0 {
                 let p = tiers.get(i - 1).unwrap();
-                ensure(
-                    env,
-                    t.min_lock_secs > p.min_lock_secs,
-                    EscrowError::TierLockNotIncreasing,
-                );
-                ensure(
-                    env,
-                    t.yield_bps >= p.yield_bps,
-                    EscrowError::TierYieldNotNonDecreasing,
-                );
+                Self::validate_yield_tier_ordering(env, &p, &t);
             }
         }
     }
