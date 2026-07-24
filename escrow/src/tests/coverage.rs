@@ -12,6 +12,7 @@ use crate::{
 use soroban_sdk::{
     symbol_short,
     testutils::{Address as _, Events as _, Ledger},
+    token::TokenClient,
     Address, BytesN, Env, Error, InvokeError, Vec as SorobanVec,
 };
 
