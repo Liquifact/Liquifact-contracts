@@ -46,56 +46,6 @@ This catches fee-on-transfer tokens and malicious implementations at the host bo
 
 `MAX_DUST_SWEEP_AMOUNT` is a compile-time constant. Tune it per asset decimals off-chain before deployment.
 
-### Admin-configurable per-call ceiling (issue #617 addition)
-
-The compile-time [`MAX_DUST_SWEEP_AMOUNT`] may be too small for high-decimal assets
-or large rounding residues, or too loose for low-value tokens. To allow deployments
-to tune the per-call ceiling without redeploying, the contract exposes an additive
-admin override at runtime:
-
-- **Storage key:** [`DataKey::MaxDustSweepOverride`] (instance storage, additive per ADR-007).
-- **Setter:** [`LiquifactEscrow::set_max_dust_sweep`] — admin-only (`load_escrow_require_admin`),
-  validates `cap > 0` ([`EscrowError::MaxDustSweepNotPositive`]), and emits
-  [`MaxDustSweepUpdated`] carrying `old_cap` (the previously effective cap: override
-  if set, otherwise `MAX_DUST_SWEEP_AMOUNT`) and `new_cap`. Topic: `dust_max`.
-- **Getter:** [`LiquifactEscrow::get_max_dust_sweep`] — pure read, returns the
-  effective cap (`override if set, else MAX_DUST_SWEEP_AMOUNT`).
-
-At call time, [`LiquifactEscrow::sweep_terminal_dust`] loads the effective cap once at
-the top of the entrypoint (`DataKey::MaxDustSweepOverride.unwrap_or(MAX_DUST_SWEEP_AMOUNT)`)
-and enforces `amount <= effective_cap` with the existing
-[`EscrowError::SweepAmountExceedsMax`] (the typed error code is unchanged). Behaviour
-when no override is configured is byte-for-byte identical to the pre-#617 contract.
-
-**Default fallback.** Absent ⇒ `MAX_DUST_SWEEP_AMOUNT`. Deployments predating this
-issue are unaffected because the new key is additive and reads as the default.
-
-**Auth.** Admin-only. The treasury cannot configure its own sweep ceiling; the admin
-role remains the sole configuration authority per the existing auth boundaries in
-[ADR-002](ADR-002-auth-boundaries.md).
-
-**Disabling the override.** There is no dedicated "clear" entrypoint by design —
-to fall back to the compile-time default the admin can simply call
-`set_max_dust_sweep(MAX_DUST_SWEEP_AMOUNT)`. This keeps the API surface minimal and
-avoids a third state (unset vs set vs cleared).
-
-**Security notes.**
-
-- `cap > 0` is strictly enforced: a zero or negative cap would defeat the blast-radius
-  bounding invariant and is rejected with the append-only typed error
-  [`EscrowError::MaxDustSweepNotPositive = 223`]. The error is append-only; no
-  existing `EscrowError` discriminant changes.
-- The override interacts **only** with the per-call size guard. It does not
-  weaken any other sweep guard: legal-hold check, terminal-status requirement,
-  treasury authentication, the `min(amount, balance)` ceiling, and the cancelled-state
-  liability floor are all unchanged.
-- The override is **read-only** at sweep time: `sweep_terminal_dust` does not mutate
-  [`DataKey::MaxDustSweepOverride`]. The setter is the sole writer, gated via
-  `load_escrow_require_admin`.
-- Indexers and dashboards should prefer [`LiquifactEscrow::get_max_dust_sweep`] to
-  read the effective cap rather than fetching [`DataKey::MaxDustSweepOverride`]
-  directly — the getter handles the absent-state default.
-
 ## Consequences
 
 - Only the configured SEP-41 funding token can be swept; other assets sent to the contract are untouched.

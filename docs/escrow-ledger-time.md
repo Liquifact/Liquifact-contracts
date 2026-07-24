@@ -100,32 +100,9 @@ pub fn get_settled_at(env: Env) -> Option<u64> {
 **Note:** The `EscrowSettled` event also includes `settled_at_ledger_timestamp`, but the storage 
 key provides a permanent, query-friendly view that survives network event retention policies.
 
-### 5. Funding Deadline — `DataKey::FundingDeadline`
-
-```rust
-if let Some(deadline) = env.storage().instance().get(&DataKey::FundingDeadline) {
-    ensure(
-        &env,
-        env.ledger().timestamp() <= deadline,
-        EscrowError::FundingDeadlinePassed,
-    );
-}
-```
-
-- Checked in `fund`, `fund_batch`, and `fund_with_commitment` on every call while the
-  escrow is open (status 0).
-- The gate is `now <= deadline` (inclusive at the deadline boundary).
-- When `funding_deadline` is absent (or was not set at init), the gate is skipped entirely.
-- `is_funding_expired()` returns `true` when `now > deadline` (strictly after deadline).
-- **Only the funding window** is gated; `cancel_funding` is never blocked by the deadline.
-- At init, the deadline is validated to be strictly greater than the current ledger time
-  (`deadline > now` required; equal timestamps are rejected).
-
-**Trust model note:** like all time comparisons in this contract, the deadline is evaluated
-against `env.ledger().timestamp()` — validator-observed ledger time, not wall-clock time.
-The usual ±30s mainnet skew guidance applies; see the Skew section below.
-
 ---
+
+## `claim_investor_payout` — Idempotency
 
 `claim_investor_payout` is **idempotent**: calling it more than once for
 the same investor is safe and produces no additional side effects.
