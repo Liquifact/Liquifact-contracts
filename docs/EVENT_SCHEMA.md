@@ -33,7 +33,7 @@ short routing symbol passed with `symbol_short!(...)`, such as `funded` or
 
 ## Event Catalog
 
-The current contract defines 39 event structs.
+The current contract defines 36 event structs.
 
 | Rust event | `name` symbol | Entrypoint(s) |
 |---|---:|---|
@@ -42,18 +42,15 @@ The current contract defines 39 event structs.
 | `AdminProposedEvent` | `adm_prop` | `propose_admin`, `transfer_admin` |
 | `AdminTransferredEvent` | `admin` | (never emitted; placeholder for `accept_admin` doc) |
 | `AllowlistEnabledChanged` | `al_ena` | `set_allowlist_active` |
-| `AllowlistStateChanged` | `al_state` | `set_investor_allowlisted`, `set_investors_allowlisted` |
 | `AttestationDigestAppended` | `att_app` | `append_attestation_digest` |
 | `AttestationDigestRevoked` | `att_rev` | `revoke_attestation_digest` |
-| `AttestationDigestBatchRevoked` | `att_revb` | `revoke_attestation_digests` |
 | `AttestationDigestUnrevoked` | `att_unrev` | `unrevoke_attestation_digest` |
 | `BeneficiaryRotated` | `ben_rot` | `rotate_beneficiary` |
 | `CollateralClearedEvt` | — | `clear_sme_collateral_commitment` |
 | `CollateralRecordedEvt` | `coll_rec` | `record_sme_collateral_commitment` |
 | `ContractUpgraded` | `upgrade` | `upgrade` |
 | `DeprecatedTransferAdminUsed` | `depr_xfer` | `transfer_admin` |
-| `EscrowFunded` | `funded` | `fund`, `fund_with_commitment`, `fund_batch` |
-| `FundingReached` | `fund_rchd` | `fund`, `fund_with_commitment`, `fund_batch`, `update_funding_target` |
+| `EscrowFunded` | `funded` | `fund`, `fund_with_commitment` |
 | `EscrowInitialized` | `escrow_ii` | `init` |
 | `EscrowPartialSettle` | `part_set` | `partial_settle` |
 | `EscrowSettled` | `escrow_sd` | `settle` |
@@ -74,9 +71,7 @@ The current contract defines 39 event structs.
 | `MaxUniqueInvestorsCapLowered` | `inv_cap` | `lower_max_unique_investors` |
 | `MaxUniqueInvestorsCapRaised` | `raise_cap` | `raise_max_unique_investors` |
 | `MinContributionFloorLowered` | `floor_lo` | `lower_min_contribution_floor` |
-| `PausedChanged` | `paused` | `set_paused` |
 | `PrimaryAttestationBound` | `att_bind` | `bind_primary_attestation_hash` |
-| `ProtocolFeeBpsLowered` | `fee_lo` | `lower_protocol_fee_bps` |
 | `RegistryRefRebound` | `reg_rebind` | `set_registry` |
 | `SmeWithdrew` | `sme_wd` | `withdraw` |
 | `TreasuryDustSwept` | `dust_sw` | `sweep_terminal_dust` |
@@ -123,28 +118,9 @@ Data:
 | `old_cap` | `u32` |
 | `new_cap` | `u32` |
 
-### `ProtocolFeeBpsLowered`
-
-Emitted after successful `lower_protocol_fee_bps`.
-
-Topics:
-
-| Index | Field | Type | Value |
-|---:|---|---|---|
-| 0 | fixed event topic | `Symbol` | `protocol_fee_bps_lowered` |
-| 1 | `name` | `Symbol` | `fee_lo` |
-| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
-
-Data:
-
-| Field | Type |
-|---|---|
-| `old_bps` | `i64` |
-| `new_bps` | `i64` |
-
 ### `EscrowFunded`
 
-Emitted after successful `fund`, `fund_with_commitment`, or `fund_batch` (once per entry).
+Emitted after successful `fund` or `fund_with_commitment`.
 
 Topics:
 
@@ -163,36 +139,6 @@ Data:
 | `funded_amount` | `i128` |
 | `status` | `u32` |
 | `investor_effective_yield_bps` | `i64` |
-
-### `FundingReached`
-
-Emitted exactly **once** when the escrow transitions from **open** (status 0) to **funded**
-(status 1). This event fires:
-
-1. Inside `fund` / `fund_with_commitment` / `fund_batch` when a deposit crosses the
-   funding threshold — always **after** the corresponding `EscrowFunded` event.
-2. Inside `update_funding_target` when a target lowering promotes an already-credited
-   principal — always **after** the `FundingTargetUpdated` event.
-
-Indexers can subscribe to `fund_rchd` to react to the funding threshold crossing without
-inspecting the `status` field of every per-deposit `EscrowFunded` event.
-
-Topics:
-
-| Index | Field | Type | Value |
-|---:|---|---|---|
-| 0 | fixed event topic | `Symbol` | `funding_reached` |
-| 1 | `name` | `Symbol` | `fund_rchd` |
-| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
-
-Data:
-
-| Field | Type | Description |
-|---|---|---|
-| `funded_amount` | `i128` | Total principal credited at the moment of the 0→1 transition (may exceed `funding_target` on over-funded escrows). |
-| `funding_target` | `i128` | The effective target that was satisfied. |
-| `ledger_timestamp` | `u64` | `env.ledger().timestamp()` at promotion time. |
-| `ledger_sequence` | `u32` | `env.ledger().sequence()` at promotion time. |
 
 ### `EscrowSettled`
 
@@ -394,31 +340,6 @@ Data:
 | Field | Type |
 |---|---|
 | `amount` | `i128` |
-| `recipient` | `Address` |
-| `fee` | `i128` |
-
-### `ProtocolFeeWithdrawn`
-
-Emitted after successful `withdraw` only when the computed protocol fee is
-non-zero. This records the treasury leg separately from the SME net withdrawal
-event so accounting integrations do not need to re-derive the protocol cut.
-
-Topics:
-
-| Index | Field | Type | Value |
-|---:|---|---|---|
-| 0 | fixed event topic | `Symbol` | `protocol_fee_withdrawn` |
-| 1 | `name` | `Symbol` | `prot_fee` |
-| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
-
-Data:
-
-| Field | Type |
-|---|---|
-| `fee_amount` | `i128` |
-| `fee_bps` | `i64` |
-| `treasury` | `Address` |
-| `sme_net_amount` | `i128` |
 
 ### `InvestorPayoutClaimed`
 
@@ -612,55 +533,6 @@ Data:
 operations. `batch_size` equals the count of `al_set` events emitted in the
 same transaction. Existing indexers that only consume `al_set` remain fully
 compatible — `al_batch` is purely additive.
-
-### `AllowlistStateChanged`
-
-Emitted after any allowlist state change (single or batch) to provide the aggregate state.
-Carries the total count of allowlisted addresses after the modification, enabling indexers
-to track the overall allowlist size without inferring from individual per-address events.
-
-Topics:
-
-| Index | Field | Type | Value |
-|---:|---|---|---|
-| 0 | fixed event topic | `Symbol` | `allowlist_state_changed` |
-| 1 | `name` | `Symbol` | `al_state` |
-| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
-
-Data:
-
-| Field | Type | Values |
-|---|---|---|
-| `total_count` | `u32` | Total number of allowlisted addresses after the state change |
-
-**Indexer guidance:** filter on `topic[1] == "al_state"` to detect aggregate allowlist state changes.
-This event is emitted after both `set_investor_allowlisted` and `set_investors_allowlisted` calls,
-providing a single source of truth for the total allowlist count without needing to aggregate
-individual `al_set` events.
-
-### `PausedChanged`
-
-Emitted when an admin toggles the lightweight operational pause via `set_paused`.
-Orthogonal to `LegalHoldChanged` — it signals the incident-response circuit
-breaker (no compliance semantics, no clear delay), not the compliance hold.
-
-Topics:
-
-| Index | Field | Type | Value |
-|---:|---|---|---|
-| 0 | fixed event topic | `Symbol` | `paused_changed` |
-| 1 | `name` | `Symbol` | `paused` |
-| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
-
-Data:
-
-| Field | Type | Values |
-|---|---|---|
-| `active` | `u32` | `1` = pause enabled, `0` = cleared |
-
-**Indexer guidance:** filter on `topic[1] == "paused"` to detect pause state changes.
-This event is emitted on every `set_paused` call, including idempotent calls (setting to the same value).
-The pause flag blocks `fund`, `settle`, `withdraw`, and `claim_investor_payout` entrypoints when active.
 
 ## Nested Types
 

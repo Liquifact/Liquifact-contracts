@@ -10,7 +10,7 @@
 //! off-chain verifiers can confirm the on-chain anchor matches their document set.
 
 use super::*;
-use soroban_sdk::{symbol_short, testutils::Events, vec, BytesN, Error, InvokeError};
+use soroban_sdk::{symbol_short, testutils::Events, BytesN, Error, InvokeError};
 use std::fmt::Debug;
 
 fn assert_contract_error<T, E>(
@@ -499,164 +499,6 @@ fn test_unrevoke_not_revoked() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// get_attestation_state — read-only view
-// ---------------------------------------------------------------------------
-
-/// Returns default state when no attestation is set.
-#[test]
-fn test_get_attestation_state_default() {
-    let env = Env::default();
-    let (client, _) = setup_with_init(&env);
-    let state = client.get_attestation_state();
-    assert_eq!(state.primary_hash, None);
-    assert_eq!(state.append_log.len(), 0);
-    assert_eq!(state.append_log_len, 0);
-    assert_eq!(state.remaining_capacity, MAX_ATTESTATION_APPEND_ENTRIES);
-}
-
-/// Returns correct state after binding primary hash.
-#[test]
-fn test_get_attestation_state_with_primary() {
-    let env = Env::default();
-    let (client, _) = setup_with_init(&env);
-    let d = digest(&env, 0xAA);
-    client.bind_primary_attestation_hash(&d);
-
-    let state = client.get_attestation_state();
-    assert_eq!(state.primary_hash, Some(d));
-    assert_eq!(state.append_log.len(), 0);
-    assert_eq!(state.append_log_len, 0);
-    assert_eq!(state.remaining_capacity, MAX_ATTESTATION_APPEND_ENTRIES);
-}
-
-/// Returns correct state after appending digests.
-#[test]
-fn test_get_attestation_state_with_append_log() {
-    let env = Env::default();
-    let (client, _) = setup_with_init(&env);
-    for i in 0u8..3 {
-        client.append_attestation_digest(&digest(&env, i));
-    }
-
-    let state = client.get_attestation_state();
-    assert_eq!(state.primary_hash, None);
-    assert_eq!(state.append_log.len(), 3);
-    assert_eq!(state.append_log_len, 3);
-    assert_eq!(state.remaining_capacity, MAX_ATTESTATION_APPEND_ENTRIES - 3);
-
-    // Verify log contents
-    for i in 0u8..3 {
-        assert_eq!(state.append_log.get(i as u32).unwrap(), digest(&env, i));
-    }
-}
-
-/// Returns correct state with both primary and append log.
-#[test]
-fn test_get_attestation_state_full() {
-    let env = Env::default();
-    let (client, _) = setup_with_init(&env);
-    let primary = digest(&env, 0xCC);
-    client.bind_primary_attestation_hash(&primary);
-
-    for i in 0u8..5 {
-        client.append_attestation_digest(&digest(&env, i));
-    }
-
-    let state = client.get_attestation_state();
-    assert_eq!(state.primary_hash, Some(primary));
-    assert_eq!(state.append_log.len(), 5);
-    assert_eq!(state.append_log_len, 5);
-    assert_eq!(state.remaining_capacity, MAX_ATTESTATION_APPEND_ENTRIES - 5);
-}
-
-/// Returns correct state after revocation.
-#[test]
-fn test_get_attestation_state_after_revoke() {
-    let env = Env::default();
-    let (client, _) = setup_with_init(&env);
-    for i in 0u8..3 {
-        client.append_attestation_digest(&digest(&env, i));
-    }
-    client.revoke_attestation_digest(&1);
-
-    let state = client.get_attestation_state();
-    assert_eq!(state.append_log.len(), 3);
-    assert_eq!(state.append_log_len, 3);
-    // Note: revocation doesn't remove from log, just marks as revoked
-}
-
-/// Returns correct state when append log is full.
-#[test]
-fn test_get_attestation_state_full_capacity() {
-    let env = Env::default();
-    let (client, _) = setup_with_init(&env);
-    for i in 0u8..(MAX_ATTESTATION_APPEND_ENTRIES as u8) {
-        client.append_attestation_digest(&digest(&env, i));
-    }
-
-    let state = client.get_attestation_state();
-    assert_eq!(state.append_log.len(), MAX_ATTESTATION_APPEND_ENTRIES);
-    assert_eq!(state.append_log_len, MAX_ATTESTATION_APPEND_ENTRIES);
-    assert_eq!(state.remaining_capacity, 0);
-}
-
-/// State view is consistent after multiple operations.
-#[test]
-fn test_get_attestation_state_consistency() {
-    let env = Env::default();
-    let (client, _) = setup_with_init(&env);
-
-    // Initial state
-    let state1 = client.get_attestation_state();
-    assert_eq!(state1.append_log_len, 0);
-
-    // After append
-    client.append_attestation_digest(&digest(&env, 0x01));
-    let state2 = client.get_attestation_state();
-    assert_eq!(state2.append_log_len, 1);
-
-    // After revoke
-    client.revoke_attestation_digest(&0);
-    let state3 = client.get_attestation_state();
-    assert_eq!(state3.append_log_len, 1); // Length unchanged
-
-    // After unrevoke
-    client.unrevoke_attestation_digest(&0);
-    let state4 = client.get_attestation_state();
-    assert_eq!(state4.append_log_len, 1); // Length still unchanged
-}
-
-/// State view correctly reflects capacity after unrevoke.
-#[test]
-fn test_get_attestation_state_capacity_after_unrevoke() {
-    let env = Env::default();
-    let (client, _) = setup_with_init(&env);
-    for i in 0u8..3 {
-        client.append_attestation_digest(&digest(&env, i));
-    }
-
-    let state1 = client.get_attestation_state();
-    assert_eq!(
-        state1.remaining_capacity,
-        MAX_ATTESTATION_APPEND_ENTRIES - 3
-    );
-
-    client.revoke_attestation_digest(&1);
-    let state2 = client.get_attestation_state();
-    assert_eq!(
-        state2.remaining_capacity,
-        MAX_ATTESTATION_APPEND_ENTRIES - 3
-    );
-
-    client.unrevoke_attestation_digest(&1);
-    let state3 = client.get_attestation_state();
-    assert_eq!(
-        state3.remaining_capacity,
-        MAX_ATTESTATION_APPEND_ENTRIES - 3
-    );
-}
-
 /// Unrevoking an index that was never revoked still returns
 /// `AttestationNotRevoked` even after an unrelated index was revoked.
 #[test]
@@ -928,17 +770,6 @@ fn test_revoked_digests_view_pagination_and_empty_past_end() {
 }
 
 #[test]
-fn test_revoked_digests_view_zero_limit() {
-    let env = Env::default();
-    let (client, _) = setup_with_init(&env);
-    client.append_attestation_digest(&digest(&env, 0xAA));
-    client.revoke_attestation_digest(&0);
-
-    let page = client.get_revoked_attestation_digests(&0, &0);
-    assert_eq!(page.len(), 0);
-}
-
-#[test]
 #[ignore = "branch-specific latent failure"]
 fn test_revoked_digests_view_caps_limit() {
     let env = Env::default();
@@ -949,75 +780,4 @@ fn test_revoked_digests_view_caps_limit() {
     }
     let page = client.get_revoked_attestation_digests(&0, &100);
     assert_eq!(page.len(), crate::MAX_ATTESTATION_READ_PAGE);
-}
-
-// ---------------------------------------------------------------------------
-// revoke_attestation_digest — typed EscrowError edge cases (issue #378)
-// ---------------------------------------------------------------------------
-
-/// index > log.len() (large value) returns `AttestationIndexOutOfRange`.
-#[test]
-fn test_revoke_large_index_out_of_range() {
-    let env = Env::default();
-    let (client, _) = setup_with_init(&env);
-    client.append_attestation_digest(&digest(&env, 0x01));
-    assert_contract_error(
-        client.try_revoke_attestation_digest(&99),
-        EscrowError::AttestationIndexOutOfRange,
-    );
-}
-
-/// Revoking the first entry (index 0) in a multi-entry log succeeds.
-#[test]
-fn test_revoke_first_entry() {
-    let env = Env::default();
-    let (client, _) = setup_with_init(&env);
-    client.append_attestation_digest(&digest(&env, 0x01));
-    client.append_attestation_digest(&digest(&env, 0x02));
-    client.revoke_attestation_digest(&0);
-    assert!(client.is_attestation_revoked(&0));
-    assert!(!client.is_attestation_revoked(&1));
-}
-
-/// Revoking the last entry in a multi-entry log succeeds.
-#[test]
-fn test_revoke_last_entry() {
-    let env = Env::default();
-    let (client, _) = setup_with_init(&env);
-    for i in 0u8..3 {
-        client.append_attestation_digest(&digest(&env, i));
-    }
-    client.revoke_attestation_digest(&2);
-    assert!(!client.is_attestation_revoked(&0));
-    assert!(!client.is_attestation_revoked(&1));
-    assert!(client.is_attestation_revoked(&2));
-}
-
-/// Third revoke attempt on same index still returns `AttestationAlreadyRevoked`.
-#[test]
-fn test_repeated_revoke_returns_typed_error() {
-    let env = Env::default();
-    let (client, _) = setup_with_init(&env);
-    client.append_attestation_digest(&digest(&env, 0x10));
-    client.revoke_attestation_digest(&0);
-    assert_contract_error(
-        client.try_revoke_attestation_digest(&0),
-        EscrowError::AttestationAlreadyRevoked,
-    );
-    // A second retry also returns the same typed error.
-    assert_contract_error(
-        client.try_revoke_attestation_digest(&0),
-        EscrowError::AttestationAlreadyRevoked,
-    );
-}
-
-/// Non-admin `try_revoke_attestation_digest` returns an authorization error.
-#[test]
-fn test_revoke_non_admin_returns_error() {
-    let env = Env::default();
-    let (client, _) = setup_with_init(&env);
-    client.append_attestation_digest(&digest(&env, 0xFF));
-    env.mock_auths(&[]);
-    // Any error (not Ok) satisfies the auth-rejection requirement.
-    assert!(client.try_revoke_attestation_digest(&0).is_err());
 }

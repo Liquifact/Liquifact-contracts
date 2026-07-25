@@ -194,24 +194,6 @@ This is the symmetric counterpart to `lower_max_unique_investors` — it allows 
       - test::test_raise_cap_existing_investor_above_old_cap_can_add_more
       - test::test_raise_cap_rejects_negative
 
-### `lower_protocol_fee_bps(new_bps: i64)`
-
-Admin-only entrypoint to reduce the protocol fee basis points after initialization.
-
-- **Requires**: caller is admin, `new_bps` in `0..=10_000`, escrow status is not `Withdrawn` (3)
-- **Enforces**: `new_bps` must be strictly lower than current protocol fee bps (`lower-only`)
-- **Emits**: `ProtocolFeeBpsLowered` event with old and new values
-- **Effect**: Updates `DataKey::ProtocolFeeBps`; subsequent `withdraw` calls compute treasury fee split using `new_bps`
-
-#### Security invariants
-
-| Invariant | Enforcement |
-|-----------|-------------|
-| Lower-only | `new_bps < old_bps` else `ProtocolFeeBpsNotLower` |
-| Range-checked | `0 <= new_bps <= 10_000` else `ProtocolFeeBpsOutOfRange` |
-| Non-terminal status | Rejects when escrow status is `Withdrawn` (3) (`ProtocolFeeLowerWithdrawn`) |
-| Admin-only | `load_escrow_require_admin` gates auth before any state change |
-
 
 
 ## New init parameters

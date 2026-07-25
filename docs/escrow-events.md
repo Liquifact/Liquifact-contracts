@@ -82,38 +82,6 @@ Emitted when an investor deposits principal.
 }
 ```
 
-### `FundingSnapshotStored`
-Emitted exactly once when `DataKey::FundingCloseSnapshot` is first written to instance storage,
-signalling the **status 0 → 1** (open → funded) transition. Fires from every code path that
-crosses the funding threshold: `fund` / `fund_with_commitment` (via `fund_impl`), `fund_batch`,
-`update_funding_target` (when target is lowered to ≤ funded amount), and `partial_settle`.
-
-Indexers MUST use this event as the authoritative signal for the snapshot write. Do not infer it
-from companion events (`funded`, `part_set`, `fund_tgt`).
-
-**Topics:**
-1. `snap_st` (Symbol)
-2. `invoice_id` (Symbol)
-
-**Data Payload:**
-- `total_principal` (i128) — funded amount at the moment the snapshot was sealed (≥ `funding_target`)
-- `funding_target` (i128) — funding target recorded in the snapshot
-- `closed_at_ledger_timestamp` (u64) — ledger timestamp when the snapshot was sealed
-- `closed_at_ledger_sequence` (u32) — ledger sequence number when the snapshot was sealed
-
-**Example (JSON Decoded):**
-```json
-{
-  "topics": ["snap_st", "INV_001"],
-  "data": {
-    "total_principal": "10000000000",
-    "funding_target": "10000000000",
-    "closed_at_ledger_timestamp": 1714184000,
-    "closed_at_ledger_sequence": 5000042
-  }
-}
-```
-
 ### `EscrowSettled`
 Emitted when the SME finalizes the escrow after maturity.
 

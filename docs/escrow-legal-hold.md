@@ -58,11 +58,6 @@ Key properties:
 - **Persistent across state transitions.** The hold is stored independently of
   `InvoiceEscrow::status`. A hold set while the escrow is open remains active
   after it becomes funded; a hold set after settlement blocks investor claims.
-- **Claim timing boundary.** A tiered `fund_with_commitment` deposit may not set
-  `InvestorClaimNotBefore` beyond the escrow `maturity`. If
-  `now + committed_lock_secs > maturity`, the deposit fails with
-  `CommitmentLockExceedsMaturity`, so a settled escrow cannot trap an investor
-  claim beyond the funds-due boundary.
 - **Controlled-clear semantics.** When a hold-clear delay is configured,
   `request_clear_legal_hold` must be called first and `set_legal_hold(false)` is
   only allowed once the ledger timestamp has reached the returned boundary.
