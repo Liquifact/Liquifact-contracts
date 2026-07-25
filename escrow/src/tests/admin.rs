@@ -1983,13 +1983,29 @@ fn test_rotate_beneficiary_success_dual_auth() {
     assert_eq!(updated.sme_address, new_sme);
     assert_eq!(client.get_escrow().sme_address, new_sme);
 
+    let all_evts = rotate_events.events();
+    let total_evts = all_evts.len();
+    assert!(total_evts >= 2);
+
     assert_eq!(
-        rotate_events.events().last().unwrap().clone(),
+        all_evts.get(total_evts - 2).unwrap().clone(),
         crate::BeneficiaryRotated {
             name: symbol_short!("ben_rot"),
             invoice_id: client.get_escrow().invoice_id,
+            prior_sme: sme.clone(),
+            new_sme: new_sme.clone(),
+        }
+        .to_xdr(&env, &contract_id)
+    );
+
+    assert_eq!(
+        all_evts.get(total_evts - 1).unwrap().clone(),
+        crate::BenChange {
+            name: symbol_short!("ben_chg"),
+            invoice_id: client.get_escrow().invoice_id,
             prior_sme: sme,
             new_sme,
+            amount: client.get_escrow().amount,
         }
         .to_xdr(&env, &contract_id)
     );

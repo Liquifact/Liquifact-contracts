@@ -33,7 +33,7 @@ short routing symbol passed with `symbol_short!(...)`, such as `funded` or
 
 ## Event Catalog
 
-The current contract defines 36 event structs.
+The current contract defines 38 event structs.
 
 | Rust event | `name` symbol | Entrypoint(s) |
 |---|---:|---|
@@ -47,6 +47,7 @@ The current contract defines 36 event structs.
 | `AttestationDigestRevoked` | `att_rev` | `revoke_attestation_digest` |
 | `AttestationDigestUnrevoked` | `att_unrev` | `unrevoke_attestation_digest` |
 | `BeneficiaryRotated` | `ben_rot` | `rotate_beneficiary` |
+| `BenChange` | `ben_chg` | `rotate_beneficiary` |
 | `CollateralClearedEvt` | — | `clear_sme_collateral_commitment` |
 | `CollateralRecordedEvt` | `coll_rec` | `record_sme_collateral_commitment` |
 | `ContractUpgraded` | `upgrade` | `upgrade` |
@@ -263,6 +264,26 @@ Data:
 |---|---|
 | `prior_sme` | `Address` |
 | `new_sme` | `Address` |
+
+### `BenChange`
+
+Emitted after successful `rotate_beneficiary` as a dedicated <= 9 chars topic event.
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `BenChange` |
+| 1 | `name` | `Symbol` | `ben_chg` |
+| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
+
+Data:
+
+| Field | Type |
+|---|---|
+| `prior_sme` | `Address` |
+| `new_sme` | `Address` |
+| `amount` | `i128` |
 
 ### `FundingTargetUpdated`
 

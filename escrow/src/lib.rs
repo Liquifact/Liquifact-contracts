@@ -1116,6 +1116,17 @@ pub struct BeneficiaryRotated {
 }
 
 #[contractevent]
+pub struct BenChange {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    pub prior_sme: Address,
+    pub new_sme: Address,
+    pub amount: i128,
+}
+
+#[contractevent]
 pub struct EscrowPartialSettle {
     #[topic]
     pub name: Symbol,
@@ -1540,6 +1551,15 @@ pub struct InvestorAllowlistChanged {
     pub investor: Address,
     /// `1` = allowed, `0` = blocked.
     pub allowed: u32,
+}
+
+#[contractevent]
+pub struct AllowlistStateChanged {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    pub total_count: u32,
 }
 
 #[contractevent]
@@ -2241,8 +2261,17 @@ impl LiquifactEscrow {
         BeneficiaryRotated {
             name: symbol_short!("ben_rot"),
             invoice_id: escrow.invoice_id.clone(),
+            prior_sme: prior_sme.clone(),
+            new_sme: new_sme_address.clone(),
+        }
+        .publish(&env);
+
+        BenChange {
+            name: symbol_short!("ben_chg"),
+            invoice_id: escrow.invoice_id.clone(),
             prior_sme,
             new_sme: new_sme_address,
+            amount: escrow.amount,
         }
         .publish(&env);
 

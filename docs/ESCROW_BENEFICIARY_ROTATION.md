@@ -104,12 +104,12 @@ So after a successful rotation:
 
 ### Eventing for indexers
 
-- `rotate_beneficiary` emits **`BeneficiaryRotated`** (with `prior_sme` and `new_sme`).
+- `rotate_beneficiary` emits **`BeneficiaryRotated`** (with `prior_sme` and `new_sme`) and **`BenChange`** (with `prior_sme`, `new_sme`, and `amount`).
 - After rotation, later SME disbursement emits **`SmeWithdrew`**.
 
 Indexers should:
 
-1. update their internal “active SME” mapping on `BeneficiaryRotated`, then
+1. update their internal “active SME” mapping on `BeneficiaryRotated` or `BenChange`, then
 2. attribute a later `SmeWithdrew` to the SME that was current after the rotation.
 
 ---
@@ -126,6 +126,18 @@ Fields:
 - `invoice_id`: the escrow invoice id
 - `prior_sme`: previous SME address
 - `new_sme`: updated SME address
+
+### `BenChange`
+
+Emitted after successful `rotate_beneficiary` as a dedicated <= 9 chars topic event.
+
+Fields:
+
+- `name`: `ben_chg`
+- `invoice_id`: the escrow invoice id
+- `prior_sme`: previous SME address
+- `new_sme`: updated SME address
+- `amount`: the escrow target amount
 
 ---
 
