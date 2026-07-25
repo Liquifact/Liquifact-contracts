@@ -3943,12 +3943,7 @@ impl LiquifactEscrow {
         asset: Symbol,
         amount: i128,
     ) -> SmeCollateralCommitment {
-        ensure(&env, amount > 0, EscrowError::CollateralAmountNotPositive);
-        ensure(
-            &env,
-            asset != Symbol::new(&env, ""),
-            EscrowError::CollateralAssetEmpty,
-        );
+        Self::check_collateral_params(&env, asset, amount);
 
         // env.clone(): env is used again after this call for storage read/write, timestamp, and publish.
         let escrow = Self::load_escrow_require_sme(&env);
@@ -5143,6 +5138,16 @@ impl LiquifactEscrow {
                 EscrowError::FundingBelowMinContribution,
             );
         }
+    }
+
+    #[inline(always)]
+    fn check_collateral_params(env: &Env, asset: Symbol, amount: i128) {
+        ensure(&env, amount > 0, EscrowError::CollateralAmountNotPositive);
+        ensure(
+            &env,
+            asset != Symbol::new(&env, ""),
+            EscrowError::CollateralAssetEmpty,
+        );
     }
 
     fn fund_impl(
