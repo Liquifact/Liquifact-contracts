@@ -2163,7 +2163,11 @@ impl LiquifactEscrow {
                 .instance()
                 .get(&DataKey::DistributedPrincipal)
                 .unwrap_or(0);
-            let outstanding = escrow.funded_amount.saturating_sub(distributed);
+            let outstanding = escrow
+                .funded_amount
+                .checked_sub(distributed)
+                .map(|raw| raw.max(0))
+                .unwrap_or(0);
             // sweep_amt <= balance (from amount.min(balance) above), so this subtraction is safe.
             let balance_after_sweep = balance - sweep_amt;
             ensure(
@@ -4376,6 +4380,7 @@ impl LiquifactEscrow {
             .unwrap_or_else(|| fail(&env, EscrowError::WithdrawFeeArithmeticOverflow));
         let net: i128 = amount
             .checked_sub(fee)
+            .and_then(|raw| if raw >= 0 { Some(raw) } else { None })
             .unwrap_or_else(|| fail(&env, EscrowError::WithdrawNetArithmeticUnderflow));
 
         let token_addr: Address = env
