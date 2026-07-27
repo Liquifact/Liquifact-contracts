@@ -1218,6 +1218,12 @@ pub struct EscrowSummary {
     pub has_primary_attestation: bool,
     /// Number of entries in the attestation append log.
     pub attestation_log_length: u32,
+    /// Whether the lightweight operational pause is active, mirroring
+    /// [`LiquifactEscrow::is_paused`]. Reads `false` for instances that have never been paused.
+    pub paused: bool,
+    /// Immutable protocol fee in basis points, mirroring
+    /// [`LiquifactEscrow::get_protocol_fee_bps`]. Reads `0` for pre-fee instances.
+    pub protocol_fee_bps: i64,
 }
 
 /// Bundled settlement-readiness snapshot returned by
@@ -2770,6 +2776,10 @@ impl LiquifactEscrow {
 
     /// Bundles multiple read-only values to return a comprehensive summary of the escrow state
     /// in a single host invocation.
+    ///
+    /// The `paused` and `protocol_fee_bps` fields are read from the **same** storage keys as the
+    /// standalone [`LiquifactEscrow::is_paused`] and [`LiquifactEscrow::get_protocol_fee_bps`]
+    /// views, so the summary can never drift from those getters.
     pub fn get_escrow_summary(env: Env) -> EscrowSummary {
         let escrow = Self::get_escrow(env.clone());
         let legal_hold = Self::get_legal_hold(env.clone());
@@ -2780,6 +2790,8 @@ impl LiquifactEscrow {
         let sme_collateral_commitment = Self::get_sme_collateral_commitment(env.clone());
         let primary_attestation_hash = Self::get_primary_attestation_hash(env.clone());
         let attestation_append_log = Self::get_attestation_append_log(env.clone());
+        let paused = Self::is_paused(env.clone());
+        let protocol_fee_bps = Self::get_protocol_fee_bps(env.clone());
 
         let funding_close_snapshot = match funding_close_snapshot_opt {
             Some(snap) => EscrowCloseSnapshot::Some(snap),
@@ -2802,6 +2814,8 @@ impl LiquifactEscrow {
             sme_collateral_commitment,
             has_primary_attestation: primary_attestation_hash.is_some(),
             attestation_log_length: attestation_append_log.len(),
+            paused,
+            protocol_fee_bps,
         }
     }
 
