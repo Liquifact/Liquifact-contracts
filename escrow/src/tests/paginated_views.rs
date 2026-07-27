@@ -22,7 +22,10 @@ fn paginate_window_empty_collection_returns_none() {
 fn paginate_window_start_past_end_returns_none() {
     // start >= len → None
     assert_eq!(crate::LiquifactEscrow::paginate_window(5, 10, 50, 5), None);
-    assert_eq!(crate::LiquifactEscrow::paginate_window(100, 10, 50, 5), None);
+    assert_eq!(
+        crate::LiquifactEscrow::paginate_window(100, 10, 50, 5),
+        None
+    );
 }
 
 #[test]
@@ -292,9 +295,7 @@ fn get_investors_start_past_end_returns_empty() {
 
 // ── get_allowlisted_investors ─────────────────────────────────────────────────
 
-fn setup_allowlist_escrow(
-    env: &Env,
-) -> (crate::LiquifactEscrowClient<'_>, Address, Address) {
+fn setup_allowlist_escrow(env: &Env) -> (crate::LiquifactEscrowClient<'_>, Address, Address) {
     let client = super::deploy(env);
     let admin = Address::generate(env);
     let sme = Address::generate(env);
@@ -419,9 +420,7 @@ fn get_allowlisted_investors_excludes_revoked_addresses() {
 
 // ── get_revoked_attestation_digests ───────────────────────────────────────────
 
-fn setup_attestation_escrow(
-    env: &Env,
-) -> (crate::LiquifactEscrowClient<'_>, Address) {
+fn setup_attestation_escrow(env: &Env) -> (crate::LiquifactEscrowClient<'_>, Address) {
     let client = super::deploy(env);
     let admin = Address::generate(env);
     let sme = Address::generate(env);
@@ -573,7 +572,10 @@ fn get_collateral_records_page() {
 
     for i in 1..=4 {
         env.ledger().with_mut(|l| l.timestamp = (i as u64) * 100);
-        client.record_sme_collateral_commitment(&soroban_sdk::Symbol::new(&env, "USDC"), &(i as i128));
+        client.record_sme_collateral_commitment(
+            &soroban_sdk::Symbol::new(&env, "USDC"),
+            &(i as i128),
+        );
     }
 
     let result = client.get_collateral_records(&0, &2);
@@ -590,7 +592,10 @@ fn get_collateral_records_continuation() {
 
     for i in 1..=4 {
         env.ledger().with_mut(|l| l.timestamp = (i as u64) * 100);
-        client.record_sme_collateral_commitment(&soroban_sdk::Symbol::new(&env, "USDC"), &(i as i128));
+        client.record_sme_collateral_commitment(
+            &soroban_sdk::Symbol::new(&env, "USDC"),
+            &(i as i128),
+        );
     }
 
     let result = client.get_collateral_records(&2, &5);
@@ -607,7 +612,10 @@ fn get_collateral_records_ceiling() {
 
     for i in 1..=55 {
         env.ledger().with_mut(|l| l.timestamp = (i as u64) * 100);
-        client.record_sme_collateral_commitment(&soroban_sdk::Symbol::new(&env, "USDC"), &(i as i128));
+        client.record_sme_collateral_commitment(
+            &soroban_sdk::Symbol::new(&env, "USDC"),
+            &(i as i128),
+        );
     }
 
     let result = client.get_collateral_records(&0, &100);

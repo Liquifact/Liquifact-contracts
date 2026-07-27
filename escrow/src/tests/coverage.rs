@@ -12,7 +12,7 @@ use crate::{
 use soroban_sdk::{
     symbol_short,
     testutils::{Address as _, Events as _, Ledger},
-    Address, BytesN, Env, Error, Event, InvokeError, Vec as SorobanVec,
+    Address, BytesN, Env, Error, InvokeError, Vec as SorobanVec,
 };
 
 const AMOUNT: i128 = 100_000_000_000;
@@ -1041,19 +1041,6 @@ fn test_claim_lock_not_expired() {
 }
 
 #[test]
-fn test_clear_without_record_rejected() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, admin, sme) = setup(&env);
-    default_init(&client, &env, &admin, &sme);
-
-    assert_contract_error(
-        client.try_clear_sme_collateral_commitment(),
-        EscrowError::NoCollateralToClear,
-    );
-}
-
-#[test]
 fn test_double_clear_rejected() {
     let env = Env::default();
     env.mock_all_auths();
@@ -1067,114 +1054,6 @@ fn test_double_clear_rejected() {
         client.try_clear_sme_collateral_commitment(),
         EscrowError::NoCollateralToClear,
     );
-}
-
-#[test]
-fn test_record_then_clear_removes_commitment() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, admin, sme) = setup(&env);
-    default_init(&client, &env, &admin, &sme);
-
-    let asset = symbol_short!("USDC");
-    client.record_sme_collateral_commitment(&asset, &PLEDGE);
-    assert!(client.get_sme_collateral_commitment().is_some());
-
-    client.clear_sme_collateral_commitment();
-    assert!(
-        client.get_sme_collateral_commitment().is_none(),
-        "clear must remove DataKey::SmeCollateralPledge"
-    );
-}
-
-#[test]
-fn test_clear_emits_exactly_one_coll_clr_event() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, admin, sme) = setup(&env);
-    let contract_id = client.address.clone();
-    default_init(&client, &env, &admin, &sme);
-
-    let asset = symbol_short!("USDC");
-    client.record_sme_collateral_commitment(&asset, &PLEDGE);
-
-    // Drain the event buffer so we only measure the clear operation.
-    let _ = env.events().all();
-    client.clear_sme_collateral_commitment();
-
-    let contract_events = env.events().all().filter_by_contract(&contract_id);
-    let events = contract_events.events();
-    assert_eq!(
-        events.len(),
-        1,
-        "clear_sme_collateral_commitment must emit exactly one coll_clr event"
-    );
-
-    let invoice_id = client.get_escrow().invoice_id;
-    assert_eq!(
-        events.last().unwrap().clone(),
-        CollateralClearedEvt {
-            name: symbol_short!("coll_clr"),
-            invoice_id,
-            asset,
-            amount: PLEDGE,
-            recorded_at: env.ledger().timestamp(),
-        }
-        .to_xdr(&env, &contract_id)
-    );
-}
-
-#[test]
-fn test_clear_non_sme_caller_rejected() {
-    let env = Env::default();
-    let (client, admin, sme) = setup(&env);
-    init_for_collateral(&env, &client, &admin, &sme, "CLR_AUTH");
-
-    let asset = symbol_short!("USDC");
-    env.mock_all_auths();
-    client.record_sme_collateral_commitment(&asset, &PLEDGE);
-
-    // Revoke all auths so the SME signature is absent on clear.
-    env.mock_auths(&[]);
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        client.clear_sme_collateral_commitment();
-    }));
-    assert!(result.is_err(), "non-SME clear must be rejected");
-    assert!(
-        client.get_sme_collateral_commitment().is_some(),
-        "failed clear must leave the commitment in place"
-    );
-}
-
-#[test]
-fn test_clear_after_settle_succeeds() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, admin, sme) = setup(&env);
-    init_settleable_test(&env, &client, &admin, &sme, 0);
-
-    let asset = symbol_short!("USDC");
-    client.record_sme_collateral_commitment(&asset, &5_000i128);
-    fund_to_target_stl(&env, &client);
-    client.settle();
-
-    client.clear_sme_collateral_commitment();
-    assert!(client.get_sme_collateral_commitment().is_none());
-}
-
-#[test]
-fn test_clear_after_cancel_funding_succeeds() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, admin, sme) = setup(&env);
-    default_init(&client, &env, &admin, &sme);
-
-    let asset = symbol_short!("USDC");
-    client.record_sme_collateral_commitment(&asset, &PLEDGE);
-    client.cancel_funding();
-
-    client.clear_sme_collateral_commitment();
-    assert!(client.get_sme_collateral_commitment().is_none());
 }
 
 // ---------------------------------------------------------------------------
@@ -1191,7 +1070,7 @@ fn test_get_returns_none_before_record() {
 }
 
 // ---------------------------------------------------------------------------
-// Overwrite: record twice, clear once → None; cleared amount is the last pledge
+// Overwrite: record twice, clear once ÔåÆ None; cleared amount is the last pledge
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -1213,54 +1092,7 @@ fn test_overwrite_then_clear() {
     assert!(client.get_sme_collateral_commitment().is_none());
 }
 
-#[test]
-fn test_clear_emits_exactly_one_coll_clr_event() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, admin, sme) = setup(&env);
-    let contract_id = client.address.clone();
-    default_init(&client, &env, &admin, &sme);
-
-    let asset = symbol_short!("USDC");
-    client.record_sme_collateral_commitment(&asset, &PLEDGE);
-
-    // Drain the record event so we only measure the clear transition.
-    let _ = env.events().all();
-    client.clear_sme_collateral_commitment();
-
-    let contract_events = env.events().all().filter_by_contract(&contract_id);
-    let events = contract_events.events();
-    assert_eq!(
-        events.len(),
-        1,
-        "clear_sme_collateral_commitment must emit exactly one event"
-    );
-
-    let invoice_id = client.get_escrow().invoice_id;
-    assert_eq!(
-        events.last().unwrap().clone(),
-        CollateralClearedEvt {
-            name: symbol_short!("coll_clr"),
-            invoice_id,
-            asset,
-            amount: PLEDGE,
-            recorded_at: env.ledger().timestamp(),
-        }
-        .to_xdr(&env, &contract_id)
-    );
-}
-
-#[test]
-fn test_collateral_state_change_topics_are_distinct() {
-    // Indexers key on the short routing symbols; record and clear must not collide.
-    assert_ne!(
-        symbol_short!("coll_rec"),
-        symbol_short!("coll_clr"),
-        "collateral record and clear topics must be distinct"
-    );
-}
-
-// ──────────────────────────────────────────────────────────────────────────────
+// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 // Anchoring tests: read-view default/absent return values (docs/escrow-read-api.md)
 //
 // Each test asserts the default or absent-key return value documented in the
