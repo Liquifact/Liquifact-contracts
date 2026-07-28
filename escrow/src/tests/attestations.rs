@@ -773,6 +773,32 @@ fn test_revoked_digests_view_pagination_and_empty_past_end() {
 }
 
 #[test]
+fn test_revoked_digests_view_zero_limit_returns_empty() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    for i in 0u8..3 {
+        client.append_attestation_digest(&digest(&env, i));
+        client.revoke_attestation_digest(&(i as u32));
+    }
+
+    let page = client.get_revoked_attestation_digests(&0, &0);
+    assert_eq!(page.len(), 0);
+}
+
+#[test]
+fn test_revoked_digests_view_large_limit_caps_to_max_page() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    for i in 0u8..25 {
+        client.append_attestation_digest(&digest(&env, i));
+        client.revoke_attestation_digest(&(i as u32));
+    }
+
+    let page = client.get_revoked_attestation_digests(&0, &(crate::MAX_ATTESTATION_READ_PAGE + 10));
+    assert_eq!(page.len(), crate::MAX_ATTESTATION_READ_PAGE);
+}
+
+#[test]
 #[ignore = "branch-specific latent failure"]
 fn test_revoked_digests_view_caps_limit() {
     let env = Env::default();
@@ -950,6 +976,52 @@ fn test_require_index_in_range_empty_log_index_zero_all_callers() {
         client.try_unrevoke_attestation_digest(&0),
         EscrowError::AttestationIndexOutOfRange,
     );
+}
+
+#[test]
+fn test_revoke_attestation_digests_empty_batch_returns_typed_error() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    let indices: soroban_sdk::Vec<u32> = soroban_sdk::Vec::new(&env);
+
+    assert_contract_error(
+        client.try_revoke_attestation_digests(&indices),
+        EscrowError::AttestationBatchEmpty,
+    );
+    assert_eq!(client.get_attestation_append_log().len(), 0);
+}
+
+#[test]
+fn test_revoke_attestation_digests_over_limit_returns_typed_error() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    let mut indices = soroban_sdk::Vec::new(&env);
+    for i in 0u32..=(MAX_ATTESTATION_REVOKE_BATCH) {
+        indices.push_back(i);
+    }
+
+    assert_contract_error(
+        client.try_revoke_attestation_digests(&indices),
+        EscrowError::AttestationBatchTooLarge,
+    );
+    assert_eq!(client.get_attestation_append_log().len(), 0);
+}
+
+#[test]
+fn test_revoke_attestation_digests_exact_max_size_succeeds() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    let mut batch = soroban_sdk::Vec::new(&env);
+    for i in 0u8..(MAX_ATTESTATION_APPEND_BATCH as u8) {
+        batch.push_back(digest(&env, i));
+    }
+    client.append_attestation_digests(&batch);
+
+    let last = MAX_ATTESTATION_APPEND_ENTRIES - 1;
+    let indices = soroban_sdk::vec![&env, last];
+    client.revoke_attestation_digests(&indices);
+
+    assert!(client.is_attestation_revoked(&last));
 }
 
 /// Appending exactly MAX entries then revoking and unrevoking the last index (31)
