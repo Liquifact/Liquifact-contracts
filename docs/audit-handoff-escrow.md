@@ -65,7 +65,7 @@ These map directly to property tests in `escrow/src/test/properties.rs` and `tes
 | Role | Stored at | Entrypoints authorized |
 |------|-----------|------------------------|
 | `admin` | `InvoiceEscrow::admin` (rotatable via `propose_admin` + `accept_admin`) | `init`, `set_legal_hold`, `clear_legal_hold`, `update_maturity`, `update_funding_target`, `propose_admin`, `accept_admin`, `migrate`, `bind_primary_attestation_hash`, `append_attestation_digest` |
-| `sme_address` | `InvoiceEscrow::sme_address` (immutable) | `settle`, `withdraw`, `record_sme_collateral_commitment` |
+| `sme_address` | `InvoiceEscrow::sme_address` (immutable) | `settle`, `withdraw`, `record_sme_collateral_commitment`, `batch_record_collateral` |
 | `investor` | per-call argument (verified via `require_auth`) | `fund`, `fund_with_commitment`, `claim_investor_payout` |
 | `treasury` | `DataKey::Treasury` (immutable) | `sweep_terminal_dust` |
 

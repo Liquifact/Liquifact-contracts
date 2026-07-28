@@ -7612,3 +7612,775 @@ fn test_unfund_event_emitted() {
 
     assert_eq!(*last, expected.to_xdr(&env, &contract_id));
 }
+
+// ---------------------------------------------------------------------------
+// FundingStateChanged event tests (issue #913)
+// ---------------------------------------------------------------------------
+
+/// Funding a single investor to exactly the target must emit exactly one
+/// `FundingStateChanged` event with `from_status=0`, `to_status=1`, and
+/// `trigger=fund`.
+#[test]
+fn funding_state_changed_emitted_once_on_exact_target_fund() {
+    use crate::FundingStateChanged;
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let (contract_id, client) = deploy_with_id(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    let invoice_id = symbol_short!("FSC001");
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "FSC001"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    let investor = Address::generate(&env);
+    client.fund(&investor, &TARGET);
+
+    let all_events = env.events().all();
+    let fsc_events: std::vec::Vec<_> = all_events
+        .events()
+        .iter()
+        .filter(|e| {
+            let expected = FundingStateChanged {
+                name: symbol_short!("fund_st_ch"),
+                invoice_id,
+                from_status: 0u32,
+                to_status: 1u32,
+                funded_amount: TARGET,
+                funding_target: TARGET,
+                ledger_timestamp: env.ledger().timestamp(),
+                trigger: symbol_short!("fund"),
+            }
+            .to_xdr(&env, &contract_id);
+            *e == expected
+        })
+        .collect();
+
+    assert_eq!(fsc_events.len(), 1, "expected exactly one FundingStateChanged event");
+}
+
+/// Funding below the target must NOT emit a `FundingStateChanged` event.
+#[test]
+fn funding_state_changed_not_emitted_on_partial_fund() {
+    use crate::FundingStateChanged;
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let (contract_id, client) = deploy_with_id(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    let invoice_id = symbol_short!("FSC002");
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "FSC002"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    let investor = Address::generate(&env);
+    client.fund(&investor, &(TARGET / 2));
+
+    let all_events = env.events().all();
+    let fsc_count = all_events
+        .events()
+        .iter()
+        .filter(|e| {
+            let candidate = FundingStateChanged {
+                name: symbol_short!("fund_st_ch"),
+                invoice_id,
+                from_status: 0u32,
+                to_status: 1u32,
+                funded_amount: TARGET / 2,
+                funding_target: TARGET,
+                ledger_timestamp: env.ledger().timestamp(),
+                trigger: symbol_short!("fund"),
+            }
+            .to_xdr(&env, &contract_id);
+            *e == candidate
+        })
+        .count();
+
+    assert_eq!(fsc_count, 0, "FundingStateChanged must not fire before target is reached");
+    assert_eq!(client.get_escrow().status, 0, "escrow must still be open");
+}
+
+/// Two-step funding: first deposit partial, second crosses target. The event
+/// must be emitted on the **second** call only, with the correct total principal.
+#[test]
+fn funding_state_changed_emitted_on_threshold_crossing_deposit() {
+    use crate::FundingStateChanged;
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let (contract_id, client) = deploy_with_id(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    let invoice_id = symbol_short!("FSC003");
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "FSC003"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    let investor = Address::generate(&env);
+    // First call: below target — must produce no FundingStateChanged.
+    client.fund(&investor, &(TARGET / 2));
+    let after_first = env.events().all();
+    let fsc_after_first = after_first
+        .events()
+        .iter()
+        .any(|e| {
+            let candidate = FundingStateChanged {
+                name: symbol_short!("fund_st_ch"),
+                invoice_id,
+                from_status: 0u32,
+                to_status: 1u32,
+                funded_amount: TARGET / 2,
+                funding_target: TARGET,
+                ledger_timestamp: env.ledger().timestamp(),
+                trigger: symbol_short!("fund"),
+            }
+            .to_xdr(&env, &contract_id);
+            *e == candidate
+        });
+    assert!(!fsc_after_first, "no FundingStateChanged after partial fund");
+
+    // Second call: reaches target — must produce exactly one FundingStateChanged.
+    client.fund(&investor, &(TARGET / 2));
+    let after_second = env.events().all();
+    let fsc_events: std::vec::Vec<_> = after_second
+        .events()
+        .iter()
+        .filter(|e| {
+            let expected = FundingStateChanged {
+                name: symbol_short!("fund_st_ch"),
+                invoice_id,
+                from_status: 0u32,
+                to_status: 1u32,
+                funded_amount: TARGET,
+                funding_target: TARGET,
+                ledger_timestamp: env.ledger().timestamp(),
+                trigger: symbol_short!("fund"),
+            }
+            .to_xdr(&env, &contract_id);
+            *e == expected
+        })
+        .collect();
+
+    assert_eq!(fsc_events.len(), 1, "exactly one FundingStateChanged on threshold crossing");
+}
+
+/// Over-funding: investor deposits more than the target in a single call.
+/// The event must reflect the actual `funded_amount` (which exceeds target).
+#[test]
+fn funding_state_changed_payload_reflects_overfunded_amount() {
+    use crate::FundingStateChanged;
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let (contract_id, client) = deploy_with_id(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    let invoice_id = symbol_short!("FSC004");
+    let overshoot = TARGET + 5_000_000_000i128;
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "FSC004"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    let investor = Address::generate(&env);
+    client.fund(&investor, &overshoot);
+
+    let all_events = env.events().all();
+    let fsc_events: std::vec::Vec<_> = all_events
+        .events()
+        .iter()
+        .filter(|e| {
+            let expected = FundingStateChanged {
+                name: symbol_short!("fund_st_ch"),
+                invoice_id,
+                from_status: 0u32,
+                to_status: 1u32,
+                funded_amount: overshoot,
+                funding_target: TARGET,
+                ledger_timestamp: env.ledger().timestamp(),
+                trigger: symbol_short!("fund"),
+            }
+            .to_xdr(&env, &contract_id);
+            *e == expected
+        })
+        .collect();
+
+    assert_eq!(fsc_events.len(), 1, "expected exactly one FundingStateChanged");
+    assert_eq!(client.get_escrow().funded_amount, overshoot);
+}
+
+/// No duplicate emission: a follow-on deposit after the escrow is already
+/// funded (status == 1) must NOT emit another `FundingStateChanged`.
+#[test]
+fn funding_state_changed_not_emitted_for_follow_on_deposit_after_funded() {
+    use crate::FundingStateChanged;
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let (contract_id, client) = deploy_with_id(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    let invoice_id = symbol_short!("FSC005");
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "FSC005"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    // Reach funded state with first investor.
+    let inv_a = Address::generate(&env);
+    client.fund(&inv_a, &TARGET);
+    assert_eq!(client.get_escrow().status, 1);
+
+    // Drain event buffer so we can inspect only the follow-on fund events.
+    let _ = env.events().all();
+
+    // Follow-on deposit from a second investor while already funded.
+    let inv_b = Address::generate(&env);
+    client.fund(&inv_b, &1_000i128);
+
+    let after_followon = env.events().all();
+    let fsc_count = after_followon
+        .events()
+        .iter()
+        .filter(|e| {
+            // Any FundingStateChanged with invoice_id FSC005 is a duplicate.
+            let candidate = FundingStateChanged {
+                name: symbol_short!("fund_st_ch"),
+                invoice_id,
+                from_status: 0u32,
+                to_status: 1u32,
+                funded_amount: TARGET + 1_000i128,
+                funding_target: TARGET,
+                ledger_timestamp: env.ledger().timestamp(),
+                trigger: symbol_short!("fund"),
+            }
+            .to_xdr(&env, &contract_id);
+            *e == candidate
+        })
+        .count();
+
+    assert_eq!(fsc_count, 0, "FundingStateChanged must not be re-emitted after already funded");
+}
+
+/// `fund_with_commitment` that crosses the target must also emit `FundingStateChanged`
+/// with `trigger = fund` (same as plain `fund`).
+#[test]
+fn funding_state_changed_emitted_via_fund_with_commitment() {
+    use crate::FundingStateChanged;
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let (contract_id, client) = deploy_with_id(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    let invoice_id = symbol_short!("FSC006");
+
+    let mut tiers = SorobanVec::new(&env);
+    tiers.push_back(YieldTier {
+        min_lock_secs: 100,
+        yield_bps: 900,
+    });
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "FSC006"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &Some(tiers),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    let investor = Address::generate(&env);
+    client.fund_with_commitment(&investor, &TARGET, &200u64);
+
+    let all_events = env.events().all();
+    let fsc_events: std::vec::Vec<_> = all_events
+        .events()
+        .iter()
+        .filter(|e| {
+            let expected = FundingStateChanged {
+                name: symbol_short!("fund_st_ch"),
+                invoice_id,
+                from_status: 0u32,
+                to_status: 1u32,
+                funded_amount: TARGET,
+                funding_target: TARGET,
+                ledger_timestamp: env.ledger().timestamp(),
+                trigger: symbol_short!("fund"),
+            }
+            .to_xdr(&env, &contract_id);
+            *e == expected
+        })
+        .collect();
+
+    assert_eq!(fsc_events.len(), 1, "FundingStateChanged must fire once via fund_with_commitment");
+}
+
+/// `update_funding_target` that lowers the target to meet the funded amount
+/// must emit `FundingStateChanged` with `trigger = tgt_lower`.
+#[test]
+fn funding_state_changed_emitted_via_update_funding_target() {
+    use crate::FundingStateChanged;
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let (contract_id, client) = deploy_with_id(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    let invoice_id = symbol_short!("FSC007");
+    let high_target = TARGET * 2;
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "FSC007"),
+        &sme,
+        &high_target,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    let investor = Address::generate(&env);
+    // Fund to exactly TARGET (below high_target — still open).
+    client.fund(&investor, &TARGET);
+    assert_eq!(client.get_escrow().status, 0);
+
+    // Clear events so we isolate the update_funding_target events.
+    let _ = env.events().all();
+
+    // Lower target to match funded_amount — triggers 0 → 1 transition.
+    client.update_funding_target(&TARGET);
+
+    let all_events = env.events().all();
+    let fsc_events: std::vec::Vec<_> = all_events
+        .events()
+        .iter()
+        .filter(|e| {
+            let expected = FundingStateChanged {
+                name: symbol_short!("fund_st_ch"),
+                invoice_id,
+                from_status: 0u32,
+                to_status: 1u32,
+                funded_amount: TARGET,
+                funding_target: TARGET,
+                ledger_timestamp: env.ledger().timestamp(),
+                trigger: symbol_short!("tgt_lower"),
+            }
+            .to_xdr(&env, &contract_id);
+            *e == expected
+        })
+        .collect();
+
+    assert_eq!(fsc_events.len(), 1, "FundingStateChanged must fire once via update_funding_target");
+    assert_eq!(client.get_escrow().status, 1);
+}
+
+/// `update_funding_target` that does NOT cause a transition (target still above
+/// funded amount) must NOT emit `FundingStateChanged`.
+#[test]
+fn funding_state_changed_not_emitted_when_target_update_does_not_trigger_transition() {
+    use crate::FundingStateChanged;
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let (contract_id, client) = deploy_with_id(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    let invoice_id = symbol_short!("FSC008");
+    let high_target = TARGET * 3;
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "FSC008"),
+        &sme,
+        &high_target,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    let investor = Address::generate(&env);
+    client.fund(&investor, &TARGET);
+    let _ = env.events().all();
+
+    // Lower target to TARGET * 2 — still above funded_amount, no transition.
+    client.update_funding_target(&(TARGET * 2));
+
+    let all_events = env.events().all();
+    let fsc_count = all_events
+        .events()
+        .iter()
+        .filter(|e| {
+            // Any FundingStateChanged event for this invoice is unexpected.
+            let candidate_any = FundingStateChanged {
+                name: symbol_short!("fund_st_ch"),
+                invoice_id,
+                from_status: 0u32,
+                to_status: 1u32,
+                funded_amount: TARGET,
+                funding_target: TARGET * 2,
+                ledger_timestamp: env.ledger().timestamp(),
+                trigger: symbol_short!("tgt_lower"),
+            }
+            .to_xdr(&env, &contract_id);
+            *e == candidate_any
+        })
+        .count();
+
+    assert_eq!(fsc_count, 0, "FundingStateChanged must not fire when target still above funded_amount");
+    assert_eq!(client.get_escrow().status, 0);
+}
+
+/// `partial_settle` must emit `FundingStateChanged` with `trigger = part_set`.
+#[test]
+fn funding_state_changed_emitted_via_partial_settle() {
+    use crate::FundingStateChanged;
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let (contract_id, client) = deploy_with_id(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    let invoice_id = symbol_short!("FSC009");
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "FSC009"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    let investor = Address::generate(&env);
+    // Fund partially — still open.
+    client.fund(&investor, &(TARGET / 2));
+    assert_eq!(client.get_escrow().status, 0);
+
+    let _ = env.events().all();
+
+    // partial_settle forces 0 → 1 even under-funded.
+    client.partial_settle(&sme);
+
+    let all_events = env.events().all();
+    let fsc_events: std::vec::Vec<_> = all_events
+        .events()
+        .iter()
+        .filter(|e| {
+            let expected = FundingStateChanged {
+                name: symbol_short!("fund_st_ch"),
+                invoice_id,
+                from_status: 0u32,
+                to_status: 1u32,
+                funded_amount: TARGET / 2,
+                funding_target: TARGET,
+                ledger_timestamp: env.ledger().timestamp(),
+                trigger: symbol_short!("part_set"),
+            }
+            .to_xdr(&env, &contract_id);
+            *e == expected
+        })
+        .collect();
+
+    assert_eq!(fsc_events.len(), 1, "FundingStateChanged must fire once via partial_settle");
+    assert_eq!(client.get_escrow().status, 1);
+}
+
+/// `fund_batch` reaching the target emits exactly one `FundingStateChanged`
+/// (the batch shares the same `fund_impl` path, trigger = `fund`).
+#[test]
+fn funding_state_changed_emitted_via_fund_batch() {
+    use crate::FundingStateChanged;
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let (contract_id, client) = deploy_with_id(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    let invoice_id = symbol_short!("FSC010");
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "FSC010"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    let inv_a = Address::generate(&env);
+    let inv_b = Address::generate(&env);
+    let half = TARGET / 2;
+
+    let mut entries = SorobanVec::new(&env);
+    entries.push_back((inv_a.clone(), half));
+    entries.push_back((inv_b.clone(), half));
+
+    client.fund_batch(&entries);
+
+    let all_events = env.events().all();
+    let fsc_events: std::vec::Vec<_> = all_events
+        .events()
+        .iter()
+        .filter(|e| {
+            let expected = FundingStateChanged {
+                name: symbol_short!("fund_st_ch"),
+                invoice_id,
+                from_status: 0u32,
+                to_status: 1u32,
+                funded_amount: TARGET,
+                funding_target: TARGET,
+                ledger_timestamp: env.ledger().timestamp(),
+                trigger: symbol_short!("fund"),
+            }
+            .to_xdr(&env, &contract_id);
+            *e == expected
+        })
+        .collect();
+
+    assert_eq!(fsc_events.len(), 1, "exactly one FundingStateChanged via fund_batch");
+    assert_eq!(client.get_escrow().status, 1);
+}
+
+/// Event fields are correct: `from_status`, `to_status`, `funded_amount`,
+/// `funding_target`, and `ledger_timestamp` must all match storage state.
+#[test]
+fn funding_state_changed_all_payload_fields_correct() {
+    use crate::FundingStateChanged;
+    use soroban_sdk::testutils::{Events as _, Ledger as _};
+
+    let env = Env::default();
+    env.mock_all_auths();
+
+    // Set a known ledger timestamp before the call.
+    let mut li = env.ledger().get();
+    li.timestamp = 9_000_000;
+    env.ledger().set(li);
+
+    let (contract_id, client) = deploy_with_id(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    let invoice_id = symbol_short!("FSC011");
+    let target = 50_000i128;
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "FSC011"),
+        &sme,
+        &target,
+        &500i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    let investor = Address::generate(&env);
+    client.fund(&investor, &target);
+
+    let all_events = env.events().all();
+    let fsc_events: std::vec::Vec<_> = all_events
+        .events()
+        .iter()
+        .filter(|e| {
+            let expected = FundingStateChanged {
+                name: symbol_short!("fund_st_ch"),
+                invoice_id,
+                from_status: 0u32,
+                to_status: 1u32,
+                funded_amount: target,
+                funding_target: target,
+                ledger_timestamp: 9_000_000u64,
+                trigger: symbol_short!("fund"),
+            }
+            .to_xdr(&env, &contract_id);
+            *e == expected
+        })
+        .collect();
+
+    assert_eq!(fsc_events.len(), 1, "one FundingStateChanged with correct fields");
+
+    // Confirm storage state matches event payload.
+    let escrow = client.get_escrow();
+    assert_eq!(escrow.status, 1);
+    assert_eq!(escrow.funded_amount, target);
+    assert_eq!(escrow.funding_target, target);
+}

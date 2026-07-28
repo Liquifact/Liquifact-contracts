@@ -2549,6 +2549,11 @@ fn test_get_escrow_summary_happy_path() {
     );
     assert!(!summary.has_primary_attestation);
     assert_eq!(summary.attestation_log_length, 0);
+    // No fee supplied at init and never paused ⇒ additive-key defaults.
+    assert_eq!(summary.paused, client.is_paused());
+    assert_eq!(summary.protocol_fee_bps, client.get_protocol_fee_bps());
+    assert!(!summary.paused);
+    assert_eq!(summary.protocol_fee_bps, 0);
 }
 
 #[test]
@@ -2722,6 +2727,65 @@ fn test_get_escrow_summary_with_collateral_and_attestations() {
     // Verify attestation fields
     assert!(summary.has_primary_attestation);
     assert_eq!(summary.attestation_log_length, 2);
+}
+
+/// The summary's `paused` field must track `set_paused` toggles, and its
+/// `protocol_fee_bps` field must reflect the immutable init-time fee. Both are read from
+/// the same storage keys as `is_paused()` / `get_protocol_fee_bps()`, so they can never
+/// drift from the standalone views.
+#[test]
+fn test_get_escrow_summary_tracks_pause_and_protocol_fee() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let (funding_token, treasury) = free_addresses(&env);
+
+    // Initialize with a non-default, immutable protocol fee of 250 bps.
+    let fee_bps: i64 = 250;
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "INV_PAUSE_FEE"),
+        &sme,
+        &1000,
+        &100,
+        &100,
+        &funding_token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &Some(fee_bps),
+    );
+
+    // Fee mirrors the init-time value and the standalone getter from the start.
+    let summary = client.get_escrow_summary();
+    assert_eq!(summary.protocol_fee_bps, fee_bps);
+    assert_eq!(summary.protocol_fee_bps, client.get_protocol_fee_bps());
+
+    // Never paused yet ⇒ false, matching is_paused().
+    assert!(!summary.paused);
+    assert_eq!(summary.paused, client.is_paused());
+
+    // Activate the operational pause; summary must now report paused == true.
+    client.set_paused(&true);
+    let summary = client.get_escrow_summary();
+    assert!(summary.paused);
+    assert_eq!(summary.paused, client.is_paused());
+    // The immutable fee is unaffected by pause toggles.
+    assert_eq!(summary.protocol_fee_bps, fee_bps);
+
+    // Clear the pause; summary tracks the flag back to false.
+    client.set_paused(&false);
+    let summary = client.get_escrow_summary();
+    assert!(!summary.paused);
+    assert_eq!(summary.paused, client.is_paused());
+    assert_eq!(summary.protocol_fee_bps, fee_bps);
 }
 
 #[test]
@@ -4019,4 +4083,144 @@ fn refactor_gate_helpers_rotate_blocked_post_settlement() {
         client.try_rotate_beneficiary(&new_sme),
         EscrowError::RotationNotOpen,
     );
+}
+
+// =============================================================================
+// Settlement validation helper parity tests (issue #1009)
+//
+// Asserts that `is_maturity_reached` and `validate_settlement_state` are
+// behaviour-preserving replacements for the inline settlement checks that
+// previously appeared in `settle`, `settleable_now`, and
+// `get_settlement_readiness`.
+// =============================================================================
+
+/// Pure-function boundary coverage for `is_maturity_reached`: vacuous reach when
+/// `maturity == 0`, and inclusive `>=` at the configured maturity timestamp.
+#[test]
+fn settlement_validation_maturity_reached_predicate_boundaries() {
+    let env = Env::default();
+
+    assert!(
+        crate::is_maturity_reached(&env, 0),
+        "maturity == 0 must be vacuously reached"
+    );
+
+    let maturity: u64 = 10_000;
+    env.ledger().with_mut(|l| l.timestamp = maturity - 1);
+    assert!(
+        !crate::is_maturity_reached(&env, maturity),
+        "one second before maturity must not be reached"
+    );
+
+    env.ledger().with_mut(|l| l.timestamp = maturity);
+    assert!(
+        crate::is_maturity_reached(&env, maturity),
+        "exact maturity boundary must be inclusive"
+    );
+
+    env.ledger().with_mut(|l| l.timestamp = maturity + 1);
+    assert!(
+        crate::is_maturity_reached(&env, maturity),
+        "after maturity must be reached"
+    );
+}
+
+/// Confirms `validate_settlement_state` still emits the documented typed errors
+/// through `settle` after the refactor.
+#[test]
+fn settlement_validation_helper_preserves_settle_error_variants() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    // Open escrow → SettlementNotFunded
+    let (open, _a, _s) = init_open(&env, "SV_OPEN");
+    assert_contract_error(open.try_settle(), EscrowError::SettlementNotFunded);
+
+    // Funded but pre-maturity → MaturityNotReached
+    let maturity: u64 = 20_000;
+    let client = super::deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (token, treasury) = super::free_addresses(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "SV_MAT"),
+        &sme,
+        &super::TARGET,
+        &0i64,
+        &maturity,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+    let investor = Address::generate(&env);
+    client.fund(&investor, &super::TARGET);
+    env.ledger().with_mut(|l| l.timestamp = maturity - 1);
+    assert_contract_error(client.try_settle(), EscrowError::MaturityNotReached);
+
+    // At maturity → succeeds
+    env.ledger().with_mut(|l| l.timestamp = maturity);
+    let settled = client.settle();
+    assert_eq!(settled.status, 2);
+}
+
+/// Confirms `get_settlement_readiness().maturity_reached` stays aligned with
+/// `is_maturity_reached` after the helper extraction.
+#[test]
+fn settlement_validation_readiness_maturity_reached_matches_predicate() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let maturity: u64 = 15_000;
+    let client = super::deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (token, treasury) = super::free_addresses(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "SV_RDY"),
+        &sme,
+        &super::TARGET,
+        &0i64,
+        &maturity,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+    let investor = Address::generate(&env);
+    client.fund(&investor, &super::TARGET);
+
+    env.ledger().with_mut(|l| l.timestamp = maturity - 1);
+    let pre = client.get_settlement_readiness();
+    assert_eq!(
+        pre.maturity_reached,
+        crate::is_maturity_reached(&env, maturity)
+    );
+    assert!(!pre.maturity_reached);
+
+    env.ledger().with_mut(|l| l.timestamp = maturity);
+    let at = client.get_settlement_readiness();
+    assert_eq!(
+        at.maturity_reached,
+        crate::is_maturity_reached(&env, maturity)
+    );
+    assert!(at.maturity_reached);
 }

@@ -1,7 +1,9 @@
 # Escrow Attestations: KYC/KYB Operational Flows
 
-This document describes how the three attestation entrypoints on the LiquiFact escrow contract
+This document describes how the attestation entrypoints on the LiquiFact escrow contract
 are used in KYC (Know Your Customer) and KYB (Know Your Business) compliance workflows.
+
+See [`docs/attestation-invariants.md`](attestation-invariants.md) for the formal invariants and enforcement rules.
 
 ## What this is — and what it is not
 
@@ -66,6 +68,14 @@ values satisfy `used + remaining == MAX_ATTESTATION_APPEND_ENTRIES`, and `remain
 `0` once the log is full and the next append would fail with
 `AttestationAppendLogCapacityReached`.
 
+### `get_revoked_attestation_digests(start: u32, limit: u32)`
+
+Returns a page of revoked append-log entries. `start` is zero-based and may point at or beyond
+the end of the log, in which case the result is empty. `limit` must be in
+`1..=MAX_ATTESTATION_READ_PAGE` (20); zero returns `AttestationReadLimitZero` (57), and a value
+above the maximum returns `AttestationReadLimitTooLarge` (58). Valid limits are applied exactly
+and are never silently clamped.
+
 ### `revoke_attestation_digest(index: u32)`
 
 | Property | Value |
@@ -110,6 +120,40 @@ This was inconsistent with the rest of the attestation API (codes 50–51) and w
 `EscrowError` contract. Raw panic strings cannot be caught by type in SDKs or indexers and may
 change without notice. Stable numeric codes allow SDK consumers to branch deterministically on
 `ContractError(52)` / `ContractError(53)` without parsing message text.
+
+### `append_attestation_digests(digests: Vec<BytesN<32>>)`
+
+| Property | Value |
+|---|---|
+| Auth | `InvoiceEscrow::admin` |
+| Write policy | **Batch append**, all-or-nothing |
+| Batch bounds | Non-empty; max [`MAX_ATTESTATION_APPEND_BATCH`] (32) entries |
+| Capacity check | Pre-flight: `current_log_len + batch_len <= MAX_ATTESTATION_APPEND_ENTRIES` |
+| Storage key | `DataKey::AttestationAppendLog` |
+| Event | One `AttestationDigestAppended { invoice_id, index, digest }` per entry |
+
+Atomically appends multiple digests in a single call, saving per-call transaction fees for
+operators that need to anchor several document hashes at the same ledger. All-or-nothing:
+if any validation guard fails, no state is mutated and no events are emitted.
+
+The pre-flight capacity check runs before any mutation — even a partially-fitting batch is
+rejected entirely, guaranteeing callers never observe a partial append. Indices are assigned
+sequentially starting from `log.len()` at call time, identical to repeated single-entry calls.
+
+**Typed errors:**
+
+| Condition | Error code | `EscrowError` variant |
+|---|---|---|
+| `digests.len() == 0` | 57 | `AttestationAppendBatchEmpty` |
+| `digests.len() > MAX_ATTESTATION_APPEND_BATCH` | 58 | `AttestationAppendBatchTooLarge` |
+| `current_log_len + digests.len() > MAX_ATTESTATION_APPEND_ENTRIES` | 51 | `AttestationAppendLogCapacityReached` |
+
+```typescript
+// Example: anchor three document hashes in one call
+await contract.append_attestation_digests({
+  digests: [sha256(bundle_a), sha256(bundle_b), sha256(bundle_c)]
+});
+```
 
 ### `revoke_attestation_digests(indices: Vec<u32>)`
 
@@ -164,7 +208,7 @@ The append log entry and its digest are unaffected. After a successful unrevoke,
 active by indexers.
 
 **Errors** with `AttestationIndexOutOfRange` (52) if `index >= log.len()`, or
-`AttestationNotRevoked` (53) if the index is not currently revoked.
+`AttestationNotRevoked` (56) if the index is not currently revoked.
 
 ---
 
@@ -380,7 +424,7 @@ storage key; the digest at index N is unchanged.
 
 - **Unrevoke is admin-only:** `unrevoke_attestation_digest` is gated by `require_auth` on
   `InvoiceEscrow::admin`. ADR-002 guard ordering is preserved: range and state checks run
-  before auth so typed errors (`AttestationIndexOutOfRange` = 52, `AttestationNotRevoked` = 53)
+  before auth so typed errors (`AttestationIndexOutOfRange` = 52, `AttestationNotRevoked` = 56)
   are surfaced cleanly.
 
 - **Unrevoke is idempotent in round-trips:** revoke → unrevoke → revoke is valid. Each
@@ -455,6 +499,26 @@ Attestation behavior is covered in [`escrow/src/tests/attestations.rs`](../escro
 | `test_unrevoke_non_admin_panics` | Non-admin unrevoke is rejected |
 | `test_revoke_unrevoke_revoke_round_trip` | Round-trip revoke → unrevoke → revoke succeeds |
 | `test_unrevoke_does_not_affect_other_indices` | Unrevoke of index 0 leaves index 1 revoked |
+
+### Batch append (`append_attestation_digests`)
+
+| Test | What it proves |
+|---|---|
+| `test_batch_append_happy_path` | Happy path: 3 digests appended atomically, all readable in order |
+| `test_batch_append_starts_at_existing_log_length` | Indices offset correctly when log is pre-filled |
+| `test_batch_append_single_element_succeeds` | Minimum valid batch size (1 entry) succeeds |
+| `test_batch_append_max_size_succeeds` | Batch of exactly `MAX_ATTESTATION_APPEND_BATCH` succeeds |
+| `test_batch_append_empty_returns_typed_error` | Empty batch returns `AttestationAppendBatchEmpty` (57) |
+| `test_batch_append_over_limit_returns_typed_error` | `MAX + 1` entries returns `AttestationAppendBatchTooLarge` (58) |
+| `test_batch_append_over_capacity_rejected_atomically` | Batch that would overflow the log is rejected with `AttestationAppendLogCapacityReached` (51); no partial write |
+| `test_batch_append_fills_log_exactly_to_capacity` | Filling exactly to `MAX_ATTESTATION_APPEND_ENTRIES` succeeds; next single append fails |
+| `test_batch_append_duplicate_digests_allowed` | Duplicate digests within a batch are accepted (audit trail, not a set) |
+| `test_batch_append_non_admin_returns_error` | Non-admin caller is rejected; log is unmodified |
+| `test_batch_append_emits_events_with_correct_indices` | Exactly one `att_app` event per entry with correct sequential index |
+| `test_batch_append_events_offset_by_existing_log_length` | Event indices correctly offset when log is pre-filled |
+| `test_batch_append_interleaved_with_single_appends` | Mixing single and batch appends preserves full ordered audit trail |
+| `test_batch_append_entries_are_revocable` | Batch-appended entries are independently revocable after insertion |
+| `test_batch_append_failed_call_leaves_log_unchanged` | Failed batch (over-limit or over-capacity) leaves log in its prior state |
 
 ### Batch revocation (`revoke_attestation_digests`)
 

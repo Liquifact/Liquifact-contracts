@@ -24,6 +24,7 @@ Multiple principals interact with the escrow (admin, SME, investors, treasury). 
 | `propose_admin` | current `admin` |
 | `accept_admin` | pending admin stored in `DataKey::PendingAdmin` |
 | `record_sme_collateral_commitment` | `sme_address` |
+| `batch_record_collateral` | `sme_address` |
 
 `admin` and `treasury` are stored at `init`; `treasury` is immutable, while `admin` rotates only through a two-step handover. The current admin calls `propose_admin(new_admin)`, which stores `DataKey::PendingAdmin` without changing authority. The pending address must then call `accept_admin()`, which requires its own authorization, promotes it into `InvoiceEscrow::admin`, and clears `DataKey::PendingAdmin`. The deprecated `transfer_admin` shim must not be treated as an immediate transfer; it only creates the pending proposal.
 

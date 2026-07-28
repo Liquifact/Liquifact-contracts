@@ -170,13 +170,18 @@ liquifact-contracts/
 | `migrate` | Admin | Schema version gate — **typed errors on all paths** in the current release (codes 90–92). |
 | `set_legal_hold` | Admin | Admin activates/clears compliance hold. |
 | `set_paused` | Admin | Admin toggles a lightweight operational pause (incident response) that blocks `fund`, `settle`, `withdraw`, and `claim_investor_payout`. Orthogonal to legal hold; single-call toggle with no clear delay. |
-| `is_paused` | — | Read the current operational pause flag (defaults to `false`). |
+| `is_paused` | — | Read the current operational pause flag (defaults to `false`). Reflects auto-expiry once a pause max duration is configured. |
+| `set_pause_max_duration` | Admin | Configure how long (seconds) an operational pause may stay active before it auto-expires. `0` disables the limit (legacy behavior: pause blocks indefinitely until explicitly cleared). Nonzero values must fall within `[MIN_PAUSE_MAX_DURATION_SECS, MAX_PAUSE_MAX_DURATION_SECS]` or the call fails with `PauseMaxDurationOutOfRange` (code 223). Emits `PauseMaxDurationUpdated`. |
+| `get_pause_max_duration` | — | Read the configured pause auto-expiry duration (`0` = unlimited). |
+| `set_pause_rate_limit` | Admin | Configure a cap (`max_toggles`) on `set_paused` calls allowed within a rolling `window_secs` window. `(0, 0)` disables rate limiting (legacy behavior). A nonzero `max_toggles` must pair with a nonzero `window_secs` (`PauseRateLimitInvalidCombination`, code 226) and both must fall within their configured bounds (`PauseToggleLimitOutOfRange` code 224, `PauseToggleWindowOutOfRange` code 225). Reconfiguring resets the current window. Emits `PauseRateLimitUpdated`. |
+| `get_pause_rate_limit` | — | Read the configured pause-toggle rate limit as `(max_toggles, window_secs)`; `(0, 0)` = unlimited. |
 | `set_allowlist_active` | Admin | Admin enables/disables the investor allowlist gate. |
 | `set_investor_allowlisted` | Admin | Admin sets per-address allowlist status. |
 | `set_investors_allowlisted` | Admin | Admin batch-sets allowlist status for multiple addresses. |
 | `bind_primary_attestation_hash` | Admin | Admin sets a single-write 32-byte digest (single-set guarantee). |
 | `append_attestation_digest` | Admin | Admin appends to bounded audit log. |
 | `record_sme_collateral_commitment` | SME | SME records collateral pledge (metadata only). |
+| `batch_record_collateral` | SME | Batch-record collateral commitments atomically (all-or-nothing); bounded by `MAX_COLLATERAL_BATCH`. |
 | `get_sme_collateral_commitment` | — | Return current pledge record, or `None`. |
 | `clear_sme_collateral_commitment` | SME | Retire a recorded pledge; emits `CollateralClearedEvt`. Returns `NoCollateralToClear` if none exists. |
 | `propose_admin` | Admin | Step 1 of admin handover — sets `PendingAdmin` and proposal expiry. |
@@ -341,6 +346,18 @@ The escrow supports cancellation by the admin under specific criteria, unlocking
   clear delay. It gates `fund`, `settle`, `withdraw`, and `claim_investor_payout`
   as a read-only precondition before `require_auth` (typed errors 201–204). Either
   flag blocks independently; clearing one never clears the other.
+- **Pause limit configuration:** two independent, admin-configurable bounds guard the
+  pause circuit breaker itself, both defaulting to **disabled** so pre-existing
+  deployments behave identically until an admin opts in:
+  - `set_pause_max_duration` bounds how long a pause may block gated entrypoints before
+    it auto-expires (`is_paused` and the gate checks compute expiry from `DataKey::PausedAt`;
+    the stored `Paused` flag itself is left untouched until an explicit `set_paused(false)`).
+  - `set_pause_rate_limit` bounds how many times `set_paused` may be called within a
+    rolling window, to blunt a compromised-admin-key toggle-spam scenario.
+  Both setters require admin auth and reject out-of-range values with typed errors
+  (`PauseMaxDurationOutOfRange` 223, `PauseToggleLimitOutOfRange` 224,
+  `PauseToggleWindowOutOfRange` 225, `PauseRateLimitInvalidCombination` 226,
+  `PauseToggleRateLimitExceeded` 227).
 - **Collateral record:** SME-reported metadata only; not proof of custody,
   token movement, reserved balance, or an enforceable on-chain claim.
 - **Token integration:** fee-on-transfer, rebasing, and hook tokens are
