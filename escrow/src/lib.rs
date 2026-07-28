@@ -590,6 +590,27 @@ pub(crate) fn ensure(env: &Env, condition: bool, error: EscrowError) {
     }
 }
 
+/// Validate that a `protocol_fee_bps` value lies within the valid basis-points range `0..=10_000`.
+///
+/// Returns `Ok(())` if valid, or `Err(EscrowError::ProtocolFeeBpsOutOfRange)` if out of range.
+#[inline(always)]
+pub(crate) fn check_protocol_fee_bps(protocol_fee_bps: i64) -> Result<(), EscrowError> {
+    if (0..=10_000).contains(&protocol_fee_bps) {
+        Ok(())
+    } else {
+        Err(EscrowError::ProtocolFeeBpsOutOfRange)
+    }
+}
+
+/// Validate that a `protocol_fee_bps` value is within `0..=10_000`, panicking with
+/// [`EscrowError::ProtocolFeeBpsOutOfRange`] if invalid.
+#[inline(always)]
+pub(crate) fn validate_protocol_fee_bps(env: &Env, protocol_fee_bps: i64) {
+    if let Err(err) = check_protocol_fee_bps(protocol_fee_bps) {
+        fail(env, err);
+    }
+}
+
 /// Assert that `actual_status == expected_status`, emitting `error` otherwise.
 ///
 /// This is the shared primitive used by all status gate helpers. Callers that need a
@@ -1842,11 +1863,7 @@ impl LiquifactEscrow {
         // 0..=10_000 envelope as `yield_bps`; `10_000` routes the entire `funded_amount` to the
         // treasury at withdrawal. See `docs/escrow-numeric-model.md` for the split math.
         let protocol_fee_bps = protocol_fee_bps.unwrap_or(0);
-        ensure(
-            &env,
-            (0..=10_000).contains(&protocol_fee_bps),
-            EscrowError::ProtocolFeeBpsOutOfRange,
-        );
+        validate_protocol_fee_bps(&env, protocol_fee_bps);
         ensure(
             &env,
             !env.storage().instance().has(&DataKey::Escrow),

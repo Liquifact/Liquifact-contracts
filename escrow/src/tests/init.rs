@@ -2206,3 +2206,37 @@ fn test_invoice_id_matches_event_payload_with_registry_present() {
         "event escrow.invoice_id must round-trip to the original string (registry present)"
     );
 }
+
+#[test]
+fn test_check_protocol_fee_bps_valid_and_invalid_bounds() {
+    use crate::{check_protocol_fee_bps, EscrowError};
+
+    assert_eq!(check_protocol_fee_bps(0), Ok(()));
+    assert_eq!(check_protocol_fee_bps(5_000), Ok(()));
+    assert_eq!(check_protocol_fee_bps(10_000), Ok(()));
+
+    assert_eq!(
+        check_protocol_fee_bps(-1),
+        Err(EscrowError::ProtocolFeeBpsOutOfRange)
+    );
+    assert_eq!(
+        check_protocol_fee_bps(10_001),
+        Err(EscrowError::ProtocolFeeBpsOutOfRange)
+    );
+}
+
+#[test]
+#[should_panic]
+fn test_validate_protocol_fee_bps_panics_on_negative_bps() {
+    use crate::validate_protocol_fee_bps;
+    let env = Env::default();
+    validate_protocol_fee_bps(&env, -1);
+}
+
+#[test]
+#[should_panic]
+fn test_validate_protocol_fee_bps_panics_on_exceeding_max_bps() {
+    use crate::validate_protocol_fee_bps;
+    let env = Env::default();
+    validate_protocol_fee_bps(&env, 10_001);
+}
