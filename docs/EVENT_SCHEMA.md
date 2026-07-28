@@ -33,13 +33,14 @@ short routing symbol passed with `symbol_short!(...)`, such as `funded` or
 
 ## Event Catalog
 
-The current contract defines 19 event structs.
+The current contract defines 20 event structs.
 
 | Rust event | `name` symbol | Entrypoint(s) |
 |---|---:|---|
 | `EscrowInitialized` | `escrow_ii` | `init` |
 | `MaxUniqueInvestorsCapLowered` | `inv_cap` | `lower_max_unique_investors` |
 | `EscrowFunded` | `funded` | `fund`, `fund_with_commitment` |
+| `FundingStateChanged` | `fund_st_ch` | `fund`, `fund_with_commitment`, `fund_batch`, `update_funding_target`, `partial_settle` |
 | `EscrowSettled` | `escrow_sd` | `settle` |
 | `MaturityUpdatedEvent` | `maturity` | `update_maturity` |
 | `AdminTransferredEvent` | `admin` | `accept_admin` |
@@ -122,6 +123,37 @@ Data:
 | `funded_amount` | `i128` |
 | `status` | `u32` |
 | `investor_effective_yield_bps` | `i64` |
+
+### `FundingStateChanged`
+
+Emitted exactly once when the escrow transitions from **open** (status 0) to **funded** (status 1).
+
+This event is emitted by `fund`, `fund_with_commitment`, `fund_batch`, `update_funding_target`, 
+or `partial_settle` — whichever call causes the `0 → 1` transition. Indexers should subscribe 
+to this event rather than buffering every `EscrowFunded` event to detect the funding-close edge.
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `funding_state_changed` |
+| 1 | `name` | `Symbol` | `fund_st_ch` |
+| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
+
+Data:
+
+| Field | Type | Notes |
+|---|---|---|
+| `from_status` | `u32` | Always `0` (open) |
+| `to_status` | `u32` | Always `1` (funded) |
+| `funded_amount` | `i128` | Total principal at transition |
+| `funding_target` | `i128` | Configured target at transition |
+| `ledger_timestamp` | `u64` | Ledger timestamp of transition |
+| `trigger` | `Symbol` | `fund`, `tgt_lower`, or `part_set` |
+
+**Emission guarantee:** This event is emitted exactly once per escrow instance. The `0 → 1` 
+transition is guarded by the `FundingCloseSnapshot` write and by the `escrow.status == 0` 
+precondition. Once status reaches 1 it never decreases.
 
 ### `EscrowSettled`
 
@@ -527,3 +559,4 @@ Status values:
 | 2026-05-27 | v0.2 | Added initialization references and investor-cap event notes |
 | 2026-05-31 | v0.3 | Issue #272: replaced drifted reference with complete `#[contractevent]` topic and data layout from `escrow/src/lib.rs` |
 | 2026-06-24 | v0.4 | Added `settled_at_ledger_timestamp` field to `EscrowSettled` event; added `is_settleable` view |
+| 2026-07-28 | v0.5 | Issue #913: added `FundingStateChanged` event emitted exactly once on `0 → 1` status transition |

@@ -263,6 +263,12 @@ status 0 → 1 iff funded_amount >= funding_target (first occurrence)
 - Property test: `prop_status_only_increases` and `prop_funding_accounting_invariants_issue_325`
   in `escrow/src/tests/properties.rs` assert exactly one transition to funded.
 
+**On-chain signal (issue #913):** Every `0 → 1` transition emits a `FundingStateChanged` event
+(topic `fund_st_ch`) immediately after storage is committed and `EscrowFunded` / `EscrowPartialSettle`
+/ `FundingTargetUpdated` is published. The event carries `from_status`, `to_status`,
+`funded_amount`, `funding_target`, `ledger_timestamp`, and a `trigger` symbol so indexers can
+react without buffering per-deposit events. See `docs/EVENT_SCHEMA.md` § `FundingStateChanged`.
+
 ---
 
 ## 15. FundingCloseSnapshot Immutability

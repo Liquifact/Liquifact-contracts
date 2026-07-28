@@ -1353,6 +1353,60 @@ pub struct EscrowPartialSettle {
     pub funded_amount: i128,
 }
 
+/// Emitted exactly once when the escrow transitions from **open** (status 0) to **funded**
+/// (status 1), regardless of which entrypoint triggered the transition.
+///
+/// Indexers that need to react to the funding-close moment should listen for this event
+/// rather than filtering the per-deposit [`EscrowFunded`] stream for a `status == 1` payload,
+/// which would require buffering every deposit to detect the transition edge.
+///
+/// # Emission guarantees
+///
+/// - **Exactly once per escrow instance.** The `0 → 1` transition is guarded by the
+///   `FundingCloseSnapshot` write (which uses a `has` check) and by the `escrow.status == 0`
+///   precondition. Once status is 1 it never decreases, so this event can never be emitted
+///   a second time.
+/// - **No duplicate emission.** All three entrypoints that can cause the `0 → 1` transition
+///   (`fund_impl`, `update_funding_target`, `partial_settle`) emit this event in the same
+///   `if escrow.status == 0 && ...` branch that writes the status and the snapshot.
+///
+/// # Fields
+///
+/// - `name`: hardcoded `fund_st_ch` symbol — used by indexers for topic routing.
+/// - `invoice_id`: escrow invoice identifier.
+/// - `from_status`: always `0` (open); present for forward-compatibility if the event shape
+///   is reused for other transitions in the future.
+/// - `to_status`: always `1` (funded).
+/// - `funded_amount`: total principal at the moment of transition (equals
+///   [`FundingCloseSnapshot::total_principal`]).
+/// - `funding_target`: the configured target at transition time (equals
+///   [`FundingCloseSnapshot::funding_target`]).
+/// - `ledger_timestamp`: [`Env::ledger`] timestamp at the moment of transition.
+/// - `trigger`: short routing symbol identifying which entrypoint caused the transition:
+///   `fund` for `fund` / `fund_with_commitment` / `fund_batch`, `tgt_lower` for
+///   `update_funding_target`, `part_set` for `partial_settle`.
+#[contractevent]
+pub struct FundingStateChanged {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    /// Previous status value; always `0` (open) for the `0 → 1` transition.
+    pub from_status: u32,
+    /// New status value; always `1` (funded) for the `0 → 1` transition.
+    pub to_status: u32,
+    /// Total principal at the moment of transition.
+    pub funded_amount: i128,
+    /// Configured funding target at transition time.
+    pub funding_target: i128,
+    /// Ledger timestamp at which the transition occurred.
+    pub ledger_timestamp: u64,
+    /// Short symbol identifying the entrypoint that caused the transition:
+    /// `fund` (fund/fund_with_commitment/fund_batch), `tgt_lower` (update_funding_target),
+    /// or `part_set` (partial_settle).
+    pub trigger: Symbol,
+}
+
 #[contractevent]
 pub struct EscrowSettled {
     #[topic]
@@ -4408,13 +4462,17 @@ impl LiquifactEscrow {
         let old_target = escrow.funding_target;
         escrow.funding_target = new_target;
 
+        // Track whether this call triggers the 0 → 1 transition so we can emit
+        // FundingStateChanged after storage writes (no second storage read needed).
+        let status_transitioned = escrow.status == 0
+            && escrow.funded_amount > 0
+            && escrow.funded_amount >= new_target
+            && !env.storage().instance().has(&DataKey::FundingCloseSnapshot);
+
         // If lowering the target causes it to equal (or fall to) the already-funded
         // amount, promote the escrow to funded and capture the immutable close snapshot
         // exactly once — mirroring the promotion logic in `fund`/`fund_with_commitment`.
-        if escrow.funded_amount > 0
-            && escrow.funded_amount >= new_target
-            && !env.storage().instance().has(&DataKey::FundingCloseSnapshot)
-        {
+        if status_transitioned {
             escrow.status = 1;
             env.storage().instance().set(
                 &DataKey::FundingCloseSnapshot,
@@ -4436,6 +4494,22 @@ impl LiquifactEscrow {
             new_target,
         }
         .publish(&env);
+
+        // Emit the dedicated funding-state-change event exactly once, only when lowering
+        // the target triggered the 0 → 1 transition.
+        if status_transitioned {
+            FundingStateChanged {
+                name: symbol_short!("fund_st_ch"),
+                invoice_id: escrow.invoice_id.clone(),
+                from_status: 0,
+                to_status: 1,
+                funded_amount: escrow.funded_amount,
+                funding_target: new_target,
+                ledger_timestamp: env.ledger().timestamp(),
+                trigger: symbol_short!("tgt_lower"),
+            }
+            .publish(&env);
+        }
 
         escrow
     }
@@ -5076,7 +5150,11 @@ impl LiquifactEscrow {
             .checked_add(amount)
             .unwrap_or_else(|| fail(&env, EscrowError::FundedAmountOverflow));
 
-        if escrow.status == 0 && escrow.funded_amount >= escrow.funding_target {
+        // Track whether this call triggers the 0 → 1 transition so we can emit
+        // FundingStateChanged after storage writes (no second storage read needed).
+        let status_transitioned = escrow.status == 0 && escrow.funded_amount >= escrow.funding_target;
+
+        if status_transitioned {
             escrow.status = 1;
             if !env.storage().instance().has(&DataKey::FundingCloseSnapshot) {
                 let snap = FundingCloseSnapshot {
@@ -5143,6 +5221,23 @@ impl LiquifactEscrow {
         }
         .publish(&env);
 
+        // Emit the dedicated funding-state-change event exactly once, only when this
+        // deposit triggered the 0 → 1 transition. Indexers can subscribe to this topic
+        // without having to buffer every EscrowFunded event to detect the edge.
+        if status_transitioned {
+            FundingStateChanged {
+                name: symbol_short!("fund_st_ch"),
+                invoice_id: escrow.invoice_id.clone(),
+                from_status: 0,
+                to_status: 1,
+                funded_amount: escrow.funded_amount,
+                funding_target: escrow.funding_target,
+                ledger_timestamp: env.ledger().timestamp(),
+                trigger: symbol_short!("fund"),
+            }
+            .publish(&env);
+        }
+
         escrow
     }
 
@@ -5195,6 +5290,20 @@ impl LiquifactEscrow {
             name: symbol_short!("part_set"),
             invoice_id: escrow.invoice_id.clone(),
             funded_amount: escrow.funded_amount,
+        }
+        .publish(&env);
+
+        // Emit the dedicated funding-state-change event. partial_settle always causes
+        // the 0 → 1 transition (guarded by the PartialSettleNotOpen check above).
+        FundingStateChanged {
+            name: symbol_short!("fund_st_ch"),
+            invoice_id: escrow.invoice_id.clone(),
+            from_status: 0,
+            to_status: 1,
+            funded_amount: escrow.funded_amount,
+            funding_target: escrow.funding_target,
+            ledger_timestamp: env.ledger().timestamp(),
+            trigger: symbol_short!("part_set"),
         }
         .publish(&env);
 
