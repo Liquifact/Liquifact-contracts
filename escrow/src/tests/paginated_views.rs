@@ -1,5 +1,6 @@
-// Tests for the shared paginate_window helper and the three public paginated read views:
-//   get_investors, get_allowlisted_investors, get_revoked_attestation_digests.
+// Tests for the shared paginate_window helper and the public paginated read views:
+//   get_investors, get_allowlisted_investors, get_revoked_attestation_digests,
+//   get_collateral_records, get_pause_records, and get_settlement_records.
 //
 // Each test uses a fresh Env so state cannot leak across cases.
 
@@ -612,6 +613,128 @@ fn get_collateral_records_ceiling() {
 
     let result = client.get_collateral_records(&0, &100);
     assert_eq!(result.len(), 50);
+}
+
+// ── get_pause_records ──────────────────────────────────────────────────────────
+
+// ── get_settlement_records ───────────────────────────────────────────────────
+
+fn setup_settlement_escrow(
+    env: &Env,
+    invoice_id: &str,
+    yield_bps: i64,
+) -> (crate::LiquifactEscrowClient<'_>, Address, Address) {
+    let client = super::deploy(env);
+    let admin = Address::generate(env);
+    let sme = Address::generate(env);
+    let (token, treasury) = super::free_addresses(env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(env, invoice_id),
+        &sme,
+        &100_000_000_000i128,
+        &yield_bps,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+    (client, admin, sme)
+}
+
+#[test]
+fn get_settlement_records_empty_before_settle() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin, _sme) = setup_settlement_escrow(&env, "SETL-PG-EMP", 800i64);
+
+    let result = client.get_settlement_records(&0, &10);
+    assert_eq!(result.len(), 0, "must be empty before any settle");
+}
+
+#[test]
+fn get_settlement_records_zero_limit_returns_empty() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin, _sme) = setup_settlement_escrow(&env, "SETL-PG-ZRL", 800i64);
+
+    let investor = Address::generate(&env);
+    client.fund(&investor, &100_000_000_000i128);
+    client.settle();
+
+    let result = client.get_settlement_records(&0, &0);
+    assert_eq!(result.len(), 0);
+}
+
+#[test]
+fn get_settlement_records_start_past_end_returns_empty() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin, _sme) = setup_settlement_escrow(&env, "SETL-PG-PST", 800i64);
+
+    let investor = Address::generate(&env);
+    client.fund(&investor, &100_000_000_000i128);
+    client.settle();
+
+    // Log has length 1, start=5 is past the end
+    let result = client.get_settlement_records(&5, &10);
+    assert_eq!(result.len(), 0);
+}
+
+#[test]
+fn get_settlement_records_single_record_after_settle() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin, _sme) = setup_settlement_escrow(&env, "SETL-PG-SGL", 500i64);
+
+    let settle_ts: u64 = 42_000;
+    env.ledger().with_mut(|l| l.timestamp = settle_ts);
+
+    let investor = Address::generate(&env);
+    client.fund(&investor, &100_000_000_000i128);
+    client.settle();
+
+    let result = client.get_settlement_records(&0, &10);
+    assert_eq!(result.len(), 1, "one settlement record expected");
+
+    let record = result.get(0).unwrap();
+    assert_eq!(record.settled_at, settle_ts);
+    assert_eq!(record.funded_amount, 100_000_000_000i128);
+    assert_eq!(record.yield_bps, 500i64);
+    assert_eq!(record.maturity, 0u64);
+
+    // settle_pool = funded_amount + (funded_amount * yield_bps / 10_000)
+    //            = 100_000_000_000 + (100_000_000_000 * 500 / 10_000)
+    //            = 100_000_000_000 + 5_000_000_000
+    //            = 105_000_000_000
+    assert_eq!(record.settle_pool, 105_000_000_000i128);
+}
+
+#[test]
+fn get_settlement_records_correct_settle_pool_with_max_yield() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin, _sme) = setup_settlement_escrow(&env, "SETL-PG-YLD", 10_000i64);
+
+    let investor = Address::generate(&env);
+    client.fund(&investor, &500_000_000i128);
+    client.settle();
+
+    // settle_pool = 500_000_000 + (500_000_000 * 10_000 / 10_000)
+    //            = 500_000_000 + 500_000_000
+    //            = 1_000_000_000
+    let result = client.get_settlement_records(&0, &10);
+    assert_eq!(result.len(), 1);
+    assert_eq!(result.get(0).unwrap().settle_pool, 1_000_000_000i128);
 }
 
 // ── get_pause_records ──────────────────────────────────────────────────────────
