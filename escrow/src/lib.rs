@@ -318,6 +318,10 @@ pub enum EscrowError {
     AlreadyCurrentSchemaVersion = 91,
     /// [`LiquifactEscrow::migrate`] has no implemented path from the requested version.
     NoMigrationPath = 92,
+    /// [`LiquifactEscrow::upgrade_funding`] was called by a `caller` other than the
+    /// configured [`InvoiceEscrow::admin`]. The upgrade authorization is rejected and no
+    /// event is emitted / no WASM is swapped.
+    UpgradeUnauthorizedCaller = 93,
 
     /// [`LiquifactEscrow::fund`] / [`LiquifactEscrow::fund_with_commitment`] received non-positive amount.
     FundingAmountNotPositive = 100,
@@ -1115,6 +1119,35 @@ pub struct CollateralConfig {
     pub sme_commitment: CollateralCommitmentSnapshot,
 }
 
+/// Read-only snapshot of the settlement subsystem configuration.
+///
+/// Bundles the four settlement-relevant admin knobs so an off-chain caller can understand
+/// the full settlement gate with a single host invocation rather than stitching together
+/// `get_settlement_limit`, `get_protocol_fee_bps`, and the maturity / yield fields from
+/// `get_escrow`.
+///
+/// Returns sensible defaults before [`LiquifactEscrow::init`] is called:
+/// - `settlement_limit` → [`DEFAULT_SETTLEMENT_LIMIT`]
+/// - `yield_bps` → `0`
+/// - `protocol_fee_bps` → `0`
+/// - `maturity` → `0` (no maturity lock)
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct SettlementConfig {
+    /// Admin-configured batch limit for settlement payout processing.
+    /// Defaults to [`DEFAULT_SETTLEMENT_LIMIT`] when never set via
+    /// [`LiquifactEscrow::set_settlement_limit`].
+    pub settlement_limit: u32,
+    /// Invoice yield in basis points set at [`LiquifactEscrow::init`]; `0` before init.
+    pub yield_bps: i64,
+    /// Protocol fee in basis points deducted from the SME disbursement at
+    /// [`LiquifactEscrow::withdraw`]; `0` before init or when not configured.
+    pub protocol_fee_bps: i64,
+    /// Maturity timestamp (ledger seconds) after which settlement is permitted;
+    /// `0` means no time lock. Taken from [`InvoiceEscrow::maturity`]; `0` before init.
+    pub maturity: u64,
+}
+
 /// Read-only metadata for the investor allowlist subsystem.
 ///
 /// The view intentionally returns defaults for uninitialized deployments so off-chain
@@ -1852,6 +1885,32 @@ pub struct ContractUpgraded {
     pub new_wasm_hash: BytesN<32>,
 }
 
+/// Emitted by [`LiquifactEscrow::upgrade_funding`] once the caller has passed the explicit
+/// admin authorization check, immediately before the WASM is replaced.
+///
+/// This is the funding subsystem's dedicated upgrade-authorization audit trail. Unlike
+/// [`ContractUpgraded`] (emitted by the generic [`LiquifactEscrow::upgrade`]), this event also
+/// carries the authorizing `admin` address as a topic so indexers can attribute every funding
+/// upgrade to the exact account that authorized it. Like [`ContractUpgraded`], it is published
+/// **before** `env.deployer().update_current_contract_wasm` (defensive ordering).
+///
+/// # Fields
+/// - `name`: hardcoded `"fund_upg"` symbol (topic).
+/// - `invoice_id`: the escrow's `invoice_id` (topic, for indexer correlation).
+/// - `admin`: the admin address that authorized the upgrade (topic).
+/// - `new_wasm_hash`: the 32-byte hash of the incoming WASM binary.
+#[contractevent]
+pub struct FundingUpgradeAuthorized {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    #[topic]
+    pub admin: Address,
+    pub new_wasm_hash: BytesN<32>,
+}
+
+
 // ---------------------------------------------------------------------------
 // Contract
 // ---------------------------------------------------------------------------
@@ -1933,6 +1992,16 @@ impl LiquifactEscrow {
         TokenClient::new(&env, &token_addr).balance(&this)
     }
 
+    /// Returns the settlement's deployed version/metadata.
+    /// 
+    /// Returns a sane default (0) before initialization.
+    pub fn get_version(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::SchemaVersion)
+            .unwrap_or(0)
+    }
+
     /// Read the immutable treasury address, failing with [`EscrowError::TreasuryNotSet`]
     /// when the escrow has not been initialized.
     fn treasury_or_fail(env: &Env) -> Address {
@@ -2006,7 +2075,7 @@ impl LiquifactEscrow {
         }
     }
 
-    /// Returns `(effective_yield_bps, matched_lock_secs)` for a given commitment.
+    /// Returns a [`YieldTierPreview`] for a given commitment.
     ///
     /// Scans [`DataKey::YieldTierTable`] and picks the tier with the highest `yield_bps`
     /// where `committed_lock_secs >= tier.min_lock_secs`. Returns base yield when:
@@ -2019,23 +2088,32 @@ impl LiquifactEscrow {
     /// - lock=300 -> (1200, 300) tier 2 (highest)
     ///
     /// `matched_lock_secs` is the `min_lock_secs` of the matched tier, or `0` for base yield.
-    fn effective_yield_for_commitment(
+    pub(crate) fn effective_yield_for_commitment(
         env: &Env,
         base_yield: i64,
         committed_lock_secs: u64,
-    ) -> (i64, u64) {
+    ) -> YieldTierPreview {
         if committed_lock_secs == 0 {
-            return (base_yield, 0);
+            return YieldTierPreview {
+                effective_yield_bps: base_yield,
+                matched_lock_secs: 0,
+            };
         }
         let Some(tiers) = env
             .storage()
             .instance()
             .get::<DataKey, Vec<YieldTier>>(&DataKey::YieldTierTable)
         else {
-            return (base_yield, 0);
+            return YieldTierPreview {
+                effective_yield_bps: base_yield,
+                matched_lock_secs: 0,
+            };
         };
         if tiers.is_empty() {
-            return (base_yield, 0);
+            return YieldTierPreview {
+                effective_yield_bps: base_yield,
+                matched_lock_secs: 0,
+            };
         }
         let mut best = base_yield;
         let mut best_lock = 0u64;
@@ -2047,7 +2125,10 @@ impl LiquifactEscrow {
                 best_lock = t.min_lock_secs;
             }
         }
-        (best, best_lock)
+        YieldTierPreview {
+            effective_yield_bps: best,
+            matched_lock_secs: best_lock,
+        }
     }
 
     /// Initialize escrow. `funding_target` defaults to `amount`.
@@ -3264,7 +3345,7 @@ impl LiquifactEscrow {
     ///
     /// > **Note:** this preview reflects the rule applied at **first deposit only**. A
     /// > follow-on [`LiquifactEscrow::fund`] call does not re-select a tier.
-    pub fn preview_yield_tier(env: Env, amount: i128, lock: u64) -> (i64, u64) {
+    pub fn preview_yield_tier(env: Env, amount: i128, lock: u64) -> YieldTierPreview {
         let _ = amount; // accepted for signature parity with fund_with_commitment; unused in lock-only selection
         let escrow = Self::get_escrow(env.clone());
         Self::effective_yield_for_commitment(&env, escrow.yield_bps, lock)
@@ -3676,6 +3757,39 @@ impl LiquifactEscrow {
         env.storage()
             .instance()
             .set(&DataKey::SettlementLimit, &new_limit);
+    }
+
+    /// Read-only snapshot of the settlement subsystem configuration.
+    ///
+    /// Bundles `settlement_limit`, `yield_bps`, `protocol_fee_bps`, and `maturity` into
+    /// a single [`SettlementConfig`] so an off-chain caller can understand the full settlement
+    /// gate with one host invocation.
+    ///
+    /// # Defaults (before `init`)
+    /// All fields return their documented default values when the escrow has never been
+    /// initialized (additive-key semantics, ADR-007):
+    /// - `settlement_limit` → [`DEFAULT_SETTLEMENT_LIMIT`]
+    /// - `yield_bps` → `0`
+    /// - `protocol_fee_bps` → `0`
+    /// - `maturity` → `0` (no maturity lock)
+    ///
+    /// # Read-only
+    /// Pure view: no `require_auth`, no storage writes, and no TTL bump.
+    pub fn get_settlement_config(env: Env) -> SettlementConfig {
+        let settlement_limit = Self::get_settlement_limit(env.clone());
+        let protocol_fee_bps = Self::get_protocol_fee_bps(env.clone());
+        let (yield_bps, maturity) = env
+            .storage()
+            .instance()
+            .get::<DataKey, InvoiceEscrow>(&DataKey::Escrow)
+            .map(|e| (e.yield_bps, e.maturity))
+            .unwrap_or((0, 0));
+        SettlementConfig {
+            settlement_limit,
+            yield_bps,
+            protocol_fee_bps,
+            maturity,
+        }
     }
 
     /// Bundle the settleable flag, legal-hold state, maturity-reached state, and a single derived
@@ -4858,6 +4972,60 @@ impl LiquifactEscrow {
         env.deployer().update_current_contract_wasm(new_wasm_hash);
     }
 
+    /// Funding-subsystem upgrade entrypoint with an explicit admin authorization check.
+    ///
+    /// This is the funding module's dedicated upgrade path. Unlike [`LiquifactEscrow::upgrade`],
+    /// which relies solely on `require_auth()` trapping unauthenticated callers at the host
+    /// level, this entrypoint adds an **explicit typed authorization check**: the supplied
+    /// `caller` must equal the stored [`InvoiceEscrow::admin`] address, or the call is
+    /// rejected with [`EscrowError::UpgradeUnauthorizedCaller`] before any WASM is touched.
+    ///
+    /// ## Authorization
+    ///
+    /// 1. `caller.require_auth()` — Soroban host verifies the caller's signature.
+    /// 2. `ensure(caller == escrow.admin, UpgradeUnauthorizedCaller)` — explicit typed check
+    ///    that rejects any address other than the configured admin with a typed error.
+    ///
+    /// ## Event
+    ///
+    /// A [`FundingUpgradeAuthorized`] event is emitted **before** the deployer call (defensive
+    /// ordering) carrying `invoice_id`, `admin`, and `new_wasm_hash` as topics/data so indexers
+    /// can attribute every funding upgrade to the exact authorizing account.
+    ///
+    /// ## Errors
+    ///
+    /// | Condition | Error |
+    /// |-----------|-------|
+    /// | `caller` signature not satisfied | host panic (via `require_auth`) |
+    /// | `caller != escrow.admin` | [`EscrowError::UpgradeUnauthorizedCaller`] |
+    /// | Escrow not initialized | [`EscrowError::EscrowNotInitialized`] |
+    pub fn upgrade_funding(env: Env, caller: Address, new_wasm_hash: BytesN<32>) {
+        caller.require_auth();
+
+        let escrow: InvoiceEscrow = env
+            .storage()
+            .instance()
+            .get(&DataKey::Escrow)
+            .unwrap_or_else(|| fail(&env, EscrowError::EscrowNotInitialized));
+
+        ensure(
+            &env,
+            caller == escrow.admin,
+            EscrowError::UpgradeUnauthorizedCaller,
+        );
+
+        // Emit before deployer call — defensive ordering matches upgrade()
+        FundingUpgradeAuthorized {
+            name: symbol_short!("fund_upg"),
+            invoice_id: escrow.invoice_id,
+            admin: caller,
+            new_wasm_hash: new_wasm_hash.clone(),
+        }
+        .publish(&env);
+
+        env.deployer().update_current_contract_wasm(new_wasm_hash);
+    }
+
     /// Record investor deposit: transfer tokens from investor to escrow.
     ///
     /// # Errors
@@ -5074,9 +5242,13 @@ impl LiquifactEscrow {
             }
         } else {
             ensure(&env, prev == 0, EscrowError::TieredSecondDeposit);
-            let (eff, lock) =
+            let tier_preview =
                 Self::effective_yield_for_commitment(&env, escrow.yield_bps, committed_lock_secs);
-            Self::set_persistent_investor_effective_yield(&env, investor.clone(), eff);
+            Self::set_persistent_investor_effective_yield(
+                &env,
+                investor.clone(),
+                tier_preview.effective_yield_bps,
+            );
             let now = env.ledger().timestamp();
             let claim_nb = if committed_lock_secs == 0 {
                 0u64
@@ -5094,7 +5266,10 @@ impl LiquifactEscrow {
                 );
             }
             Self::set_persistent_investor_claim_not_before(&env, investor.clone(), claim_nb);
-            (eff, lock)
+            (
+                tier_preview.effective_yield_bps,
+                tier_preview.matched_lock_secs,
+            )
         };
 
         escrow.funded_amount = escrow

@@ -2892,3 +2892,37 @@ fn test_settle_event_topics_no_collision() {
         }
     }
 }
+
+#[test]
+fn test_get_version_before_init() {
+    let env = Env::default();
+    let (client, _admin, _sme) = setup(&env);
+    assert_eq!(client.get_version(), 0);
+}
+
+#[test]
+fn test_get_version_after_init() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "INV001"),
+        &sme,
+        &10_000i128,
+        &800i64,
+        &1000u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+    assert_eq!(client.get_version(), 6);
+}

@@ -63,12 +63,14 @@ mod auth_matrix;
 mod cap_validation;
 mod collateral_config_view;
 mod collateral_limit_setter;
-mod collateral_validation_helpers;
+mod collateral_boundary_tests;
+mod collateral_boundary_tests;
 #[rustfmt::skip]
 mod coverage;
 mod external_calls;
 mod external_calls_mocked;
 mod funding;
+mod funding_upgrade_auth;
 mod init;
 mod integration;
 mod integration_status_guards;
@@ -79,6 +81,7 @@ mod pause;
 mod properties;
 mod reconciliation_lifecycle;
 mod settlement;
+mod settlement_config_view;
 mod settlement_limit;
 
 /// Registers a new escrow contract instance and returns its contract id.

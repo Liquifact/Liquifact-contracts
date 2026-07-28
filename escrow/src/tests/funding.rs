@@ -6379,23 +6379,25 @@ fn assert_preview_matches_actual(
     amount: i128,
     lock: u64,
 ) {
-    let (preview_bps, preview_lock) = client.preview_yield_tier(&amount, &lock);
+    let preview = client.preview_yield_tier(&amount, &lock);
     let investor = Address::generate(env);
     sac_admin.mint(&investor, &amount);
     client.fund_with_commitment(&investor, &amount, &lock);
     let actual_bps = client.get_investor_yield_bps(&investor);
     let actual_claim_not_before = client.get_investor_claim_not_before(&investor);
     assert_eq!(
-        preview_bps, actual_bps,
-        "preview_yield_tier bps mismatch for lock={lock}: preview={preview_bps} actual={actual_bps}"
+        preview.effective_yield_bps, actual_bps,
+        "preview_yield_tier bps mismatch for lock={lock}: preview={} actual={actual_bps}",
+        preview.effective_yield_bps
     );
     // preview_yield_tier returns the matched tier's min_lock_secs (duration),
     // while fund_with_commitment stores (ledger_timestamp + user_lock).
     // Check that the stored timestamp is at least the tier threshold.
     let now = env.ledger().timestamp();
     assert!(
-        actual_claim_not_before >= now + preview_lock,
-        "preview_yield_tier lock mismatch for lock={lock}: preview={preview_lock} actual_claim_not_before={actual_claim_not_before} (now={now})"
+        actual_claim_not_before >= now + preview.matched_lock_secs,
+        "preview_yield_tier lock mismatch for lock={lock}: preview={} actual_claim_not_before={actual_claim_not_before} (now={now})",
+        preview.matched_lock_secs
     );
 }
 
@@ -6463,9 +6465,12 @@ fn test_preview_matches_actual_zero_lock_with_tiers() {
     let env = Env::default();
     env.mock_all_auths();
     let (client, sac_admin) = setup_three_tier_escrow_with_sac(&env, "PV_ZERO", 1_000_000i128);
-    let (preview_bps, preview_lock) = client.preview_yield_tier(&1_000i128, &0u64);
-    assert_eq!(preview_bps, 500, "zero lock must return base yield");
-    assert_eq!(preview_lock, 0, "zero lock must return lock=0");
+    let preview = client.preview_yield_tier(&1_000i128, &0u64);
+    assert_eq!(
+        preview.effective_yield_bps, 500,
+        "zero lock must return base yield"
+    );
+    assert_eq!(preview.matched_lock_secs, 0, "zero lock must return lock=0");
     assert_preview_matches_actual(&client, &env, &sac_admin, 1_000i128, 0u64);
 }
 
