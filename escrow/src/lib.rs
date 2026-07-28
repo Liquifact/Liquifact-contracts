@@ -18,7 +18,23 @@ pub const SCHEMA_VERSION: u32 = 6;
 
 /// Upper bound on [`LiquifactEscrow::append_attestation_digest`] entries to keep storage bounded.
 /// Revocation via [`LiquifactEscrow::revoke_attestation_digest`] does not consume a slot.
+/// This constant is also the **default** used when no explicit
+/// [`LiquifactEscrow::set_attestation_limit`] call has been made.
 pub const MAX_ATTESTATION_APPEND_ENTRIES: u32 = 32;
+
+/// Default attestation append-log limit (= [`MAX_ATTESTATION_APPEND_ENTRIES`]).
+/// Returned by [`LiquifactEscrow::get_attestation_limit`] when the admin has not configured a
+/// custom value.
+pub const DEFAULT_ATTESTATION_LIMIT: u32 = MAX_ATTESTATION_APPEND_ENTRIES;
+
+/// Minimum value accepted by [`LiquifactEscrow::set_attestation_limit`].
+/// Must be at least 1 so the log is always usable.
+pub const MIN_ATTESTATION_LIMIT: u32 = 1;
+
+/// Maximum value accepted by [`LiquifactEscrow::set_attestation_limit`].
+/// Mirrors [`MAX_ATTESTATION_APPEND_ENTRIES`] so the hard upper bound cannot be
+/// exceeded via configuration.
+pub const MAX_ATTESTATION_LIMIT: u32 = MAX_ATTESTATION_APPEND_ENTRIES;
 
 /// Maximum number of indices that can be revoked in a single batch call.
 pub const MAX_ATTESTATION_REVOKE_BATCH: u32 = 32;
@@ -491,6 +507,10 @@ pub enum EscrowError {
     /// [`LiquifactEscrow::set_yield_tiers`] received an invalid tier table.
     YieldTierTableInvalid = 301,
 
+    /// [`LiquifactEscrow::set_attestation_limit`] received a limit outside
+    /// `[MIN_ATTESTATION_LIMIT, MAX_ATTESTATION_LIMIT]`.
+    AttestationLimitOutOfRange = 302,
+
     /// [`LiquifactEscrow::set_paused`] exceeded the configured rate limit for pause toggles.
     PauseToggleRateLimitExceeded = 227,
 
@@ -952,6 +972,10 @@ pub enum DataKey {
     /// **Additive key (ADR-007):** absent ⇒ [`DEFAULT_SETTLEMENT_LIMIT`]. Updatable via
     /// [`LiquifactEscrow::set_settlement_limit`].
     SettlementLimit,
+    /// Admin-configured cap on the attestation append log length.
+    /// **Additive key (ADR-007):** absent ⇒ [`DEFAULT_ATTESTATION_LIMIT`] (= [`MAX_ATTESTATION_APPEND_ENTRIES`]).
+    /// Updatable via [`LiquifactEscrow::set_attestation_limit`].
+    AttestationLimit,
 }
 
 // --- Data types ---
@@ -1795,6 +1819,24 @@ pub struct AttestationDigestUnrevoked {
     pub name: Symbol,
     pub invoice_id: Symbol,
     pub index: u32,
+}
+
+/// Emitted by [`LiquifactEscrow::set_attestation_limit`] when the admin updates the
+/// attestation append-log capacity.
+///
+/// # Fields
+/// - `name`: Hardcoded `att_lim` symbol.
+/// - `invoice_id`: Symbol representation of the invoice.
+/// - `old_limit`: Previously effective limit ([`DEFAULT_ATTESTATION_LIMIT`] if never configured).
+/// - `new_limit`: Newly configured limit.
+#[contractevent]
+pub struct AttestationLimitUpdated {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    pub old_limit: u32,
+    pub new_limit: u32,
 }
 
 #[contractevent]
@@ -2948,15 +2990,19 @@ impl LiquifactEscrow {
     /// Append a digest to a bounded on-chain log (see [`MAX_ATTESTATION_APPEND_ENTRIES`]) for **versioned**
     /// or incremental attestation updates. Does not replace [`LiquifactEscrow::bind_primary_attestation_hash`].
     ///
+    /// The effective capacity is governed by the admin-configurable
+    /// [`LiquifactEscrow::set_attestation_limit`] (defaults to [`DEFAULT_ATTESTATION_LIMIT`]).
+    ///
     /// # Errors
     /// Emits typed [`EscrowError`] codes when the escrow is uninitialized or the append log is full.
     pub fn append_attestation_digest(env: Env, digest: BytesN<32>) {
         let escrow = Self::load_escrow_require_admin(&env);
 
         let mut log: Vec<BytesN<32>> = Self::load_attestation_log(&env);
+        let limit = Self::get_attestation_limit(env.clone());
         ensure(
             &env,
-            log.len() < MAX_ATTESTATION_APPEND_ENTRIES,
+            log.len() < limit,
             EscrowError::AttestationAppendLogCapacityReached,
         );
         let idx = log.len();
@@ -3028,11 +3074,12 @@ impl LiquifactEscrow {
         let escrow = Self::load_escrow_require_admin(&env);
 
         let mut log: Vec<BytesN<32>> = Self::load_attestation_log(&env);
+        let limit = Self::get_attestation_limit(env.clone());
 
         // Pre-flight capacity check: reject the whole batch atomically if it would overflow.
         ensure(
             &env,
-            log.len() + n <= MAX_ATTESTATION_APPEND_ENTRIES,
+            log.len() + n <= limit,
             EscrowError::AttestationAppendLogCapacityReached,
         );
 
@@ -3702,6 +3749,63 @@ impl LiquifactEscrow {
         env.storage()
             .instance()
             .set(&DataKey::SettlementLimit, &new_limit);
+    }
+
+    /// Retrieve the admin-configured attestation append-log capacity.
+    ///
+    /// Returns [`DEFAULT_ATTESTATION_LIMIT`] (= [`MAX_ATTESTATION_APPEND_ENTRIES`] = 32)
+    /// when no explicit [`LiquifactEscrow::set_attestation_limit`] call has been made.
+    /// This preserves current on-chain behavior for deployments that predate this key
+    /// (additive key, ADR-007).
+    ///
+    /// # Read-only
+    /// Pure view: no `require_auth`, no storage writes, and no TTL bump.
+    pub fn get_attestation_limit(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::AttestationLimit)
+            .unwrap_or(DEFAULT_ATTESTATION_LIMIT)
+    }
+
+    /// Admin-only setter for the attestation append-log capacity.
+    ///
+    /// Allows the admin to lower (or raise, within bounds) the maximum number of digests
+    /// that may accumulate in the append log. The new limit applies on the **next** call to
+    /// [`LiquifactEscrow::append_attestation_digest`] or
+    /// [`LiquifactEscrow::append_attestation_digests`]; it does **not** retroactively
+    /// truncate an already-full log.
+    ///
+    /// # Authorization
+    /// Requires `InvoiceEscrow::admin` auth (via [`LiquifactEscrow::load_escrow_require_admin`]).
+    ///
+    /// # Bounds
+    /// `new_limit` must fall within `[MIN_ATTESTATION_LIMIT, MAX_ATTESTATION_LIMIT]`, else
+    /// [`EscrowError::AttestationLimitOutOfRange`] (302).
+    ///
+    /// # Events
+    /// Emits [`AttestationLimitUpdated`] with the previous effective limit and the new value.
+    pub fn set_attestation_limit(env: Env, new_limit: u32) {
+        let escrow = Self::load_escrow_require_admin(&env);
+
+        ensure(
+            &env,
+            (MIN_ATTESTATION_LIMIT..=MAX_ATTESTATION_LIMIT).contains(&new_limit),
+            EscrowError::AttestationLimitOutOfRange,
+        );
+
+        let old_limit = Self::get_attestation_limit(env.clone());
+
+        env.storage()
+            .instance()
+            .set(&DataKey::AttestationLimit, &new_limit);
+
+        AttestationLimitUpdated {
+            name: symbol_short!("att_lim"),
+            invoice_id: escrow.invoice_id.clone(),
+            old_limit,
+            new_limit,
+        }
+        .publish(&env);
     }
 
     /// Read-only snapshot of the settlement subsystem configuration.

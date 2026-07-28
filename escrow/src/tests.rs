@@ -19,12 +19,14 @@
 #[allow(unused_imports)]
 use super::{
     AttestationDigestAppended, AttestationDigestRevoked, AttestationDigestUnrevoked,
-    CollateralRecordedEvt, ContractUpgraded, DataKey, DeprecatedTransferAdminUsed, EscrowError,
-    EscrowFunded, EscrowInitialized, EscrowUnfunded, FundingCancelled, FundingStateChanged,
-    FundingTargetUpdated, InvestorRefundedEvt, LiquifactEscrow, LiquifactEscrowClient,
-    MaturityMaxHorizonUpdated, MaxUniqueInvestorsCapLowered, PrimaryAttestationBound,
-    RegistryRefRebound, TreasuryDustSwept, YieldTier, MAX_ATTESTATION_APPEND_BATCH,
-    MAX_ATTESTATION_APPEND_ENTRIES, MAX_DUST_SWEEP_AMOUNT, MAX_FUND_BATCH, SCHEMA_VERSION,
+    AttestationLimitUpdated, CollateralRecordedEvt, ContractUpgraded, DataKey,
+    DeprecatedTransferAdminUsed, EscrowError, EscrowFunded, EscrowInitialized, EscrowUnfunded,
+    FundingCancelled, FundingStateChanged, FundingTargetUpdated, InvestorRefundedEvt,
+    LiquifactEscrow, LiquifactEscrowClient, MaturityMaxHorizonUpdated,
+    MaxUniqueInvestorsCapLowered, PrimaryAttestationBound, RegistryRefRebound, TreasuryDustSwept,
+    YieldTier, DEFAULT_ATTESTATION_LIMIT, MAX_ATTESTATION_APPEND_BATCH,
+    MAX_ATTESTATION_APPEND_ENTRIES, MAX_ATTESTATION_LIMIT, MAX_DUST_SWEEP_AMOUNT, MAX_FUND_BATCH,
+    MIN_ATTESTATION_LIMIT, SCHEMA_VERSION,
 };
 use soroban_sdk::{
     symbol_short,
@@ -64,7 +66,6 @@ mod cap_validation;
 mod collateral_config_view;
 mod collateral_limit_setter;
 mod collateral_boundary_tests;
-mod collateral_boundary_tests;
 #[rustfmt::skip]
 mod coverage;
 mod external_calls;
@@ -83,6 +84,7 @@ mod reconciliation_lifecycle;
 mod settlement;
 mod settlement_config_view;
 mod settlement_limit;
+mod attestation_limit;
 
 /// Registers a new escrow contract instance and returns its contract id.
 pub fn deploy_id(env: &Env) -> Address {
