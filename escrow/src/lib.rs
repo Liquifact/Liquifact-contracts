@@ -166,6 +166,7 @@ pub const PERSISTENT_TTL_MIN_EXTENSION_LEDGERS: u32 = 60 * 60; // Approx. 1h at 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
 pub enum EscrowError {
+    AllowlistParametersOutOfRange = 72,
     /// [`LiquifactEscrow::init`] rejected a non-positive invoice amount.
     AmountMustBePositive = 1,
     /// [`LiquifactEscrow::init`] rejected `yield_bps` outside `0..=10_000`.
@@ -702,6 +703,7 @@ pub(crate) fn validate_maturity_bounds(env: &Env, maturity: u64, max_horizon: u6
 /// - `Clone`: required because keys are passed by reference into storage APIs and reused
 ///   across lookups/sets in the same execution path.
 pub enum DataKey {
+    AllowlistParameters,
     /// Full escrow snapshot ([`InvoiceEscrow`]); rewritten atomically on every state transition.
     Escrow,
     /// Stored schema version; written once by [`LiquifactEscrow::init`] to [`SCHEMA_VERSION`]
@@ -1662,6 +1664,7 @@ pub const PERSISTENT_TTL_MIN_EXTENSION_LEDGERS: u32 = 60 * 60; // Approx. 1h at 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
 pub enum EscrowError {
+    AllowlistParametersOutOfRange = 72,
     /// [`LiquifactEscrow::init`] rejected a non-positive invoice amount.
     AmountMustBePositive = 1,
     /// [`LiquifactEscrow::init`] rejected `yield_bps` outside `0..=10_000`.
@@ -1889,6 +1892,7 @@ pub(crate) fn ensure(env: &Env, condition: bool, error: EscrowError) {
 /// - `Clone`: required because keys are passed by reference into storage APIs and reused
 ///   across lookups/sets in the same execution path.
 pub enum DataKey {
+    AllowlistParameters,
     /// Full escrow snapshot ([`InvoiceEscrow`]); rewritten atomically on every state transition.
     Escrow,
     /// Stored schema version; written once by [`LiquifactEscrow::init`] to [`SCHEMA_VERSION`]
@@ -7360,5 +7364,57 @@ impl LiquifactEscrow {
 
     pub fn get_version(env: Env) -> Option<u32> {
         get_version(&env)
+    }
+}
+
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AllowlistParameters {
+    pub max_investor_allowlist_batch: u32,
+    pub persistent_ttl_min_extension_ledgers: u32,
+}
+
+#[contractevent]
+pub struct AllowlistParametersUpdated {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    pub max_investor_allowlist_batch: u32,
+    pub persistent_ttl_min_extension_ledgers: u32,
+}
+
+#[contractimpl]
+impl LiquifactEscrow {
+    pub fn set_allowlist_parameters(
+        env: Env,
+        max_investor_allowlist_batch: u32,
+        persistent_ttl_min_extension_ledgers: u32,
+    ) {
+        let escrow = Self::load_escrow_require_admin(&env);
+
+        if max_investor_allowlist_batch == 0 || max_investor_allowlist_batch > 100 {
+            fail(&env, EscrowError::AllowlistParametersOutOfRange);
+        }
+        if persistent_ttl_min_extension_ledgers == 0 || persistent_ttl_min_extension_ledgers > 1_000_000 {
+            fail(&env, EscrowError::AllowlistParametersOutOfRange);
+        }
+
+        let params = AllowlistParameters {
+            max_investor_allowlist_batch,
+            persistent_ttl_min_extension_ledgers,
+        };
+
+        env.storage()
+            .instance()
+            .set(&DataKey::AllowlistParameters, &params);
+
+        AllowlistParametersUpdated {
+            name: symbol_short!("al_prm_upd"),
+            invoice_id: escrow.invoice_id,
+            max_investor_allowlist_batch,
+            persistent_ttl_min_extension_ledgers,
+        }
+        .publish(&env);
     }
 }

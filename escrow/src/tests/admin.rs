@@ -3381,3 +3381,41 @@ fn test_bump_ttl_succeeds_after_storage_limit_override() {
     let addrs = soroban_sdk::Vec::<Address>::new(&env);
     client.bump_ttl(&addrs);
 }
+
+#[test]
+fn test_allowlist_parameters_setter() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, _) = setup(&env);
+    
+    client.set_allowlist_parameters(&50u32, &3600u32);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #72)")]
+fn test_allowlist_parameters_setter_out_of_bounds() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, _) = setup(&env);
+    
+    client.set_allowlist_parameters(&101u32, &3600u32);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #72)")]
+fn test_allowlist_parameters_setter_out_of_bounds_ttl() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, _) = setup(&env);
+    
+    client.set_allowlist_parameters(&50u32, &0u32);
+}
+
+#[test]
+#[should_panic]
+fn test_allowlist_parameters_non_admin() {
+    let env = Env::default();
+    let (client, _, sme) = setup(&env);
+    // Note: mock_all_auths is not called, so require_auth will fail
+    client.set_allowlist_parameters(&50u32, &3600u32);
+}
