@@ -301,7 +301,7 @@ fn test_init_amount_exceeds_max_rejected() {
 /// All intermediate `checked_*` operations must stay within `i128`.
 #[test]
 fn test_max_bound_funded_escrow_compute_investor_payout_no_overflow() {
-    use soroban_sdk::token::StellarAssetClient;
+    use soroban_sdk::{testutils::Address as _, token::StellarAssetClient};
 
     let env = Env::default();
     env.mock_all_auths();
