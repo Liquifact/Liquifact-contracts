@@ -317,6 +317,10 @@ pub enum EscrowError {
     AlreadyCurrentSchemaVersion = 91,
     /// [`LiquifactEscrow::migrate`] has no implemented path from the requested version.
     NoMigrationPath = 92,
+    /// [`LiquifactEscrow::upgrade_funding`] was called by a `caller` other than the
+    /// configured [`InvoiceEscrow::admin`]. The upgrade authorization is rejected and no
+    /// event is emitted / no WASM is swapped.
+    UpgradeUnauthorizedCaller = 93,
 
     /// [`LiquifactEscrow::fund`] / [`LiquifactEscrow::fund_with_commitment`] received non-positive amount.
     FundingAmountNotPositive = 100,
@@ -1713,6 +1717,32 @@ pub struct ContractUpgraded {
     pub invoice_id: Symbol,
     pub new_wasm_hash: BytesN<32>,
 }
+
+/// Emitted by [`LiquifactEscrow::upgrade_funding`] once the caller has passed the explicit
+/// admin authorization check, immediately before the WASM is replaced.
+///
+/// This is the funding subsystem's dedicated upgrade-authorization audit trail. Unlike
+/// [`ContractUpgraded`] (emitted by the generic [`LiquifactEscrow::upgrade`]), this event also
+/// carries the authorizing `admin` address as a topic so indexers can attribute every funding
+/// upgrade to the exact account that authorized it. Like [`ContractUpgraded`], it is published
+/// **before** `env.deployer().update_current_contract_wasm` (defensive ordering).
+///
+/// # Fields
+/// - `name`: hardcoded `"fund_upg"` symbol (topic).
+/// - `invoice_id`: the escrow's `invoice_id` (topic, for indexer correlation).
+/// - `admin`: the admin address that authorized the upgrade (topic).
+/// - `new_wasm_hash`: the 32-byte hash of the incoming WASM binary.
+#[contractevent]
+pub struct FundingUpgradeAuthorized {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    #[topic]
+    pub admin: Address,
+    pub new_wasm_hash: BytesN<32>,
+}
+
 
 // ---------------------------------------------------------------------------
 // Contract
@@ -4642,6 +4672,60 @@ impl LiquifactEscrow {
         .publish(&env);
 
         // Replace contract WASM — no state is modified
+        env.deployer().update_current_contract_wasm(new_wasm_hash);
+    }
+
+    /// Funding-subsystem upgrade entrypoint with an explicit admin authorization check.
+    ///
+    /// This is the funding module's dedicated upgrade path. Unlike [`LiquifactEscrow::upgrade`],
+    /// which relies solely on `require_auth()` trapping unauthenticated callers at the host
+    /// level, this entrypoint adds an **explicit typed authorization check**: the supplied
+    /// `caller` must equal the stored [`InvoiceEscrow::admin`] address, or the call is
+    /// rejected with [`EscrowError::UpgradeUnauthorizedCaller`] before any WASM is touched.
+    ///
+    /// ## Authorization
+    ///
+    /// 1. `caller.require_auth()` — Soroban host verifies the caller's signature.
+    /// 2. `ensure(caller == escrow.admin, UpgradeUnauthorizedCaller)` — explicit typed check
+    ///    that rejects any address other than the configured admin with a typed error.
+    ///
+    /// ## Event
+    ///
+    /// A [`FundingUpgradeAuthorized`] event is emitted **before** the deployer call (defensive
+    /// ordering) carrying `invoice_id`, `admin`, and `new_wasm_hash` as topics/data so indexers
+    /// can attribute every funding upgrade to the exact authorizing account.
+    ///
+    /// ## Errors
+    ///
+    /// | Condition | Error |
+    /// |-----------|-------|
+    /// | `caller` signature not satisfied | host panic (via `require_auth`) |
+    /// | `caller != escrow.admin` | [`EscrowError::UpgradeUnauthorizedCaller`] |
+    /// | Escrow not initialized | [`EscrowError::EscrowNotInitialized`] |
+    pub fn upgrade_funding(env: Env, caller: Address, new_wasm_hash: BytesN<32>) {
+        caller.require_auth();
+
+        let escrow: InvoiceEscrow = env
+            .storage()
+            .instance()
+            .get(&DataKey::Escrow)
+            .unwrap_or_else(|| fail(&env, EscrowError::EscrowNotInitialized));
+
+        ensure(
+            &env,
+            caller == escrow.admin,
+            EscrowError::UpgradeUnauthorizedCaller,
+        );
+
+        // Emit before deployer call — defensive ordering matches upgrade()
+        FundingUpgradeAuthorized {
+            name: symbol_short!("fund_upg"),
+            invoice_id: escrow.invoice_id,
+            admin: caller,
+            new_wasm_hash: new_wasm_hash.clone(),
+        }
+        .publish(&env);
+
         env.deployer().update_current_contract_wasm(new_wasm_hash);
     }
 
