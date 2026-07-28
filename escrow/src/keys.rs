@@ -1,71 +1,76 @@
-//! Centralised storage-key definitions for the LiquiFact escrow contract.
+//! Centralized constructors for funding-related storage keys.
 //!
-//! # Purpose
+//! Funding logic (`fund`/`fund_with_commitment`/`fund_batch`/`fund_impl`, the cap and
+//! funding-deadline admin setters, `update_funding_target`, `partial_settle`, `unfund`, and
+//! `bump_ttl`) previously constructed the [`DataKey`] variants below inline at each call site.
+//! Two call sites agreeing on a key's shape by convention (rather than by construction) is
+//! exactly the drift risk this module removes: every caller now obtains a given key through one
+//! function instead of re-typing `DataKey::Variant(...)`.
 //!
-//! All persistent and instance-storage keys are defined in [`DataKey`] (lib.rs).
-//! Typed constructor functions are provided here for every key family so that call sites never
-//! build a [`DataKey`] inline — reducing the risk of typos, discriminant drift between
-//! modules, and copy-paste errors when a new key needs to be added.
-//!
-//! ## Collateral keys
-//!
-//! The collateral pledge key family is managed by [`collateral_pledge_key`]. All three
-//! collateral entrypoints (`record_sme_collateral_commitment`, `clear_sme_collateral_commitment`,
-//! `get_sme_collateral_commitment`) call this function instead of constructing
-//! `DataKey::SmeCollateralPledge` inline. This ensures any future rename or split of the
-//! collateral key cannot silently diverge across call sites.
-//!
-//! ## Additive-key policy (ADR-007)
-//!
-//! Adding a new variant to [`DataKey`] is **backward-compatible** when the new key is read with
-//! `.unwrap_or(default)` and its absence does not change existing entrypoint semantics.
-//! Renaming a variant, changing its XDR discriminant, or altering the stored type of an
-//! existing key is **breaking** and requires a `migrate` path or a full redeploy.
-
-use soroban_sdk::Address;
+//! This is a pure indirection layer. No key's on-chain shape or `DataKey` discriminant changes —
+//! that contract still belongs solely to [`DataKey`] (see ADR-007) — so no migration or
+//! `SCHEMA_VERSION` bump is needed (issue #912).
 
 use crate::DataKey;
+use soroban_sdk::Address;
 
-// ---------------------------------------------------------------------------
-// Collateral key constructors
-// ---------------------------------------------------------------------------
-
-/// Return the canonical storage key for the SME collateral pledge.
-///
-/// All three collateral entrypoints — `record_sme_collateral_commitment`,
-/// `clear_sme_collateral_commitment`, and `get_sme_collateral_commitment` — must call this
-/// function instead of constructing `DataKey::SmeCollateralPledge` inline. This single
-/// construction point guarantees that a future rename or variant-split cannot silently
-/// diverge across call sites.
-///
-/// # Storage tier
-///
-/// The returned key lives in **instance** storage (shared TTL with the contract instance).
-/// Callers are responsible for using `env.storage().instance()`.
-///
-/// # Example
-///
-/// ```ignore
-/// use crate::keys::collateral_pledge_key;
-///
-/// let key = collateral_pledge_key();
-/// env.storage().instance().set(&key, &commitment);
-/// ```
-#[inline(always)]
-pub fn collateral_pledge_key() -> DataKey {
-    DataKey::SmeCollateralPledge
+/// Per-investor persistent principal recorded by `fund` / `fund_with_commitment` / `fund_batch`.
+pub(crate) fn investor_contribution(investor: Address) -> DataKey {
+    DataKey::InvestorContribution(investor)
 }
 
-/// Return the canonical storage key for the settlement records log.
-///
-/// The settlement records log is an append-only [`Vec<SettlementRecord>`] stored in instance
-/// storage. It is written by [`LiquifactEscrow::settle`] and read by
-/// [`LiquifactEscrow::get_settlement_records`].
-///
-/// # Storage tier
-///
-/// Instance storage (shared TTL with the contract instance).
-#[inline(always)]
-pub fn settlement_records_key() -> DataKey {
-    DataKey::SettlementRecords
+/// Per-investor persistent effective yield (bps) selected on the investor's first deposit.
+pub(crate) fn investor_effective_yield(investor: Address) -> DataKey {
+    DataKey::InvestorEffectiveYield(investor)
 }
+
+/// Per-investor persistent claim-not-before ledger timestamp (`0` = no extra claim gate).
+pub(crate) fn investor_claim_not_before(investor: Address) -> DataKey {
+    DataKey::InvestorClaimNotBefore(investor)
+}
+
+/// Per-investor persistent claimed-payout marker.
+pub(crate) fn investor_claimed(investor: Address) -> DataKey {
+    DataKey::InvestorClaimed(investor)
+}
+
+/// Instance-storage minimum per-call contribution floor (`0` = no floor).
+pub(crate) fn min_contribution_floor() -> DataKey {
+    DataKey::MinContributionFloor
+}
+
+/// Instance-storage cap on distinct investor addresses (absent = unlimited).
+pub(crate) fn max_unique_investors_cap() -> DataKey {
+    DataKey::MaxUniqueInvestorsCap
+}
+
+/// Instance-storage cap on total principal for a single investor address (absent = unlimited).
+pub(crate) fn max_per_investor_cap() -> DataKey {
+    DataKey::MaxPerInvestorCap
+}
+
+/// Instance-storage count of distinct investor addresses that have funded so far.
+pub(crate) fn unique_funder_count() -> DataKey {
+    DataKey::UniqueFunderCount
+}
+
+/// Instance-storage ordered list of investor addresses backing paginated enumeration.
+pub(crate) fn investor_index() -> DataKey {
+    DataKey::InvestorIndex
+}
+
+/// Instance-storage optional funding deadline timestamp (absent = no deadline).
+pub(crate) fn funding_deadline() -> DataKey {
+    DataKey::FundingDeadline
+}
+
+/// Instance-storage write-once pro-rata snapshot captured at the first funded transition.
+pub(crate) fn funding_close_snapshot() -> DataKey {
+    DataKey::FundingCloseSnapshot
+}
+
+/// Instance-storage immutable SEP-41 funding token address, set once at `init`.
+pub(crate) fn funding_token() -> DataKey {
+    DataKey::FundingToken
+}
+

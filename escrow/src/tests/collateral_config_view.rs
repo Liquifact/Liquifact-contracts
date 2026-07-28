@@ -1,4 +1,6 @@
-use super::super::{CollateralConfig, CollateralCommitmentSnapshot, LiquifactEscrow, LiquifactEscrowClient};
+use super::super::{
+    CollateralCommitmentSnapshot, CollateralConfig, LiquifactEscrow, LiquifactEscrowClient,
+};
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::{Address, Env};
 

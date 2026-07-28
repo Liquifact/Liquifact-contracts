@@ -143,14 +143,18 @@ pub struct EscrowSummary {
     pub sme_collateral_commitment: Option<SmeCollateralCommitment>,
     pub has_primary_attestation: bool,
     pub attestation_log_length: u32,
+    pub paused: bool,
+    pub protocol_fee_bps: i64,
 }
 ```
 
 - `sme_collateral_commitment` — pulled from `DataKey::SmeCollateralPledge`; `None` when never recorded.
 - `has_primary_attestation` — `true` when `DataKey::PrimaryAttestationHash` is present.
 - `attestation_log_length` — length of the `Vec` stored at `DataKey::AttestationAppendLog`; `0` when absent.
+- `paused` — read from `DataKey::Paused` (same key as `is_paused()`); `false` when never paused.
+- `protocol_fee_bps` — read from `DataKey::ProtocolFeeBps` (same key as `get_protocol_fee_bps()`); `0` for pre-fee instances.
 
-Legacy instances (no collateral or attestation keys) return `None` / `false` / `0` respectively,
+Legacy instances (no collateral, attestation, or fee keys) return `None` / `false` / `0` respectively,
 per the additive-key policy.
 
 ### `SmeCollateralCommitment` (stored at `DataKey::SmeCollateralPledge`)
