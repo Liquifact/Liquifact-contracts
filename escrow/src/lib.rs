@@ -1,11 +1,4 @@
-<<<<<<< HEAD
-<<<<<<< HEAD
-#![no_std]
-=======
-﻿#![cfg_attr(not(test), no_std)]
-=======
 #![cfg_attr(not(test), no_std)]
->>>>>>> 973c262 (feat(collateral): add admin parameter setter)
 //! LiquiFact Escrow Contract
 //!
 //! Holds investor funds for an invoice until settlement.
@@ -140,10 +133,6 @@
 //! claims ([`LiquifactEscrow::claim_investor_payout`]). The treasury here is the same immutable
 //! address used by [`LiquifactEscrow::sweep_terminal_dust`]; the fee transfer reuses the same
 //! SEP-41 balance-delta–checked path in [`external_calls`].
-<<<<<<< HEAD
->>>>>>> pr-982
-=======
->>>>>>> 973c262 (feat(collateral): add admin parameter setter)
 
 #![allow(clippy::too_many_arguments)]
 
@@ -156,15 +145,10 @@ use soroban_sdk::{
     symbol_short, token::TokenClient, Address, BytesN, Env, String, Symbol, Vec,
 };
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-=======
 pub mod external_calls;
 pub mod keys;
 pub use keys::{collateral_pledge_key, DataKey};
-=======
-pub mod external_calls;
->>>>>>> 973c262 (feat(collateral): add admin parameter setter)
+
 
 /// Current storage schema version written to [`DataKey::Version`] by [`LiquifactEscrow::init`].
 ///
@@ -180,10 +164,6 @@ pub mod external_calls;
 /// | 6 | Per-investor keys moved to **persistent** storage (see ADR-007) | **Redeploy required** — no `migrate` path (addresses not enumerable) |
 ///
 /// See `docs/OPERATOR_RUNBOOK.md` for the full redeploy-vs-upgrade decision tree.
-<<<<<<< HEAD
->>>>>>> pr-982
-=======
->>>>>>> 973c262 (feat(collateral): add admin parameter setter)
 pub const SCHEMA_VERSION: u32 = 6;
 // See the schema version contract documentation: [Escrow schema versioning](../docs/escrow-schema-versioning.md)
 
@@ -267,7 +247,6 @@ pub const MAX_INVESTOR_ALLOWLIST_BATCH: u32 = 32;
 /// Upper bound on [`LiquifactEscrow::get_contributions`] / investor read batch size.
 pub const MAX_INVESTOR_READ_BATCH: u32 = 50;
 
-<<<<<<< HEAD
 /// Upper bound on pause record read page size.
 pub const MAX_PAUSE_READ_PAGE: u32 = 50;
 
@@ -296,8 +275,6 @@ pub const DEFAULT_SETTLEMENT_LIMIT: u32 = 50;
 pub const MIN_SETTLEMENT_LIMIT: u32 = 1;
 pub const MAX_SETTLEMENT_LIMIT: u32 = 100;
 
-=======
->>>>>>> 973c262 (feat(collateral): add admin parameter setter)
 /// Upper bound on attestation digest read page size.
 pub const MAX_ATTESTATION_READ_PAGE: u32 = 20;
 
@@ -862,7 +839,6 @@ pub(crate) fn validate_maturity_bounds(env: &Env, maturity: u64, max_horizon: u6
     );
 }
 
-<<<<<<< HEAD
 // --- Storage keys ---
 
 #[contracttype]
@@ -1043,9 +1019,6 @@ pub enum DataKey {
     /// [`LiquifactEscrow::set_settlement_limit`].
     SettlementLimit,
 }
-=======
-// Storage keys are defined in keys.rs and re-exported via pub use keys::DataKey.
->>>>>>> pr-982
 
 // --- Data types ---
 
@@ -1108,7 +1081,6 @@ pub struct YieldTier {
     pub yield_bps: i64,
 }
 
-<<<<<<< HEAD
 /// One entry in the pause record index: records when an operational pause was activated.
 ///
 /// **Append-only:** pause records are never deleted; clearing a pause does not remove its record.
@@ -1140,8 +1112,6 @@ pub struct YieldTierPreview {
     pub matched_lock_secs: u64,
 }
 
-=======
->>>>>>> 973c262 (feat(collateral): add admin parameter setter)
 /// Captured exactly once at the first ledger transition to **funded** so settlement and claims can
 /// use a stable total principal and target. If the threshold-crossing deposit overshoots
 /// [`InvoiceEscrow::funding_target`], [`FundingCloseSnapshot::total_principal`] records the full
@@ -2967,11 +2937,7 @@ impl LiquifactEscrow {
     pub fn append_attestation_digests(env: Env, digests: Vec<BytesN<32>>) {
         let n = digests.len();
 
-<<<<<<< HEAD
         // Batch-size guards (surfaced before auth, consistent with revoke_attestation_digests).
-=======
-        // Batch-size guards run before auth, consistent with revoke_attestation_digests.
->>>>>>> pr-982
         ensure(&env, n > 0, EscrowError::AttestationAppendBatchEmpty);
         ensure(
             &env,
@@ -2990,11 +2956,7 @@ impl LiquifactEscrow {
             EscrowError::AttestationAppendLogCapacityReached,
         );
 
-<<<<<<< HEAD
         // Append all digests.
-=======
-        // Collect base index then append all digests.
->>>>>>> pr-982
         let base_idx = log.len();
         for i in 0..n {
             let d = digests.get(i).unwrap();
@@ -3249,7 +3211,6 @@ impl LiquifactEscrow {
         Self::effective_yield_for_commitment(&env, escrow.yield_bps, lock)
     }
 
-<<<<<<< HEAD
     /// Admin-only setter that replaces the yield-tier table.
     ///
     /// Validates invariants identical to `init`:
@@ -3305,12 +3266,9 @@ impl LiquifactEscrow {
         .publish(&env);
     }
 
-=======
->>>>>>> 973c262 (feat(collateral): add admin parameter setter)
     /// Retrieve the currently recorded SME collateral commitment metadata from storage.
     /// Returns `None` if no commitment has been recorded yet.
     pub fn get_sme_collateral_commitment(env: Env) -> Option<SmeCollateralCommitment> {
-<<<<<<< HEAD
         Self::collateral_pledge_get(&env)
     }
 
@@ -3339,9 +3297,6 @@ impl LiquifactEscrow {
             collateral_limit,
             sme_commitment,
         }
-=======
-        env.storage().instance().get(&collateral_pledge_key())
->>>>>>> pr-982
     }
 
     /// Admin-only setter that updates the collateral ceiling enforced by
@@ -3420,29 +3375,13 @@ impl LiquifactEscrow {
     /// 2. `require_auth` on the SME address (via `load_escrow_require_sme`).
     /// 3. Remove storage entry and emit [`CollateralClearedEvt`].
     pub fn clear_sme_collateral_commitment(env: Env) {
-<<<<<<< HEAD
-<<<<<<< HEAD
         let commitment: SmeCollateralCommitment = Self::collateral_pledge_get(&env)
-=======
-        let commitment: SmeCollateralCommitment = env
-            .storage()
-            .instance()
-            .get(&collateral_pledge_key())
->>>>>>> pr-982
-=======
         let commitment: SmeCollateralCommitment = Self::collateral_pledge_get(&env)
->>>>>>> 973c262 (feat(collateral): add admin parameter setter)
             .unwrap_or_else(|| fail(&env, EscrowError::NoCollateralToClear));
 
         let escrow = Self::load_escrow_require_sme(&env);
 
-<<<<<<< HEAD
         Self::collateral_pledge_remove(&env);
-=======
-        env.storage()
-            .instance()
-            .remove(&collateral_pledge_key());
->>>>>>> pr-982
 
         CollateralClearedEvt {
             name: symbol_short!("coll_clr"),
@@ -3766,12 +3705,7 @@ impl LiquifactEscrow {
         let escrow = Self::load_escrow_require_sme(&env);
 
         let now = env.ledger().timestamp();
-<<<<<<< HEAD
         let prior: Option<SmeCollateralCommitment> = Self::collateral_pledge_get(&env);
-=======
-        let prior: Option<SmeCollateralCommitment> =
-            env.storage().instance().get(&collateral_pledge_key());
->>>>>>> pr-982
         let prior_amount = prior.as_ref().map(|c| c.amount).unwrap_or(0);
 
         if let Some(ref existing) = prior {
@@ -3787,13 +3721,7 @@ impl LiquifactEscrow {
             amount,
             recorded_at: now,
         };
-<<<<<<< HEAD
         Self::collateral_pledge_set(&env, &commitment);
-=======
-        env.storage()
-            .instance()
-            .set(&collateral_pledge_key(), &commitment);
->>>>>>> pr-982
 
         let mut records: Vec<SmeCollateralCommitment> = env
             .storage()
@@ -5116,15 +5044,11 @@ impl LiquifactEscrow {
             ensure(&env, prev == 0, EscrowError::TieredSecondDeposit);
             let (eff, lock) =
                 Self::effective_yield_for_commitment(&env, escrow.yield_bps, committed_lock_secs);
-<<<<<<< HEAD
             Self::set_persistent_investor_effective_yield(
                 &env,
                 investor.clone(),
                 tier.effective_yield_bps,
             );
-=======
-            Self::set_persistent_investor_effective_yield(&env, investor.clone(), eff);
->>>>>>> 973c262 (feat(collateral): add admin parameter setter)
             let now = env.ledger().timestamp();
             let claim_nb = if committed_lock_secs == 0 {
                 0u64
@@ -6242,7 +6166,6 @@ impl LiquifactEscrow {
     /// - [`EscrowError::NoPendingAdmin`] — no proposal exists; nothing to cancel.
     ///
     /// # Returns
-<<<<<<< HEAD
     /// A `Vec<SmeCollateralCommitment>` containing the records within the requested page.
     pub fn get_collateral_records(
         env: Env,
@@ -6271,8 +6194,6 @@ impl LiquifactEscrow {
     }
 
     /// Set or clear compliance hold. Only the **current** [`InvoiceEscrow::admin`] may call.
-=======
->>>>>>> 973c262 (feat(collateral): add admin parameter setter)
     ///
     /// The revoked pending address, so callers can record it off-chain without a
     /// separate read.
@@ -6537,7 +6458,6 @@ impl LiquifactEscrow {
         escrow.funded_amount = new_funded_amount;
         env.storage().instance().set(&DataKey::Escrow, &escrow);
 
-<<<<<<< HEAD
         if simple_fund {
             // Non-tiered deposits never carry a commitment lock.
             tier_lock_secs = 0;
@@ -6584,29 +6504,6 @@ impl LiquifactEscrow {
                 );
             }
             Self::set_persistent_investor_claim_not_before(&env, investor.clone(), claim_nb);
-=======
-        // 9. Token transfer (interactions last — checks-effects-interactions pattern).
-        let token_addr = Self::funding_token_or_fail(&env);
-        let this = env.current_contract_address();
-        external_calls::transfer_funding_token_with_balance_checks(
-            &env,
-            &token_addr,
-            &this,
-            &investor,
-            amount,
-        );
-
-        // 10. Event emission.
-        let timestamp = env.ledger().timestamp();
-        EscrowUnfunded {
-            name: symbol_short!("unfunded"),
-            invoice_id: escrow.invoice_id.clone(),
-            investor: investor.clone(),
-            amount,
-            remaining_contribution,
-            new_funded_amount,
-            timestamp,
->>>>>>> 973c262 (feat(collateral): add admin parameter setter)
         }
         .publish(&env);
 
@@ -6621,7 +6518,6 @@ impl LiquifactEscrow {
             .unwrap_or(false)
     }
 
-<<<<<<< HEAD
     pub fn set_settlement_limit(env: Env, limit: u32) -> Result<(), EscrowError> {
         let _escrow = Self::load_escrow_require_admin(&env);
 
@@ -6637,163 +6533,5 @@ impl LiquifactEscrow {
 
     pub fn get_version(env: Env) -> Option<u32> {
         get_version(&env)
-=======
-    /// Total principal already returned to investors via [`LiquifactEscrow::refund`].
-    ///
-    /// Used by [`LiquifactEscrow::sweep_terminal_dust`] to compute outstanding liabilities.
-    /// Absent ⇒ `0` (no refunds have occurred).
-    pub fn get_distributed_principal(env: Env) -> i128 {
-        env.storage()
-            .instance()
-            .get(&DataKey::DistributedPrincipal)
-            .unwrap_or(0)
-    }
-
-    /// Read-only reconciliation position: the live funding-token balance held by
-    /// the contract, the outstanding investor liability, and the resulting
-    /// surplus (sweepable dust) or deficit.
-    ///
-    /// `outstanding_liability` is computed with the **same liability floor** that
-    /// [`LiquifactEscrow::sweep_terminal_dust`] enforces (see line
-    /// `outstanding = funded_amount - distributed_principal` in that function):
-    ///
-    /// ```text
-    /// outstanding_liability = max(funded_amount - distributed_principal, 0)
-    /// surplus               = token_balance - outstanding_liability
-    /// ```
-    ///
-    /// so a caller's view of "what may be swept" never disagrees with the on-chain
-    /// invariant. In settled (`2`) and withdrawn (`3`) states `distributed_principal`
-    /// stays `0` by design, so `outstanding_liability` reflects the full
-    /// `funded_amount`; the reported `surplus` is therefore never larger than what
-    /// `sweep_terminal_dust` would actually permit (it only applies the floor in the
-    /// cancelled state `4`). `surplus` is negative in a deficit.
-    ///
-    /// This is a pure read: no authorization, no storage writes. All arithmetic is
-    /// saturating, so the view cannot panic on extreme balances or amounts.
-    ///
-    /// # Errors
-    ///
-    /// Fails with [`EscrowError::EscrowNotInitialized`] / [`EscrowError::FundingTokenNotSet`]
-    /// only when the escrow has not been initialized; it never panics on numeric values.
-    pub fn get_reconciliation(env: Env) -> ReconciliationView {
-        let escrow = Self::get_escrow(env.clone());
-
-        let distributed: i128 = env
-            .storage()
-            .instance()
-            .get(&DataKey::DistributedPrincipal)
-            .unwrap_or(0);
-
-        // Same formula as sweep_terminal_dust's liability floor, floored at zero.
-        let outstanding_liability = escrow.funded_amount.saturating_sub(distributed).max(0);
-
-        let token_addr = Self::funding_token_or_fail(&env);
-        let this = env.current_contract_address();
-        let token_balance = TokenClient::new(&env, &token_addr).balance(&this);
-
-        // Surplus is sweepable dust when positive, a deficit when negative.
-        let surplus = token_balance.saturating_sub(outstanding_liability);
-
-        ReconciliationView {
-            token_balance,
-            outstanding_liability,
-            surplus,
-        }
-    }
-}
-
-/// Read-only reconciliation snapshot returned by
-/// [`LiquifactEscrow::get_reconciliation`].
-///
-/// Derive rationale:
-/// - `Debug`: improves failure diagnostics in tests.
-/// - `PartialEq`: allows exact assertions in tests.
-#[contracttype]
-#[derive(Clone, Debug, PartialEq)]
-pub struct ReconciliationView {
-    /// Live SEP-41 funding-token balance held by the contract address.
-    pub token_balance: i128,
-    /// Principal still owed to investors:
-    /// `max(funded_amount - distributed_principal, 0)`. Uses the identical floor
-    /// to [`LiquifactEscrow::sweep_terminal_dust`] so the two never disagree.
-    pub outstanding_liability: i128,
-    /// `token_balance - outstanding_liability`. Positive means sweepable dust
-    /// (a surplus); negative means the contract is in deficit for its remaining
-    /// obligations.
-    pub surplus: i128,
-}
-
-#[cfg(test)]
-mod test_allowlist_tests;
-
-#[cfg(test)]
-mod tests;
-
-/// Default starting balance assigned to any address that has never been seen by the
-/// [`DefaultMockToken`] contract.
-///
-/// The value (100 trillion stroops, i.e. 10 000 000 XLM at 7 decimal places) is large
-/// enough that ordinary test escrow amounts never accidentally overdraw an account,
-/// while still being representable in a signed 64-bit integer.  Defined once here so
-/// that `balance` and `transfer` stay in sync and a single edit suffices to change the
-/// test-harness funding level.  Large-principal tests that fund above this ceiling must
-/// provision balances via a real Stellar asset token (see `install_stellar_asset_token`).
-#[cfg(any(test, feature = "testutils"))]
-pub const MOCK_TOKEN_DEFAULT_BALANCE: i128 = 100_000_000_000_000i128;
-
-#[cfg(any(test, feature = "testutils"))]
-#[soroban_sdk::contract]
-pub struct DefaultMockToken;
-
-#[cfg(any(test, feature = "testutils"))]
-#[soroban_sdk::contractimpl]
-impl DefaultMockToken {
-    pub fn balance(env: soroban_sdk::Env, addr: soroban_sdk::Address) -> i128 {
-        let key = soroban_sdk::symbol_short!("balances");
-        let balances: soroban_sdk::Map<soroban_sdk::Address, i128> = env
-            .storage()
-            .instance()
-            .get(&key)
-            .unwrap_or_else(|| soroban_sdk::Map::new(&env));
-        balances.get(addr).unwrap_or(MOCK_TOKEN_DEFAULT_BALANCE)
-    }
-
-    pub fn transfer(
-        env: soroban_sdk::Env,
-        from: soroban_sdk::Address,
-        to: soroban_sdk::Address,
-        amount: i128,
-    ) {
-        let key = soroban_sdk::symbol_short!("balances");
-        let mut balances: soroban_sdk::Map<soroban_sdk::Address, i128> = env
-            .storage()
-            .instance()
-            .get(&key)
-            .unwrap_or_else(|| soroban_sdk::Map::new(&env));
-        let from_bal = balances
-            .get(from.clone())
-            .unwrap_or(MOCK_TOKEN_DEFAULT_BALANCE);
-        let to_bal = balances
-            .get(to.clone())
-            .unwrap_or(MOCK_TOKEN_DEFAULT_BALANCE);
-        balances.set(from.clone(), from_bal - amount);
-        balances.set(to.clone(), to_bal + amount);
-        env.storage().instance().set(&key, &balances);
-    }
-}
-
-#[cfg(any(test, feature = "testutils"))]
-fn register_mock_token_if_needed(env: &Env, token_addr: &Address) {
-    use std::panic::AssertUnwindSafe;
-    let env_clone = env.clone();
-    let token_clone = token_addr.clone();
-    let result = std::panic::catch_unwind(AssertUnwindSafe(move || {
-        let client = TokenClient::new(&env_clone, &token_clone);
-        let _ = client.balance(&token_clone);
-    }));
-    if result.is_err() {
-        env.register_at(token_addr, DefaultMockToken, ());
->>>>>>> 973c262 (feat(collateral): add admin parameter setter)
     }
 }
