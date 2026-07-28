@@ -1246,6 +1246,46 @@ pub struct SettlementReadiness {
     pub ready_now: bool,
 }
 
+/// Read-only snapshot of funding-related metadata for off-chain indexers and client rendering.
+///
+/// Bundles multiple read-only values that are useful for understanding the current funding
+/// state of the escrow in a single host invocation, reducing the number of RPC round-trips
+/// needed by off-chain consumers.
+///
+/// # Fields
+/// - `funding_token`: The SEP-41 token contract address that the escrow uses for funding.
+/// - `treasury`: The protocol treasury address that may receive dust sweeps.
+/// - `funding_deadline`: Optional ledger timestamp at which funding expires; `None` if no deadline.
+/// - `funding_expired`: `true` if a funding deadline is set and the current ledger time is past it.
+/// - `funding_target`: The current funding target (amount needed to reach funded status).
+/// - `funded_amount`: The amount currently contributed.
+/// - `remaining_capacity`: The amount remaining before the funding target is reached, floored at `0`.
+/// - `min_contribution_floor`: Minimum per-call contribution floor (`0` = no floor).
+/// - `max_unique_investors_cap`: Optional cap on distinct investor addresses.
+/// - `unique_funder_count`: Number of distinct investor addresses that have contributed.
+/// - `max_per_investor_cap`: Optional cap on total principal per investor address.
+/// - `protocol_fee_bps`: Immutable protocol fee in basis points.
+/// - `is_funded`: `true` if the escrow has reached a funded status.
+/// - `funding_close_snapshot`: The captured funding close snapshot (`None` if not yet funded).
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct FundingMetadata {
+    pub funding_token: Address,
+    pub treasury: Address,
+    pub funding_deadline: Option<u64>,
+    pub funding_expired: bool,
+    pub funding_target: i128,
+    pub funded_amount: i128,
+    pub remaining_capacity: i128,
+    pub min_contribution_floor: i128,
+    pub max_unique_investors_cap: Option<u32>,
+    pub unique_funder_count: u32,
+    pub max_per_investor_cap: Option<i128>,
+    pub protocol_fee_bps: i64,
+    pub is_funded: bool,
+    pub funding_close_snapshot: EscrowCloseSnapshot,
+}
+
 // --- Events ---
 
 #[contractevent]
