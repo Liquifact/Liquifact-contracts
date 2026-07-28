@@ -1198,14 +1198,14 @@ fn test_batch_append_emits_events_with_correct_indices() {
     let batch = soroban_sdk::vec![&env, d0.clone(), d1.clone()];
 
     // Clear any prior events emitted during setup/init.
-    let events_before = env.events().all().len();
+    let events_before = env.events().all().events().len();
     client.append_attestation_digests(&batch);
 
     let all_events = env.events().all();
-    let new_events: soroban_sdk::Vec<_> = {
-        let mut v = soroban_sdk::Vec::new(&env);
-        for i in events_before..all_events.len() {
-            v.push_back(all_events.get(i).unwrap());
+    let new_events: std::vec::Vec<_> = {
+        let mut v = std::vec::Vec::new();
+        for i in events_before..all_events.events().len() {
+            v.push(all_events.events().get(i).unwrap().clone());
         }
         v
     };
@@ -1214,7 +1214,7 @@ fn test_batch_append_emits_events_with_correct_indices() {
     assert_eq!(new_events.len(), 2);
 
     assert_eq!(
-        new_events.get(0).unwrap(),
+        new_events[0],
         AttestationDigestAppended {
             name: soroban_sdk::symbol_short!("att_app"),
             invoice_id: invoice_id.clone(),
@@ -1225,7 +1225,7 @@ fn test_batch_append_emits_events_with_correct_indices() {
     );
 
     assert_eq!(
-        new_events.get(1).unwrap(),
+        new_events[1],
         AttestationDigestAppended {
             name: soroban_sdk::symbol_short!("att_app"),
             invoice_id,
@@ -1248,7 +1248,7 @@ fn test_batch_append_events_offset_by_existing_log_length() {
     client.append_attestation_digest(&digest(&env, 0x01));
     client.append_attestation_digest(&digest(&env, 0x02));
 
-    let events_before = env.events().all().len();
+    let events_before = env.events().all().events().len();
     let d2 = digest(&env, 0xCC);
     let batch = soroban_sdk::vec![&env, d2.clone()];
     client.append_attestation_digests(&batch);
@@ -1256,7 +1256,7 @@ fn test_batch_append_events_offset_by_existing_log_length() {
     let all_events = env.events().all();
     // The single new event must be at index 2.
     assert_eq!(
-        all_events.get(events_before).unwrap(),
+        all_events.events().get(events_before).unwrap().clone(),
         AttestationDigestAppended {
             name: soroban_sdk::symbol_short!("att_app"),
             invoice_id,

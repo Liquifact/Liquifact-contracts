@@ -2549,6 +2549,11 @@ fn test_get_escrow_summary_happy_path() {
     );
     assert!(!summary.has_primary_attestation);
     assert_eq!(summary.attestation_log_length, 0);
+    // No fee supplied at init and never paused ⇒ additive-key defaults.
+    assert_eq!(summary.paused, client.is_paused());
+    assert_eq!(summary.protocol_fee_bps, client.get_protocol_fee_bps());
+    assert!(!summary.paused);
+    assert_eq!(summary.protocol_fee_bps, 0);
 }
 
 #[test]
@@ -2722,6 +2727,65 @@ fn test_get_escrow_summary_with_collateral_and_attestations() {
     // Verify attestation fields
     assert!(summary.has_primary_attestation);
     assert_eq!(summary.attestation_log_length, 2);
+}
+
+/// The summary's `paused` field must track `set_paused` toggles, and its
+/// `protocol_fee_bps` field must reflect the immutable init-time fee. Both are read from
+/// the same storage keys as `is_paused()` / `get_protocol_fee_bps()`, so they can never
+/// drift from the standalone views.
+#[test]
+fn test_get_escrow_summary_tracks_pause_and_protocol_fee() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let (funding_token, treasury) = free_addresses(&env);
+
+    // Initialize with a non-default, immutable protocol fee of 250 bps.
+    let fee_bps: i64 = 250;
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "INV_PAUSE_FEE"),
+        &sme,
+        &1000,
+        &100,
+        &100,
+        &funding_token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &Some(fee_bps),
+    );
+
+    // Fee mirrors the init-time value and the standalone getter from the start.
+    let summary = client.get_escrow_summary();
+    assert_eq!(summary.protocol_fee_bps, fee_bps);
+    assert_eq!(summary.protocol_fee_bps, client.get_protocol_fee_bps());
+
+    // Never paused yet ⇒ false, matching is_paused().
+    assert!(!summary.paused);
+    assert_eq!(summary.paused, client.is_paused());
+
+    // Activate the operational pause; summary must now report paused == true.
+    client.set_paused(&true);
+    let summary = client.get_escrow_summary();
+    assert!(summary.paused);
+    assert_eq!(summary.paused, client.is_paused());
+    // The immutable fee is unaffected by pause toggles.
+    assert_eq!(summary.protocol_fee_bps, fee_bps);
+
+    // Clear the pause; summary tracks the flag back to false.
+    client.set_paused(&false);
+    let summary = client.get_escrow_summary();
+    assert!(!summary.paused);
+    assert_eq!(summary.paused, client.is_paused());
+    assert_eq!(summary.protocol_fee_bps, fee_bps);
 }
 
 #[test]
