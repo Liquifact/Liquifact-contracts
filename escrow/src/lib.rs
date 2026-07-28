@@ -730,6 +730,50 @@ pub(crate) fn validate_maturity_bounds(env: &Env, maturity: u64, max_horizon: u6
     );
 }
 
+/// Predicate: `true` when there is no maturity lock (`maturity == 0`) or the ledger timestamp
+/// has reached the configured maturity (`now >= maturity`, inclusive boundary).
+///
+/// Centralises the maturity-reached comparison used by [`LiquifactEscrow::settle`],
+/// [`LiquifactEscrow::is_settleable`], and [`LiquifactEscrow::get_settlement_readiness`] so the
+/// settlement gate cannot drift across call sites.
+///
+/// # Notes
+/// Pure function aside from the ledger timestamp read. No storage access.
+#[inline(always)]
+pub(crate) fn is_maturity_reached(env: &Env, maturity: u64) -> bool {
+    maturity == 0 || env.ledger().timestamp() >= maturity
+}
+
+/// Shared guard: assert escrow is in funded status (`status == 1`) and settlement maturity has
+/// been reached.
+///
+/// Replaces the repeated inline pattern in [`LiquifactEscrow::settle`]:
+/// ```ignore
+/// ensure(&env, escrow.status == 1, EscrowError::SettlementNotFunded);
+/// if escrow.maturity > 0 {
+///     ensure(&env, now >= escrow.maturity, EscrowError::MaturityNotReached);
+/// }
+/// ```
+///
+/// Does **not** check pause or legal hold — entrypoints compose those gates separately per
+/// ADR-002.
+///
+/// # Errors
+/// - [`EscrowError::SettlementNotFunded`] when `escrow.status != 1`.
+/// - [`EscrowError::MaturityNotReached`] when `maturity > 0` and
+///   [`is_maturity_reached`] is `false`.
+#[inline(always)]
+pub(crate) fn validate_settlement_state(env: &Env, escrow: &InvoiceEscrow) {
+    guard_status_eq(env, escrow.status, 1, EscrowError::SettlementNotFunded);
+    if escrow.maturity > 0 {
+        ensure(
+            env,
+            is_maturity_reached(env, escrow.maturity),
+            EscrowError::MaturityNotReached,
+        );
+    }
+}
+
 // --- Storage keys ---
 
 #[contracttype]
@@ -2960,13 +3004,7 @@ impl LiquifactEscrow {
             return false;
         }
         let escrow = Self::get_escrow(env.clone());
-        if escrow.status != 1 {
-            return false;
-        }
-        if escrow.maturity > 0 && env.ledger().timestamp() < escrow.maturity {
-            return false;
-        }
-        true
+        escrow.status == 1 && is_maturity_reached(env, escrow.maturity)
     }
 
     /// Returns `true` when [`LiquifactEscrow::settle`] would succeed for the current ledger state.
@@ -2999,7 +3037,7 @@ impl LiquifactEscrow {
     pub fn get_settlement_readiness(env: Env) -> SettlementReadiness {
         let legal_hold_active = Self::legal_hold_active(&env);
         let escrow = Self::get_escrow(env.clone());
-        let maturity_reached = escrow.maturity == 0 || env.ledger().timestamp() >= escrow.maturity;
+        let maturity_reached = is_maturity_reached(&env, escrow.maturity);
 
         // Reuse the single-source-of-truth gate so this view cannot drift from `settle`.
         let is_settleable = Self::settleable_now(&env);
@@ -4288,16 +4326,9 @@ impl LiquifactEscrow {
         // env.clone(): env is used again after this call for ledger timestamp, storage set, and publish.
         let mut escrow = Self::load_escrow_require_sme(&env);
 
-        ensure(&env, escrow.status == 1, EscrowError::SettlementNotFunded);
+        validate_settlement_state(&env, &escrow);
 
         let now = env.ledger().timestamp();
-        if escrow.maturity > 0 {
-            ensure(
-                &env,
-                now >= escrow.maturity,
-                EscrowError::MaturityNotReached,
-            );
-        }
 
         // Compute settle_pool using the same arithmetic as compute_investor_payout.
         // coupon = funded_amount × yield_bps / 10_000  (floor)

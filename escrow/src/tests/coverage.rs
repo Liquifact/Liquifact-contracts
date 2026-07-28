@@ -4020,3 +4020,143 @@ fn refactor_gate_helpers_rotate_blocked_post_settlement() {
         EscrowError::RotationNotOpen,
     );
 }
+
+// =============================================================================
+// Settlement validation helper parity tests (issue #1009)
+//
+// Asserts that `is_maturity_reached` and `validate_settlement_state` are
+// behaviour-preserving replacements for the inline settlement checks that
+// previously appeared in `settle`, `settleable_now`, and
+// `get_settlement_readiness`.
+// =============================================================================
+
+/// Pure-function boundary coverage for `is_maturity_reached`: vacuous reach when
+/// `maturity == 0`, and inclusive `>=` at the configured maturity timestamp.
+#[test]
+fn settlement_validation_maturity_reached_predicate_boundaries() {
+    let env = Env::default();
+
+    assert!(
+        crate::is_maturity_reached(&env, 0),
+        "maturity == 0 must be vacuously reached"
+    );
+
+    let maturity: u64 = 10_000;
+    env.ledger().with_mut(|l| l.timestamp = maturity - 1);
+    assert!(
+        !crate::is_maturity_reached(&env, maturity),
+        "one second before maturity must not be reached"
+    );
+
+    env.ledger().with_mut(|l| l.timestamp = maturity);
+    assert!(
+        crate::is_maturity_reached(&env, maturity),
+        "exact maturity boundary must be inclusive"
+    );
+
+    env.ledger().with_mut(|l| l.timestamp = maturity + 1);
+    assert!(
+        crate::is_maturity_reached(&env, maturity),
+        "after maturity must be reached"
+    );
+}
+
+/// Confirms `validate_settlement_state` still emits the documented typed errors
+/// through `settle` after the refactor.
+#[test]
+fn settlement_validation_helper_preserves_settle_error_variants() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    // Open escrow → SettlementNotFunded
+    let (open, _a, _s) = init_open(&env, "SV_OPEN");
+    assert_contract_error(open.try_settle(), EscrowError::SettlementNotFunded);
+
+    // Funded but pre-maturity → MaturityNotReached
+    let maturity: u64 = 20_000;
+    let client = super::deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (token, treasury) = super::free_addresses(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "SV_MAT"),
+        &sme,
+        &super::TARGET,
+        &0i64,
+        &maturity,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+    let investor = Address::generate(&env);
+    client.fund(&investor, &super::TARGET);
+    env.ledger().with_mut(|l| l.timestamp = maturity - 1);
+    assert_contract_error(client.try_settle(), EscrowError::MaturityNotReached);
+
+    // At maturity → succeeds
+    env.ledger().with_mut(|l| l.timestamp = maturity);
+    let settled = client.settle();
+    assert_eq!(settled.status, 2);
+}
+
+/// Confirms `get_settlement_readiness().maturity_reached` stays aligned with
+/// `is_maturity_reached` after the helper extraction.
+#[test]
+fn settlement_validation_readiness_maturity_reached_matches_predicate() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let maturity: u64 = 15_000;
+    let client = super::deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (token, treasury) = super::free_addresses(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "SV_RDY"),
+        &sme,
+        &super::TARGET,
+        &0i64,
+        &maturity,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+    let investor = Address::generate(&env);
+    client.fund(&investor, &super::TARGET);
+
+    env.ledger().with_mut(|l| l.timestamp = maturity - 1);
+    let pre = client.get_settlement_readiness();
+    assert_eq!(
+        pre.maturity_reached,
+        crate::is_maturity_reached(&env, maturity)
+    );
+    assert!(!pre.maturity_reached);
+
+    env.ledger().with_mut(|l| l.timestamp = maturity);
+    let at = client.get_settlement_readiness();
+    assert_eq!(
+        at.maturity_reached,
+        crate::is_maturity_reached(&env, maturity)
+    );
+    assert!(at.maturity_reached);
+}
