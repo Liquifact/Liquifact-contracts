@@ -952,3 +952,421 @@ fn test_allowlist_metadata_reflects_initialized_values() {
     assert!(metadata.is_active);
     assert_eq!(metadata.allowlisted_count, 1);
 }
+
+// =============================================================================
+// Allowlist arithmetic safety — overflow / saturation tests
+//
+// Background
+// ----------
+// `get_allowlisted_investors` computes the pagination window with
+//
+//   let actual_limit = limit.min(50);
+//   let end = start.saturating_add(actual_limit).min(len);
+//
+// Prior to the fix the expression was `start + actual_limit` (plain u32 add),
+// which panics in debug builds and wraps silently in release builds when
+// `start` is near `u32::MAX`.  These tests pin the *correct* post-fix
+// behaviour, and also cover the arithmetic in:
+//
+//   • `get_allowlisted_investors_count`  — counts over the AllowlistIndex Vec;
+//     safe because Vec::len() returns u32 and the counter never exceeds len.
+//   • `set_investors_allowlisted`        — batch size bound (u32 ≤ MAX=32);
+//     the only arithmetic is the positivity/ceiling check, no addition.
+//   • metadata aggregation              — `allowlisted_count` is a read-only
+//     delegate to `get_allowlisted_investors_count`; same safety bound applies.
+//
+// Test nomenclature
+// -----------------
+//   overflow_*   — previously-crashing path; must now return an empty Vec
+//   saturation_* — start very close to u32::MAX; must clamp correctly
+//   count_*      — cover the increment loop in get_allowlisted_investors_count
+//   batch_*      — cover arithmetic in set_investors_allowlisted batch path
+// =============================================================================
+
+// ── get_allowlisted_investors: extreme start values ──────────────────────────
+
+/// `start = u32::MAX`, non-zero limit, empty index → returns empty (start >= len = 0).
+///
+/// The early-exit guard `if start >= len` fires before the addition, so no
+/// overflow occurs even in the degenerate all-zero case.
+#[test]
+fn overflow_get_allowlisted_investors_max_start_empty_index() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init(&env, &client);
+
+    let result = client.get_allowlisted_investors(&u32::MAX, &50);
+    assert_eq!(result.len(), 0, "must return empty when start >= len (0)");
+}
+
+/// `start = u32::MAX`, limit = 1, one investor in index → `start >= len = 1`,
+/// so the guard fires before any addition.  Must return empty.
+#[test]
+fn overflow_get_allowlisted_investors_max_start_one_investor() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init(&env, &client);
+
+    let inv = Address::generate(&env);
+    client.set_investor_allowlisted(&inv, &true);
+
+    // len = 1; start = u32::MAX >= 1 → early-exit fires, no addition.
+    let result = client.get_allowlisted_investors(&u32::MAX, &1);
+    assert_eq!(result.len(), 0, "must return empty; start past end of index");
+}
+
+/// `start = u32::MAX - 1`, limit = 50 (actual_limit also 50).
+/// Saturating add: (u32::MAX - 1).saturating_add(50) = u32::MAX (saturated).
+/// .min(len = 1) → end = 1, but start (u32::MAX - 1) >= 1, so early-exit fires.
+/// Must return empty, not panic.
+#[test]
+fn saturation_get_allowlisted_investors_near_max_start() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init(&env, &client);
+
+    let inv = Address::generate(&env);
+    client.set_investor_allowlisted(&inv, &true);
+
+    // start = u32::MAX - 1 ≥ len = 1 → early-exit.
+    let result = client.get_allowlisted_investors(&(u32::MAX - 1), &50);
+    assert_eq!(result.len(), 0, "start past len; must return empty without overflow");
+}
+
+/// `start = u32::MAX`, limit = u32::MAX → actual_limit = 50 (ceiling enforced).
+/// Still start >= any realistic len, so must return empty.
+#[test]
+fn saturation_get_allowlisted_investors_max_start_max_limit() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init(&env, &client);
+
+    let result = client.get_allowlisted_investors(&u32::MAX, &u32::MAX);
+    assert_eq!(result.len(), 0, "both start and limit at u32::MAX must not overflow");
+}
+
+/// `start = 0`, limit = u32::MAX → `actual_limit` is clamped to 50 (ceiling).
+/// With 3 investors: end = 0.saturating_add(50).min(3) = 3.  Must return all 3.
+#[test]
+fn saturation_get_allowlisted_investors_zero_start_max_limit_clamped() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init(&env, &client);
+
+    for _ in 0..3 {
+        let addr = Address::generate(&env);
+        client.set_investor_allowlisted(&addr, &true);
+    }
+
+    let result = client.get_allowlisted_investors(&0, &u32::MAX);
+    assert_eq!(result.len(), 3, "ceiling should clamp limit; all 3 investors returned");
+}
+
+/// start close to but still within the valid range.
+///
+/// With 5 investors in the index, start = 4 (last valid), limit = u32::MAX → actual_limit = 50.
+/// saturating_add(4, 50) = 54, min(5) = 5.  Loop runs `for i in 4..5` → returns item[4].
+#[test]
+fn saturation_get_allowlisted_investors_last_valid_start() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init(&env, &client);
+
+    let mut addrs = soroban_sdk::Vec::new(&env);
+    for _ in 0..5 {
+        let addr = Address::generate(&env);
+        client.set_investor_allowlisted(&addr, &true);
+        addrs.push_back(addr);
+    }
+
+    // start = 4, effective limit = 50 → window [4, min(54, 5)) = [4, 5)
+    let result = client.get_allowlisted_investors(&4, &u32::MAX);
+    assert_eq!(result.len(), 1);
+    assert_eq!(result.get(0).unwrap(), addrs.get(4).unwrap());
+}
+
+/// Ceiling enforcement: limit = 51 (just above the 50-ceiling) → actual_limit = 50.
+/// With 60 investors, start = 0: window [0, 50).  Must return exactly 50.
+#[test]
+fn saturation_get_allowlisted_investors_limit_above_ceiling_clamped() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init(&env, &client);
+
+    // Add 60 investors
+    for _ in 0..60 {
+        let addr = Address::generate(&env);
+        client.set_investor_allowlisted(&addr, &true);
+    }
+
+    let result = client.get_allowlisted_investors(&0, &51);
+    assert_eq!(result.len(), 50, "limit above ceiling must be clamped to 50");
+
+    // Also test limit = 50 exactly — must also return 50
+    let result2 = client.get_allowlisted_investors(&0, &50);
+    assert_eq!(result2.len(), 50, "limit == ceiling must return 50");
+}
+
+// ── get_allowlisted_investors_count: count increment safety ──────────────────
+
+/// count += 1 is safe for a small set; verify the counter is accurate for every
+/// intermediate size from 0 to 5.
+#[test]
+fn count_get_allowlisted_investors_count_increments_correctly() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init(&env, &client);
+
+    let count_before = client.get_allowlisted_investors_count();
+    assert_eq!(count_before, 0, "count must be 0 before any allowlisting");
+
+    let mut addrs = Vec::new();
+    for i in 1u32..=5 {
+        let addr = Address::generate(&env);
+        addrs.push(addr.clone());
+        client.set_investor_allowlisted(&addr, &true);
+        assert_eq!(
+            client.get_allowlisted_investors_count(),
+            i,
+            "count must equal number of distinct allowlisted addresses"
+        );
+    }
+}
+
+/// Revoking an investor reduces the count by exactly 1.
+#[test]
+fn count_get_allowlisted_investors_count_decrements_on_revoke() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init(&env, &client);
+
+    let a = Address::generate(&env);
+    let b = Address::generate(&env);
+    let c = Address::generate(&env);
+
+    client.set_investor_allowlisted(&a, &true);
+    client.set_investor_allowlisted(&b, &true);
+    client.set_investor_allowlisted(&c, &true);
+    assert_eq!(client.get_allowlisted_investors_count(), 3);
+
+    client.set_investor_allowlisted(&b, &false);
+    assert_eq!(client.get_allowlisted_investors_count(), 2, "revoke must decrement count");
+
+    client.set_investor_allowlisted(&a, &false);
+    assert_eq!(client.get_allowlisted_investors_count(), 1);
+
+    client.set_investor_allowlisted(&c, &false);
+    assert_eq!(client.get_allowlisted_investors_count(), 0, "all revoked → count must be 0");
+}
+
+/// Re-allowlisting an already-allowlisted investor must not double-count.
+#[test]
+fn count_re_allowlist_idempotent_count() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init(&env, &client);
+
+    let inv = Address::generate(&env);
+    client.set_investor_allowlisted(&inv, &true);
+    assert_eq!(client.get_allowlisted_investors_count(), 1);
+
+    // Setting the same address to true again: count must remain 1.
+    // Note: the index only appends when was_allowlisted == false, so a double
+    // set_true call is a no-op on the index.
+    client.set_investor_allowlisted(&inv, &true);
+    assert_eq!(
+        client.get_allowlisted_investors_count(),
+        1,
+        "idempotent re-allowlisting must not bump the count"
+    );
+}
+
+/// `get_allowlist_metadata` reflects the same count as
+/// `get_allowlisted_investors_count` — both read through the same index.
+#[test]
+fn count_metadata_allowlisted_count_matches_direct_count() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init(&env, &client);
+
+    for _ in 0..4 {
+        let addr = Address::generate(&env);
+        client.set_investor_allowlisted(&addr, &true);
+    }
+
+    let direct = client.get_allowlisted_investors_count();
+    let via_metadata = client.get_allowlist_metadata().allowlisted_count;
+    assert_eq!(direct, via_metadata, "metadata.allowlisted_count must equal direct count");
+    assert_eq!(direct, 4);
+}
+
+// ── set_investors_allowlisted: batch arithmetic ──────────────────────────────
+
+/// Batch of exactly MAX_INVESTOR_ALLOWLIST_BATCH entries succeeds (boundary check).
+#[test]
+fn batch_allowlist_exact_max_batch_size_succeeds() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init(&env, &client);
+
+    let max = super::MAX_INVESTOR_ALLOWLIST_BATCH as usize;
+    let mut v: soroban_sdk::Vec<Address> = soroban_sdk::Vec::new(&env);
+    for _ in 0..max {
+        v.push_back(Address::generate(&env));
+    }
+
+    // Exactly MAX must succeed.
+    client.set_investors_allowlisted(&v, &true);
+    assert_eq!(
+        client.get_allowlisted_investors_count(),
+        super::MAX_INVESTOR_ALLOWLIST_BATCH,
+        "all MAX batch members must be allowlisted"
+    );
+}
+
+/// Batch of MAX + 1 must be rejected with InvestorBatchTooLarge (typed error 101).
+#[test]
+fn batch_allowlist_one_over_max_batch_returns_typed_error() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init(&env, &client);
+
+    let too_many = super::MAX_INVESTOR_ALLOWLIST_BATCH as usize + 1;
+    let mut v: soroban_sdk::Vec<Address> = soroban_sdk::Vec::new(&env);
+    for _ in 0..too_many {
+        v.push_back(Address::generate(&env));
+    }
+
+    assert_contract_error_gate(
+        client.try_set_investors_allowlisted(&v, &true),
+        EscrowError::InvestorBatchTooLarge,
+    );
+    // Count must remain 0 — no partial writes.
+    assert_eq!(client.get_allowlisted_investors_count(), 0);
+}
+
+/// Empty batch must be rejected with InvestorBatchEmpty (typed error 100).
+#[test]
+fn batch_allowlist_empty_batch_returns_typed_error() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init(&env, &client);
+
+    let v: soroban_sdk::Vec<Address> = soroban_sdk::Vec::new(&env);
+
+    assert_contract_error_gate(
+        client.try_set_investors_allowlisted(&v, &true),
+        EscrowError::InvestorBatchEmpty,
+    );
+}
+
+/// Batch revoke of MAX entries brings the count from MAX to 0 in a single call.
+#[test]
+fn batch_revoke_max_entries_count_reaches_zero() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init(&env, &client);
+
+    let max = super::MAX_INVESTOR_ALLOWLIST_BATCH as usize;
+    let mut v: soroban_sdk::Vec<Address> = soroban_sdk::Vec::new(&env);
+    for _ in 0..max {
+        v.push_back(Address::generate(&env));
+    }
+
+    client.set_investors_allowlisted(&v, &true);
+    assert_eq!(client.get_allowlisted_investors_count(), super::MAX_INVESTOR_ALLOWLIST_BATCH);
+
+    client.set_investors_allowlisted(&v, &false);
+    assert_eq!(
+        client.get_allowlisted_investors_count(),
+        0,
+        "batch revoke of all MAX entries must set count to 0"
+    );
+}
+
+// ── Combined: pagination + arithmetic consistency ────────────────────────────
+
+/// After adding N investors, paginating through all pages must yield exactly N
+/// results in total, with no duplicates and no panic at the page boundary.
+/// Uses 3 pages of size 5 over 13 investors (final page has only 3 items).
+#[test]
+fn pagination_full_scan_no_overflow_or_duplicates() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init(&env, &client);
+
+    let n: usize = 13;
+    let mut inserted = std::collections::HashSet::new();
+    for _ in 0..n {
+        let addr = Address::generate(&env);
+        inserted.insert(addr.to_string());
+        client.set_investor_allowlisted(&addr, &true);
+    }
+
+    // Paginate with page size 5 → 3 pages (5, 5, 3).
+    let page_size: u32 = 5;
+    let mut collected = std::collections::HashSet::new();
+    let mut start: u32 = 0;
+    loop {
+        let page = client.get_allowlisted_investors(&start, &page_size);
+        let page_len = page.len();
+        if page_len == 0 {
+            break;
+        }
+        for i in 0..page_len {
+            let addr_str = page.get(i).unwrap().to_string();
+            assert!(
+                collected.insert(addr_str.clone()),
+                "duplicate address {addr_str} found in paginated results"
+            );
+        }
+        start = start.saturating_add(page_size);
+        if page_len < page_size {
+            break;
+        }
+    }
+    assert_eq!(collected.len(), n, "total paginated count must equal {n}");
+    assert_eq!(
+        collected, inserted,
+        "paginated set must match exactly the inserted set"
+    );
+}
+
+/// After adding 5 investors, querying `start = 3` with `limit = u32::MAX`
+/// should return exactly 2 items (items 3 and 4) — no panic from the large limit.
+#[test]
+fn saturation_large_limit_from_mid_page_returns_tail() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init(&env, &client);
+
+    let mut addrs = soroban_sdk::Vec::new(&env);
+    for _ in 0..5 {
+        let addr = Address::generate(&env);
+        client.set_investor_allowlisted(&addr, &true);
+        addrs.push_back(addr);
+    }
+
+    // start = 3, limit = u32::MAX → actual_limit = 50 → end = min(3+50, 5) = 5
+    let result = client.get_allowlisted_investors(&3, &u32::MAX);
+    assert_eq!(result.len(), 2, "tail of 2 items returned without overflow");
+    assert_eq!(result.get(0).unwrap(), addrs.get(3).unwrap());
+    assert_eq!(result.get(1).unwrap(), addrs.get(4).unwrap());
+}
