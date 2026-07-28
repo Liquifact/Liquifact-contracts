@@ -125,6 +125,10 @@ Bundles multiple read-only values in a single host invocation, optimizing read l
 - `sme_collateral_commitment: CollateralCommitmentSnapshot` — Custom option-like enum (`None` or `Some(SmeCollateralCommitment)`).
 - `has_primary_attestation: bool` — Primary attestation binding status.
 - `attestation_log_length: u32` — Number of append-log entries.
+- `paused: bool` — Operational pause flag; mirrors `is_paused()`. Reads `false` for instances that have never been paused.
+- `protocol_fee_bps: i64` — Configured protocol fee in basis points; mirrors `get_protocol_fee_bps()`. Reads `0` for pre-fee instances.
+
+The `paused` and `protocol_fee_bps` fields are read from the same storage keys (`DataKey::Paused`, `DataKey::ProtocolFeeBps`) as their standalone getters, so the summary can never drift from `is_paused()` / `get_protocol_fee_bps()`.
 
 ---
 

@@ -21,7 +21,7 @@
 //!   sweep_terminal_dust          → "Legal hold blocks treasury dust sweep"
 
 use super::*;
-use soroban_sdk::token::StellarAssetClient;
+use soroban_sdk::{testutils::Address as _, token::StellarAssetClient};
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -259,7 +259,7 @@ fn settle_passes_when_hold_cleared() {
     client.set_legal_hold(&true);
     client.clear_legal_hold();
     let escrow = client.settle();
-    assert_eq!(escrow.escrow.status, 2);
+    assert_eq!(escrow.status, 2);
 }
 
 // ── 4. withdraw ──────────────────────────────────────────────────────────────
@@ -570,7 +570,7 @@ fn hold_can_be_toggled_and_re_blocks_operations() {
     client.set_legal_hold(&true);
     client.clear_legal_hold();
     let settled = client.settle();
-    assert_eq!(settled.escrow.status, 2);
+    assert_eq!(settled.status, 2);
 
     // Second toggle: re-set → claim is blocked.
     client.set_legal_hold(&true);
@@ -614,7 +614,7 @@ fn hold_persists_after_admin_handover() {
     client.clear_legal_hold();
     assert!(!client.get_legal_hold());
     let settled = client.settle();
-    assert_eq!(settled.escrow.status, 2);
+    assert_eq!(settled.status, 2);
 }
 
 // ── 11. Edge-case: hold check fires before amount / status / auth checks ─────
@@ -1007,7 +1007,7 @@ fn recovery_new_admin_clears_hold_and_operations_resume() {
     // settle transitions funded(1) → settled(2); withdraw requires status=1
     // so we verify settle first, then demonstrate claim on the settled escrow.
     let settled = client.settle();
-    assert_eq!(settled.escrow.status, 2);
+    assert_eq!(settled.status, 2);
 
     client.claim_investor_payout(&investor);
     assert!(client.is_investor_claimed(&investor));

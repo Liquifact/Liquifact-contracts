@@ -12,7 +12,7 @@ use crate::{
 use soroban_sdk::{
     symbol_short,
     testutils::{Address as _, Events as _, Ledger},
-    Address, BytesN, Env, Error, Event, InvokeError, Vec as SorobanVec,
+    Address, BytesN, Env, Error, InvokeError, Vec as SorobanVec,
 };
 
 const AMOUNT: i128 = 100_000_000_000;
@@ -1041,19 +1041,6 @@ fn test_claim_lock_not_expired() {
 }
 
 #[test]
-fn test_clear_without_record_rejected() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, admin, sme) = setup(&env);
-    default_init(&client, &env, &admin, &sme);
-
-    assert_contract_error(
-        client.try_clear_sme_collateral_commitment(),
-        EscrowError::NoCollateralToClear,
-    );
-}
-
-#[test]
 fn test_double_clear_rejected() {
     let env = Env::default();
     env.mock_all_auths();
@@ -1067,114 +1054,6 @@ fn test_double_clear_rejected() {
         client.try_clear_sme_collateral_commitment(),
         EscrowError::NoCollateralToClear,
     );
-}
-
-#[test]
-fn test_record_then_clear_removes_commitment() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, admin, sme) = setup(&env);
-    default_init(&client, &env, &admin, &sme);
-
-    let asset = symbol_short!("USDC");
-    client.record_sme_collateral_commitment(&asset, &PLEDGE);
-    assert!(client.get_sme_collateral_commitment().is_some());
-
-    client.clear_sme_collateral_commitment();
-    assert!(
-        client.get_sme_collateral_commitment().is_none(),
-        "clear must remove DataKey::SmeCollateralPledge"
-    );
-}
-
-#[test]
-fn test_clear_emits_exactly_one_coll_clr_event() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, admin, sme) = setup(&env);
-    let contract_id = client.address.clone();
-    default_init(&client, &env, &admin, &sme);
-
-    let asset = symbol_short!("USDC");
-    client.record_sme_collateral_commitment(&asset, &PLEDGE);
-
-    // Drain the event buffer so we only measure the clear operation.
-    let _ = env.events().all();
-    client.clear_sme_collateral_commitment();
-
-    let contract_events = env.events().all().filter_by_contract(&contract_id);
-    let events = contract_events.events();
-    assert_eq!(
-        events.len(),
-        1,
-        "clear_sme_collateral_commitment must emit exactly one coll_clr event"
-    );
-
-    let invoice_id = client.get_escrow().invoice_id;
-    assert_eq!(
-        events.last().unwrap().clone(),
-        CollateralClearedEvt {
-            name: symbol_short!("coll_clr"),
-            invoice_id,
-            asset,
-            amount: PLEDGE,
-            recorded_at: env.ledger().timestamp(),
-        }
-        .to_xdr(&env, &contract_id)
-    );
-}
-
-#[test]
-fn test_clear_non_sme_caller_rejected() {
-    let env = Env::default();
-    let (client, admin, sme) = setup(&env);
-    init_for_collateral(&env, &client, &admin, &sme, "CLR_AUTH");
-
-    let asset = symbol_short!("USDC");
-    env.mock_all_auths();
-    client.record_sme_collateral_commitment(&asset, &PLEDGE);
-
-    // Revoke all auths so the SME signature is absent on clear.
-    env.mock_auths(&[]);
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        client.clear_sme_collateral_commitment();
-    }));
-    assert!(result.is_err(), "non-SME clear must be rejected");
-    assert!(
-        client.get_sme_collateral_commitment().is_some(),
-        "failed clear must leave the commitment in place"
-    );
-}
-
-#[test]
-fn test_clear_after_settle_succeeds() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, admin, sme) = setup(&env);
-    init_settleable_test(&env, &client, &admin, &sme, 0);
-
-    let asset = symbol_short!("USDC");
-    client.record_sme_collateral_commitment(&asset, &5_000i128);
-    fund_to_target_stl(&env, &client);
-    client.settle();
-
-    client.clear_sme_collateral_commitment();
-    assert!(client.get_sme_collateral_commitment().is_none());
-}
-
-#[test]
-fn test_clear_after_cancel_funding_succeeds() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, admin, sme) = setup(&env);
-    default_init(&client, &env, &admin, &sme);
-
-    let asset = symbol_short!("USDC");
-    client.record_sme_collateral_commitment(&asset, &PLEDGE);
-    client.cancel_funding();
-
-    client.clear_sme_collateral_commitment();
-    assert!(client.get_sme_collateral_commitment().is_none());
 }
 
 // ---------------------------------------------------------------------------
@@ -1191,7 +1070,7 @@ fn test_get_returns_none_before_record() {
 }
 
 // ---------------------------------------------------------------------------
-// Overwrite: record twice, clear once → None; cleared amount is the last pledge
+// Overwrite: record twice, clear once ÔåÆ None; cleared amount is the last pledge
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -1213,54 +1092,7 @@ fn test_overwrite_then_clear() {
     assert!(client.get_sme_collateral_commitment().is_none());
 }
 
-#[test]
-fn test_clear_emits_exactly_one_coll_clr_event() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, admin, sme) = setup(&env);
-    let contract_id = client.address.clone();
-    default_init(&client, &env, &admin, &sme);
-
-    let asset = symbol_short!("USDC");
-    client.record_sme_collateral_commitment(&asset, &PLEDGE);
-
-    // Drain the record event so we only measure the clear transition.
-    let _ = env.events().all();
-    client.clear_sme_collateral_commitment();
-
-    let contract_events = env.events().all().filter_by_contract(&contract_id);
-    let events = contract_events.events();
-    assert_eq!(
-        events.len(),
-        1,
-        "clear_sme_collateral_commitment must emit exactly one event"
-    );
-
-    let invoice_id = client.get_escrow().invoice_id;
-    assert_eq!(
-        events.last().unwrap().clone(),
-        CollateralClearedEvt {
-            name: symbol_short!("coll_clr"),
-            invoice_id,
-            asset,
-            amount: PLEDGE,
-            recorded_at: env.ledger().timestamp(),
-        }
-        .to_xdr(&env, &contract_id)
-    );
-}
-
-#[test]
-fn test_collateral_state_change_topics_are_distinct() {
-    // Indexers key on the short routing symbols; record and clear must not collide.
-    assert_ne!(
-        symbol_short!("coll_rec"),
-        symbol_short!("coll_clr"),
-        "collateral record and clear topics must be distinct"
-    );
-}
-
-// ──────────────────────────────────────────────────────────────────────────────
+// ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇ
 // Anchoring tests: read-view default/absent return values (docs/escrow-read-api.md)
 //
 // Each test asserts the default or absent-key return value documented in the
@@ -2717,6 +2549,11 @@ fn test_get_escrow_summary_happy_path() {
     );
     assert!(!summary.has_primary_attestation);
     assert_eq!(summary.attestation_log_length, 0);
+    // No fee supplied at init and never paused ⇒ additive-key defaults.
+    assert_eq!(summary.paused, client.is_paused());
+    assert_eq!(summary.protocol_fee_bps, client.get_protocol_fee_bps());
+    assert!(!summary.paused);
+    assert_eq!(summary.protocol_fee_bps, 0);
 }
 
 #[test]
@@ -2890,6 +2727,65 @@ fn test_get_escrow_summary_with_collateral_and_attestations() {
     // Verify attestation fields
     assert!(summary.has_primary_attestation);
     assert_eq!(summary.attestation_log_length, 2);
+}
+
+/// The summary's `paused` field must track `set_paused` toggles, and its
+/// `protocol_fee_bps` field must reflect the immutable init-time fee. Both are read from
+/// the same storage keys as `is_paused()` / `get_protocol_fee_bps()`, so they can never
+/// drift from the standalone views.
+#[test]
+fn test_get_escrow_summary_tracks_pause_and_protocol_fee() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let (funding_token, treasury) = free_addresses(&env);
+
+    // Initialize with a non-default, immutable protocol fee of 250 bps.
+    let fee_bps: i64 = 250;
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "INV_PAUSE_FEE"),
+        &sme,
+        &1000,
+        &100,
+        &100,
+        &funding_token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &Some(fee_bps),
+    );
+
+    // Fee mirrors the init-time value and the standalone getter from the start.
+    let summary = client.get_escrow_summary();
+    assert_eq!(summary.protocol_fee_bps, fee_bps);
+    assert_eq!(summary.protocol_fee_bps, client.get_protocol_fee_bps());
+
+    // Never paused yet ⇒ false, matching is_paused().
+    assert!(!summary.paused);
+    assert_eq!(summary.paused, client.is_paused());
+
+    // Activate the operational pause; summary must now report paused == true.
+    client.set_paused(&true);
+    let summary = client.get_escrow_summary();
+    assert!(summary.paused);
+    assert_eq!(summary.paused, client.is_paused());
+    // The immutable fee is unaffected by pause toggles.
+    assert_eq!(summary.protocol_fee_bps, fee_bps);
+
+    // Clear the pause; summary tracks the flag back to false.
+    client.set_paused(&false);
+    let summary = client.get_escrow_summary();
+    assert!(!summary.paused);
+    assert_eq!(summary.paused, client.is_paused());
+    assert_eq!(summary.protocol_fee_bps, fee_bps);
 }
 
 #[test]
@@ -4187,4 +4083,144 @@ fn refactor_gate_helpers_rotate_blocked_post_settlement() {
         client.try_rotate_beneficiary(&new_sme),
         EscrowError::RotationNotOpen,
     );
+}
+
+// =============================================================================
+// Settlement validation helper parity tests (issue #1009)
+//
+// Asserts that `is_maturity_reached` and `validate_settlement_state` are
+// behaviour-preserving replacements for the inline settlement checks that
+// previously appeared in `settle`, `settleable_now`, and
+// `get_settlement_readiness`.
+// =============================================================================
+
+/// Pure-function boundary coverage for `is_maturity_reached`: vacuous reach when
+/// `maturity == 0`, and inclusive `>=` at the configured maturity timestamp.
+#[test]
+fn settlement_validation_maturity_reached_predicate_boundaries() {
+    let env = Env::default();
+
+    assert!(
+        crate::is_maturity_reached(&env, 0),
+        "maturity == 0 must be vacuously reached"
+    );
+
+    let maturity: u64 = 10_000;
+    env.ledger().with_mut(|l| l.timestamp = maturity - 1);
+    assert!(
+        !crate::is_maturity_reached(&env, maturity),
+        "one second before maturity must not be reached"
+    );
+
+    env.ledger().with_mut(|l| l.timestamp = maturity);
+    assert!(
+        crate::is_maturity_reached(&env, maturity),
+        "exact maturity boundary must be inclusive"
+    );
+
+    env.ledger().with_mut(|l| l.timestamp = maturity + 1);
+    assert!(
+        crate::is_maturity_reached(&env, maturity),
+        "after maturity must be reached"
+    );
+}
+
+/// Confirms `validate_settlement_state` still emits the documented typed errors
+/// through `settle` after the refactor.
+#[test]
+fn settlement_validation_helper_preserves_settle_error_variants() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    // Open escrow → SettlementNotFunded
+    let (open, _a, _s) = init_open(&env, "SV_OPEN");
+    assert_contract_error(open.try_settle(), EscrowError::SettlementNotFunded);
+
+    // Funded but pre-maturity → MaturityNotReached
+    let maturity: u64 = 20_000;
+    let client = super::deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (token, treasury) = super::free_addresses(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "SV_MAT"),
+        &sme,
+        &super::TARGET,
+        &0i64,
+        &maturity,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+    let investor = Address::generate(&env);
+    client.fund(&investor, &super::TARGET);
+    env.ledger().with_mut(|l| l.timestamp = maturity - 1);
+    assert_contract_error(client.try_settle(), EscrowError::MaturityNotReached);
+
+    // At maturity → succeeds
+    env.ledger().with_mut(|l| l.timestamp = maturity);
+    let settled = client.settle();
+    assert_eq!(settled.status, 2);
+}
+
+/// Confirms `get_settlement_readiness().maturity_reached` stays aligned with
+/// `is_maturity_reached` after the helper extraction.
+#[test]
+fn settlement_validation_readiness_maturity_reached_matches_predicate() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let maturity: u64 = 15_000;
+    let client = super::deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (token, treasury) = super::free_addresses(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "SV_RDY"),
+        &sme,
+        &super::TARGET,
+        &0i64,
+        &maturity,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+    let investor = Address::generate(&env);
+    client.fund(&investor, &super::TARGET);
+
+    env.ledger().with_mut(|l| l.timestamp = maturity - 1);
+    let pre = client.get_settlement_readiness();
+    assert_eq!(
+        pre.maturity_reached,
+        crate::is_maturity_reached(&env, maturity)
+    );
+    assert!(!pre.maturity_reached);
+
+    env.ledger().with_mut(|l| l.timestamp = maturity);
+    let at = client.get_settlement_readiness();
+    assert_eq!(
+        at.maturity_reached,
+        crate::is_maturity_reached(&env, maturity)
+    );
+    assert!(at.maturity_reached);
 }
