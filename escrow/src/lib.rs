@@ -1115,6 +1115,35 @@ pub struct CollateralConfig {
     pub sme_commitment: CollateralCommitmentSnapshot,
 }
 
+/// Read-only snapshot of the settlement subsystem configuration.
+///
+/// Bundles the four settlement-relevant admin knobs so an off-chain caller can understand
+/// the full settlement gate with a single host invocation rather than stitching together
+/// `get_settlement_limit`, `get_protocol_fee_bps`, and the maturity / yield fields from
+/// `get_escrow`.
+///
+/// Returns sensible defaults before [`LiquifactEscrow::init`] is called:
+/// - `settlement_limit` → [`DEFAULT_SETTLEMENT_LIMIT`]
+/// - `yield_bps` → `0`
+/// - `protocol_fee_bps` → `0`
+/// - `maturity` → `0` (no maturity lock)
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct SettlementConfig {
+    /// Admin-configured batch limit for settlement payout processing.
+    /// Defaults to [`DEFAULT_SETTLEMENT_LIMIT`] when never set via
+    /// [`LiquifactEscrow::set_settlement_limit`].
+    pub settlement_limit: u32,
+    /// Invoice yield in basis points set at [`LiquifactEscrow::init`]; `0` before init.
+    pub yield_bps: i64,
+    /// Protocol fee in basis points deducted from the SME disbursement at
+    /// [`LiquifactEscrow::withdraw`]; `0` before init or when not configured.
+    pub protocol_fee_bps: i64,
+    /// Maturity timestamp (ledger seconds) after which settlement is permitted;
+    /// `0` means no time lock. Taken from [`InvoiceEscrow::maturity`]; `0` before init.
+    pub maturity: u64,
+}
+
 /// Read-only metadata for the investor allowlist subsystem.
 ///
 /// The view intentionally returns defaults for uninitialized deployments so off-chain
@@ -3621,6 +3650,39 @@ impl LiquifactEscrow {
         env.storage()
             .instance()
             .set(&DataKey::SettlementLimit, &new_limit);
+    }
+
+    /// Read-only snapshot of the settlement subsystem configuration.
+    ///
+    /// Bundles `settlement_limit`, `yield_bps`, `protocol_fee_bps`, and `maturity` into
+    /// a single [`SettlementConfig`] so an off-chain caller can understand the full settlement
+    /// gate with one host invocation.
+    ///
+    /// # Defaults (before `init`)
+    /// All fields return their documented default values when the escrow has never been
+    /// initialized (additive-key semantics, ADR-007):
+    /// - `settlement_limit` → [`DEFAULT_SETTLEMENT_LIMIT`]
+    /// - `yield_bps` → `0`
+    /// - `protocol_fee_bps` → `0`
+    /// - `maturity` → `0` (no maturity lock)
+    ///
+    /// # Read-only
+    /// Pure view: no `require_auth`, no storage writes, and no TTL bump.
+    pub fn get_settlement_config(env: Env) -> SettlementConfig {
+        let settlement_limit = Self::get_settlement_limit(env.clone());
+        let protocol_fee_bps = Self::get_protocol_fee_bps(env.clone());
+        let (yield_bps, maturity) = env
+            .storage()
+            .instance()
+            .get::<DataKey, InvoiceEscrow>(&DataKey::Escrow)
+            .map(|e| (e.yield_bps, e.maturity))
+            .unwrap_or((0, 0));
+        SettlementConfig {
+            settlement_limit,
+            yield_bps,
+            protocol_fee_bps,
+            maturity,
+        }
     }
 
     /// Bundle the settleable flag, legal-hold state, maturity-reached state, and a single derived

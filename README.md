@@ -190,6 +190,7 @@ liquifact-contracts/
 | `get_escrow` | — | Read current escrow state. |
 | `get_version` | — | Read stored `DataKey::Version`. |
 | `get_remaining_investor_slots` | — | Read remaining unique investor capacity before reaching the cap. |
+| `get_settlement_config` | — | Read-only bundled view of settlement configuration: `settlement_limit`, `yield_bps`, `protocol_fee_bps`, and `maturity`. Returns sensible defaults (`DEFAULT_SETTLEMENT_LIMIT`, `0`, `0`, `0`) before `init`. |
 | `get_reconciliation` | — | Read solvency position: live token balance, outstanding liability, and surplus/deficit. See [`docs/escrow-read-api.md`](docs/escrow-read-api.md). |
 
 | `rebind_registry_ref` | Admin | Set or update the off-chain registry hint (`DataKey::RegistryRef`). Emits `RegistryRefRebound`. |
