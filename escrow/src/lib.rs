@@ -3220,7 +3220,7 @@ impl LiquifactEscrow {
     pub fn append_attestation_digests(env: Env, digests: Vec<BytesN<32>>) {
         let n = digests.len();
 
-// Batch-size guards (surfaced before auth, consistent with revoke_attestation_digests).
+        // Batch-size guards (surfaced before auth, consistent with revoke_attestation_digests).
         ensure(&env, n > 0, EscrowError::AttestationAppendBatchEmpty);
         ensure(
             &env,
@@ -3239,7 +3239,7 @@ impl LiquifactEscrow {
             EscrowError::AttestationAppendLogCapacityReached,
         );
 
-// Append all digests.
+        // Append all digests.
         let base_idx = log.len();
         for i in 0..n {
             let d = digests.get(i).unwrap();
@@ -3589,7 +3589,7 @@ impl LiquifactEscrow {
 
     /// Retrieve the currently recorded SME collateral commitment metadata from storage.
     pub fn get_sme_collateral_commitment(env: Env) -> Option<SmeCollateralCommitment> {
-Self::collateral_pledge_get(&env)
+        Self::collateral_pledge_get(&env)
     }
 
     /// Retrieve the admin-configured collateral limit.
@@ -3628,12 +3628,12 @@ Self::collateral_pledge_get(&env)
     /// 2. `require_auth` on the SME address (via `load_escrow_require_sme`).
     /// 3. Remove storage entry and emit [`CollateralClearedEvt`].
     pub fn clear_sme_collateral_commitment(env: Env) {
-let commitment: SmeCollateralCommitment = Self::collateral_pledge_get(&env)
+        let commitment: SmeCollateralCommitment = Self::collateral_pledge_get(&env)
             .unwrap_or_else(|| fail(&env, EscrowError::NoCollateralToClear));
 
         let escrow = Self::load_escrow_require_sme(&env);
 
-Self::collateral_pledge_remove(&env);
+        Self::collateral_pledge_remove(&env);
 
         CollateralClearedEvt {
             name: symbol_short!("coll_clr"),
@@ -3924,7 +3924,7 @@ Self::collateral_pledge_remove(&env);
         let escrow = Self::load_escrow_require_sme(&env);
 
         let now = env.ledger().timestamp();
-let prior: Option<SmeCollateralCommitment> = Self::collateral_pledge_get(&env);
+        let prior: Option<SmeCollateralCommitment> = Self::collateral_pledge_get(&env);
         let prior_amount = prior.as_ref().map(|c| c.amount).unwrap_or(0);
 
         if let Some(ref existing) = prior {
@@ -3940,7 +3940,7 @@ let prior: Option<SmeCollateralCommitment> = Self::collateral_pledge_get(&env);
             amount,
             recorded_at: now,
         };
-Self::collateral_pledge_set(&env, &commitment);
+        Self::collateral_pledge_set(&env, &commitment);
 
         CollateralRecordedEvt {
             name: symbol_short!("coll_rec"),
@@ -6719,24 +6719,18 @@ Self::collateral_pledge_set(&env, &commitment);
     /// # Returns
     /// A `Vec<SettlementRecord>` containing the records within the requested page.
     /// Returns an empty vector if `start` is past the end or `limit` is zero.
-    pub fn get_settlement_records(
-        env: Env,
-        start: u32,
-        limit: u32,
-    ) -> Vec<SettlementRecord> {
+    pub fn get_settlement_records(env: Env, start: u32, limit: u32) -> Vec<SettlementRecord> {
         let log: Vec<SettlementRecord> = env
             .storage()
             .instance()
             .get(&DataKey::SettlementRecords)
             .unwrap_or_else(|| Vec::new(&env));
 
-        let len = log.len();
-        if start >= len || limit == 0 {
-            return Vec::new(&env);
-        }
-
-        let actual_limit = limit.min(MAX_SETTLEMENT_READ_PAGE);
-        let end = (start + actual_limit).min(len);
+        let (start, end) =
+            match Self::paginate_window(start, limit, MAX_SETTLEMENT_READ_PAGE, log.len()) {
+                Some(bounds) => bounds,
+                None => return Vec::new(&env),
+            };
 
         let mut result = Vec::new(&env);
         for i in start..end {
@@ -7118,5 +7112,4 @@ Self::collateral_pledge_set(&env, &commitment);
     ) -> InvoiceEscrow {
         Self::fund_impl(env, investor, amount, false, committed_lock_secs)
     }
-
 }
