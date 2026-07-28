@@ -2997,6 +2997,66 @@ impl LiquifactEscrow {
         Some(AttestationDigestInfo { digest, revoked })
     }
 
+    // --- Collateral validation helper ---
+    //
+    // Centralised validation for collateral-related parameters to ensure consistent
+    // rejection behaviour across all call sites. Extracted from repeated inline checks
+    // to reduce maintenance risk and make validation rules explicit.
+
+    /// Validates collateral commitment parameters before any state mutation.
+    ///
+    /// This helper consolidates all validation checks for SME collateral commitments:
+    /// - Amount must be strictly positive
+    /// - Asset symbol must not be empty
+    /// - Amount must not exceed the admin-configured limit
+    ///
+    /// # Parameters
+    /// - `amount`: The collateral commitment amount in base units (must be > 0).
+    /// - `asset`: The off-chain asset symbol (must not be empty string).
+    /// - `limit`: The admin-configured maximum allowed commitment amount.
+    ///
+    /// # Returns
+    /// - `Ok(())` if all validations pass.
+    /// - Panics with [`EscrowError::CollateralAmountNotPositive`] if `amount <= 0`.
+    /// - Panics with [`EscrowError::CollateralAssetEmpty`] if `asset` is empty.
+    /// - Panics with [`EscrowError::CollateralLimitExceeded`] if `amount > limit`.
+    fn validate_collateral_commitment(
+        env: &Env,
+        amount: i128,
+        asset: &Symbol,
+        limit: i128,
+    ) {
+        ensure(env, amount > 0, EscrowError::CollateralAmountNotPositive);
+        ensure(
+            env,
+            asset != &Symbol::new(env, ""),
+            EscrowError::CollateralAssetEmpty,
+        );
+        ensure(env, amount <= limit, EscrowError::CollateralLimitExceeded);
+    }
+
+    /// Validates collateral limit parameters before any state mutation.
+    ///
+    /// This helper consolidates validation checks for admin-configured collateral limits:
+    /// - Limit must be strictly positive
+    /// - Limit must not exceed the global maximum invoice amount
+    ///
+    /// # Parameters
+    /// - `limit`: The new collateral limit to validate (must be > 0 and <= MAX_INVOICE_AMOUNT).
+    ///
+    /// # Returns
+    /// Panics with:
+    /// - [`EscrowError::CollateralLimitNotPositive`] if `limit <= 0`.
+    /// - [`EscrowError::CollateralLimitExceedsMax`] if `limit > MAX_INVOICE_AMOUNT`.
+    fn validate_collateral_limit(env: &Env, limit: i128) {
+        ensure(env, limit > 0, EscrowError::CollateralLimitNotPositive);
+        ensure(
+            env,
+            limit <= MAX_INVOICE_AMOUNT,
+            EscrowError::CollateralLimitExceedsMax,
+        );
+    }
+
     // --- Collateral storage key helpers ---
     //
     // All reads and writes to `DataKey::SmeCollateralPledge` go through these three
@@ -3315,12 +3375,7 @@ impl LiquifactEscrow {
     pub fn set_collateral_limit(env: Env, new_limit: i128) {
         let escrow = Self::load_escrow_require_admin(&env);
 
-        ensure(&env, new_limit > 0, EscrowError::CollateralLimitNotPositive);
-        ensure(
-            &env,
-            new_limit <= MAX_INVOICE_AMOUNT,
-            EscrowError::CollateralLimitExceedsMax,
-        );
+        Self::validate_collateral_limit(&env, new_limit);
 
         let old_limit = Self::get_collateral_limit(env.clone());
 
@@ -3683,15 +3738,8 @@ impl LiquifactEscrow {
         asset: Symbol,
         amount: i128,
     ) -> SmeCollateralCommitment {
-        ensure(&env, amount > 0, EscrowError::CollateralAmountNotPositive);
-        ensure(
-            &env,
-            asset != Symbol::new(&env, ""),
-            EscrowError::CollateralAssetEmpty,
-        );
-
         let limit = Self::get_collateral_limit(env.clone());
-        ensure(&env, amount <= limit, EscrowError::CollateralLimitExceeded);
+        Self::validate_collateral_commitment(&env, amount, &asset, limit);
 
         // env.clone(): env is used again after this call for storage read/write, timestamp, and publish.
         let escrow = Self::load_escrow_require_sme(&env);

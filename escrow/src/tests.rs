@@ -63,6 +63,7 @@ mod auth_matrix;
 mod cap_validation;
 mod collateral_config_view;
 mod collateral_limit_setter;
+mod collateral_validation_helpers;
 #[rustfmt::skip]
 mod coverage;
 mod external_calls;
