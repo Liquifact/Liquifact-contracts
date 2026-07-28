@@ -91,3 +91,43 @@ fn non_admin_cannot_set_settlement_limit() {
     let result = client.try_set_settlement_limit(&50u32);
     assert!(result.is_err());
 }
+
+#[test]
+fn set_settlement_limit_boundary_zero_and_max() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    init_escrow(&env, &client, &admin, &sme);
+
+    // zero
+    assert_contract_error(
+        client.try_set_settlement_limit(&0),
+        EscrowError::SettlementLimitOutOfRange,
+    );
+
+    // max
+    assert_contract_error(
+        client.try_set_settlement_limit(&u32::MAX),
+        EscrowError::SettlementLimitOutOfRange,
+    );
+}
+
+use proptest::prelude::*;
+proptest! {
+    #[test]
+    fn fuzz_set_settlement_limit(limit in 0u32..=u32::MAX) {
+        let env = Env::default();
+        let (client, admin, sme) = setup(&env);
+        init_escrow(&env, &client, &admin, &sme);
+
+        let result = client.try_set_settlement_limit(&limit);
+        if limit >= MIN_SETTLEMENT_LIMIT && limit <= MAX_SETTLEMENT_LIMIT {
+            assert!(result.is_ok());
+            assert_eq!(client.get_settlement_limit(), limit);
+        } else {
+            assert_contract_error(
+                result,
+                EscrowError::SettlementLimitOutOfRange,
+            );
+        }
+    }
+}
