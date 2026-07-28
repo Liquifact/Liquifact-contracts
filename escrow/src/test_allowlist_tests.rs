@@ -919,3 +919,36 @@ fn gate_batch_revoke_blocks_all_revoked_members() {
     assert_eq!(client.get_contribution(&a), 1_000i128);
     assert_eq!(client.get_contribution(&b), 1_000i128);
 }
+
+#[test]
+fn test_allowlist_metadata_defaults_before_init() {
+    let env = Env::default();
+    let client = deploy(&env);
+
+    let metadata = client.get_allowlist_metadata();
+
+    assert_eq!(metadata.schema_version, 0);
+    assert!(!metadata.is_active);
+    assert_eq!(metadata.allowlisted_count, 0);
+}
+
+#[test]
+fn test_allowlist_metadata_reflects_initialized_values() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init(&env, &client);
+    let investor = Address::generate(&env);
+    let removed = Address::generate(&env);
+
+    client.set_allowlist_active(&true);
+    client.set_investor_allowlisted(&investor, &true);
+    client.set_investor_allowlisted(&removed, &true);
+    client.set_investor_allowlisted(&removed, &false);
+
+    let metadata = client.get_allowlist_metadata();
+
+    assert_eq!(metadata.schema_version, crate::SCHEMA_VERSION);
+    assert!(metadata.is_active);
+    assert_eq!(metadata.allowlisted_count, 1);
+}

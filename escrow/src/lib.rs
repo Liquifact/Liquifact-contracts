@@ -1192,6 +1192,21 @@ pub struct CollateralConfig {
     pub sme_commitment: CollateralCommitmentSnapshot,
 }
 
+/// Read-only metadata for the investor allowlist subsystem.
+///
+/// The view intentionally returns defaults for uninitialized deployments so off-chain
+/// callers can discover allowlist capabilities without first calling `init`.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct AllowlistMetadata {
+    /// Stored contract schema version; defaults to `0` before `init` writes `DataKey::Version`.
+    pub schema_version: u32,
+    /// Whether the allowlist gate is currently active; defaults to `false` when unset.
+    pub is_active: bool,
+    /// Number of currently allowlisted investors, filtered through the live per-address flags.
+    pub allowlisted_count: u32,
+}
+
 /// Comprehensive summary of the escrow contract state.
 /// Bundles multiple read-only values to allow a single host invocation
 /// for off-chain indexers and client rendering.
@@ -4309,6 +4324,19 @@ impl LiquifactEscrow {
             }
         }
         count
+    }
+
+    /// Returns read-only metadata for the investor allowlist subsystem.
+    ///
+    /// This view performs no authorization and does not mutate storage. It is safe to call
+    /// before initialization: absent storage keys resolve to `schema_version = 0`,
+    /// `is_active = false`, and `allowlisted_count = 0`.
+    pub fn get_allowlist_metadata(env: Env) -> AllowlistMetadata {
+        AllowlistMetadata {
+            schema_version: Self::get_version(env.clone()),
+            is_active: Self::is_allowlist_active(env.clone()),
+            allowlisted_count: Self::get_allowlisted_investors_count(env),
+        }
     }
 
     /// Convenience alias for [`LiquifactEscrow::set_legal_hold`] with `active = false`.
