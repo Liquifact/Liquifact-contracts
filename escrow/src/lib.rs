@@ -1933,6 +1933,16 @@ impl LiquifactEscrow {
         TokenClient::new(&env, &token_addr).balance(&this)
     }
 
+    /// Returns the settlement's deployed version/metadata.
+    /// 
+    /// Returns a sane default (0) before initialization.
+    pub fn get_version(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::SchemaVersion)
+            .unwrap_or(0)
+    }
+
     /// Read the immutable treasury address, failing with [`EscrowError::TreasuryNotSet`]
     /// when the escrow has not been initialized.
     fn treasury_or_fail(env: &Env) -> Address {
