@@ -723,6 +723,30 @@ pub(crate) fn require_funding_open(env: &Env, status: u32) {
     guard_status_eq(env, status, 0, EscrowError::EscrowNotOpenForFunding);
 }
 
+/// Shared guard: validate funding amount against positivity and minimum contribution floor.
+///
+/// Ensures the `amount` is strictly positive, and if a [`DataKey::MinContributionFloor`]
+/// is configured, ensures the amount meets or exceeds that floor. This logic is shared
+/// by all funding entrypoints to prevent inline validation repetition.
+///
+/// # Errors
+/// Returns [`EscrowError::FundingAmountNotPositive`] if `amount <= 0`.
+/// Returns [`EscrowError::FundingBelowMinContribution`] if `amount < floor`.
+pub(crate) fn validate_funding_amount(env: &Env, amount: i128) -> Result<(), EscrowError> {
+    if amount <= 0 {
+        return Err(EscrowError::FundingAmountNotPositive);
+    }
+    let floor: i128 = env
+        .storage()
+        .instance()
+        .get(&DataKey::MinContributionFloor)
+        .unwrap_or(0);
+    if floor > 0 && amount < floor {
+        return Err(EscrowError::FundingBelowMinContribution);
+    }
+    Ok(())
+}
+
 /// Shared guard: assert that no legal/compliance hold is currently active.
 ///
 /// Replaces the repeated inline pattern
@@ -4868,20 +4892,10 @@ impl LiquifactEscrow {
         //
         // Stateful per-entry guards (per-investor cap, unique-investor cap, overflow)
         // remain enforced inside `fund_impl` against the running accumulated state.
-        let floor: i128 = env
-            .storage()
-            .instance()
-            .get(&DataKey::MinContributionFloor)
-            .unwrap_or(0);
         for i in 0..n {
             let (_, amount) = entries.get(i).unwrap();
-            ensure(&env, amount > 0, EscrowError::FundingAmountNotPositive);
-            if floor > 0 {
-                ensure(
-                    &env,
-                    amount >= floor,
-                    EscrowError::FundingBelowMinContribution,
-                );
+            if let Err(e) = validate_funding_amount(&env, amount) {
+                fail(&env, e);
             }
         }
 
@@ -4927,19 +4941,8 @@ impl LiquifactEscrow {
     ) -> InvoiceEscrow {
         investor.require_auth();
 
-        ensure(&env, amount > 0, EscrowError::FundingAmountNotPositive);
-
-        let floor: i128 = env
-            .storage()
-            .instance()
-            .get(&DataKey::MinContributionFloor)
-            .unwrap_or(0);
-        if floor > 0 {
-            ensure(
-                &env,
-                amount >= floor,
-                EscrowError::FundingBelowMinContribution,
-            );
+        if let Err(e) = validate_funding_amount(&env, amount) {
+            fail(&env, e);
         }
 
         // env.clone(): env is used again after this call for storage writes and publish.
