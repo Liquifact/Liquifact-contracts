@@ -1181,6 +1181,39 @@ pub struct CollateralConfig {
     pub sme_commitment: CollateralCommitmentSnapshot,
 }
 
+/// Flattened, O(1) read view of the current collateral state returned by
+/// [`LiquifactEscrow::get_collateral_state`].
+///
+/// Unlike [`CollateralConfig`], which nests the commitment in an option-like enum, this view
+/// always returns concrete scalars so callers (indexers, dashboards, other contracts) never have
+/// to reconstruct the state. When no commitment has been recorded the view returns a default —
+/// it never panics.
+///
+/// # Unset defaults
+/// - `is_set`: `false`
+/// - `asset`: the empty [`Symbol`]
+/// - `amount`: `0`
+/// - `recorded_at`: `0`
+/// - `collateral_limit`: the stored limit, or [`MAX_INVOICE_AMOUNT`] when never configured
+///
+/// **Record-only:** the values mirror [`SmeCollateralCommitment`] and are reported metadata, not
+/// proof of custody, lien, or token movement.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct CollateralState {
+    /// `true` exactly when an SME collateral commitment is currently recorded.
+    pub is_set: bool,
+    /// Reported asset symbol; empty [`Symbol`] when unset.
+    pub asset: Symbol,
+    /// Reported collateral amount; `0` when unset.
+    pub amount: i128,
+    /// Ledger timestamp of the recorded commitment; `0` when unset.
+    pub recorded_at: u64,
+    /// Admin-configured ceiling on `record_sme_collateral_commitment` `amount`; defaults to
+    /// [`MAX_INVOICE_AMOUNT`] when never configured.
+    pub collateral_limit: i128,
+}
+
 
 /// Read-only funding configuration returned by [`LiquifactEscrow::get_funding_config`].
 #[contracttype]
@@ -3565,6 +3598,42 @@ impl LiquifactEscrow {
         CollateralConfig {
             collateral_limit,
             sme_commitment,
+        }
+    }
+
+    /// Read-only, O(1) view of the current collateral state.
+    ///
+    /// Pure read — no auth, no storage writes, safe for simulation. Returns a flattened
+    /// [`CollateralState`] so callers do not have to reconstruct it from
+    /// [`LiquifactEscrow::get_sme_collateral_commitment`] and
+    /// [`LiquifactEscrow::get_collateral_limit`].
+    ///
+    /// Values are taken straight from storage via [`LiquifactEscrow::get_collateral_config`] —
+    /// nothing is recomputed, so this view can never drift from the config view.
+    ///
+    /// # Unset state
+    /// When no commitment has been recorded this returns the documented default
+    /// (`is_set = false`, empty asset, zero amount and timestamp) instead of panicking. The
+    /// `collateral_limit` field still reflects the stored limit, defaulting to
+    /// [`MAX_INVOICE_AMOUNT`].
+    pub fn get_collateral_state(env: Env) -> CollateralState {
+        // env.clone(): env is used again below to build the empty default asset symbol.
+        let config = Self::get_collateral_config(env.clone());
+        match config.sme_commitment {
+            CollateralCommitmentSnapshot::Some(commitment) => CollateralState {
+                is_set: true,
+                asset: commitment.asset,
+                amount: commitment.amount,
+                recorded_at: commitment.recorded_at,
+                collateral_limit: config.collateral_limit,
+            },
+            CollateralCommitmentSnapshot::None => CollateralState {
+                is_set: false,
+                asset: Symbol::new(&env, ""),
+                amount: 0,
+                recorded_at: 0,
+                collateral_limit: config.collateral_limit,
+            },
         }
     }
 
