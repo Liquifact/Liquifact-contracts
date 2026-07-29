@@ -68,6 +68,7 @@ mod collateral_limit_setter;
 mod coverage;
 mod external_calls;
 mod external_calls_mocked;
+mod fees_boundary_tests;
 mod funding;
 mod funding_upgrade_auth;
 mod init;
