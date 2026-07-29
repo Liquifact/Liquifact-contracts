@@ -190,6 +190,7 @@ liquifact-contracts/
 | `get_escrow` | — | Read current escrow state. |
 | `get_version` | — | Read stored `DataKey::Version`. |
 | `get_collateral_version` | — | Read the collateral subsystem's schema version (`DataKey::Version`). Returns `0` before `init`. Consistent with `get_version`; named separately for integrators scoped to the collateral API. |
+| `get_pauser_version` | — | Read the pauser subsystem's schema version (`DataKey::Version`). Returns `0` before `init`. Consistent with `get_version`; named separately for integrators scoped to the pauser API. |
 | `get_remaining_investor_slots` | — | Read remaining unique investor capacity before reaching the cap. |
 | `get_settlement_config` | — | Read-only bundled view of settlement configuration: `settlement_limit`, `yield_bps`, `protocol_fee_bps`, and `maturity`. Returns sensible defaults (`DEFAULT_SETTLEMENT_LIMIT`, `0`, `0`, `0`) before `init`. |
 | `get_reconciliation` | — | Read solvency position: live token balance, outstanding liability, and surplus/deficit. See [`docs/escrow-read-api.md`](docs/escrow-read-api.md). |

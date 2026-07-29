@@ -2807,6 +2807,14 @@ impl LiquifactEscrow {
         env.storage().instance().get(&DataKey::Version).unwrap_or(0)
     }
 
+    /// Read the pauser subsystem's schema version (`DataKey::Version`).
+    ///
+    /// Returns `0` before [`LiquifactEscrow::init`]. Consistent with [`LiquifactEscrow::get_version`];
+    /// named separately for integrators scoped to the pauser API.
+    pub fn get_pauser_version(env: Env) -> u32 {
+        env.storage().instance().get(&DataKey::Version).unwrap_or(0)
+    }
+
     /// Get the optional funding deadline (ledger timestamp), returns None if not set.
     pub fn get_funding_deadline(env: Env) -> Option<u64> {
         env.storage().instance().get(&DataKey::FundingDeadline)
@@ -3641,7 +3649,6 @@ impl LiquifactEscrow {
         }
         .publish(&env);
     }
-}
 
 /// Retire the recorded SME collateral pledge.
 ///
