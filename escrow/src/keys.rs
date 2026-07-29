@@ -74,3 +74,41 @@ pub(crate) fn funding_token() -> DataKey {
     DataKey::FundingToken
 }
 
+/// Single-set primary attestation digest storage key.
+pub(crate) fn primary_attestation_hash() -> DataKey {
+    DataKey::PrimaryAttestationHash
+}
+
+/// Append-only attestation log storage key.
+pub(crate) fn attestation_append_log() -> DataKey {
+    DataKey::AttestationAppendLog
+}
+
+/// Per-index revocation marker for attestation-log entries.
+pub(crate) fn attestation_revoked(index: u32) -> DataKey {
+    DataKey::AttestationRevoked(index)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn attestation_keys_match_data_key_variants() {
+        assert!(matches!(primary_attestation_hash(), DataKey::PrimaryAttestationHash));
+        assert!(matches!(attestation_append_log(), DataKey::AttestationAppendLog));
+        assert!(matches!(attestation_revoked(7), DataKey::AttestationRevoked(7)));
+    }
+
+    #[test]
+    fn attestation_revocation_keys_are_stable_per_index() {
+        let first = attestation_revoked(5);
+        let second = attestation_revoked(5);
+        let different = attestation_revoked(6);
+
+        assert!(matches!(first, DataKey::AttestationRevoked(5)));
+        assert!(matches!(second, DataKey::AttestationRevoked(5)));
+        assert!(matches!(different, DataKey::AttestationRevoked(6)));
+        assert!(!matches!(first, DataKey::AttestationRevoked(6)));
+    }
+}

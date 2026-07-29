@@ -1,4 +1,3 @@
-
 #![allow(clippy::too_many_arguments)]
 
 #[cfg(test)]
@@ -1910,7 +1909,6 @@ pub struct FundingUpgradeAuthorized {
     pub new_wasm_hash: BytesN<32>,
 }
 
-
 // ---------------------------------------------------------------------------
 // Contract
 // ---------------------------------------------------------------------------
@@ -1993,7 +1991,7 @@ impl LiquifactEscrow {
     }
 
     /// Returns the settlement's deployed version/metadata.
-    /// 
+    ///
     /// Returns a sane default (0) before initialization.
     pub fn get_version(env: Env) -> u32 {
         env.storage()
@@ -2675,7 +2673,7 @@ impl LiquifactEscrow {
     fn load_attestation_log(env: &Env) -> Vec<BytesN<32>> {
         env.storage()
             .instance()
-            .get(&DataKey::AttestationAppendLog)
+            .get(&keys::attestation_append_log())
             .unwrap_or_else(|| Vec::new(env))
     }
 
@@ -2925,12 +2923,12 @@ impl LiquifactEscrow {
             &env,
             !env.storage()
                 .instance()
-                .has(&DataKey::PrimaryAttestationHash),
+                .has(&keys::primary_attestation_hash()),
             EscrowError::PrimaryAttestationAlreadyBound,
         );
         env.storage()
             .instance()
-            .set(&DataKey::PrimaryAttestationHash, &digest);
+            .set(&keys::primary_attestation_hash(), &digest);
         PrimaryAttestationBound {
             name: symbol_short!("att_bind"),
             invoice_id: escrow.invoice_id.clone(),
@@ -2942,7 +2940,7 @@ impl LiquifactEscrow {
     pub fn get_primary_attestation_hash(env: Env) -> Option<BytesN<32>> {
         env.storage()
             .instance()
-            .get(&DataKey::PrimaryAttestationHash)
+            .get(&keys::primary_attestation_hash())
     }
 
     /// Append a digest to a bounded on-chain log (see [`MAX_ATTESTATION_APPEND_ENTRIES`]) for **versioned**
@@ -2963,7 +2961,7 @@ impl LiquifactEscrow {
         log.push_back(digest.clone());
         env.storage()
             .instance()
-            .set(&DataKey::AttestationAppendLog, &log);
+            .set(&keys::attestation_append_log(), &log);
 
         AttestationDigestAppended {
             name: symbol_short!("att_app"),
@@ -3046,7 +3044,7 @@ impl LiquifactEscrow {
         // Single storage write — atomicity guaranteed by Soroban's transactional execution.
         env.storage()
             .instance()
-            .set(&DataKey::AttestationAppendLog, &log);
+            .set(&keys::attestation_append_log(), &log);
 
         // Emit one event per entry after the write succeeds.
         for i in 0..n {
@@ -3073,7 +3071,7 @@ impl LiquifactEscrow {
         let revoked = env
             .storage()
             .instance()
-            .get(&DataKey::AttestationRevoked(index))
+            .get(&keys::attestation_revoked(index))
             .unwrap_or(false);
         Some(AttestationDigestInfo { digest, revoked })
     }
@@ -3491,13 +3489,13 @@ impl LiquifactEscrow {
             &env,
             !env.storage()
                 .instance()
-                .has(&DataKey::AttestationRevoked(index)),
+                .has(&keys::attestation_revoked(index)),
             EscrowError::AttestationAlreadyRevoked,
         );
 
         env.storage()
             .instance()
-            .set(&DataKey::AttestationRevoked(index), &true);
+            .set(&keys::attestation_revoked(index), &true);
 
         AttestationDigestRevoked {
             name: symbol_short!("att_rev"),
@@ -3555,13 +3553,13 @@ impl LiquifactEscrow {
                 &env,
                 !env.storage()
                     .instance()
-                    .has(&DataKey::AttestationRevoked(index)),
+                    .has(&keys::attestation_revoked(index)),
                 EscrowError::AttestationAlreadyRevoked,
             );
 
             env.storage()
                 .instance()
-                .set(&DataKey::AttestationRevoked(index), &true);
+                .set(&keys::attestation_revoked(index), &true);
 
             AttestationDigestRevoked {
                 name: symbol_short!("att_rev"),
@@ -3578,7 +3576,7 @@ impl LiquifactEscrow {
     pub fn is_attestation_revoked(env: Env, index: u32) -> bool {
         env.storage()
             .instance()
-            .get(&DataKey::AttestationRevoked(index))
+            .get(&keys::attestation_revoked(index))
             .unwrap_or(false)
     }
 
@@ -3630,7 +3628,7 @@ impl LiquifactEscrow {
             &env,
             env.storage()
                 .instance()
-                .has(&DataKey::AttestationRevoked(index)),
+                .has(&keys::attestation_revoked(index)),
             EscrowError::AttestationNotRevoked,
         );
 
@@ -3639,7 +3637,7 @@ impl LiquifactEscrow {
 
         env.storage()
             .instance()
-            .remove(&DataKey::AttestationRevoked(index));
+            .remove(&keys::attestation_revoked(index));
 
         AttestationDigestUnrevoked {
             name: symbol_short!("att_unrev"),
@@ -3899,7 +3897,7 @@ impl LiquifactEscrow {
             ensure(
                 &env,
                 window_count < limit,
-                EscrowError::PauseToggleRateLimitExceeded
+                EscrowError::PauseToggleRateLimitExceeded,
             );
 
             // Update count
@@ -3964,7 +3962,7 @@ impl LiquifactEscrow {
             duration == 0
                 || (duration >= MIN_PAUSE_MAX_DURATION_SECS
                     && duration <= MAX_PAUSE_MAX_DURATION_SECS),
-            EscrowError::PauseMaxDurationOutOfRange
+            EscrowError::PauseMaxDurationOutOfRange,
         );
 
         let _ = Self::load_escrow_require_admin(&env);
@@ -4029,14 +4027,14 @@ impl LiquifactEscrow {
         ensure(
             &env,
             (limit == 0 && window_secs == 0) || (limit > 0 && window_secs > 0),
-            EscrowError::PauseRateLimitInvalidCombination
+            EscrowError::PauseRateLimitInvalidCombination,
         );
 
         // Validate limit
         ensure(
             &env,
             limit == 0 || (limit >= MIN_PAUSE_TOGGLE_LIMIT && limit <= MAX_PAUSE_TOGGLE_LIMIT),
-            EscrowError::PauseToggleLimitOutOfRange
+            EscrowError::PauseToggleLimitOutOfRange,
         );
 
         // Validate window
@@ -4045,7 +4043,7 @@ impl LiquifactEscrow {
             window_secs == 0
                 || (window_secs >= MIN_PAUSE_TOGGLE_WINDOW_SECS
                     && window_secs <= MAX_PAUSE_TOGGLE_WINDOW_SECS),
-            EscrowError::PauseToggleWindowOutOfRange
+            EscrowError::PauseToggleWindowOutOfRange,
         );
 
         let _ = Self::load_escrow_require_admin(&env);
@@ -5231,7 +5229,8 @@ impl LiquifactEscrow {
 
         // Track whether this call triggers the 0 → 1 transition so we can emit
         // FundingStateChanged after storage writes (no second storage read needed).
-        let status_transitioned = escrow.status == 0 && escrow.funded_amount >= escrow.funding_target;
+        let status_transitioned =
+            escrow.status == 0 && escrow.funded_amount >= escrow.funding_target;
 
         if status_transitioned {
             escrow.status = 1;
@@ -6789,7 +6788,9 @@ impl LiquifactEscrow {
         if max_investor_allowlist_batch == 0 || max_investor_allowlist_batch > 100 {
             fail(&env, EscrowError::AllowlistParametersOutOfRange);
         }
-        if persistent_ttl_min_extension_ledgers == 0 || persistent_ttl_min_extension_ledgers > 1_000_000 {
+        if persistent_ttl_min_extension_ledgers == 0
+            || persistent_ttl_min_extension_ledgers > 1_000_000
+        {
             fail(&env, EscrowError::AllowlistParametersOutOfRange);
         }
 

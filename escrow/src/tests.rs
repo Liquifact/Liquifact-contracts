@@ -64,7 +64,6 @@ mod cap_validation;
 mod collateral_config_view;
 mod collateral_limit_setter;
 mod collateral_boundary_tests;
-mod collateral_boundary_tests;
 #[rustfmt::skip]
 mod coverage;
 mod external_calls;
