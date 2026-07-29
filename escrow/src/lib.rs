@@ -154,6 +154,10 @@ pub const SCHEMA_VERSION: u32 = 6;
 /// Revocation via [`LiquifactEscrow::revoke_attestation_digest`] does not consume a slot.
 pub const MAX_ATTESTATION_APPEND_ENTRIES: u32 = 32;
 
+/// Upper bound on [`LiquifactEscrow::append_attestation_digests`] items per batch call.
+/// Mirrors [`MAX_ATTESTATION_REVOKE_BATCH`] for consistent batch sizing.
+pub const MAX_ATTESTATION_APPEND_BATCH: u32 = 32;
+
 /// Maximum number of indices that can be revoked in a single batch call.
 pub const MAX_ATTESTATION_REVOKE_BATCH: u32 = 32;
 
@@ -3378,9 +3382,9 @@ impl LiquifactEscrow {
     /// Requires `InvoiceEscrow::admin` auth.
     ///
     /// # Batch bounds
-    /// - `digests` must be non-empty (panics with [`EscrowError::AttestationAppendBatchEmpty`]).
+    /// - `digests` must be non-empty (panics with [`EscrowError::AttestationBatchEmpty`]).
     /// - `digests.len()` must not exceed [`MAX_ATTESTATION_APPEND_BATCH`] (panics with
-    ///   [`EscrowError::AttestationAppendBatchTooLarge`]).
+    ///   [`EscrowError::AttestationBatchTooLarge`]).
     ///
     /// # Capacity check
     /// The entire batch is rejected with [`EscrowError::AttestationAppendLogCapacityReached`] when
@@ -3399,20 +3403,23 @@ impl LiquifactEscrow {
     /// # Errors
     /// | Condition | Error code | `EscrowError` variant |
     /// |---|---|---|
-    /// | `digests.len() == 0` | 57 | `AttestationAppendBatchEmpty` |
-    /// | `digests.len() > MAX_ATTESTATION_APPEND_BATCH` | 58 | `AttestationAppendBatchTooLarge` |
+    /// | `digests.len() == 0` | 54 | `AttestationBatchEmpty` |
+    /// | `digests.len() > MAX_ATTESTATION_APPEND_BATCH` | 55 | `AttestationBatchTooLarge` |
     /// | `current_log_len + digests.len() > MAX_ATTESTATION_APPEND_ENTRIES` | 51 | `AttestationAppendLogCapacityReached` |
     pub fn append_attestation_digests(env: Env, digests: Vec<BytesN<32>>) {
+        let escrow = Self::load_escrow_require_admin(&env);
         let n = digests.len();
         let parameters = Self::get_attestation_parameters(env.clone());
 
         // Batch-size guards run before auth, consistent with revoke_attestation_digests.
-        ensure(&env, n > 0, EscrowError::AttestationAppendBatchEmpty);
+        ensure(&env, n > 0, EscrowError::AttestationBatchEmpty);
         ensure(
             &env,
             n <= parameters.max_append_batch,
-            EscrowError::AttestationAppendBatchTooLarge,
+            EscrowError::AttestationBatchTooLarge,
         );
+
+        let mut log: Vec<BytesN<32>> = Self::load_attestation_log(&env);
         ensure(
             &env,
             log.len().saturating_add(n) <= parameters.max_append_entries,

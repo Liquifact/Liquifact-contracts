@@ -1228,7 +1228,7 @@ fn test_batch_append_empty_returns_typed_error() {
     let empty: soroban_sdk::Vec<soroban_sdk::BytesN<32>> = soroban_sdk::Vec::new(&env);
     assert_contract_error(
         client.try_append_attestation_digests(&empty),
-        EscrowError::AttestationAppendBatchEmpty,
+        EscrowError::AttestationBatchEmpty,
     );
 
     // Log must be unmodified.
@@ -1250,7 +1250,7 @@ fn test_batch_append_over_limit_returns_typed_error() {
 
     assert_contract_error(
         client.try_append_attestation_digests(&oversized),
-        EscrowError::AttestationAppendBatchTooLarge,
+        EscrowError::AttestationBatchTooLarge,
     );
 
     // No partial write must have occurred.
