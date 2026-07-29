@@ -1018,6 +1018,20 @@ fn allowlist_limit_can_be_updated_multiple_times() {
 /// Setting the limit to 0 (below MIN) is rejected with AllowlistLimitOutOfRange.
 #[test]
 fn allowlist_limit_zero_rejected_with_typed_error() {
+#[test]
+fn test_allowlist_metadata_defaults_before_init() {
+    let env = Env::default();
+    let client = deploy(&env);
+
+    let metadata = client.get_allowlist_metadata();
+
+    assert_eq!(metadata.schema_version, 0);
+    assert!(!metadata.is_active);
+    assert_eq!(metadata.allowlisted_count, 0);
+}
+
+#[test]
+fn test_allowlist_metadata_reflects_initialized_values() {
     let env = Env::default();
     env.mock_all_auths();
     let client = deploy(&env);
@@ -1310,4 +1324,17 @@ fn allowlist_lowering_limit_does_not_evict_but_blocks_new_additions() {
         client.try_set_investor_allowlisted(&d, &true),
         EscrowError::AllowlistCapacityReached,
     );
+    let investor = Address::generate(&env);
+    let removed = Address::generate(&env);
+
+    client.set_allowlist_active(&true);
+    client.set_investor_allowlisted(&investor, &true);
+    client.set_investor_allowlisted(&removed, &true);
+    client.set_investor_allowlisted(&removed, &false);
+
+    let metadata = client.get_allowlist_metadata();
+
+    assert_eq!(metadata.schema_version, crate::SCHEMA_VERSION);
+    assert!(metadata.is_active);
+    assert_eq!(metadata.allowlisted_count, 1);
 }

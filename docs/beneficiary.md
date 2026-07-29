@@ -41,6 +41,7 @@ The contract maintains the following invariants regarding the beneficiary:
 Only the configured `sme_address` is authorized to invoke or sign the following operations:
 - `withdraw` (SME pull principal/yield)
 - `record_sme_collateral_commitment` (Report metadata for off-chain risk)
+- `batch_record_collateral` (Batch-record collateral commitments atomically)
 - `clear_sme_collateral_commitment` (Clear reported collateral metadata)
 - `partial_settle` (Authorized by either the SME or the admin)
 

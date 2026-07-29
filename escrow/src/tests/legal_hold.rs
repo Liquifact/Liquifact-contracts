@@ -21,7 +21,7 @@
 //!   sweep_terminal_dust          → "Legal hold blocks treasury dust sweep"
 
 use super::*;
-use soroban_sdk::token::StellarAssetClient;
+use soroban_sdk::{testutils::Address as _, token::StellarAssetClient};
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 

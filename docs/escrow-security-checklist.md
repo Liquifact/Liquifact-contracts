@@ -26,6 +26,7 @@ Every state-mutating entrypoint and the identity required to authorize it.
 | `fund` | `investor` (caller-supplied) | `investor.require_auth()` | `status == 0`; allowlist-gated when active |
 | `fund_with_commitment` | `investor` (caller-supplied) | `investor.require_auth()` | First deposit only (`prev == 0`); sets claim lock |
 | `record_sme_collateral_commitment` | `escrow.sme_address` | `escrow.sme_address.require_auth()` | Ledger record only; no token transfer |
+| `batch_record_collateral` | `escrow.sme_address` | `escrow.sme_address.require_auth()` | Batch ledger record (all-or-nothing); bounded at `MAX_COLLATERAL_BATCH` = 50 |
 | `settle` | `escrow.sme_address` | `escrow.sme_address.require_auth()` | `status == 1`; optional maturity gate |
 | `withdraw` | `escrow.sme_address` | `escrow.sme_address.require_auth()` | `status == 1`; sets `status = 3` |
 | `claim_investor_payout` | `investor` (caller-supplied) | `investor.require_auth()` | `status == 2`; contribution > 0; claim-lock gate |

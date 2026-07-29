@@ -20,11 +20,11 @@
 use super::{
     AttestationDigestAppended, AttestationDigestRevoked, AttestationDigestUnrevoked,
     CollateralRecordedEvt, ContractUpgraded, DataKey, DeprecatedTransferAdminUsed, EscrowError,
-    EscrowFunded, EscrowInitialized, EscrowUnfunded, FundingCancelled, FundingTargetUpdated,
-    InvestorRefundedEvt, LiquifactEscrow, LiquifactEscrowClient, MaturityMaxHorizonUpdated,
-    MaxUniqueInvestorsCapLowered, PrimaryAttestationBound, RegistryRefRebound, TreasuryDustSwept,
-    YieldTier, MAX_ATTESTATION_APPEND_ENTRIES, MAX_DUST_SWEEP_AMOUNT, MAX_FUND_BATCH,
-    SCHEMA_VERSION,
+    EscrowFunded, EscrowInitialized, EscrowUnfunded, FundingCancelled, FundingStateChanged,
+    FundingTargetUpdated, InvestorRefundedEvt, LiquifactEscrow, LiquifactEscrowClient,
+    MaturityMaxHorizonUpdated, MaxUniqueInvestorsCapLowered, PrimaryAttestationBound,
+    RegistryRefRebound, TreasuryDustSwept, YieldTier, MAX_ATTESTATION_APPEND_BATCH,
+    MAX_ATTESTATION_APPEND_ENTRIES, MAX_DUST_SWEEP_AMOUNT, MAX_FUND_BATCH, SCHEMA_VERSION,
 };
 use soroban_sdk::{
     symbol_short,
@@ -61,20 +61,28 @@ mod admin;
 mod attestations;
 mod auth_matrix;
 mod cap_validation;
+mod collateral_config_view;
+mod collateral_limit_setter;
+mod collateral_boundary_tests;
+mod collateral_boundary_tests;
 #[rustfmt::skip]
 mod coverage;
 mod external_calls;
 mod external_calls_mocked;
 mod funding;
+mod funding_upgrade_auth;
 mod init;
 mod integration;
 mod integration_status_guards;
 mod legal_hold;
 mod migration_errors;
+mod paginated_views;
 mod pause;
 mod properties;
 mod reconciliation_lifecycle;
 mod settlement;
+mod settlement_config_view;
+mod settlement_limit;
 
 /// Registers a new escrow contract instance and returns its contract id.
 pub fn deploy_id(env: &Env) -> Address {
@@ -220,3 +228,5 @@ pub fn init_and_fund_with_real_token<'a>(
 
     (client, escrow_id, sme)
 }
+
+mod yield_tier_boundaries;
