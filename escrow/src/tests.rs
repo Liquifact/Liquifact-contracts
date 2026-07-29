@@ -68,6 +68,7 @@ mod external_calls;
 mod external_calls_mocked;
 mod fees;
 mod funding;
+mod funding_state_view;
 mod init;
 mod integration;
 mod integration_status_guards;

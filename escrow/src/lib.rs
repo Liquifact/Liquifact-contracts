@@ -1150,6 +1150,40 @@ pub enum EscrowCloseSnapshot {
     Some(FundingCloseSnapshot),
 }
 
+/// Live funding progress assembled at read time (issue #688).
+///
+/// Unlike [`FundingCloseSnapshot`], which is written once at the first transition to
+/// `status == 1`, this view reflects the **current** ledger state and is safe to call at
+/// any point in the lifecycle -- including before [`LiquifactEscrow::init`], where every
+/// field returns its zero/default value rather than panicking.
+///
+/// Every field is sourced from the same storage keys as the standalone getters
+/// ([`LiquifactEscrow::get_unique_funder_count`], [`LiquifactEscrow::is_funding_expired`],
+/// [`LiquifactEscrow::get_funding_close_snapshot`]), so this view cannot drift from them.
+#[contracttype]
+#[derive(Debug, PartialEq)]
+pub struct FundingStateView {
+    /// [`InvoiceEscrow::funding_target`] as currently configured; adjustable while `status == 0`.
+    pub funding_target: i128,
+    /// [`InvoiceEscrow::funded_amount`] credited so far, including over-funding past target.
+    pub funded_amount: i128,
+    /// `funding_target - funded_amount`, saturating at `0` once the target is met or exceeded.
+    pub remaining_to_target: i128,
+    /// True once a positive target exists and `funded_amount >= funding_target`.
+    pub target_reached: bool,
+    /// Distinct investor addresses credited so far ([`DataKey::UniqueFunderCount`]).
+    pub unique_funder_count: u32,
+    /// Deadline as a ledger timestamp; `0` when unset (see `has_funding_deadline`).
+    pub funding_deadline: u64,
+    /// Whether [`DataKey::FundingDeadline`] is present; separates "unset" from a `0` timestamp.
+    pub has_funding_deadline: bool,
+    /// True when a deadline is set and the current ledger timestamp is past it.
+    pub is_expired: bool,
+    /// Lifecycle status: `0` open, `1` funded, `2` settled, `3` withdrawn.
+    pub status: u32,
+    /// Write-once pro-rata snapshot; [`EscrowCloseSnapshot::None`] until `status` first reaches `1`.
+    pub close_snapshot: EscrowCloseSnapshot,
+}
 /// Custom option-like enum to represent the SME collateral commitment.
 /// Models standard option semantics as a contracttype to avoid standard library
 /// blanket trait limitations in Soroban SDK testutils.
@@ -2947,6 +2981,47 @@ impl LiquifactEscrow {
             .unwrap_or(0)
     }
 
+    /// Read-only snapshot of the **current** funding state (issue #688).
+    ///
+    /// Never panics: on an uninitialised instance every field returns its zero/default
+    /// value, consistent with the additive-key policy in ADR-007.
+    ///
+    /// Composed entirely from existing accessors and storage keys -- no new [`DataKey`]
+    /// variant and no `SCHEMA_VERSION` bump.
+    pub fn get_funding_state(env: Env) -> FundingStateView {
+        let escrow: Option<InvoiceEscrow> = env.storage().instance().get(&DataKey::Escrow);
+        let deadline_opt: Option<u64> = env.storage().instance().get(&DataKey::FundingDeadline);
+        let close_snapshot = match Self::get_funding_close_snapshot(env.clone()) {
+            Some(snapshot) => EscrowCloseSnapshot::Some(snapshot),
+            None => EscrowCloseSnapshot::None,
+        };
+        let unique_funder_count = Self::get_unique_funder_count(env.clone());
+        let is_expired = Self::is_funding_expired(env.clone());
+
+        let (funding_target, funded_amount, status) = match escrow {
+            Some(escrow) => (escrow.funding_target, escrow.funded_amount, escrow.status),
+            None => (0i128, 0i128, 0u32),
+        };
+
+        let remaining_to_target = if funded_amount >= funding_target {
+            0i128
+        } else {
+            funding_target - funded_amount
+        };
+
+        FundingStateView {
+            funding_target,
+            funded_amount,
+            remaining_to_target,
+            target_reached: funding_target > 0 && funded_amount >= funding_target,
+            unique_funder_count,
+            funding_deadline: deadline_opt.unwrap_or(0),
+            has_funding_deadline: deadline_opt.is_some(),
+            is_expired,
+            status,
+            close_snapshot,
+        }
+    }
     /// Bundles multiple read-only values to return a comprehensive summary of the escrow state
     /// in a single host invocation.
     pub fn get_escrow_summary(env: Env) -> EscrowSummary {
