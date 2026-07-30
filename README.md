@@ -189,6 +189,7 @@ liquifact-contracts/
 | `cancel_pending_admin` | Admin | Admin withdraws an unaccepted proposal. |
 | `get_escrow` | — | Read current escrow state. |
 | `get_version` | — | Read stored `DataKey::Version`. |
+| `get_fees_version` | — | Read the fees subsystem's schema version (`DataKey::Version`). Returns `0` before `init`. Consistent with `get_version`; named separately for integrators scoped to the fees API. |
 | `get_collateral_version` | — | Read the collateral subsystem's schema version (`DataKey::Version`). Returns `0` before `init`. Consistent with `get_version`; named separately for integrators scoped to the collateral API. |
 | `get_pauser_version` | — | Read the pauser subsystem's schema version (`DataKey::Version`). Returns `0` before `init`. Consistent with `get_version`; named separately for integrators scoped to the pauser API. |
 | `get_remaining_investor_slots` | — | Read remaining unique investor capacity before reaching the cap. |

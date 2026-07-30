@@ -2917,6 +2917,15 @@ impl LiquifactEscrow {
         env.storage().instance().get(&DataKey::Version).unwrap_or(0)
     }
 
+    /// Read-only fees-specific version view.
+    ///
+    /// Returns the deployed schema version exposed via [`DataKey::Version`], keeping the
+    /// fees subsystem aligned with the rest of the contract's version/metadata read APIs.
+    /// Before [`LiquifactEscrow::init`] it returns the same sane default as [`get_version`]: `0`.
+    pub fn get_fees_version(env: Env) -> u32 {
+        Self::get_version(env)
+    }
+
     /// Get the optional funding deadline (ledger timestamp), returns None if not set.
     pub fn get_funding_deadline(env: Env) -> Option<u64> {
         env.storage().instance().get(&keys::funding_deadline())
