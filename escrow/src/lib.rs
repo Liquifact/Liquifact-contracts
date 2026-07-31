@@ -1,4 +1,3 @@
-
 #![allow(clippy::too_many_arguments)]
 
 #[cfg(test)]
@@ -1099,6 +1098,15 @@ pub enum EscrowCloseSnapshot {
 pub enum CollateralCommitmentSnapshot {
     None,
     Some(SmeCollateralCommitment),
+}
+
+/// Read-only snapshot of the fees subsystem: the immutable protocol fee applied at withdrawal.
+/// Returns a sensible default (`0`) before [`LiquifactEscrow::init`] writes the fee configuration.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct FeesConfig {
+    /// Immutable protocol fee in basis points; defaults to `0` before `init` writes storage.
+    pub protocol_fee_bps: i64,
 }
 
 /// Read-only snapshot of the collateral subsystem: the admin-configured ceiling on
@@ -2756,6 +2764,14 @@ impl LiquifactEscrow {
             .unwrap_or(0)
     }
 
+    /// Read-only snapshot of the fees subsystem. Returns the current protocol-fee configuration
+    /// without mutating storage and defaults to `0` before [`LiquifactEscrow::init`] writes it.
+    pub fn get_fees_config(env: Env) -> FeesConfig {
+        FeesConfig {
+            protocol_fee_bps: Self::get_protocol_fee_bps(env),
+        }
+    }
+
     /// Optional cap on **distinct** investor addresses (`prev == 0` at fund time); [`None`] if unlimited.
     ///
     /// Reflects the current stored cap, including any admin reduction via
@@ -3785,7 +3801,7 @@ impl LiquifactEscrow {
             ensure(
                 &env,
                 window_count < limit,
-                EscrowError::PauseToggleRateLimitExceeded
+                EscrowError::PauseToggleRateLimitExceeded,
             );
 
             // Update count
@@ -3850,7 +3866,7 @@ impl LiquifactEscrow {
             duration == 0
                 || (duration >= MIN_PAUSE_MAX_DURATION_SECS
                     && duration <= MAX_PAUSE_MAX_DURATION_SECS),
-            EscrowError::PauseMaxDurationOutOfRange
+            EscrowError::PauseMaxDurationOutOfRange,
         );
 
         let _ = Self::load_escrow_require_admin(&env);
@@ -3915,14 +3931,14 @@ impl LiquifactEscrow {
         ensure(
             &env,
             (limit == 0 && window_secs == 0) || (limit > 0 && window_secs > 0),
-            EscrowError::PauseRateLimitInvalidCombination
+            EscrowError::PauseRateLimitInvalidCombination,
         );
 
         // Validate limit
         ensure(
             &env,
             limit == 0 || (limit >= MIN_PAUSE_TOGGLE_LIMIT && limit <= MAX_PAUSE_TOGGLE_LIMIT),
-            EscrowError::PauseToggleLimitOutOfRange
+            EscrowError::PauseToggleLimitOutOfRange,
         );
 
         // Validate window
@@ -3931,7 +3947,7 @@ impl LiquifactEscrow {
             window_secs == 0
                 || (window_secs >= MIN_PAUSE_TOGGLE_WINDOW_SECS
                     && window_secs <= MAX_PAUSE_TOGGLE_WINDOW_SECS),
-            EscrowError::PauseToggleWindowOutOfRange
+            EscrowError::PauseToggleWindowOutOfRange,
         );
 
         let _ = Self::load_escrow_require_admin(&env);
@@ -5056,7 +5072,8 @@ impl LiquifactEscrow {
 
         // Track whether this call triggers the 0 → 1 transition so we can emit
         // FundingStateChanged after storage writes (no second storage read needed).
-        let status_transitioned = escrow.status == 0 && escrow.funded_amount >= escrow.funding_target;
+        let status_transitioned =
+            escrow.status == 0 && escrow.funded_amount >= escrow.funding_target;
 
         if status_transitioned {
             escrow.status = 1;
@@ -6614,7 +6631,9 @@ impl LiquifactEscrow {
         if max_investor_allowlist_batch == 0 || max_investor_allowlist_batch > 100 {
             fail(&env, EscrowError::AllowlistParametersOutOfRange);
         }
-        if persistent_ttl_min_extension_ledgers == 0 || persistent_ttl_min_extension_ledgers > 1_000_000 {
+        if persistent_ttl_min_extension_ledgers == 0
+            || persistent_ttl_min_extension_ledgers > 1_000_000
+        {
             fail(&env, EscrowError::AllowlistParametersOutOfRange);
         }
 

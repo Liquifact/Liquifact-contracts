@@ -67,6 +67,7 @@ mod collateral_limit_setter;
 mod coverage;
 mod external_calls;
 mod external_calls_mocked;
+mod fees_config_view;
 mod funding;
 mod init;
 mod integration;
