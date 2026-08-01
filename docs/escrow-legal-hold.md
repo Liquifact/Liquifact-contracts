@@ -192,6 +192,19 @@ acceptance the new admin inherits the hold state and must explicitly call
 
 ---
 
+## Relationship to the operational pause
+
+The contract carries an independent **operational pause** (`DataKey::Paused`)
+for incident response. See [`escrow-pause.md`](escrow-pause.md) for the full
+reference. Key differences:
+
+- The pause is a single-call toggle with optional auto-expiry and rate limiting.
+- The legal hold uses a two-step clear with a configurable delay.
+- When **both** are active, the pause gate fires **first** — the transaction
+  fails with a `PausedBlocks*` error, not a `LegalHoldBlocks*` error.
+
+---
+
 ## Assumptions and out-of-scope items
 
 | Item | Status |

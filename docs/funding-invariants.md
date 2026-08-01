@@ -5,6 +5,14 @@ where each is enforced in the codebase.
 
 ---
 
+> **⚠ Accuracy note:** The `unfund` entrypoint (referenced in invariants #1, #3, #4, #8, #12,
+> #18, and #24) is **planned but not yet implemented** in the current codebase. Its typed error
+> codes (`UnfundEscrowNotOpen` = 220, `OverWithdrawal` = 221, `UnfundLegalHoldActive` = 222)
+> are defined in `EscrowError` but the corresponding `pub fn unfund(…)` does not yet exist in
+> `escrow/src/lib.rs`. The behaviour described below is the **intended design**; verify against
+> the implementation when `unfund` lands.  The tests in `escrow/src/tests/funding.rs` and
+> `escrow/src/tests/arithmetic_overflow.rs` exercise the planned behaviour.
+
 ## Overview
 
 "Funding" spans all state from the first `fund()` call through the terminal `0→1` status flip,
@@ -31,7 +39,7 @@ amount > 0
 **Where enforced:**
 - `fund_impl` in `escrow/src/lib.rs` — `ensure(&env, amount > 0, EscrowError::FundingAmountNotPositive)` (code 100)
 - `fund_batch` pre-validation loop — checks every entry before any state mutation
-- `unfund` — amount ≤ 0 falls through the `amount <= contribution` guard and then the explicit zero-amount guard, both emitting `EscrowError::OverWithdrawal` (code 221)
+- `unfund` *(planned)* — amount ≤ 0 falls through the `amount <= contribution` guard and then the explicit zero-amount guard, both emitting `EscrowError::OverWithdrawal` (code 221)
 
 ---
 
@@ -67,7 +75,7 @@ escrow.funded_amount = Σ get_contribution(addr) over all addr
 - `fund_impl` — increments `escrow.funded_amount` by `amount` with `checked_add`, and
   increments `DataKey::InvestorContribution(investor)` by the same `amount`. Both are written
   atomically before the token transfer.
-- `unfund` — decrements both `escrow.funded_amount` and `DataKey::InvestorContribution(investor)`
+- `unfund` *(planned)* — decrements both `escrow.funded_amount` and `DataKey::InvestorContribution(investor)`
   by `amount` using `checked_sub`, with the contribution guard ensuring `amount ≤ contribution`.
 - Property test: `prop_funding_accounting_invariants_issue_325` in
   `escrow/src/tests/properties.rs` verifies this over randomised sequences of fund calls.
@@ -85,12 +93,12 @@ escrow.funded_amount = Σ get_contribution(addr) over all addr
 decreases after the escrow transitions to funded (status 1).
 
 - During funding (status 0): `funded_amount` increases on every successful `fund` call.
-- `unfund` is the only path that decreases `funded_amount`, and it is only valid in status 0.
+- `unfund` *(planned)* is the only path that decreases `funded_amount`, and it is only valid in status 0.
 - After status reaches 1, no call can decrease `funded_amount`.
 
 **Where enforced:**
 - `fund_impl` — `checked_add` always yields a value ≥ prev; negative amounts are rejected first.
-- `unfund` — requires `status == 0` (`EscrowError::UnfundEscrowNotOpen` = 220).
+- `unfund` *(planned)* — requires `status == 0` (`EscrowError::UnfundEscrowNotOpen` = 220).
 - Property test: `prop_funded_amount_non_decreasing` in `escrow/src/tests/properties.rs`.
 
 ---
@@ -173,7 +181,7 @@ UniqueFunderCount = |{ addr : get_contribution(addr) > 0 }|
 **Where enforced:**
 - `fund_impl` — increments the counter **only** when `prev == 0` (first deposit from this
   address). The read is hoisted to avoid a redundant storage read.
-- `unfund` — decrements the counter (with `saturating_sub` to prevent underflow) when
+- `unfund` *(planned)* — decrements the counter (with `saturating_sub` to prevent underflow) when
   `remaining_contribution == 0`.
 - Property test: `prop_funding_accounting_invariants_issue_325` in
   `escrow/src/tests/properties.rs` asserts the count matches the set of non-zero contributors
@@ -230,7 +238,7 @@ if FundingDeadline is Some(d): env.ledger().timestamp() <= d
 
 **Where enforced:**
 - `fund_impl` — `guard_not_legal_hold(&env, EscrowError::LegalHoldBlocksFunding)` (code 102)
-- `unfund` — `ensure(&env, !Self::legal_hold_active(&env), EscrowError::UnfundLegalHoldActive)` (code 222)
+- `unfund` *(planned)* — `ensure(&env, !Self::legal_hold_active(&env), EscrowError::UnfundLegalHoldActive)` (code 222)
 
 ---
 
@@ -346,7 +354,7 @@ recipient_post = recipient_pre + amount  (exact)
   asserts `received == amount` and `spent >= 0`. Called by `fund_impl`.
 - `external_calls::transfer_funding_token_with_balance_checks` — outbound (escrow → recipient):
   asserts `spent == amount` and `received == amount`. Called by `withdraw`, `refund`,
-  `claim_investor_payout`, `unfund`, and `sweep_terminal_dust`.
+  `claim_investor_payout`, `unfund` *(planned)*, and `sweep_terminal_dust`.
 - Typed errors: `SenderBalanceDeltaMismatch` (40), `RecipientBalanceDeltaMismatch` (41),
   `SenderBalanceUnderflow` (38), `RecipientBalanceUnderflow` (39).
 
@@ -490,7 +498,7 @@ Repeat deposits by the same investor must not decrement remaining slots.
 
 **Where enforced:**
 - `get_remaining_investor_slots` computes this on the fly from stored `cap` and `UniqueFunderCount`.
-- `unfund` uses `saturating_sub` when decrementing `UniqueFunderCount`, preventing underflow.
+- `unfund` *(planned)* uses `saturating_sub` when decrementing `UniqueFunderCount`, preventing underflow.
 - Property tests: `prop_remaining_slots_conservation_non_underflow`,
   `slots_repeat_deposit_does_not_decrement_remaining`,
   `slots_lower_cap_mid_sequence_invariant` in `escrow/src/tests/properties.rs`.
@@ -503,25 +511,25 @@ Repeat deposits by the same investor must not decrement remaining slots.
 |-----------|---------------------|
 | Amount positivity (#1) | `fund`, `fund_with_commitment`, `fund_batch` |
 | Min contribution floor (#2) | `fund`, `fund_with_commitment`, `fund_batch`, `lower_min_contribution_floor` |
-| Conservation (#3) | `fund`, `fund_with_commitment`, `fund_batch`, `unfund` |
-| Monotonicity (#4) | `fund`, `fund_with_commitment`, `fund_batch`, `unfund` |
+| Conservation (#3) | `fund`, `fund_with_commitment`, `fund_batch`, `unfund` *(planned)* |
+| Monotonicity (#4) | `fund`, `fund_with_commitment`, `fund_batch`, `unfund` *(planned)* |
 | MAX_INVOICE_AMOUNT (#5) | `init` |
 | Per-investor cap (#6) | `fund`, `fund_with_commitment`, `fund_batch`, `raise_max_per_investor` |
 | Unique investor cap (#7) | `fund`, `fund_with_commitment`, `fund_batch`, `lower_max_unique_investors`, `raise_max_unique_investors` |
-| UniqueFunderCount accuracy (#8) | `fund`, `fund_with_commitment`, `fund_batch`, `unfund` |
+| UniqueFunderCount accuracy (#8) | `fund`, `fund_with_commitment`, `fund_batch`, `unfund` *(planned)* |
 | Allowlist gate (#9) | `fund`, `fund_with_commitment`, `fund_batch` |
 | Funding deadline (#10) | `fund`, `fund_with_commitment`, `fund_batch`, `extend_funding_deadline` |
 | Status gate (#11) | `fund`, `fund_with_commitment`, `fund_batch`, `partial_settle` |
-| Legal hold gate (#12) | `fund`, `fund_with_commitment`, `fund_batch`, `unfund` |
+| Legal hold gate (#12) | `fund`, `fund_with_commitment`, `fund_batch`, `unfund` *(planned)* |
 | Pause gate (#13) | `fund`, `fund_with_commitment`, `fund_batch` |
 | Status 0→1 transition (#14) | `fund_impl`, `update_funding_target`, `partial_settle` |
 | Snapshot immutability (#15) | `fund_impl`, `update_funding_target`, `partial_settle` |
 | Tier first-deposit-only (#16) | `fund_with_commitment`, `fund` |
 | Commitment lock ≤ maturity (#17) | `fund_with_commitment` |
-| SEP-41 balance-delta (#18) | `fund`, `fund_with_commitment`, `fund_batch`, `withdraw`, `refund`, `claim_investor_payout`, `unfund`, `sweep_terminal_dust` |
+| SEP-41 balance-delta (#18) | `fund`, `fund_with_commitment`, `fund_batch`, `withdraw`, `refund`, `claim_investor_payout`, `unfund` *(planned)*, `sweep_terminal_dust` |
 | Batch atomicity / dedup (#19) | `fund_batch` |
 | Protocol fee conservation (#20) | `withdraw` |
 | Pro-rata aggregate bound (#21) | `compute_investor_payout`, `claim_investor_payout` |
 | Refund conservation (#22) | `refund`, `refund_batch`, `sweep_terminal_dust` |
 | Status never regresses (#23) | all state-mutating entrypoints |
-| Remaining slots conservation (#24) | `fund`, `fund_with_commitment`, `fund_batch`, `unfund`, `lower_max_unique_investors`, `raise_max_unique_investors` |
+| Remaining slots conservation (#24) | `fund`, `fund_with_commitment`, `fund_batch`, `unfund` *(planned)*, `lower_max_unique_investors`, `raise_max_unique_investors` |

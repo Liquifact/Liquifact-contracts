@@ -56,7 +56,8 @@ The current contract defines 20 event structs.
 | `TreasuryDustSwept` | `dust_sw` | `sweep_terminal_dust` |
 | `PrimaryAttestationBound` | `att_bind` | `bind_primary_attestation_hash` |
 | `AttestationDigestAppended` | `att_app` | `append_attestation_digest` |
-| `AttestationDigestRevoked` | `att_rev` | `revoke_attestation_digest` |
+| `AttestationDigestRevoked` | `att_rev` | `revoke_attestation_digest`, `revoke_attestation_digests` |
+| `AttestationDigestUnrevoked` | `att_unrev` | `unrevoke_attestation_digest` |
 | `AllowlistEnabledChanged` | `al_ena` | `set_allowlist_active` |
 | `InvestorAllowlistChanged` | `al_set` | `set_investor_allowlisted`, `set_investors_allowlisted` |
 
@@ -456,6 +457,23 @@ Topics:
 
 Data: empty map; this struct has no non-topic fields.
 
+### `AttestationDigestUnrevoked`
+
+Emitted after successful `unrevoke_attestation_digest`. Reverses a prior
+revocation for the given append-log index without altering the original digest
+entry.
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `attestation_digest_unrevoked` |
+| 1 | `name` | `Symbol` | `att_unrev` |
+| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
+| 3 | `index` | `u32` | Unrevoked attestation index |
+
+Data: empty map; this struct has no non-topic fields.
+
 ### `AllowlistEnabledChanged`
 
 Emitted after successful `set_allowlist_active`.
@@ -548,8 +566,9 @@ Status values:
 - Investor claim and refund events are deduplicated by persistent markers or
   contribution zeroing before emission.
 - Event emission is O(1) for all entrypoints except
-  `set_investors_allowlisted`, which emits O(n) `InvestorAllowlistChanged`
-  events for `n <= MAX_INVESTOR_ALLOWLIST_BATCH`.
+  `set_investors_allowlisted` and `revoke_attestation_digests`, which emit O(n)
+  events for `n <= MAX_INVESTOR_ALLOWLIST_BATCH` and `n <= MAX_ATTESTATION_REVOKE_BATCH`
+  respectively.
 
 ## Changelog
 
@@ -559,4 +578,4 @@ Status values:
 | 2026-05-27 | v0.2 | Added initialization references and investor-cap event notes |
 | 2026-05-31 | v0.3 | Issue #272: replaced drifted reference with complete `#[contractevent]` topic and data layout from `escrow/src/lib.rs` |
 | 2026-06-24 | v0.4 | Added `settled_at_ledger_timestamp` field to `EscrowSettled` event; added `is_settleable` view |
-| 2026-07-28 | v0.5 | Issue #913: added `FundingStateChanged` event emitted exactly once on `0 → 1` status transition |
+| 2026-07-27 | v0.5 | Added `AttestationDigestUnrevoked` event for `unrevoke_attestation_digest`; updated `AttestationDigestRevoked` to include `revoke_attestation_digests` |

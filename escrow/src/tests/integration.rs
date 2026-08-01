@@ -447,7 +447,7 @@ fn test_escrow_tiered_yield_with_commitment_locks() {
 
     // Settle the escrow
     let settled = client.settle();
-    assert_eq!(settled.status, 2);
+    assert_eq!(settled.escrow.status, 2);
 
     // Verify claim locks are enforced
     let current_time = env.ledger().timestamp();

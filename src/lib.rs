@@ -35,9 +35,8 @@ impl YieldTierContract {
         admin.require_auth();
 
         env.deployer().update_current_contract_wasm(new_wasm_hash);
-        
-        env.events().publish((symbol_short!("upgrade"),), ());
-        
+        env.events().publish((symbol_short!("upgrade"),), (new_wasm_hash.clone(),));
+
         Ok(())
     }
 
@@ -47,11 +46,15 @@ impl YieldTierContract {
         env.storage()
             .instance()
             .get(&YIELD_TIER_KEY)
-            .unwrap_or(YieldTierState::Unset) // Sensible default, never panics
+            .unwrap_or(YieldTierState::Unset)
     }
 
-    /// Sets the yield-tier state (admin function).
-    pub fn set_yield_tier(env: Env, tier: YieldTierState) {
+    /// Sets the yield-tier state (admin-only).
+    pub fn set_yield_tier(env: Env, tier: YieldTierState) -> Result<(), Error> {
+        let admin: Address = env.storage().instance().get(&ADMIN_KEY).unwrap();
+        admin.require_auth();
         env.storage().instance().set(&YIELD_TIER_KEY, &tier);
+        env.events().publish((symbol_short!("tier_set"),), (tier.clone(),));
+        Ok(())
     }
 }

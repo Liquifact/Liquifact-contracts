@@ -556,6 +556,22 @@ stellar contract invoke \
 
 ## 8. Security notes for operators
 
+### Operational pause vs. legal hold
+
+The contract exposes two independent freeze mechanisms:
+- **Operational pause** (`set_paused` / `is_paused` / `set_pause_max_duration`): a
+  single-call admin toggle with optional auto-expiry and rate limiting, designed
+  for rapid incident response (e.g. suspected token bug). See
+  [`escrow-pause.md`](escrow-pause.md).
+- **Compliance legal hold** (`set_legal_hold` / `clear_legal_hold`): a two-step
+  timelocked freeze designed for compliance scenarios. See
+  [`escrow-legal-hold.md`](escrow-legal-hold.md).
+
+When both are active, the pause gate fires first (precedence). Clearing the
+pause exposes the legal hold gate if it is still set. Operators should reach
+for the pause first during active incidents and the legal hold only when a
+compliance freeze with a cooling-off window is required.
+
 ### Token economics (out of scope)
 
 `escrow/src/external_calls.rs` explicitly documents that **fee-on-transfer,

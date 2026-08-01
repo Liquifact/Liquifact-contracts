@@ -7,7 +7,7 @@
 //! its exact threshold.
 
 use super::{assert_contract_error, deploy, LiquifactEscrowClient, TARGET};
-use crate::{EscrowError, YieldTier};
+use crate::{EscrowError, YieldTier, YieldTierPreview};
 use soroban_sdk::{testutils::Address as _, Address, Env, String, Vec as SorobanVec};
 
 const BOUNDED_TIER_COUNT_PROBE: u32 = 64;
@@ -123,10 +123,19 @@ fn test_lock_boundaries_accept_zero_and_u64_max() {
     assert_eq!(stored.get_unchecked(0).min_lock_secs, 0);
     assert_eq!(stored.get_unchecked(1).min_lock_secs, u64::MAX);
 
-    assert_eq!(client.preview_yield_tier(&1i128, &0u64), (0, 0));
+    assert_eq!(
+        client.preview_yield_tier(&1i128, &0u64),
+        YieldTierPreview {
+            effective_yield_bps: 0,
+            matched_lock_secs: 0
+        }
+    );
     assert_eq!(
         client.preview_yield_tier(&1i128, &u64::MAX),
-        (10_000, u64::MAX)
+        YieldTierPreview {
+            effective_yield_bps: 10_000,
+            matched_lock_secs: u64::MAX
+        }
     );
 }
 
@@ -189,17 +198,83 @@ fn test_preview_selection_uses_bounded_boundary_matrix() {
     let client = init_with_tiers(&env, 0, Some(tiers));
 
     let cases = [
-        (0, (0, 0)),
-        (1, (100, 1)),
-        (2, (100, 1)),
-        (9, (100, 1)),
-        (10, (200, 10)),
-        (11, (200, 10)),
-        (99, (200, 10)),
-        (100, (300, 100)),
-        (101, (300, 100)),
-        (u64::MAX - 1, (300, 100)),
-        (u64::MAX, (10_000, u64::MAX)),
+        (
+            0,
+            YieldTierPreview {
+                effective_yield_bps: 0,
+                matched_lock_secs: 0,
+            },
+        ),
+        (
+            1,
+            YieldTierPreview {
+                effective_yield_bps: 100,
+                matched_lock_secs: 1,
+            },
+        ),
+        (
+            2,
+            YieldTierPreview {
+                effective_yield_bps: 100,
+                matched_lock_secs: 1,
+            },
+        ),
+        (
+            9,
+            YieldTierPreview {
+                effective_yield_bps: 100,
+                matched_lock_secs: 1,
+            },
+        ),
+        (
+            10,
+            YieldTierPreview {
+                effective_yield_bps: 200,
+                matched_lock_secs: 10,
+            },
+        ),
+        (
+            11,
+            YieldTierPreview {
+                effective_yield_bps: 200,
+                matched_lock_secs: 10,
+            },
+        ),
+        (
+            99,
+            YieldTierPreview {
+                effective_yield_bps: 200,
+                matched_lock_secs: 10,
+            },
+        ),
+        (
+            100,
+            YieldTierPreview {
+                effective_yield_bps: 300,
+                matched_lock_secs: 100,
+            },
+        ),
+        (
+            101,
+            YieldTierPreview {
+                effective_yield_bps: 300,
+                matched_lock_secs: 100,
+            },
+        ),
+        (
+            u64::MAX - 1,
+            YieldTierPreview {
+                effective_yield_bps: 300,
+                matched_lock_secs: 100,
+            },
+        ),
+        (
+            u64::MAX,
+            YieldTierPreview {
+                effective_yield_bps: 10_000,
+                matched_lock_secs: u64::MAX,
+            },
+        ),
     ];
 
     for (lock, expected) in cases {

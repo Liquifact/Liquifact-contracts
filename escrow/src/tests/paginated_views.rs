@@ -4,11 +4,8 @@
 //
 // Each test uses a fresh Env so state cannot leak across cases.
 
-use crate::MAX_PAUSE_READ_PAGE;
-use soroban_sdk::{
-    testutils::{Address as _, Ledger},
-    Address, Env,
-};
+use soroban_sdk::testutils::Address as _;
+use soroban_sdk::{Address, Env};
 
 // ── paginate_window unit tests ────────────────────────────────────────────────
 //
@@ -95,7 +92,7 @@ fn do_init(
 ) {
     client.init(
         admin,
-        &soroban_sdk::String::from_str(env, "INV-PG-001"),
+        &soroban_sdk::String::from_str(env, "INV_PG_001"),
         sme,
         &100_000_000_000i128,
         &800i64,
@@ -113,6 +110,99 @@ fn do_init(
         &None,
         &None::<i64>,
     );
+}
+
+// ── get_beneficiary_records ──────────────────────────────────────────────────
+
+#[test]
+fn get_beneficiary_records_empty_returns_empty() {
+    let env = Env::default();
+    env.mock_all_auths();
+    // Use `deploy` directly without init to avoid the first beneficiary record
+    let client = super::deploy(&env);
+
+    let result = client.get_beneficiary_records(&0, &10);
+    assert_eq!(result.len(), 0);
+}
+
+#[test]
+fn get_beneficiary_records_init_creates_first_record() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = super::setup(&env);
+    do_init(
+        &env,
+        &client,
+        &admin,
+        &sme,
+        &Address::generate(&env),
+        &Address::generate(&env),
+    );
+    let result = client.get_beneficiary_records(&0, &10);
+    assert_eq!(result.len(), 1);
+    assert_eq!(result.get(0).unwrap().sme_address, sme);
+}
+
+#[test]
+fn get_beneficiary_records_multiple_rotations() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = super::setup(&env);
+    do_init(
+        &env,
+        &client,
+        &admin,
+        &sme,
+        &Address::generate(&env),
+        &Address::generate(&env),
+    );
+
+    let sme2 = Address::generate(&env);
+    let sme3 = Address::generate(&env);
+    let sme4 = Address::generate(&env);
+
+    client.rotate_beneficiary(&sme2);
+    client.rotate_beneficiary(&sme3);
+    client.rotate_beneficiary(&sme4);
+
+    let result = client.get_beneficiary_records(&0, &10);
+    assert_eq!(result.len(), 4);
+    assert_eq!(result.get(0).unwrap().sme_address, sme);
+    assert_eq!(result.get(1).unwrap().sme_address, sme2);
+    assert_eq!(result.get(2).unwrap().sme_address, sme3);
+    assert_eq!(result.get(3).unwrap().sme_address, sme4);
+}
+
+#[test]
+fn get_beneficiary_records_pagination() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = super::setup(&env);
+    do_init(
+        &env,
+        &client,
+        &admin,
+        &sme,
+        &Address::generate(&env),
+        &Address::generate(&env),
+    );
+
+    let sme2 = Address::generate(&env);
+    let sme3 = Address::generate(&env);
+
+    client.rotate_beneficiary(&sme2);
+    client.rotate_beneficiary(&sme3);
+
+    // Page 1 (limit 2)
+    let p1 = client.get_beneficiary_records(&0, &2);
+    assert_eq!(p1.len(), 2);
+    assert_eq!(p1.get(0).unwrap().sme_address, sme);
+    assert_eq!(p1.get(1).unwrap().sme_address, sme2);
+
+    // Page 2 (limit 2)
+    let p2 = client.get_beneficiary_records(&2, &2);
+    assert_eq!(p2.len(), 1);
+    assert_eq!(p2.get(0).unwrap().sme_address, sme3);
 }
 
 // ── get_investors ─────────────────────────────────────────────────────────────
@@ -167,7 +257,7 @@ fn get_investors_first_page() {
 
     client.init(
         &admin,
-        &soroban_sdk::String::from_str(&env, "INV-PG-FIRST"),
+        &soroban_sdk::String::from_str(&env, "INV_PG_FIRST"),
         &sme,
         &500_000_000i128,
         &800i64,
@@ -219,7 +309,7 @@ fn get_investors_continuation_page() {
 
     client.init(
         &admin,
-        &soroban_sdk::String::from_str(&env, "INV-PG-CONT"),
+        &soroban_sdk::String::from_str(&env, "INV_PG_CONT"),
         &sme,
         &500_000_000i128,
         &800i64,
@@ -269,7 +359,7 @@ fn get_investors_start_past_end_returns_empty() {
 
     client.init(
         &admin,
-        &soroban_sdk::String::from_str(&env, "INV-PG-PAST"),
+        &soroban_sdk::String::from_str(&env, "INV_PG_PAST"),
         &sme,
         &200_000_000i128,
         &800i64,
@@ -305,7 +395,7 @@ fn setup_allowlist_escrow(env: &Env) -> (crate::LiquifactEscrowClient<'_>, Addre
     let sme = Address::generate(env);
     client.init(
         &admin,
-        &soroban_sdk::String::from_str(env, "INV-AL-PG"),
+        &soroban_sdk::String::from_str(env, "INV_AL_PG"),
         &sme,
         &100_000_000_000i128,
         &800i64,
@@ -430,7 +520,7 @@ fn setup_attestation_escrow(env: &Env) -> (crate::LiquifactEscrowClient<'_>, Add
     let sme = Address::generate(env);
     client.init(
         &admin,
-        &soroban_sdk::String::from_str(env, "INV-ATT-PG"),
+        &soroban_sdk::String::from_str(env, "INV_ATT_PG"),
         &sme,
         &100_000_000_000i128,
         &800i64,
@@ -630,11 +720,11 @@ fn get_collateral_records_ceiling() {
 
 // ── get_settlement_records ───────────────────────────────────────────────────
 
-fn setup_settlement_escrow(
-    env: &Env,
+fn setup_settlement_escrow<'a>(
+    env: &'a Env,
     invoice_id: &str,
     yield_bps: i64,
-) -> (crate::LiquifactEscrowClient<'_>, Address, Address) {
+) -> (crate::LiquifactEscrowClient<'a>, Address, Address) {
     let client = super::deploy(env);
     let admin = Address::generate(env);
     let sme = Address::generate(env);
@@ -666,7 +756,7 @@ fn setup_settlement_escrow(
 fn get_settlement_records_empty_before_settle() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, _admin, _sme) = setup_settlement_escrow(&env, "SETL-PG-EMP", 800i64);
+    let (client, _admin, _sme) = setup_settlement_escrow(&env, "SETL_PG_EMP", 800i64);
 
     let result = client.get_settlement_records(&0, &10);
     assert_eq!(result.len(), 0, "must be empty before any settle");
@@ -676,7 +766,7 @@ fn get_settlement_records_empty_before_settle() {
 fn get_settlement_records_zero_limit_returns_empty() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, _admin, _sme) = setup_settlement_escrow(&env, "SETL-PG-ZRL", 800i64);
+    let (client, _admin, _sme) = setup_settlement_escrow(&env, "SETL_PG_ZRL", 800i64);
 
     let investor = Address::generate(&env);
     client.fund(&investor, &100_000_000_000i128);
@@ -690,7 +780,7 @@ fn get_settlement_records_zero_limit_returns_empty() {
 fn get_settlement_records_start_past_end_returns_empty() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, _admin, _sme) = setup_settlement_escrow(&env, "SETL-PG-PST", 800i64);
+    let (client, _admin, _sme) = setup_settlement_escrow(&env, "SETL_PG_PST", 800i64);
 
     let investor = Address::generate(&env);
     client.fund(&investor, &100_000_000_000i128);
@@ -705,7 +795,7 @@ fn get_settlement_records_start_past_end_returns_empty() {
 fn get_settlement_records_single_record_after_settle() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, _admin, _sme) = setup_settlement_escrow(&env, "SETL-PG-SGL", 500i64);
+    let (client, _admin, _sme) = setup_settlement_escrow(&env, "SETL_PG_SGL", 500i64);
 
     let settle_ts: u64 = 42_000;
     env.ledger().with_mut(|l| l.timestamp = settle_ts);
@@ -734,10 +824,11 @@ fn get_settlement_records_single_record_after_settle() {
 fn get_settlement_records_correct_settle_pool_with_max_yield() {
     let env = Env::default();
     env.mock_all_auths();
-    let (client, _admin, _sme) = setup_settlement_escrow(&env, "SETL-PG-YLD", 10_000i64);
+    let (client, _admin, sme) = setup_settlement_escrow(&env, "SETL_PG_YLD", 10_000i64);
 
     let investor = Address::generate(&env);
     client.fund(&investor, &500_000_000i128);
+    client.partial_settle(&sme);
     client.settle();
 
     // settle_pool = 500_000_000 + (500_000_000 * 10_000 / 10_000)
@@ -853,7 +944,7 @@ fn get_pause_records_ceiling_clamped() {
     // Request well above the ceiling
     let result = client.get_pause_records(&0, &(MAX_PAUSE_READ_PAGE * 2));
     // Should be clamped to MAX_PAUSE_READ_PAGE, not the full requested amount
-    assert_eq!(result.len(), MAX_PAUSE_READ_PAGE as u32);
+    assert_eq!(result.len(), MAX_PAUSE_READ_PAGE);
 }
 
 #[test]

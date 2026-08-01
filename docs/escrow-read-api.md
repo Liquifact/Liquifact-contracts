@@ -63,6 +63,7 @@ re-implementing storage reads to guarantee identical semantics.
 
 **Collateral Metadata:**
 - [get_sme_collateral_commitment](#get_sme_collateral_commitment--optionsmecollateralcommitment)
+- [get_collateral_state](#get_collateral_state--collateralstate)
 
 **Allowlist:**
 - [is_allowlist_active](#is_allowlist_active--bool)
@@ -824,3 +825,26 @@ Returns a read-only paginated view of the configured yield-tier ladder using the
 |-------|------|-------------|
 | `min_lock_secs` | `u64` | Minimum `committed_lock_secs` an investor must pass to qualify for this tier |
 | `yield_bps` | `i64` | Effective annualized yield in basis points for qualifying investors |
+
+## `get_collateral_state() → CollateralState`
+
+**Storage keys:** `DataKey::SmeCollateralPledge`, `DataKey::CollateralLimit`
+
+Single O(1) read view of the current collateral state, so callers never have to reconstruct it from `get_sme_collateral_commitment()` + `get_collateral_limit()`.
+
+- **Pure read** — no auth required, no state mutation; safe for simulation.
+- **Never panics** — an unset commitment returns the default row below instead of trapping, and the view works before `init`.
+- **No recomputation** — values are read straight from storage through `get_collateral_config()`, so this view can never drift from `get_collateral_config()` / `get_collateral_limit()` / `get_sme_collateral_commitment()`.
+- **Record-only** — the same metadata caveat as `record_sme_collateral_commitment` applies: this is reported collateral, not proof of custody, lien, or token movement.
+
+### `CollateralState` fields
+
+| Field | Type | Description | Value when unset |
+|-------|------|-------------|------------------|
+| `is_set` | `bool` | Whether an SME collateral commitment is currently recorded | `false` |
+| `asset` | `Symbol` | Reported asset symbol | empty `Symbol` |
+| `amount` | `i128` | Reported collateral amount | `0` |
+| `recorded_at` | `u64` | Ledger timestamp the commitment was written | `0` |
+| `collateral_limit` | `i128` | Admin-configured ceiling on `record_sme_collateral_commitment` | `MAX_INVOICE_AMOUNT` |
+
+Note that `collateral_limit` is independent of `is_set`: it reflects the stored limit (or the `MAX_INVOICE_AMOUNT` default) even when no commitment exists.
