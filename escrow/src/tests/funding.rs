@@ -7672,7 +7672,11 @@ fn funding_state_changed_emitted_once_on_exact_target_fund() {
         })
         .collect();
 
-    assert_eq!(fsc_events.len(), 1, "expected exactly one FundingStateChanged event");
+    assert_eq!(
+        fsc_events.len(),
+        1,
+        "expected exactly one FundingStateChanged event"
+    );
 }
 
 /// Funding below the target must NOT emit a `FundingStateChanged` event.
@@ -7733,7 +7737,10 @@ fn funding_state_changed_not_emitted_on_partial_fund() {
         })
         .count();
 
-    assert_eq!(fsc_count, 0, "FundingStateChanged must not fire before target is reached");
+    assert_eq!(
+        fsc_count, 0,
+        "FundingStateChanged must not fire before target is reached"
+    );
     assert_eq!(client.get_escrow().status, 0, "escrow must still be open");
 }
 
@@ -7777,24 +7784,24 @@ fn funding_state_changed_emitted_on_threshold_crossing_deposit() {
     // First call: below target — must produce no FundingStateChanged.
     client.fund(&investor, &(TARGET / 2));
     let after_first = env.events().all();
-    let fsc_after_first = after_first
-        .events()
-        .iter()
-        .any(|e| {
-            let candidate = FundingStateChanged {
-                name: symbol_short!("fund_st_ch"),
-                invoice_id,
-                from_status: 0u32,
-                to_status: 1u32,
-                funded_amount: TARGET / 2,
-                funding_target: TARGET,
-                ledger_timestamp: env.ledger().timestamp(),
-                trigger: symbol_short!("fund"),
-            }
-            .to_xdr(&env, &contract_id);
-            *e == candidate
-        });
-    assert!(!fsc_after_first, "no FundingStateChanged after partial fund");
+    let fsc_after_first = after_first.events().iter().any(|e| {
+        let candidate = FundingStateChanged {
+            name: symbol_short!("fund_st_ch"),
+            invoice_id,
+            from_status: 0u32,
+            to_status: 1u32,
+            funded_amount: TARGET / 2,
+            funding_target: TARGET,
+            ledger_timestamp: env.ledger().timestamp(),
+            trigger: symbol_short!("fund"),
+        }
+        .to_xdr(&env, &contract_id);
+        *e == candidate
+    });
+    assert!(
+        !fsc_after_first,
+        "no FundingStateChanged after partial fund"
+    );
 
     // Second call: reaches target — must produce exactly one FundingStateChanged.
     client.fund(&investor, &(TARGET / 2));
@@ -7818,7 +7825,11 @@ fn funding_state_changed_emitted_on_threshold_crossing_deposit() {
         })
         .collect();
 
-    assert_eq!(fsc_events.len(), 1, "exactly one FundingStateChanged on threshold crossing");
+    assert_eq!(
+        fsc_events.len(),
+        1,
+        "exactly one FundingStateChanged on threshold crossing"
+    );
 }
 
 /// Over-funding: investor deposits more than the target in a single call.
@@ -7881,7 +7892,11 @@ fn funding_state_changed_payload_reflects_overfunded_amount() {
         })
         .collect();
 
-    assert_eq!(fsc_events.len(), 1, "expected exactly one FundingStateChanged");
+    assert_eq!(
+        fsc_events.len(),
+        1,
+        "expected exactly one FundingStateChanged"
+    );
     assert_eq!(client.get_escrow().funded_amount, overshoot);
 }
 
@@ -7954,7 +7969,10 @@ fn funding_state_changed_not_emitted_for_follow_on_deposit_after_funded() {
         })
         .count();
 
-    assert_eq!(fsc_count, 0, "FundingStateChanged must not be re-emitted after already funded");
+    assert_eq!(
+        fsc_count, 0,
+        "FundingStateChanged must not be re-emitted after already funded"
+    );
 }
 
 /// `fund_with_commitment` that crosses the target must also emit `FundingStateChanged`
@@ -8022,7 +8040,11 @@ fn funding_state_changed_emitted_via_fund_with_commitment() {
         })
         .collect();
 
-    assert_eq!(fsc_events.len(), 1, "FundingStateChanged must fire once via fund_with_commitment");
+    assert_eq!(
+        fsc_events.len(),
+        1,
+        "FundingStateChanged must fire once via fund_with_commitment"
+    );
 }
 
 /// `update_funding_target` that lowers the target to meet the funded amount
@@ -8093,7 +8115,11 @@ fn funding_state_changed_emitted_via_update_funding_target() {
         })
         .collect();
 
-    assert_eq!(fsc_events.len(), 1, "FundingStateChanged must fire once via update_funding_target");
+    assert_eq!(
+        fsc_events.len(),
+        1,
+        "FundingStateChanged must fire once via update_funding_target"
+    );
     assert_eq!(client.get_escrow().status, 1);
 }
 
@@ -8162,7 +8188,10 @@ fn funding_state_changed_not_emitted_when_target_update_does_not_trigger_transit
         })
         .count();
 
-    assert_eq!(fsc_count, 0, "FundingStateChanged must not fire when target still above funded_amount");
+    assert_eq!(
+        fsc_count, 0,
+        "FundingStateChanged must not fire when target still above funded_amount"
+    );
     assert_eq!(client.get_escrow().status, 0);
 }
 
@@ -8231,7 +8260,11 @@ fn funding_state_changed_emitted_via_partial_settle() {
         })
         .collect();
 
-    assert_eq!(fsc_events.len(), 1, "FundingStateChanged must fire once via partial_settle");
+    assert_eq!(
+        fsc_events.len(),
+        1,
+        "FundingStateChanged must fire once via partial_settle"
+    );
     assert_eq!(client.get_escrow().status, 1);
 }
 
@@ -8301,7 +8334,11 @@ fn funding_state_changed_emitted_via_fund_batch() {
         })
         .collect();
 
-    assert_eq!(fsc_events.len(), 1, "exactly one FundingStateChanged via fund_batch");
+    assert_eq!(
+        fsc_events.len(),
+        1,
+        "exactly one FundingStateChanged via fund_batch"
+    );
     assert_eq!(client.get_escrow().status, 1);
 }
 
@@ -8371,7 +8408,11 @@ fn funding_state_changed_all_payload_fields_correct() {
         })
         .collect();
 
-    assert_eq!(fsc_events.len(), 1, "one FundingStateChanged with correct fields");
+    assert_eq!(
+        fsc_events.len(),
+        1,
+        "one FundingStateChanged with correct fields"
+    );
 
     // Confirm storage state matches event payload.
     let escrow = client.get_escrow();

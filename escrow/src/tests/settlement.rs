@@ -2794,21 +2794,54 @@ fn test_settle_emits_escrow_settled_event() {
     let sme = Address::generate(&env);
     let investor = Address::generate(&env);
     let (tok, tre) = free_addresses(&env);
-    client.init(&admin, &String::from_str(&env, "EVTSET01"), &sme, &10_000i128, &800i64, &0u64, &tok, &None, &tre, &None, &None, &None, &None, &None, &None);
+    client.init(
+        &admin,
+        &String::from_str(&env, "EVTSET01"),
+        &sme,
+        &10_000i128,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
     client.fund(&investor, &10_000i128);
     client.settle();
     let events = env.events().all();
-    let settlement_events: Vec<_> = events.events().iter().filter(|e| {
-        let topics = e.topics();
-        topics.len() >= 1 && topics.get(0).unwrap() == Symbol::new(&env, "escrow_sd").into_val(&env)
-    }).collect();
-    assert_eq!(settlement_events.len(), 1, "Expected exactly one EscrowSettled event");
+    let settlement_events: Vec<_> = events
+        .events()
+        .iter()
+        .filter(|e| {
+            let topics = e.topics();
+            topics.len() >= 1
+                && topics.get(0).unwrap() == Symbol::new(&env, "escrow_sd").into_val(&env)
+        })
+        .collect();
+    assert_eq!(
+        settlement_events.len(),
+        1,
+        "Expected exactly one EscrowSettled event"
+    );
     let event = settlement_events[0];
     let topics = event.topics();
     assert_eq!(topics.len(), 3, "EscrowSettled must have 3 topics");
-    assert_eq!(topics.get(0).unwrap(), Symbol::new(&env, "escrow_sd").into_val(&env), "topic[0] must be escrow_sd");
+    assert_eq!(
+        topics.get(0).unwrap(),
+        Symbol::new(&env, "escrow_sd").into_val(&env),
+        "topic[0] must be escrow_sd"
+    );
     let invoice_id: Symbol = topics.get(1).unwrap().try_into_val(&env).unwrap();
-    assert_eq!(invoice_id, Symbol::new(&env, "EVTSET01"), "topic[1] must be invoice_id");
+    assert_eq!(
+        invoice_id,
+        Symbol::new(&env, "EVTSET01"),
+        "topic[1] must be invoice_id"
+    );
 }
 
 #[test]
@@ -2820,17 +2853,40 @@ fn test_settle_event_payload_fields() {
     let sme = Address::generate(&env);
     let investor = Address::generate(&env);
     let (tok, tre) = free_addresses(&env);
-    client.init(&admin, &String::from_str(&env, "EVTSET02"), &sme, &20_000i128, &900i64, &0u64, &tok, &None, &tre, &None, &None, &None, &None, &None, &None);
+    client.init(
+        &admin,
+        &String::from_str(&env, "EVTSET02"),
+        &sme,
+        &20_000i128,
+        &900i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
     client.fund(&investor, &20_000i128);
     let settle_time = env.ledger().timestamp();
     client.settle();
     let events = env.events().all();
-    let event = events.events().iter().find(|e| {
-        let topics = e.topics();
-        topics.len() >= 1 && topics.get(0).unwrap() == Symbol::new(&env, "escrow_sd").into_val(&env)
-    }).expect("EscrowSettled event not found");
+    let event = events
+        .events()
+        .iter()
+        .find(|e| {
+            let topics = e.topics();
+            topics.len() >= 1
+                && topics.get(0).unwrap() == Symbol::new(&env, "escrow_sd").into_val(&env)
+        })
+        .expect("EscrowSettled event not found");
     let data = event.data();
-    let settled: EscrowSettled = data.try_into_val(&env).expect("Failed to decode EscrowSettled");
+    let settled: EscrowSettled = data
+        .try_into_val(&env)
+        .expect("Failed to decode EscrowSettled");
     assert_eq!(settled.name, symbol_short!("escrow_sd"));
     assert_eq!(settled.invoice_id, Symbol::new(&env, "EVTSET02"));
     assert_eq!(settled.funded_amount, 20_000i128);
@@ -2848,21 +2904,52 @@ fn test_partial_settle_emits_event() {
     let sme = Address::generate(&env);
     let investor = Address::generate(&env);
     let (tok, tre) = free_addresses(&env);
-    client.init(&admin, &String::from_str(&env, "EVTSET03"), &sme, &50_000i128, &800i64, &0u64, &tok, &None, &tre, &None, &None, &None, &None, &None, &None);
+    client.init(
+        &admin,
+        &String::from_str(&env, "EVTSET03"),
+        &sme,
+        &50_000i128,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
     client.fund(&investor, &5_000i128);
     client.partial_settle(&sme);
     let events = env.events().all();
-    let partial_events: Vec<_> = events.events().iter().filter(|e| {
-        let topics = e.topics();
-        topics.len() >= 1 && topics.get(0).unwrap() == Symbol::new(&env, "part_set").into_val(&env)
-    }).collect();
-    assert_eq!(partial_events.len(), 1, "Expected exactly one EscrowPartialSettle event");
+    let partial_events: Vec<_> = events
+        .events()
+        .iter()
+        .filter(|e| {
+            let topics = e.topics();
+            topics.len() >= 1
+                && topics.get(0).unwrap() == Symbol::new(&env, "part_set").into_val(&env)
+        })
+        .collect();
+    assert_eq!(
+        partial_events.len(),
+        1,
+        "Expected exactly one EscrowPartialSettle event"
+    );
     let event = partial_events[0];
     let topics = event.topics();
     assert_eq!(topics.len(), 3, "EscrowPartialSettle must have 3 topics");
-    assert_eq!(topics.get(0).unwrap(), Symbol::new(&env, "part_set").into_val(&env), "topic[0] must be part_set");
+    assert_eq!(
+        topics.get(0).unwrap(),
+        Symbol::new(&env, "part_set").into_val(&env),
+        "topic[0] must be part_set"
+    );
     let data = event.data();
-    let partial: EscrowPartialSettle = data.try_into_val(&env).expect("Failed to decode EscrowPartialSettle");
+    let partial: EscrowPartialSettle = data
+        .try_into_val(&env)
+        .expect("Failed to decode EscrowPartialSettle");
     assert_eq!(partial.name, symbol_short!("part_set"));
     assert_eq!(partial.invoice_id, Symbol::new(&env, "EVTSET03"));
     assert_eq!(partial.funded_amount, 5_000i128);
@@ -2877,7 +2964,23 @@ fn test_settle_event_topics_no_collision() {
     let sme = Address::generate(&env);
     let investor = Address::generate(&env);
     let (tok, tre) = free_addresses(&env);
-    client.init(&admin, &String::from_str(&env, "EVTSET04"), &sme, &10_000i128, &800i64, &0u64, &tok, &None, &tre, &None, &None, &None, &None, &None, &None);
+    client.init(
+        &admin,
+        &String::from_str(&env, "EVTSET04"),
+        &sme,
+        &10_000i128,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
     client.fund(&investor, &10_000i128);
     client.settle();
     let events = env.events().all();
@@ -2886,8 +2989,14 @@ fn test_settle_event_topics_no_collision() {
         let t = event.topics();
         if t.len() >= 1 {
             let sym: Symbol = t.get(0).unwrap().try_into_val(&env).unwrap();
-            assert!(!topics_seen.iter().any(|s: &Symbol| s == &sym) || sym == Symbol::new(&env, "escrow_sd") || sym == Symbol::new(&env, "funded") || sym == Symbol::new(&env, "escrow_ii"),
-                "Duplicate topic symbol found: {}", sym);
+            assert!(
+                !topics_seen.iter().any(|s: &Symbol| s == &sym)
+                    || sym == Symbol::new(&env, "escrow_sd")
+                    || sym == Symbol::new(&env, "funded")
+                    || sym == Symbol::new(&env, "escrow_ii"),
+                "Duplicate topic symbol found: {}",
+                sym
+            );
             topics_seen.push_back(sym);
         }
     }

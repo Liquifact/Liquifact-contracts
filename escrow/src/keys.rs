@@ -73,4 +73,3 @@ pub(crate) fn funding_close_snapshot() -> DataKey {
 pub(crate) fn funding_token() -> DataKey {
     DataKey::FundingToken
 }
-
