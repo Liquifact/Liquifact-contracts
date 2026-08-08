@@ -138,6 +138,8 @@
 
 mod keys;
 
+
+#[cfg(test)]
 extern crate std;
 
 use core::{clone::Clone, default::Default};
