@@ -134,7 +134,7 @@
 //! address used by [`LiquifactEscrow::sweep_terminal_dust`]; the fee transfer reuses the same
 //! SEP-41 balance-delta–checked path in [`external_calls`].
 
-#![allow(clippy::too_many_arguments)]
+#![allow(clippy::too_many_arguments, dead_code)]
 
 mod keys;
 
@@ -2248,7 +2248,11 @@ impl LiquifactEscrow {
         let n = tiers.len();
         for i in 0..n {
             let t = tiers.get(i).unwrap();
-            let prev = if i > 0 { Some(tiers.get(i - 1).unwrap()) } else { None };
+            let prev = if i > 0 {
+                Some(tiers.get(i - 1).unwrap())
+            } else {
+                None
+            };
             if let Err(e) = validate_yield_tier(&t, base_yield, prev.as_ref()) {
                 fail(env, e);
             }
@@ -3386,7 +3390,9 @@ impl LiquifactEscrow {
     /// funding call, including any over-funding past `funding_target`, plus the close ledger time
     /// and sequence used by off-chain auditors.
     pub fn get_funding_close_snapshot(env: Env) -> Option<FundingCloseSnapshot> {
-        env.storage().instance().get(&keys::funding_close_snapshot())
+        env.storage()
+            .instance()
+            .get(&keys::funding_close_snapshot())
     }
 
     /// Returns the ledger timestamp (seconds since Unix epoch) at which [`LiquifactEscrow::settle`]
@@ -3600,7 +3606,9 @@ impl LiquifactEscrow {
 
         let escrow = Self::load_escrow_require_sme(&env);
 
-        env.storage().instance().remove(&DataKey::SmeCollateralPledge);
+        env.storage()
+            .instance()
+            .remove(&DataKey::SmeCollateralPledge);
 
         CollateralClearedEvt {
             name: symbol_short!("coll_clr"),
@@ -3634,21 +3642,17 @@ impl LiquifactEscrow {
         amount: i128,
     ) -> SmeCollateralCommitment {
         let escrow = Self::load_escrow_require_admin(&env);
-        
+
         // Validate asset is non-empty (uses existing error 61)
         ensure(
             &env,
             asset != Symbol::new(&env, ""),
             EscrowError::CollateralAssetEmpty,
         );
-        
+
         // Validate amount is positive (uses existing error 60)
-        ensure(
-            &env,
-            amount > 0,
-            EscrowError::CollateralAmountNotPositive,
-        );
-        
+        ensure(&env, amount > 0, EscrowError::CollateralAmountNotPositive);
+
         // Validate amount doesn't exceed max (new error 239)
         let max_amount: i128 = 1_000_000_000_000_000; // Example max
         ensure(
@@ -3656,23 +3660,23 @@ impl LiquifactEscrow {
             amount <= max_amount,
             EscrowError::CollateralAmountExceedsMax,
         );
-        
+
         let now = env.ledger().timestamp();
         let commitment = SmeCollateralCommitment {
             asset: asset.clone(),
             amount,
             recorded_at: now,
         };
-        
+
         // Get prior amount for event
         let prior: Option<SmeCollateralCommitment> =
             env.storage().instance().get(&DataKey::SmeCollateralPledge);
         let prior_amount = prior.as_ref().map(|c| c.amount).unwrap_or(0);
-        
+
         env.storage()
             .instance()
             .set(&DataKey::SmeCollateralPledge, &commitment);
-        
+
         CollateralParametersUpdated {
             name: symbol_short!("coll_upd"),
             invoice_id: escrow.invoice_id.clone(),
@@ -3681,7 +3685,7 @@ impl LiquifactEscrow {
             prior_amount,
         }
         .publish(&env);
-        
+
         commitment
     }
 
@@ -3720,22 +3724,32 @@ impl LiquifactEscrow {
         for i in 0..n {
             let addr = addresses.get(i).unwrap();
             // Bump persistent storage
-            env.storage()
-                .persistent()
-                .extend_ttl(&DataKey::InvestorContribution(addr.clone()), limit, limit);
-            env.storage()
-                .persistent()
-                .extend_ttl(&investor_effective_yield_key(&addr), limit, limit);
-            env.storage()
-                .persistent()
-                .extend_ttl(&investor_claim_not_before_key(&addr), limit, limit);
-            env.storage()
-                .persistent()
-                .extend_ttl(&DataKey::InvestorClaimed(addr.clone()), limit, limit);
-            env.storage()
-                .persistent()
-                .extend_ttl(&DataKey::InvestorAllowlisted(addr.clone()), limit, limit);
+            env.storage().persistent().extend_ttl(
+                &DataKey::InvestorContribution(addr.clone()),
+                limit,
+                limit,
+            );
+            env.storage().persistent().extend_ttl(
+                &investor_effective_yield_key(&addr),
+                limit,
+                limit,
+            );
+            env.storage().persistent().extend_ttl(
+                &investor_claim_not_before_key(&addr),
+                limit,
+                limit,
+            );
+            env.storage().persistent().extend_ttl(
+                &DataKey::InvestorClaimed(addr.clone()),
+                limit,
+                limit,
+            );
+            env.storage().persistent().extend_ttl(
+                &DataKey::InvestorAllowlisted(addr.clone()),
+                limit,
+                limit,
+            );
         }
         env.storage().instance().extend_ttl(limit, limit);
     }
-}  // End of impl LiquifactEscrow
+} // End of impl LiquifactEscrow

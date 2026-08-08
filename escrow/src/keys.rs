@@ -36,6 +36,7 @@ pub fn investor_contribution(addr: Address) -> super::DataKey {
     super::DataKey::InvestorContribution(addr)
 }
 
+#[allow(dead_code)]
 pub fn investor_claimed(addr: Address) -> super::DataKey {
     super::DataKey::InvestorClaimed(addr)
 }

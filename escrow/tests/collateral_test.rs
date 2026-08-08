@@ -1,23 +1,23 @@
 use liquifact_escrow::LiquifactEscrowClient;
-use soroban_sdk::{Env, Symbol, String, Address};
 use soroban_sdk::testutils::{Address as _, Ledger as _};
+use soroban_sdk::{Address, Env, String, Symbol};
 
 #[test]
-fn test_collateral_setter_basic() {
+fn test_collateral_setter_success() {
     let env = Env::default();
     env.mock_all_auths();
-    
+
     let mut ledger_info = env.ledger().get();
     ledger_info.timestamp = 0;
     ledger_info.sequence_number = 100;
     env.ledger().set(ledger_info);
-    
-    let contract_id = env.register_contract(None, liquifact_escrow::LiquifactEscrow {});
+
+    let contract_id = env.register(liquifact_escrow::LiquifactEscrow, ());
     let client = LiquifactEscrowClient::new(&env, &contract_id);
     let admin = Address::generate(&env);
     let sme = Address::generate(&env);
     let (token, treasury) = (Address::generate(&env), Address::generate(&env));
-    
+
     client.init(
         &admin,
         &String::from_str(&env, "INV001"),
@@ -38,7 +38,7 @@ fn test_collateral_setter_basic() {
         &None,
         &None::<i64>,
     );
-    
+
     let asset = Symbol::new(&env, "USDC");
     let amount = 10000i128;
     let result = client.set_collateral_parameters(&asset, &amount);
@@ -48,21 +48,21 @@ fn test_collateral_setter_basic() {
 }
 
 #[test]
-fn test_collateral_setter_empty_asset() {
+fn test_collateral_setter_empty_asset_fails() {
     let env = Env::default();
     env.mock_all_auths();
-    
+
     let mut ledger_info = env.ledger().get();
     ledger_info.timestamp = 0;
     ledger_info.sequence_number = 100;
     env.ledger().set(ledger_info);
-    
-    let contract_id = env.register_contract(None, liquifact_escrow::LiquifactEscrow {});
+
+    let contract_id = env.register(liquifact_escrow::LiquifactEscrow, ());
     let client = LiquifactEscrowClient::new(&env, &contract_id);
     let admin = Address::generate(&env);
     let sme = Address::generate(&env);
     let (token, treasury) = (Address::generate(&env), Address::generate(&env));
-    
+
     client.init(
         &admin,
         &String::from_str(&env, "INV001"),
@@ -83,7 +83,7 @@ fn test_collateral_setter_empty_asset() {
         &None,
         &None::<i64>,
     );
-    
+
     let empty_asset = Symbol::new(&env, "");
     let amount = 10000i128;
     let result = client.try_set_collateral_parameters(&empty_asset, &amount);
@@ -92,21 +92,21 @@ fn test_collateral_setter_empty_asset() {
 }
 
 #[test]
-fn test_collateral_setter_zero_amount() {
+fn test_collateral_setter_zero_amount_fails() {
     let env = Env::default();
     env.mock_all_auths();
-    
+
     let mut ledger_info = env.ledger().get();
     ledger_info.timestamp = 0;
     ledger_info.sequence_number = 100;
     env.ledger().set(ledger_info);
-    
-    let contract_id = env.register_contract(None, liquifact_escrow::LiquifactEscrow {});
+
+    let contract_id = env.register(liquifact_escrow::LiquifactEscrow, ());
     let client = LiquifactEscrowClient::new(&env, &contract_id);
     let admin = Address::generate(&env);
     let sme = Address::generate(&env);
     let (token, treasury) = (Address::generate(&env), Address::generate(&env));
-    
+
     client.init(
         &admin,
         &String::from_str(&env, "INV001"),
@@ -127,7 +127,7 @@ fn test_collateral_setter_zero_amount() {
         &None,
         &None::<i64>,
     );
-    
+
     let asset = Symbol::new(&env, "USDC");
     let result = client.try_set_collateral_parameters(&asset, &0i128);
     assert!(result.is_err());
@@ -135,21 +135,21 @@ fn test_collateral_setter_zero_amount() {
 }
 
 #[test]
-fn test_collateral_setter_exceeds_max() {
+fn test_collateral_setter_exceeds_max_fails() {
     let env = Env::default();
     env.mock_all_auths();
-    
+
     let mut ledger_info = env.ledger().get();
     ledger_info.timestamp = 0;
     ledger_info.sequence_number = 100;
     env.ledger().set(ledger_info);
-    
-    let contract_id = env.register_contract(None, liquifact_escrow::LiquifactEscrow {});
+
+    let contract_id = env.register(liquifact_escrow::LiquifactEscrow, ());
     let client = LiquifactEscrowClient::new(&env, &contract_id);
     let admin = Address::generate(&env);
     let sme = Address::generate(&env);
     let (token, treasury) = (Address::generate(&env), Address::generate(&env));
-    
+
     client.init(
         &admin,
         &String::from_str(&env, "INV001"),
@@ -170,7 +170,7 @@ fn test_collateral_setter_exceeds_max() {
         &None,
         &None::<i64>,
     );
-    
+
     let asset = Symbol::new(&env, "USDC");
     let huge_amount = 2_000_000_000_000_000i128;
     let result = client.try_set_collateral_parameters(&asset, &huge_amount);
