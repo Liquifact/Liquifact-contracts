@@ -72,3 +72,15 @@ and token transfers) and the exact `EscrowError` variant at every call site. The
 predicates (`is_terminal_status`, `is_pre_settlement_status`) are deliberately
 separable from the `ensure`-side guards so that view helpers and tests can reuse
 the same status-set definition without hiding a panic.
+
+## Validation via comprehensive tests
+
+To guarantee the refactored helpers preserve the exact error behaviour, the integration test suite in tests/coverage.rs asserts that each entrypoint still emits the same LegalHoldBlocks* and status error variants as before. The tests cover:
+
+    Legal hold active → each of the 7 gated entrypoints (fund, settle, withdraw, claim_investor_payout, cancel_funding, rotate_beneficiary, sweep_terminal_dust) returns its specific LegalHoldBlocks* error.
+
+    Status guards → each entrypoint rejects with the appropriate status error when the escrow is in the wrong state (EscrowNotOpenForFunding, SettlementNotFunded, WithdrawalNotFunded, InvestorClaimNotSettled, CancelFundingNotOpen, RotationNotOpen, DustSweepNotTerminal).
+
+    Operational pause → guard_not_paused uses the correct PausedBlocks* variants for fund, settle, withdraw, and claim_investor_payout.
+
+These tests run in CI and will catch regressions if a future modification inadvertently changes the guard ordering or the per‑entrypoint error code.

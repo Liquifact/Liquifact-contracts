@@ -753,6 +753,10 @@ pub(crate) fn validate_yield_tier(
     Ok(())
 }
 
+// ============================================================================
+//  SHARED GUARD HELPERS
+// ============================================================================
+
 /// Assert that `actual_status == expected_status`, emitting `error` otherwise.
 ///
 /// This is the shared primitive used by all status gate helpers. Callers that need a
@@ -847,10 +851,29 @@ pub(crate) fn validate_funding_amount(env: &Env, amount: i128) -> Result<(), Esc
 /// check or pick the wrong `LegalHoldBlocks*` variant — the caller passes the typed error
 /// variant that documents which entrypoint was blocked.
 ///
-/// Operational pause guard: asserts that the operational pause ([`DataKey::Paused`]) is not active.
+/// # Errors
+/// Panics with the caller-supplied `error` (one of the `EscrowError::LegalHoldBlocks*`
+/// variants) when [`DataKey::LegalHold`] is `true`.
 ///
-/// Replaces the repeated inline pattern `ensure(&env, !Self::paused_active(&env), EscrowError::PausedBlocks*)`
-/// that previously appeared at risk-bearing entrypoints — `fund_impl`, `settle`, `withdraw`, and
+/// # Security notes
+/// - Read-only: performs a single instance-storage read with `unwrap_or(false)` (no panic on
+///   missing key). Does not write or delete any storage key.
+/// - This helper is **not** an authorization check. Callers must still call
+///   `Address::require_auth()` for the entrypoint's bound role before any storage mutation
+///   or token transfer, per [ADR-002](docs/adr/ADR-002-auth-boundaries.md).
+/// - The `LegalHold` flag is independent of the operational pause ([`DataKey::Paused`]); an
+///   entrypoint that needs both gates must compose `guard_not_legal_hold` with
+///   `guard_not_paused(env, PausedBlocks*)` itself.
+#[inline(always)]
+pub(crate) fn guard_not_legal_hold(env: &Env, error: EscrowError) {
+    ensure(env, !LiquifactEscrow::legal_hold_active(env), error);
+}
+
+/// Shared guard: assert that the operational pause is not currently active.
+///
+/// Replaces the repeated inline pattern
+/// `ensure(&env, !Self::paused_active(&env), EscrowError::PausedBlocks*)` that previously
+/// appeared at risk-bearing entrypoints — `fund_impl`, `settle`, `withdraw`, and
 /// `claim_investor_payout`.
 ///
 /// # Errors
@@ -868,24 +891,6 @@ pub(crate) fn validate_funding_amount(env: &Env, amount: i128) -> Result<(), Esc
 #[inline(always)]
 pub(crate) fn guard_not_paused(env: &Env, error: EscrowError) {
     ensure(env, !LiquifactEscrow::paused_active(env), error);
-}
-
-/// # Errors
-/// Panics with the caller-supplied `error` (one of the `EscrowError::LegalHoldBlocks*`
-/// variants) when [`DataKey::LegalHold`] is `true`.
-///
-/// # Security notes
-/// - Read-only: performs a single instance-storage read with `unwrap_or(false)` (no panic on
-///   missing key). Does not write or delete any storage key.
-/// - This helper is **not** an authorization check. Callers must still call
-///   `Address::require_auth()` for the entrypoint's bound role before any storage mutation
-///   or token transfer, per [ADR-002](docs/adr/ADR-002-auth-boundaries.md).
-/// - The `LegalHold` flag is independent of the operational pause ([`DataKey::Paused`]); an
-///   entrypoint that needs both gates must compose `guard_not_legal_hold` with
-///   `guard_not_paused(env, PausedBlocks*)` itself.
-#[inline(always)]
-pub(crate) fn guard_not_legal_hold(env: &Env, error: EscrowError) {
-    ensure(env, !LiquifactEscrow::legal_hold_active(env), error);
 }
 
 /// Predicate: `true` when `status` is one of the **terminal** escrow states
@@ -2316,6 +2321,10 @@ impl LiquifactEscrow {
         }
     }
 
+    // ================================================================
+    //  INITIALIZATION
+    // ================================================================
+
     /// Initialize escrow. `funding_target` defaults to `amount`.
     ///
     /// Binds **`funding_token`**, **`treasury`**, and optional **`registry`** for this instance only.
@@ -2528,6 +2537,10 @@ impl LiquifactEscrow {
         escrow
     }
 
+    // ================================================================
+    //  VIEW FUNCTIONS
+    // ================================================================
+
     /// Returns the full escrow snapshot ([`InvoiceEscrow`]) from [`DataKey::Escrow`].
     ///
     /// Emits [`EscrowError::EscrowNotInitialized`] (code 20) if called before [`LiquifactEscrow::init`].
@@ -2682,6 +2695,10 @@ impl LiquifactEscrow {
         Self::get_escrow(env).maturity > 0
     }
 
+    // ================================================================
+    //  SWEEP TERMINAL DUST
+    // ================================================================
+
     /// Move up to `amount` (capped by balance and [`MAX_DUST_SWEEP_AMOUNT`]) of the **funding token**
     /// from this contract to [`DataKey::Treasury`].
     ///
@@ -2795,6 +2812,10 @@ impl LiquifactEscrow {
         sweep_amt
     }
 
+    // ================================================================
+    //  ROTATE BENEFICIARY
+    // ================================================================
+
     /// Rotate the beneficiary (SME) address that receives liquidity on
     /// settlement / `withdraw`.
     ///
@@ -2859,6 +2880,10 @@ impl LiquifactEscrow {
 
         escrow
     }
+
+    // ================================================================
+    //  INTERNAL HELPERS
+    // ================================================================
 
     /// Resolve a `(start, limit)` pagination request against a collection of `len` items.
     ///
@@ -2946,6 +2971,10 @@ impl LiquifactEscrow {
             EscrowError::AttestationIndexOutOfRange,
         );
     }
+
+    // ================================================================
+    //  VIEW FUNCTIONS (continued)
+    // ================================================================
 
     pub fn get_version(env: Env) -> u32 {
         env.storage().instance().get(&DataKey::Version).unwrap_or(0)
@@ -3072,7 +3101,9 @@ impl LiquifactEscrow {
     /// Optional cap on total principal for a single investor address.
     /// Absent ⇒ unlimited. Enforced on every deposit.
     pub fn get_max_per_investor_cap(env: Env) -> Option<i128> {
-        env.storage().instance().get(&keys::max_per_investor_cap())
+        env.storage()
+            .instance()
+            .get::<_, i128>(&keys::max_per_investor_cap())
     }
 
     /// Distinct funders counted so far (each address counted once when it first receives principal).
@@ -3122,6 +3153,10 @@ impl LiquifactEscrow {
             attestation_log_length: attestation_append_log.len(),
         }
     }
+
+    // ================================================================
+    //  ATTESTATION FUNCTIONS
+    // ================================================================
 
     /// Bind a **primary** 32-byte digest (e.g. SHA-256 of an IPFS CID or document bundle). **Single-set:**
     /// the call succeeds only while no primary hash exists; use [`LiquifactEscrow::append_attestation_digest`]
@@ -3208,7 +3243,10 @@ impl LiquifactEscrow {
         Some(AttestationDigestInfo { digest, revoked })
     }
 
-    // --- Persistent per-investor storage helpers ---
+    // ================================================================
+    //  PER-INVESTOR STORAGE HELPERS
+    // ================================================================
+
     fn get_persistent_investor_contribution(env: &Env, investor: Address) -> i128 {
         env.storage()
             .persistent()
@@ -3752,5 +3790,1857 @@ impl LiquifactEscrow {
             );
         }
         env.storage().instance().extend_ttl(limit, limit);
+    }
+
+    // ================================================================
+    //  ADMIN PARAMETER UPDATES
+    // ================================================================
+
+    /// Admin-only: lower the maximum number of distinct investor addresses.
+    ///
+    /// Permitted only while the escrow is **open** (`status == 0`). The new cap must be:
+    /// - Strictly lower than the current cap (if no cap configured → `NoInvestorCapConfigured`)
+    /// - At least the current `unique_funder_count` (otherwise → `NewCapBelowCurrentFunderCount`)
+    ///
+    /// # Errors
+    /// Emits typed [`EscrowError`] codes for non-open status, missing/no-lower cap, and
+    /// cap-below-current-count conditions.
+    pub fn lower_max_unique_investors(env: Env, new_cap: u32) -> u32 {
+        let escrow = Self::load_escrow_require_admin(&env);
+
+        // Use the shared status helper for open-state check.
+        guard_status_eq(&env, escrow.status, 0, EscrowError::CapLowerNotOpen);
+
+        let current_cap: Option<u32> = env
+            .storage()
+            .instance()
+            .get(&keys::max_unique_investors_cap());
+        let current_cap =
+            current_cap.unwrap_or_else(|| fail(&env, EscrowError::NoInvestorCapConfigured));
+
+        ensure(&env, new_cap < current_cap, EscrowError::NewCapNotLower);
+
+        let current_count: u32 = env
+            .storage()
+            .instance()
+            .get(&keys::unique_funder_count())
+            .unwrap_or(0);
+        ensure(
+            &env,
+            new_cap >= current_count,
+            EscrowError::NewCapBelowCurrentFunderCount,
+        );
+
+        env.storage()
+            .instance()
+            .set(&keys::max_unique_investors_cap(), &new_cap);
+
+        MaxUniqueInvestorsCapLowered {
+            name: symbol_short!("cap_low"),
+            invoice_id: escrow.invoice_id.clone(),
+            old_cap: current_cap,
+            new_cap,
+        }
+        .publish(&env);
+
+        new_cap
+    }
+
+    /// Admin-only: raise the maximum number of distinct investor addresses.
+    ///
+    /// Permitted only while the escrow is **open** (`status == 0`). The new cap must be:
+    /// - Strictly higher than the current cap (if no cap configured → `NoInvestorCapConfigured`)
+    ///
+    /// # Errors
+    /// Emits typed [`EscrowError`] codes for non-open status, missing/no-higher cap.
+    pub fn raise_max_unique_investors(env: Env, new_cap: u32) -> u32 {
+        let escrow = Self::load_escrow_require_admin(&env);
+
+        // Use the shared status helper for open-state check.
+        guard_status_eq(&env, escrow.status, 0, EscrowError::CapLowerNotOpen);
+
+        let current_cap: Option<u32> = env
+            .storage()
+            .instance()
+            .get(&keys::max_unique_investors_cap());
+        let current_cap =
+            current_cap.unwrap_or_else(|| fail(&env, EscrowError::NoInvestorCapConfigured));
+
+        ensure(&env, new_cap > current_cap, EscrowError::NewCapNotHigher);
+
+        env.storage()
+            .instance()
+            .set(&keys::max_unique_investors_cap(), &new_cap);
+
+        MaxUniqueInvestorsCapRaised {
+            name: symbol_short!("cap_rais"),
+            invoice_id: escrow.invoice_id.clone(),
+            old_cap: current_cap,
+            new_cap,
+        }
+        .publish(&env);
+
+        new_cap
+    }
+
+    /// Admin-only: lower the minimum contribution floor.
+    ///
+    /// Permitted only while the escrow is **open** (`status == 0`). The new floor must be:
+    /// - Strictly lower than the current floor
+    /// - Positive (zero not allowed; if you need no floor, don't set one)
+    ///
+    /// # Errors
+    /// Emits typed [`EscrowError`] codes for non-positive floor, no-lower floor,
+    /// and non-open status.
+    pub fn lower_min_contribution_floor(env: Env, new_floor: i128) -> i128 {
+        let escrow = Self::load_escrow_require_admin(&env);
+
+        // Use the shared status helper for open-state check.
+        guard_status_eq(&env, escrow.status, 0, EscrowError::FloorLowerNotOpen);
+
+        ensure(&env, new_floor > 0, EscrowError::NewFloorNotPositive);
+
+        let current_floor: i128 = env
+            .storage()
+            .instance()
+            .get(&keys::min_contribution_floor())
+            .unwrap_or(0);
+
+        ensure(
+            &env,
+            new_floor < current_floor,
+            EscrowError::NewFloorNotLower,
+        );
+
+        env.storage()
+            .instance()
+            .set(&keys::min_contribution_floor(), &new_floor);
+
+        MinContributionFloorLowered {
+            name: symbol_short!("floor_lo"),
+            invoice_id: escrow.invoice_id.clone(),
+            old_floor: current_floor,
+            new_floor,
+        }
+        .publish(&env);
+
+        new_floor
+    }
+
+    /// Admin-only: raise the maximum per-investor cap.
+    ///
+    /// Permitted only while the escrow is **open** (`status == 0`). The new cap must be:
+    /// - Strictly higher than the current cap (if no cap configured → `NoInvestorCapConfigured`)
+    ///
+    /// # Errors
+    /// Emits typed [`EscrowError`] codes for non-open status, missing/no-higher cap.
+    pub fn raise_max_per_investor(env: Env, new_cap: i128) -> i128 {
+        let escrow = Self::load_escrow_require_admin(&env);
+
+        // Use the shared status helper for open-state check.
+        guard_status_eq(
+            &env,
+            escrow.status,
+            0,
+            EscrowError::MaxPerInvestorCapNotRaised,
+        );
+
+        let current_cap: Option<i128> = env.storage().instance().get(&keys::max_per_investor_cap());
+        let current_cap =
+            current_cap.unwrap_or_else(|| fail(&env, EscrowError::MaxPerInvestorCapNotConfigured));
+
+        ensure(
+            &env,
+            new_cap > current_cap,
+            EscrowError::MaxPerInvestorCapNotRaised,
+        );
+
+        env.storage()
+            .instance()
+            .set(&keys::max_per_investor_cap(), &new_cap);
+
+        MaxPerInvestorCapRaised {
+            name: symbol_short!("cap_rais"),
+            invoice_id: escrow.invoice_id.clone(),
+            old_cap: current_cap,
+            new_cap,
+        }
+        .publish(&env);
+
+        new_cap
+    }
+
+    /// Admin-only: lower the funding target after the escrow has been initialized.
+    ///
+    /// Permitted only while the escrow is **open** (`status == 0`). The new target must be:
+    /// - Positive (non-zero)
+    /// - At least the currently `funded_amount` (prevents lowering below committed principal)
+    ///
+    /// # Errors
+    /// Emits typed [`EscrowError`] codes for non-positive target, non-open status,
+    /// and target-below-funded-amount.
+    pub fn update_funding_target(env: Env, new_target: i128) -> i128 {
+        let mut escrow = Self::load_escrow_require_admin(&env);
+
+        ensure(&env, new_target > 0, EscrowError::TargetNotPositive);
+
+        // Use the shared status helper for open-state check.
+        guard_status_eq(&env, escrow.status, 0, EscrowError::TargetUpdateNotOpen);
+
+        ensure(
+            &env,
+            new_target >= escrow.funded_amount,
+            EscrowError::TargetBelowFundedAmount,
+        );
+
+        let old_target = escrow.funding_target;
+        escrow.funding_target = new_target;
+        env.storage().instance().set(&DataKey::Escrow, &escrow);
+
+        FundingTargetUpdated {
+            name: symbol_short!("tgt_upd"),
+            invoice_id: escrow.invoice_id.clone(),
+            old_target,
+            new_target,
+        }
+        .publish(&env);
+
+        new_target
+    }
+
+    /// Admin-only: extend the funding deadline forward.
+    ///
+    /// Permitted only while the escrow is **open** (`status == 0`). The new deadline must be:
+    /// - Strictly later than the current deadline (reject no-op with `FundingDeadlineNotExtended`)
+    /// - Not after the escrow's maturity timestamp if maturity is set (reject with
+    ///   `FundingDeadlineBeyondMaturity`)
+    ///
+    /// # Errors
+    /// Emits typed [`EscrowError`] codes for non-open status, no-extend, and deadline-beyond-maturity.
+    pub fn extend_funding_deadline(env: Env, new_deadline: u64) -> u64 {
+        let escrow = Self::load_escrow_require_admin(&env);
+
+        // Use the shared status helper for open-state check.
+        guard_status_eq(
+            &env,
+            escrow.status,
+            0,
+            EscrowError::FundingDeadlineUpdateNotOpen,
+        );
+
+        let current_deadline: Option<u64> = env.storage().instance().get(&keys::funding_deadline());
+        let current_deadline =
+            current_deadline.unwrap_or_else(|| fail(&env, EscrowError::FundingDeadlineNotSet));
+
+        ensure(
+            &env,
+            new_deadline > current_deadline,
+            EscrowError::FundingDeadlineNotExtended,
+        );
+
+        let now = env.ledger().timestamp();
+        ensure(&env, new_deadline > now, EscrowError::FundingDeadlinePassed);
+
+        if escrow.maturity > 0 {
+            ensure(
+                &env,
+                new_deadline < escrow.maturity,
+                EscrowError::FundingDeadlineBeyondMaturity,
+            );
+        }
+
+        env.storage()
+            .instance()
+            .set(&keys::funding_deadline(), &new_deadline);
+
+        FundingDeadlineExtended {
+            name: symbol_short!("dead_ext"),
+            invoice_id: escrow.invoice_id.clone(),
+            old_deadline: current_deadline,
+            new_deadline,
+        }
+        .publish(&env);
+
+        new_deadline
+    }
+
+    /// Admin-only: update the base yield rate (basis points) while escrow is open.
+    ///
+    /// The new `yield_bps` must be within `0..=10_000`. A no-op update (equal to the current
+    /// value) is rejected to avoid spurious events and unnecessary storage writes.
+    ///
+    /// # Authorization
+    /// Requires the current [`InvoiceEscrow::admin`] to sign.
+    ///
+    /// # Errors
+    /// Emits typed [`EscrowError`] codes for non-open status, out-of-range yield, and no-op.
+    ///
+    /// # Events
+    /// Emits [`YieldBpsUpdatedEvent`] on success.
+    pub fn update_yield_bps(env: Env, new_yield_bps: i64) -> i64 {
+        let mut escrow = Self::load_escrow_require_admin(&env);
+
+        // Use the shared status helper for open-state check.
+        guard_status_eq(&env, escrow.status, 0, EscrowError::YieldBpsUpdateNotOpen);
+
+        ensure(
+            &env,
+            (0..=10_000).contains(&new_yield_bps),
+            EscrowError::YieldBpsOutOfRange,
+        );
+
+        // Reject no-op update.
+        ensure(
+            &env,
+            new_yield_bps != escrow.yield_bps,
+            EscrowError::YieldBpsUnchanged,
+        );
+
+        let old_yield_bps = escrow.yield_bps;
+        escrow.yield_bps = new_yield_bps;
+        env.storage().instance().set(&DataKey::Escrow, &escrow);
+
+        YieldBpsUpdatedEvent {
+            name: symbol_short!("yld_upd"),
+            invoice_id: escrow.invoice_id.clone(),
+            old_yield_bps,
+            new_yield_bps,
+        }
+        .publish(&env);
+
+        new_yield_bps
+    }
+
+    /// Admin-only: update the maturity timestamp.
+    ///
+    /// Permitted only while the escrow is **open** (`status == 0`). The new maturity must be:
+    /// - Different from the current maturity (no-op rejected)
+    /// - Not in the past (`maturity >= ledger.timestamp()`)
+    /// - Within the configured `maturity_max_horizon` ceiling
+    ///
+    /// # Errors
+    /// Emits typed [`EscrowError`] codes for non-open status, no-op, past maturity,
+    /// and horizon violation.
+    ///
+    /// # Events
+    /// Emits [`MaturityUpdatedEvent`] on success.
+    pub fn update_maturity(env: Env, new_maturity: u64) -> u64 {
+        let mut escrow = Self::load_escrow_require_admin(&env);
+
+        // Use the shared status helper for open-state check.
+        guard_status_eq(&env, escrow.status, 0, EscrowError::MaturityUpdateNotOpen);
+
+        // Reject no-op update.
+        ensure(
+            &env,
+            new_maturity != escrow.maturity,
+            EscrowError::MaturityUnchanged,
+        );
+
+        let max_horizon: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::MaturityMaxHorizon)
+            .unwrap_or(DEFAULT_MATURITY_MAX_HORIZON_SECS);
+
+        validate_maturity_bounds(&env, new_maturity, max_horizon);
+
+        let old_maturity = escrow.maturity;
+        escrow.maturity = new_maturity;
+        env.storage().instance().set(&DataKey::Escrow, &escrow);
+
+        MaturityUpdatedEvent {
+            name: symbol_short!("mat_upd"),
+            invoice_id: escrow.invoice_id.clone(),
+            old_maturity,
+            new_maturity,
+        }
+        .publish(&env);
+
+        new_maturity
+    }
+
+    /// Admin-only: raise the maturity maximum horizon.
+    ///
+    /// The new horizon must be strictly greater than the current stored horizon. This call
+    /// does not validate past or future maturity timestamps — it only updates the ceiling
+    /// used by future `update_maturity` calls. It is permitted while the escrow is **open**
+    /// (`status == 0`).
+    ///
+    /// # Errors
+    /// - [`EscrowError::HorizonNotRaised`] if the new horizon is not strictly greater.
+    /// - [`EscrowError::MaturityUpdateNotOpen`] if the escrow is not open.
+    ///
+    /// # Events
+    /// Emits [`MaturityMaxHorizonRaised`] with old/new horizon values.
+    pub fn raise_maturity_max_horizon(env: Env, new_horizon: u64) -> u64 {
+        let escrow = Self::load_escrow_require_admin(&env);
+
+        // Use the shared status helper for open-state check.
+        guard_status_eq(&env, escrow.status, 0, EscrowError::MaturityUpdateNotOpen);
+
+        let old_horizon: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::MaturityMaxHorizon)
+            .unwrap_or(DEFAULT_MATURITY_MAX_HORIZON_SECS);
+
+        ensure(
+            &env,
+            new_horizon > old_horizon,
+            EscrowError::HorizonNotRaised,
+        );
+
+        env.storage()
+            .instance()
+            .set(&DataKey::MaturityMaxHorizon, &new_horizon);
+
+        MaturityMaxHorizonRaised {
+            name: symbol_short!("hor_rais"),
+            invoice_id: escrow.invoice_id.clone(),
+            old_horizon,
+            new_horizon,
+        }
+        .publish(&env);
+
+        new_horizon
+    }
+
+    // ================================================================
+    //  ADMIN TRANSFER
+    // ================================================================
+
+    /// Propose a new admin address.
+    ///
+    /// This is a two-phase admin transfer: the current admin calls `propose_admin` with the
+    /// successor address, and the successor calls [`LiquifactEscrow::accept_admin`] before
+    /// the proposal expires. The proposal remains valid for
+    /// [`DEFAULT_ADMIN_PROPOSAL_VALIDITY_SECS`] seconds from the current ledger timestamp.
+    ///
+    /// # Errors
+    /// - [`EscrowError::NewAdminSameAsCurrent`] if `new_admin == current admin`
+    /// - [`EscrowError::PendingAdminUnchanged`] if the same pending admin is repeated
+    ///
+    /// # Events
+    /// Emits [`AdminProposedEvent`] on success, or [`AdminProposalSuperseded`] when replacing
+    /// an existing pending admin.
+    pub fn propose_admin(env: Env, new_admin: Address) {
+        let escrow = Self::load_escrow_require_admin(&env);
+
+        ensure(
+            &env,
+            new_admin != escrow.admin,
+            EscrowError::NewAdminSameAsCurrent,
+        );
+
+        let pending_opt: Option<Address> = env.storage().instance().get(&DataKey::PendingAdmin);
+        if let Some(ref pending) = pending_opt {
+            if pending == &new_admin {
+                fail(&env, EscrowError::PendingAdminUnchanged);
+            }
+        }
+
+        let expiry = env
+            .ledger()
+            .timestamp()
+            .checked_add(DEFAULT_ADMIN_PROPOSAL_VALIDITY_SECS)
+            .unwrap_or_else(|| fail(&env, EscrowError::AdminProposalExpired));
+
+        env.storage()
+            .instance()
+            .set(&DataKey::PendingAdmin, &new_admin);
+        env.storage()
+            .instance()
+            .set(&DataKey::PendingAdminExpiry, &expiry);
+
+        let invoice_id = escrow.invoice_id.clone();
+        if let Some(prior_pending) = pending_opt {
+            AdminProposalSuperseded {
+                name: symbol_short!("adm_sup"),
+                invoice_id: invoice_id.clone(),
+                previous_pending: prior_pending,
+                new_pending: new_admin.clone(),
+            }
+            .publish(&env);
+        } else {
+            AdminProposedEvent {
+                name: symbol_short!("adm_prop"),
+                invoice_id: invoice_id.clone(),
+                current_admin: escrow.admin,
+                pending_admin: new_admin.clone(),
+            }
+            .publish(&env);
+        }
+    }
+
+    /// Cancel the current pending admin proposal.
+    ///
+    /// Requires the **current admin** to sign. Removing the pending admin prevents the nominated
+    /// successor from ever accepting the role. Emits [`AdminProposalCancelled`] and clears both
+    /// [`DataKey::PendingAdmin`] and [`DataKey::PendingAdminExpiry`] from storage.
+    ///
+    /// # Errors
+    /// - [`EscrowError::NoPendingAdmin`] if no pending admin proposal exists.
+    ///
+    /// # Events
+    /// Emits [`AdminProposalCancelled`] with the address that was cancelled.
+    pub fn cancel_pending_admin(env: Env) {
+        let escrow = Self::load_escrow_require_admin(&env);
+
+        let pending: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::PendingAdmin)
+            .unwrap_or_else(|| fail(&env, EscrowError::NoPendingAdmin));
+
+        env.storage().instance().remove(&DataKey::PendingAdmin);
+        env.storage()
+            .instance()
+            .remove(&DataKey::PendingAdminExpiry);
+
+        AdminProposalCancelled {
+            name: symbol_short!("adm_can"),
+            invoice_id: escrow.invoice_id.clone(),
+            cancelled_pending: pending.clone(),
+        }
+        .publish(&env);
+    }
+
+    /// Accept the pending admin proposal.
+    ///
+    /// The proposed successor calls this entrypoint **after** `propose_admin` and
+    /// **before** the proposal expires (`now < expiry`).
+    ///
+    /// # Errors
+    /// - [`EscrowError::NoPendingAdmin`] if no pending admin exists.
+    /// - [`EscrowError::AdminProposalExpired`] if the proposal has expired.
+    ///
+    /// # Events
+    /// Emits [`AdminAcceptedEvent`] and clears the proposal storage. Does **not** emit
+    /// [`AdminTransferredEvent`] — this event was historically tied to the one-step transfer.
+    pub fn accept_admin(env: Env) {
+        let escrow = Self::get_escrow(env.clone());
+
+        let pending: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::PendingAdmin)
+            .unwrap_or_else(|| fail(&env, EscrowError::NoPendingAdmin));
+        let expiry: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::PendingAdminExpiry)
+            .unwrap_or(0);
+
+        let now = env.ledger().timestamp();
+        ensure(&env, now < expiry, EscrowError::AdminProposalExpired);
+
+        pending.require_auth();
+
+        let prior_admin = escrow.admin.clone();
+        let mut updated = escrow.clone();
+        updated.admin = pending.clone();
+
+        env.storage().instance().set(&DataKey::Escrow, &updated);
+        env.storage().instance().remove(&DataKey::PendingAdmin);
+        env.storage()
+            .instance()
+            .remove(&DataKey::PendingAdminExpiry);
+
+        AdminAcceptedEvent {
+            name: symbol_short!("adm_acc"),
+            invoice_id: escrow.invoice_id.clone(),
+            prior_admin,
+            new_admin: pending.clone(),
+        }
+        .publish(&env);
+    }
+
+    /// One-step transfer that delegates to the two-phase admin mechanism.
+    ///
+    /// This shim exists for backward compatibility with integrators still using the old
+    /// `transfer_admin` pattern. It calls `propose_admin` with the proposed address, then
+    /// the caller must wait for the successor to call `accept_admin`. Emits a
+    /// [`DeprecatedTransferAdminUsed`] event so indexers can detect and warn about continued
+    /// use of the deprecated shim.
+    ///
+    /// # Errors
+    /// Forwards the exact errors emitted by [`LiquifactEscrow::propose_admin`].
+    ///
+    /// # Events
+    /// Emits [`DeprecatedTransferAdminUsed`] before delegating to `propose_admin`.
+    /// Does **not** emit `AdminAcceptedEvent` — the two-phase handshake emits that
+    /// when the successor calls `accept_admin`.
+    pub fn transfer_admin(env: Env, proposed_address: Address) {
+        // Load escrow and require admin auth before the shim does anything.
+        let escrow = Self::load_escrow_require_admin(&env);
+
+        // Emit the deprecation event for observability.
+        DeprecatedTransferAdminUsed {
+            name: symbol_short!("depr_xfer"),
+            invoice_id: escrow.invoice_id.clone(),
+            proposed_address: proposed_address.clone(),
+        }
+        .publish(&env);
+
+        // Delegate to the two-phase proposal flow.
+        Self::propose_admin(env, proposed_address);
+    }
+
+    // ================================================================
+    //  FUNDING
+    // ================================================================
+
+    /// Single-address funding.
+    ///
+    /// Requires:
+    /// - Escrow is `open` (status == 0)
+    /// - No legal hold active
+    /// - `amount > 0` and `amount >= min_contribution_floor`
+    /// - No investor cap exceeded; no per-investor cap exceeded
+    /// - Allowlist active: `investor` must be allowlisted
+    ///
+    /// This is a wrapper over the shared `fund_impl` that supplies `lock_secs = 0`:
+    /// no tier selection, locks at the base `yield_bps` (or existing stored rate).
+    ///
+    /// # Events
+    /// Delegates to [`LiquifactEscrow::fund_impl`], which emits [`EscrowFunded`].
+    pub fn fund(env: Env, investor: Address, amount: i128) {
+        Self::fund_impl(env, investor, amount, 0, None);
+    }
+
+    /// Funding with an explicit lock commitment (yield tier selection).
+    ///
+    /// On the investor's **first** deposit, this call may select a tier from the configured
+    /// `YieldTierTable` and establish an immutable `effective_yield_bps` and a
+    /// `claim_not_before` timestamp for this address. All later `fund` calls from this address
+    /// add principal at the saved yield rate and do **not** re-select a tier.
+    ///
+    /// # Behavior
+    ///
+    /// - If `lock_secs == 0`, this is identical to [`LiquifactEscrow::fund`].
+    /// - If the investor already has a stored contribution (`> 0`), the call fails with
+    ///   [`EscrowError::TieredSecondDeposit`] — investors must use the simple `fund` for
+    ///   additional principal.
+    /// - If a tier is selected, `claim_not_before` is stored as `ledger.timestamp() + lock_secs`
+    ///   and the claim gate enforces `now >= claim_not_before` for this investor.
+    /// - `lock_secs` is validated against `escrow.maturity`: the claim lock must not push
+    ///   the claimable timestamp beyond the escrow maturity timestamp, because a settled
+    ///   escrow should not hold an investor's payout claim hostage past the point where the
+    ///   principal is due. If `maturity == 0` (no maturity lock), no validation is applied.
+    ///
+    /// # Authorization
+    /// The `investor` must authorize the call (`Address::require_auth()`).
+    ///
+    /// # Errors
+    /// - [`EscrowError::TieredSecondDeposit`] if the investor already has a contribution.
+    /// - [`EscrowError::CommitmentLockExceedsMaturity`] if `ledger.timestamp() + lock_secs`
+    ///   exceeds `escrow.maturity` when `maturity > 0`.
+    /// - All errors from [`LiquifactEscrow::fund_impl`].
+    ///
+    /// # Events
+    /// Delegates to [`LiquifactEscrow::fund_impl`], which emits [`EscrowFunded`].
+    pub fn fund_with_commitment(env: Env, investor: Address, amount: i128, lock_secs: u64) {
+        Self::fund_impl(env, investor, amount, lock_secs, None);
+    }
+
+    /// Shared implementation for both `fund` and `fund_with_commitment`.
+    ///
+    /// This is the single source of truth for:
+    /// - Precondition checks (legal hold, status, allowlist, caps, floor).
+    /// - Tier selection (on first deposit only).
+    /// - Contribution accounting.
+    /// - Event emission.
+    ///
+    /// # Parameters
+    /// - `lock_secs`: 0 for simple funding; > 0 for tier commitment.
+    /// - `expected_yield`: `None` for normal flow; `Some(bps)` for prefund simulations.
+    ///
+    /// # Invariants (checked by `debug_assert!` in test builds)
+    ///
+    /// 1. Contribution always moves in one direction: `new_contrib = old_contrib + amount`
+    ///    (checked by `checked_add` and the storage write is atomic).
+    /// 2. `funded_amount` is always monotonically increasing.
+    /// 3. `unique_funder_count` is incremented exactly once per distinct `investor`.
+    /// 4. At most one `FundingCloseSnapshot` is ever written.
+    fn fund_impl(
+        env: Env,
+        investor: Address,
+        amount: i128,
+        lock_secs: u64,
+        _expected_yield: Option<i64>,
+    ) {
+        // ---- Step 1: Read-only preconditions ----
+        // Legal hold and pause gates (read-only; no auth required yet).
+        guard_not_legal_hold(&env, EscrowError::LegalHoldBlocksFunding);
+        guard_not_paused(&env, EscrowError::PausedBlocksFunding);
+
+        // Status must be open (0).
+        let mut escrow = Self::get_escrow(env.clone());
+        guard_status_eq(&env, escrow.status, 0, EscrowError::EscrowNotOpenForFunding);
+
+        // Allowlist check (read-only; per-investor persistent storage).
+        if Self::is_allowlist_active(env.clone()) {
+            ensure(
+                &env,
+                Self::is_investor_allowlisted(env.clone(), investor.clone()),
+                EscrowError::InvestorNotAllowlisted,
+            );
+        }
+
+        // Funding deadline check (read-only; instance storage).
+        if let Some(deadline) = env.storage().instance().get(&keys::funding_deadline()) {
+            ensure(
+                &env,
+                env.ledger().timestamp() < deadline,
+                EscrowError::FundingDeadlinePassed,
+            );
+        }
+
+        // Amount validation: positive and >= min_contribution_floor.
+        validate_funding_amount(&env, amount);
+
+        // Investor contribution and caps.
+        let old_contrib = Self::get_persistent_investor_contribution(&env, investor.clone());
+
+        // If this is a tiered call and the investor already has a stored contribution,
+        // fail with `TieredSecondDeposit` — the yield rate was fixed on the first leg.
+        if lock_secs > 0 && old_contrib > 0 {
+            fail(&env, EscrowError::TieredSecondDeposit);
+        }
+
+        // If contribution would overflow, fail before any auth or state mutation.
+        let new_contrib = old_contrib
+            .checked_add(amount)
+            .unwrap_or_else(|| fail(&env, EscrowError::InvestorContributionOverflow));
+
+        // Per-investor cap (instance storage).
+        if let Some(max_cap) = env
+            .storage()
+            .instance()
+            .get::<_, i128>(&keys::max_per_investor_cap())
+        {
+            ensure(
+                &env,
+                new_contrib <= max_cap,
+                EscrowError::InvestorContributionExceedsCap,
+            );
+        }
+
+        // Unique funder cap: if this is a new investor and the cap is set,
+        // verify that the current count is below the cap.
+        let current_unique_count = Self::get_unique_funder_count(env.clone());
+        if old_contrib == 0 {
+            if let Some(max_investors) = env
+                .storage()
+                .instance()
+                .get(&keys::max_unique_investors_cap())
+            {
+                ensure(
+                    &env,
+                    current_unique_count < max_investors,
+                    EscrowError::UniqueInvestorCapReached,
+                );
+            }
+        }
+
+        // Escrow funding overflow.
+        let new_funded = escrow
+            .funded_amount
+            .checked_add(amount)
+            .unwrap_or_else(|| fail(&env, EscrowError::FundedAmountOverflow));
+
+        // ---- Step 2: Authorization ----
+        investor.require_auth();
+
+        // ---- Step 3: State mutation ----
+        // Compute effective yield (first deposit only; later deposits use stored rate).
+        let (effective_yield, tier_lock_secs) = if old_contrib == 0 {
+            let resolution =
+                Self::effective_yield_for_commitment(&env, escrow.yield_bps, lock_secs);
+            (resolution.effective_yield_bps, resolution.matched_lock_secs)
+        } else {
+            // Already has a contribution: use stored yield, lock_secs are ignored.
+            let stored_yield =
+                Self::get_persistent_investor_effective_yield(&env, investor.clone())
+                    .unwrap_or(escrow.yield_bps);
+            (stored_yield, 0)
+        };
+
+        // If this is the first deposit and lock_secs > 0, store the yield and claim-not-before.
+        if old_contrib == 0 && lock_secs > 0 {
+            let now = env.ledger().timestamp();
+            let claim_not_before = now
+                .checked_add(lock_secs)
+                .unwrap_or_else(|| fail(&env, EscrowError::InvestorClaimTimeOverflow));
+
+            // If maturity is set, ensure the claim lock does not exceed maturity.
+            if escrow.maturity > 0 {
+                ensure(
+                    &env,
+                    claim_not_before <= escrow.maturity,
+                    EscrowError::CommitmentLockExceedsMaturity,
+                );
+            }
+
+            Self::set_persistent_investor_effective_yield(&env, investor.clone(), effective_yield);
+            Self::set_persistent_investor_claim_not_before(
+                &env,
+                investor.clone(),
+                claim_not_before,
+            );
+        }
+
+        // Update contribution.
+        Self::set_persistent_investor_contribution(&env, investor.clone(), new_contrib);
+
+        // Update escrow state.
+        escrow.funded_amount = new_funded;
+
+        // If the escrow transitions to funded (status 0 -> 1), write the snapshot.
+        // Also set status to funded.
+        let (new_status, funded_snapshot) = if escrow.status == 0 && new_funded > 0 {
+            let snapshot = FundingCloseSnapshot {
+                total_principal: new_funded,
+                funding_target: escrow.funding_target,
+                closed_at_ledger_timestamp: env.ledger().timestamp(),
+                closed_at_ledger_sequence: env.ledger().sequence(),
+            };
+            env.storage()
+                .instance()
+                .set(&keys::funding_close_snapshot(), &snapshot);
+            (1, Some(snapshot))
+        } else {
+            (escrow.status, None)
+        };
+
+        escrow.status = new_status;
+        env.storage().instance().set(&DataKey::Escrow, &escrow);
+
+        // Increment unique funder count if this is a new investor.
+        if old_contrib == 0 {
+            let new_count = current_unique_count
+                .checked_add(1)
+                .unwrap_or_else(|| fail(&env, EscrowError::UniqueInvestorCapReached));
+            env.storage()
+                .instance()
+                .set(&keys::unique_funder_count(), &new_count);
+
+            // Append investor to the investor index.
+            let mut index: Vec<Address> = env
+                .storage()
+                .instance()
+                .get(&keys::investor_index())
+                .unwrap_or_else(|| Vec::new(&env));
+            index.push_back(investor.clone());
+            env.storage()
+                .instance()
+                .set(&keys::investor_index(), &index);
+        }
+
+        // ---- Step 4: Token transfer ----
+        let token_addr = Self::funding_token_or_fail(&env);
+        external_calls::transfer_funding_token_with_balance_checks(
+            &env,
+            &token_addr,
+            &investor,
+            &env.current_contract_address(),
+            amount,
+        );
+
+        // ---- Step 5: Event emission ----
+        EscrowFunded {
+            name: symbol_short!("escrow_f"),
+            invoice_id: escrow.invoice_id.clone(),
+            investor: investor.clone(),
+            amount,
+            funded_amount: new_funded,
+            status: new_status,
+            investor_effective_yield_bps: effective_yield,
+            tier_lock_secs: tier_lock_secs,
+        }
+        .publish(&env);
+    }
+
+    // ================================================================
+    //  SETTLEMENT
+    // ================================================================
+
+    /// Settle the escrow when funded, matured (if maturity set), and no legal hold.
+    ///
+    /// The settlement transition:
+    /// 1. Status must be 1 (funded).
+    /// 2. Legal hold must be inactive.
+    /// 3. If `maturity > 0`, the current ledger timestamp must be `>= maturity`.
+    /// 4. Authorization: the `sme_address` must sign.
+    ///
+    /// Upon success:
+    /// - Status is updated to 2 (settled).
+    /// - `DataKey::SettledAt` is written with the current ledger timestamp.
+    /// - `coupon` and `settle_pool` are computed and returned in the event.
+    ///
+    /// # Errors
+    /// Emits typed [`EscrowError`] codes for legal hold, status, maturity, and authorization.
+    ///
+    /// # Events
+    /// Emits [`EscrowSettled`] with the post-settlement state and computed coupon/pool.
+    pub fn settle(env: Env) -> SettlementResult {
+        // Legal hold gate (read-only).
+        guard_not_legal_hold(&env, EscrowError::LegalHoldBlocksSettlement);
+        // Pause gate (read-only).
+        guard_not_paused(&env, EscrowError::PausedBlocksSettlement);
+
+        let mut escrow = Self::get_escrow(env.clone());
+
+        // Status must be funded (1).
+        guard_status_eq(&env, escrow.status, 1, EscrowError::SettlementNotFunded);
+
+        // Maturity check (if configured).
+        if escrow.maturity > 0 {
+            let now = env.ledger().timestamp();
+            ensure(
+                &env,
+                now >= escrow.maturity,
+                EscrowError::MaturityNotReached,
+            );
+        }
+
+        // Authorization: SME must sign.
+        escrow.sme_address.require_auth();
+
+        // Compute coupon and settle pool.
+        let coupon = escrow
+            .funded_amount
+            .checked_mul(escrow.yield_bps.into())
+            .and_then(|v| v.checked_div(10_000))
+            .unwrap_or_else(|| fail(&env, EscrowError::ComputePayoutArithmeticOverflow));
+
+        let settle_pool = escrow
+            .funded_amount
+            .checked_add(coupon)
+            .unwrap_or_else(|| fail(&env, EscrowError::ComputePayoutArithmeticOverflow));
+
+        // Update status to settled.
+        escrow.status = 2;
+        let settled_at = env.ledger().timestamp();
+        env.storage()
+            .instance()
+            .set(&DataKey::SettledAt, &settled_at);
+        env.storage().instance().set(&DataKey::Escrow, &escrow);
+
+        // Event emission.
+        EscrowSettled {
+            name: symbol_short!("escrow_s"),
+            invoice_id: escrow.invoice_id.clone(),
+            funded_amount: escrow.funded_amount,
+            yield_bps: escrow.yield_bps,
+            maturity: escrow.maturity,
+            settled_at_ledger_timestamp: settled_at,
+            settle_pool,
+        }
+        .publish(&env);
+
+        SettlementResult {
+            escrow,
+            coupon,
+            settle_pool,
+            settled_at,
+        }
+    }
+
+    // ================================================================
+    //  WITHDRAW
+    // ================================================================
+
+    /// Withdraw funded principal (minus protocol fee, if configured) to the SME.
+    ///
+    /// The principal disbursement at `withdraw` is split:
+    /// - `fee = funded_amount * protocol_fee_bps / 10_000` (floor, checked)
+    /// - `sme_payout = funded_amount - fee` (checked)
+    ///
+    /// If `protocol_fee_bps == 0`, the full `funded_amount` is transferred to the SME and no
+    /// treasury transfer occurs. This makes the behavior byte-for-byte identical to pre-fee
+    /// deployments.
+    ///
+    /// # Preconditions
+    /// - Escrow status must be 2 (settled).
+    /// - No legal hold active.
+    /// - No operational pause active.
+    /// - Contract balance must be at least `funded_amount` (custody invariant).
+    ///
+    /// # Authorization
+    /// The `sme_address` must authorize the call.
+    ///
+    /// # Errors
+    /// - [`EscrowError::LegalHoldBlocksWithdrawal`] if legal hold is active.
+    /// - [`EscrowError::PausedBlocksWithdrawal`] if operational pause is active.
+    /// - [`EscrowError::WithdrawalNotFunded`] if status != 2.
+    /// - [`EscrowError::InsufficientContractBalance`] if contract balance < funded_amount.
+    /// - Arithmetic errors for fee computation.
+    ///
+    /// # Events
+    /// Emits [`SmeWithdrew`] with the net amount and fee.
+    pub fn withdraw(env: Env) {
+        // Legal hold gate (read-only).
+        guard_not_legal_hold(&env, EscrowError::LegalHoldBlocksWithdrawal);
+        // Pause gate (read-only).
+        guard_not_paused(&env, EscrowError::PausedBlocksWithdrawal);
+
+        let mut escrow = Self::get_escrow(env.clone());
+
+        // Status must be settled (2).
+        guard_status_eq(&env, escrow.status, 2, EscrowError::WithdrawalNotFunded);
+
+        // Authorization: SME must sign.
+        escrow.sme_address.require_auth();
+
+        // Check contract balance.
+        let token_addr = Self::funding_token_or_fail(&env);
+        let this = env.current_contract_address();
+        let token = TokenClient::new(&env, &token_addr);
+        let balance = token.balance(&this);
+        ensure(
+            &env,
+            balance >= escrow.funded_amount,
+            EscrowError::InsufficientContractBalance,
+        );
+
+        // Compute protocol fee.
+        let fee_bps: i64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::ProtocolFeeBps)
+            .unwrap_or(0);
+
+        let (sme_payout, fee) = if fee_bps > 0 {
+            let fee = escrow
+                .funded_amount
+                .checked_mul(fee_bps.into())
+                .and_then(|v| v.checked_div(10_000))
+                .unwrap_or_else(|| fail(&env, EscrowError::WithdrawFeeArithmeticOverflow));
+
+            let sme_payout = escrow
+                .funded_amount
+                .checked_sub(fee)
+                .unwrap_or_else(|| fail(&env, EscrowError::WithdrawNetArithmeticUnderflow));
+
+            (sme_payout, fee)
+        } else {
+            (escrow.funded_amount, 0)
+        };
+
+        // Transfer to SME (net principal).
+        external_calls::transfer_funding_token_with_balance_checks(
+            &env,
+            &token_addr,
+            &this,
+            &escrow.sme_address,
+            sme_payout,
+        );
+
+        // Transfer fee to treasury (if any).
+        if fee > 0 {
+            let treasury = Self::treasury_or_fail(&env);
+            external_calls::transfer_funding_token_with_balance_checks(
+                &env,
+                &token_addr,
+                &this,
+                &treasury,
+                fee,
+            );
+        }
+
+        // Update status to withdrawn.
+        escrow.status = 3;
+        env.storage().instance().set(&DataKey::Escrow, &escrow);
+
+        // Event emission.
+        SmeWithdrew {
+            name: symbol_short!("sme_wd"),
+            invoice_id: escrow.invoice_id.clone(),
+            amount: sme_payout,
+            recipient: escrow.sme_address.clone(),
+            fee,
+        }
+        .publish(&env);
+    }
+
+    // ================================================================
+    //  CLAIM INVESTOR PAYOUT
+    // ================================================================
+
+    /// Claim an investor's pro-rata payout after settlement.
+    ///
+    /// # Preconditions
+    /// - Escrow status must be 2 (settled).
+    /// - Legal hold inactive.
+    /// - Pause inactive.
+    /// - Investor has a non-zero contribution.
+    /// - Investor has not already claimed.
+    /// - If the investor has a `claim_not_before` lock, `now >= claim_not_before`.
+    ///
+    /// # Authorization
+    /// The `investor` must sign.
+    ///
+    /// # Errors
+    /// - [`EscrowError::LegalHoldBlocksInvestorClaims`] if legal hold active.
+    /// - [`EscrowError::PausedBlocksInvestorClaims`] if pause active.
+    /// - [`EscrowError::InvestorClaimNotSettled`] if status != 2.
+    /// - [`EscrowError::NoContributionToClaim`] if contribution == 0.
+    /// - [`EscrowError::InvestorCommitmentLockNotExpired`] if claim lock not reached.
+    /// - [`EscrowError::PayoutZero`] if computed payout is 0.
+    ///
+    /// # Events
+    /// Emits [`InvestorPayoutClaimed`] on success.
+    pub fn claim_investor_payout(env: Env, investor: Address) {
+        // Legal hold gate (read-only).
+        guard_not_legal_hold(&env, EscrowError::LegalHoldBlocksInvestorClaims);
+        // Pause gate (read-only).
+        guard_not_paused(&env, EscrowError::PausedBlocksInvestorClaims);
+
+        let escrow = Self::get_escrow(env.clone());
+
+        // Status must be settled (2).
+        guard_status_eq(&env, escrow.status, 2, EscrowError::InvestorClaimNotSettled);
+
+        // Investor must have a non-zero contribution.
+        let contrib = Self::get_persistent_investor_contribution(&env, investor.clone());
+        ensure(&env, contrib > 0, EscrowError::NoContributionToClaim);
+
+        // Investor must not have already claimed.
+        ensure(
+            &env,
+            !Self::get_persistent_investor_claimed(&env, investor.clone()),
+            EscrowError::NoContributionToClaim,
+        );
+
+        // Claim-not-before lock (if set).
+        let claim_not_before =
+            Self::get_persistent_investor_claim_not_before(&env, investor.clone());
+        if claim_not_before > 0 {
+            let now = env.ledger().timestamp();
+            ensure(
+                &env,
+                now >= claim_not_before,
+                EscrowError::InvestorCommitmentLockNotExpired,
+            );
+        }
+
+        // Authorization: investor must sign.
+        investor.require_auth();
+
+        // Compute payout.
+        let snapshot = Self::get_funding_close_snapshot(env.clone())
+            .unwrap_or_else(|| fail(&env, EscrowError::EscrowNotInitialized));
+
+        let total_principal = snapshot.total_principal;
+        let coupon = escrow
+            .funded_amount
+            .checked_mul(escrow.yield_bps.into())
+            .and_then(|v| v.checked_div(10_000))
+            .unwrap_or_else(|| fail(&env, EscrowError::ComputePayoutArithmeticOverflow));
+
+        let settle_pool = escrow
+            .funded_amount
+            .checked_add(coupon)
+            .unwrap_or_else(|| fail(&env, EscrowError::ComputePayoutArithmeticOverflow));
+
+        let payout = contrib
+            .checked_mul(settle_pool)
+            .and_then(|v| v.checked_div(total_principal))
+            .unwrap_or_else(|| fail(&env, EscrowError::ComputePayoutArithmeticOverflow));
+
+        ensure(&env, payout > 0, EscrowError::PayoutZero);
+
+        // Mark investor as claimed.
+        Self::set_persistent_investor_claimed(&env, investor.clone(), true);
+
+        // Transfer payout.
+        let token_addr = Self::funding_token_or_fail(&env);
+        let this = env.current_contract_address();
+        external_calls::transfer_funding_token_with_balance_checks(
+            &env,
+            &token_addr,
+            &this,
+            &investor,
+            payout,
+        );
+
+        // Event emission.
+        InvestorPayoutClaimed {
+            name: symbol_short!("inv_pay"),
+            investor: investor.clone(),
+            invoice_id: escrow.invoice_id.clone(),
+        }
+        .publish(&env);
+    }
+
+    // ================================================================
+    //  CANCEL FUNDING & REFUND
+    // ================================================================
+
+    /// Admin-only: cancel funding while escrow is open.
+    ///
+    /// # Preconditions
+    /// - Legal hold inactive.
+    /// - Escrow status must be 0 (open).
+    /// - Admin must sign.
+    ///
+    /// # Effects
+    /// - Status is set to 4 (cancelled).
+    /// - Emits [`FundingCancelled`] event.
+    ///
+    /// # Errors
+    /// - [`EscrowError::LegalHoldBlocksCancelFunding`] if legal hold active.
+    /// - [`EscrowError::CancelFundingNotOpen`] if status != 0.
+    pub fn cancel_funding(env: Env) {
+        // Legal hold gate (read-only).
+        guard_not_legal_hold(&env, EscrowError::LegalHoldBlocksCancelFunding);
+
+        let mut escrow = Self::get_escrow(env.clone());
+
+        // Status must be open (0).
+        guard_status_eq(&env, escrow.status, 0, EscrowError::CancelFundingNotOpen);
+
+        // Admin authorization.
+        escrow.admin.require_auth();
+
+        // Update status to cancelled.
+        escrow.status = 4;
+        env.storage().instance().set(&DataKey::Escrow, &escrow);
+
+        // Event emission.
+        FundingCancelled {
+            name: symbol_short!("fund_can"),
+            invoice_id: escrow.invoice_id.clone(),
+            funded_amount: escrow.funded_amount,
+        }
+        .publish(&env);
+    }
+
+    /// Refund an investor in a cancelled escrow.
+    ///
+    /// # Preconditions
+    /// - Escrow status must be 4 (cancelled).
+    /// - Investor has a non-zero contribution.
+    /// - Investor has not already been refunded.
+    ///
+    /// # Authorization
+    /// The `investor` must sign.
+    ///
+    /// # Errors
+    /// - [`EscrowError::RefundNotCancelled`] if status != 4.
+    /// - [`EscrowError::NoContributionToRefund`] if contribution == 0 or already refunded.
+    ///
+    /// # Events
+    /// Emits [`InvestorRefundedEvt`] on success.
+    pub fn refund(env: Env, investor: Address) {
+        // Refunds are NOT blocked by legal hold (investors should get their money back).
+        let escrow = Self::get_escrow(env.clone());
+
+        // Status must be cancelled (4).
+        guard_status_eq(&env, escrow.status, 4, EscrowError::RefundNotCancelled);
+
+        // Investor must have a non-zero contribution.
+        let contrib = Self::get_persistent_investor_contribution(&env, investor.clone());
+        ensure(&env, contrib > 0, EscrowError::NoContributionToRefund);
+
+        // Investor must not have already been refunded.
+        let refunded: bool = env
+            .storage()
+            .persistent()
+            .get(&DataKey::InvestorRefunded(investor.clone()))
+            .unwrap_or(false);
+        ensure(&env, !refunded, EscrowError::NoContributionToRefund);
+
+        // Authorization: investor must sign.
+        investor.require_auth();
+
+        // Mark investor as refunded.
+        env.storage()
+            .persistent()
+            .set(&DataKey::InvestorRefunded(investor.clone()), &true);
+
+        // Update distributed principal.
+        let distributed: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::DistributedPrincipal)
+            .unwrap_or(0);
+        let new_distributed = distributed
+            .checked_add(contrib)
+            .unwrap_or_else(|| fail(&env, EscrowError::FundedAmountOverflow));
+        env.storage()
+            .instance()
+            .set(&DataKey::DistributedPrincipal, &new_distributed);
+
+        // Transfer refund.
+        let token_addr = Self::funding_token_or_fail(&env);
+        let this = env.current_contract_address();
+        external_calls::transfer_funding_token_with_balance_checks(
+            &env,
+            &token_addr,
+            &this,
+            &investor,
+            contrib,
+        );
+
+        // Event emission.
+        InvestorRefundedEvt {
+            name: symbol_short!("inv_ref"),
+            investor: investor.clone(),
+            invoice_id: escrow.invoice_id.clone(),
+            amount: contrib,
+        }
+        .publish(&env);
+    }
+
+    // ================================================================
+    //  LEGAL HOLD
+    // ================================================================
+
+    /// Admin-only: activate or clear the legal hold.
+    ///
+    /// When `active == true`, any settlement, withdrawal, investor claim, or funding is blocked.
+    /// When `active == false`, the hold is lifted and normal operations resume.
+    ///
+    /// # Authorization
+    /// Requires the current [`InvoiceEscrow::admin`] to sign.
+    ///
+    /// # Events
+    /// Emits [`LegalHoldChanged`] with the new active state.
+    pub fn set_legal_hold(env: Env, active: bool) {
+        let escrow = Self::load_escrow_require_admin(&env);
+
+        env.storage().instance().set(&DataKey::LegalHold, &active);
+
+        LegalHoldChanged {
+            name: symbol_short!("leg_hold"),
+            invoice_id: escrow.invoice_id.clone(),
+            active: if active { 1 } else { 0 },
+        }
+        .publish(&env);
+    }
+
+    /// Clear the legal hold (convenience wrapper).
+    pub fn clear_legal_hold(env: Env) {
+        Self::set_legal_hold(env, false);
+    }
+
+    /// Request to clear the legal hold (two-phase clear).
+    ///
+    /// After this call, [`DataKey::LegalHoldClearableAt`] is set to `now + delay`
+    /// where `delay` is the configured [`DataKey::LegalHoldClearDelay`].
+    /// After the delay has elapsed, [`LiquifactEscrow::set_legal_hold`] with `false`
+    /// will succeed. The request can be cancelled with
+    /// [`LiquifactEscrow::cancel_legal_hold_clear_request`].
+    ///
+    /// # Authorization
+    /// Requires the current [`InvoiceEscrow::admin`] to sign.
+    ///
+    /// # Errors
+    /// - [`EscrowError::LegalHoldClearDelayOverflow`] if delay computation overflows.
+    ///
+    /// # Events
+    /// Emits [`LegalHoldClearRequested`] with the `clearable_at` timestamp.
+    pub fn request_clear_legal_hold(env: Env) {
+        let escrow = Self::load_escrow_require_admin(&env);
+
+        let delay = Self::get_legal_hold_clear_delay(env.clone());
+        let now = env.ledger().timestamp();
+        let clearable_at = now
+            .checked_add(delay)
+            .unwrap_or_else(|| fail(&env, EscrowError::LegalHoldClearDelayOverflow));
+
+        env.storage()
+            .instance()
+            .set(&DataKey::LegalHoldClearableAt, &clearable_at);
+
+        LegalHoldClearRequested {
+            name: symbol_short!("leg_req"),
+            invoice_id: escrow.invoice_id.clone(),
+            clearable_at,
+        }
+        .publish(&env);
+    }
+
+    /// Cancel a pending legal-hold clear request.
+    ///
+    /// # Authorization
+    /// Requires the current [`InvoiceEscrow::admin`] to sign.
+    ///
+    /// # Errors
+    /// - [`EscrowError::LegalHoldClearRequestMissing`] if no clear request is pending.
+    ///
+    /// # Events
+    /// Emits [`LegalHoldClearCancelled`].
+    pub fn cancel_legal_hold_clear_request(env: Env) {
+        let escrow = Self::load_escrow_require_admin(&env);
+
+        ensure(
+            &env,
+            env.storage().instance().has(&DataKey::LegalHoldClearableAt),
+            EscrowError::LegalHoldClearRequestMissing,
+        );
+
+        env.storage()
+            .instance()
+            .remove(&DataKey::LegalHoldClearableAt);
+
+        LegalHoldClearCancelled {
+            name: symbol_short!("leg_can"),
+            invoice_id: escrow.invoice_id.clone(),
+        }
+        .publish(&env);
+    }
+
+    // ================================================================
+    //  PAUSE
+    // ================================================================
+
+    /// Admin-only: activate or clear the operational pause.
+    ///
+    /// When `active == true`, funding, settlement, withdrawal, and investor claims are blocked.
+    /// When `active == false`, the pause is lifted and normal operations resume.
+    ///
+    /// # Authorization
+    /// Requires the current [`InvoiceEscrow::admin`] to sign.
+    ///
+    /// # Rate limiting
+    /// If a toggle limit has been configured via [`LiquifactEscrow::set_pause_rate_limit`],
+    /// this call checks the number of `set_paused` calls in the current window and rejects
+    /// with [`EscrowError::PauseToggleRateLimitExceeded`] when the limit is reached.
+    ///
+    /// # Events
+    /// Emits [`PausedChanged`] with the new active state.
+    pub fn set_paused(env: Env, active: bool) {
+        let escrow = Self::load_escrow_require_admin(&env);
+
+        // Rate limiting: if configured, check the toggle limit within the current window.
+        let limit: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::PauseToggleLimit)
+            .unwrap_or(DEFAULT_PAUSE_TOGGLE_LIMIT);
+        if limit > 0 {
+            let window_start: u64 = env
+                .storage()
+                .instance()
+                .get(&DataKey::PauseToggleWindowStart)
+                .unwrap_or(0);
+            let window_secs: u64 = env
+                .storage()
+                .instance()
+                .get(&DataKey::PauseToggleWindowSecs)
+                .unwrap_or(0);
+            let now = env.ledger().timestamp();
+
+            // If window has expired, reset the counter.
+            let (window_start, count) = if window_secs > 0 && window_start + window_secs <= now {
+                // Window expired; reset.
+                (now, 0u32)
+            } else {
+                let count = env
+                    .storage()
+                    .instance()
+                    .get(&DataKey::PauseToggleCountInWindow)
+                    .unwrap_or(0);
+                (window_start, count)
+            };
+
+            // If we're in a fresh window or the window hasn't expired, check the count.
+            if window_start == now || (window_secs > 0 && now < window_start + window_secs) {
+                ensure(
+                    &env,
+                    count < limit,
+                    EscrowError::PauseToggleRateLimitExceeded,
+                );
+                // Increment count.
+                env.storage()
+                    .instance()
+                    .set(&DataKey::PauseToggleCountInWindow, &(count + 1));
+            } else {
+                // Start a new window.
+                env.storage()
+                    .instance()
+                    .set(&DataKey::PauseToggleWindowStart, &now);
+                env.storage()
+                    .instance()
+                    .set(&DataKey::PauseToggleCountInWindow, &1u32);
+            }
+        }
+
+        // If activating the pause, record when it was activated for auto-expiry.
+        if active {
+            let now = env.ledger().timestamp();
+            env.storage().instance().set(&DataKey::PausedAt, &now);
+        }
+
+        env.storage().instance().set(&DataKey::Paused, &active);
+
+        PausedChanged {
+            name: symbol_short!("pause_ch"),
+            invoice_id: escrow.invoice_id.clone(),
+            active: if active { 1 } else { 0 },
+        }
+        .publish(&env);
+    }
+
+    /// Admin-only: clear the operational pause (convenience wrapper).
+    pub fn clear_paused(env: Env) {
+        Self::set_paused(env, false);
+    }
+
+    /// Admin-only: set the maximum duration an operational pause may remain active.
+    ///
+    /// When set to a non-zero value, the pause auto-expires after that many seconds from
+    /// the most recent `set_paused(true)` call. This is a pure configuration change and
+    /// does not alter the current pause state.
+    ///
+    /// # Authorization
+    /// Requires the current [`InvoiceEscrow::admin`] to sign.
+    ///
+    /// # Errors
+    /// - [`EscrowError::PauseMaxDurationOutOfRange`] if `duration_secs` is non-zero and outside
+    ///   the `MIN_PAUSE_MAX_DURATION_SECS..=MAX_PAUSE_MAX_DURATION_SECS` range.
+    ///
+    /// # Events
+    /// Emits [`PauseMaxDurationUpdated`] on success.
+    pub fn set_pause_max_duration(env: Env, duration_secs: u64) -> u64 {
+        let escrow = Self::load_escrow_require_admin(&env);
+
+        if duration_secs != 0 {
+            ensure(
+                &env,
+                (MIN_PAUSE_MAX_DURATION_SECS..=MAX_PAUSE_MAX_DURATION_SECS)
+                    .contains(&duration_secs),
+                EscrowError::PauseMaxDurationOutOfRange,
+            );
+        }
+
+        let old_duration: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::PauseMaxDurationSecs)
+            .unwrap_or(DEFAULT_PAUSE_MAX_DURATION_SECS);
+
+        if duration_secs == old_duration {
+            return old_duration;
+        }
+
+        env.storage()
+            .instance()
+            .set(&DataKey::PauseMaxDurationSecs, &duration_secs);
+
+        PauseMaxDurationUpdated {
+            name: symbol_short!("pmax_upd"),
+            invoice_id: escrow.invoice_id.clone(),
+            old_value: old_duration,
+            new_value: duration_secs,
+        }
+        .publish(&env);
+
+        duration_secs
+    }
+
+    /// Admin-only: set the pause-toggle rate limit.
+    ///
+    /// Configures how many [`LiquifactEscrow::set_paused`] calls are allowed within a rolling
+    /// `window_secs` period. Setting `max_toggles = 0` and `window_secs = 0` disables the
+    /// rate limit (the default behavior).
+    ///
+    /// # Authorization
+    /// Requires the current [`InvoiceEscrow::admin`] to sign.
+    ///
+    /// # Errors
+    /// - [`EscrowError::PauseRateLimitInvalidCombination`] if one parameter is zero and the other
+    ///   is non-zero.
+    /// - [`EscrowError::PauseToggleLimitOutOfRange`] if `max_toggles` is non-zero and outside
+    ///   the `MIN_PAUSE_TOGGLE_LIMIT..=MAX_PAUSE_TOGGLE_LIMIT` range.
+    /// - [`EscrowError::PauseToggleWindowOutOfRange`] if `window_secs` is non-zero and outside
+    ///   the `MIN_PAUSE_TOGGLE_WINDOW_SECS..=MAX_PAUSE_TOGGLE_WINDOW_SECS` range.
+    ///
+    /// # Events
+    /// Emits [`PauseRateLimitUpdated`] on success.
+    pub fn set_pause_rate_limit(env: Env, max_toggles: u32, window_secs: u64) {
+        let escrow = Self::load_escrow_require_admin(&env);
+
+        // Both must be zero (disabled) or both non-zero (enabled).
+        ensure(
+            &env,
+            (max_toggles == 0 && window_secs == 0) || (max_toggles > 0 && window_secs > 0),
+            EscrowError::PauseRateLimitInvalidCombination,
+        );
+
+        if max_toggles > 0 {
+            ensure(
+                &env,
+                (MIN_PAUSE_TOGGLE_LIMIT..=MAX_PAUSE_TOGGLE_LIMIT).contains(&max_toggles),
+                EscrowError::PauseToggleLimitOutOfRange,
+            );
+            ensure(
+                &env,
+                (MIN_PAUSE_TOGGLE_WINDOW_SECS..=MAX_PAUSE_TOGGLE_WINDOW_SECS)
+                    .contains(&window_secs),
+                EscrowError::PauseToggleWindowOutOfRange,
+            );
+        }
+
+        let old_limit: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::PauseToggleLimit)
+            .unwrap_or(DEFAULT_PAUSE_TOGGLE_LIMIT);
+        let old_window: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::PauseToggleWindowSecs)
+            .unwrap_or(0);
+
+        if max_toggles == old_limit && window_secs == old_window {
+            return;
+        }
+
+        env.storage()
+            .instance()
+            .set(&DataKey::PauseToggleLimit, &max_toggles);
+        env.storage()
+            .instance()
+            .set(&DataKey::PauseToggleWindowSecs, &window_secs);
+
+        // Reset the current window state when the rate limit configuration changes.
+        env.storage()
+            .instance()
+            .remove(&DataKey::PauseToggleWindowStart);
+        env.storage()
+            .instance()
+            .remove(&DataKey::PauseToggleCountInWindow);
+
+        PauseRateLimitUpdated {
+            name: symbol_short!("prate_upd"),
+            invoice_id: escrow.invoice_id.clone(),
+            old_limit,
+            new_limit: max_toggles,
+            old_window_secs: old_window,
+            new_window_secs: window_secs,
+        }
+        .publish(&env);
+    }
+
+    // ================================================================
+    //  ALLOWLIST
+    // ================================================================
+
+    /// Admin-only: enable or disable the investor allowlist.
+    ///
+    /// # Authorization
+    /// Requires the current [`InvoiceEscrow::admin`] to sign.
+    ///
+    /// # Events
+    /// Emits [`AllowlistEnabledChanged`] on success.
+    pub fn set_allowlist_active(env: Env, active: bool) {
+        let escrow = Self::load_escrow_require_admin(&env);
+
+        env.storage()
+            .instance()
+            .set(&DataKey::AllowlistActive, &active);
+
+        AllowlistEnabledChanged {
+            name: symbol_short!("al_enab"),
+            invoice_id: escrow.invoice_id.clone(),
+            active: if active { 1 } else { 0 },
+        }
+        .publish(&env);
+    }
+
+    /// Admin-only: add or remove addresses from the allowlist.
+    ///
+    /// This is a batch operation that sets the allowlist status for each address.
+    ///
+    /// # Authorization
+    /// Requires the current [`InvoiceEscrow::admin`] to sign.
+    ///
+    /// # Errors
+    /// - [`EscrowError::InvestorBatchEmpty`] if the batch is empty.
+    /// - [`EscrowError::InvestorBatchTooLarge`] if the batch exceeds `MAX_INVESTOR_ALLOWLIST_BATCH`.
+    ///
+    /// # Events
+    /// Emits [`InvestorAllowlistChanged`] for each address, and [`AllowlistStateChanged`]
+    /// with the total count after the operation.
+    pub fn set_investors_allowlisted(env: Env, investors: Vec<Address>, allowed: bool) {
+        let escrow = Self::load_escrow_require_admin(&env);
+
+        let n = investors.len();
+        ensure(&env, n > 0, EscrowError::InvestorBatchEmpty);
+        ensure(
+            &env,
+            n <= MAX_INVESTOR_ALLOWLIST_BATCH,
+            EscrowError::InvestorBatchTooLarge,
+        );
+
+        let mut count_delta: i128 = 0;
+        for i in 0..n {
+            let investor = investors.get(i).unwrap();
+            let current = Self::is_investor_allowlisted(env.clone(), investor.clone());
+            if allowed && !current {
+                count_delta += 1;
+            } else if !allowed && current {
+                count_delta -= 1;
+            }
+            env.storage()
+                .persistent()
+                .set(&DataKey::InvestorAllowlisted(investor.clone()), &allowed);
+
+            InvestorAllowlistChanged {
+                name: symbol_short!("al_chg"),
+                invoice_id: escrow.invoice_id.clone(),
+                investor,
+                allowed: if allowed { 1 } else { 0 },
+            }
+            .publish(&env);
+        }
+
+        // Update the allowlist index for pagination.
+        if count_delta != 0 {
+            let mut index: Vec<Address> = env
+                .storage()
+                .instance()
+                .get(&DataKey::AllowlistIndex)
+                .unwrap_or_else(|| Vec::new(&env));
+
+            if allowed {
+                // Add new addresses to index.
+                for i in 0..n {
+                    let investor = investors.get(i).unwrap();
+                    if !index.contains(&investor) {
+                        index.push_back(investor);
+                    }
+                }
+            } else {
+                // Remove addresses from index.
+                let mut new_index = Vec::new(&env);
+                for i in 0..index.len() {
+                    let addr = index.get(i).unwrap();
+                    if !investors.contains(&addr) {
+                        new_index.push_back(addr);
+                    }
+                }
+                index = new_index;
+            }
+
+            env.storage()
+                .instance()
+                .set(&DataKey::AllowlistIndex, &index);
+
+            AllowlistStateChanged {
+                name: symbol_short!("al_st_ch"),
+                invoice_id: escrow.invoice_id.clone(),
+                total_count: index.len(),
+            }
+            .publish(&env);
+        }
+    }
+
+    /// Get the list of allowlisted investor addresses (paginated).
+    pub fn get_allowlisted_investors(env: Env, start: u32, limit: u32) -> Vec<Address> {
+        let index: Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&DataKey::AllowlistIndex)
+            .unwrap_or_else(|| Vec::new(&env));
+
+        let (start, end) =
+            match Self::paginate_window(start, limit, MAX_INVESTOR_ALLOWLIST_BATCH, index.len()) {
+                Some(w) => w,
+                None => return Vec::new(&env),
+            };
+
+        let mut result = Vec::new(&env);
+        for i in start..end {
+            result.push_back(index.get(i).unwrap());
+        }
+        result
+    }
+
+    /// Check if an investor is on the allowlist.
+    pub fn is_investor_allowlisted_view(env: Env, investor: Address) -> bool {
+        Self::is_investor_allowlisted(env, investor)
+    }
+
+    // ================================================================
+    //  MIGRATION
+    // ================================================================
+
+    /// Upgrade the WASM and optionally migrate storage schema.
+    ///
+    /// This is a **NO-OP in current implementations** — it rejects all calls
+    /// with typed errors. See `docs/OPERATOR_RUNBOOK.md` for the full decision tree.
+    ///
+    /// # Errors
+    /// - [`EscrowError::MigrationVersionMismatch`] if `from_version` != stored version.
+    /// - [`EscrowError::AlreadyCurrentSchemaVersion`] if stored version >= `SCHEMA_VERSION`.
+    /// - [`EscrowError::NoMigrationPath`] for all other cases.
+    pub fn migrate(env: Env, from_version: u32) {
+        let stored = Self::get_version(env.clone());
+        ensure(
+            &env,
+            from_version == stored,
+            EscrowError::MigrationVersionMismatch,
+        );
+        ensure(
+            &env,
+            stored < SCHEMA_VERSION,
+            EscrowError::AlreadyCurrentSchemaVersion,
+        );
+        // No migration paths implemented.
+        fail(&env, EscrowError::NoMigrationPath);
+    }
+
+    /// Upgrade the contract WASM (admin-only).
+    ///
+    /// Replaces the WASM code of the contract with `new_wasm_hash`. Requires the current
+    /// [`InvoiceEscrow::admin`] to sign. Emits [`ContractUpgraded`] before the deployer call.
+    ///
+    /// # Authorization
+    /// Requires the current [`InvoiceEscrow::admin`] to sign.
+    ///
+    /// # Events
+    /// Emits [`ContractUpgraded`] with the new WASM hash.
+    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
+        let escrow = Self::load_escrow_require_admin(&env);
+
+        ContractUpgraded {
+            name: symbol_short!("upgrade"),
+            invoice_id: escrow.invoice_id.clone(),
+            new_wasm_hash: new_wasm_hash.clone(),
+        }
+        .publish(&env);
+
+        env.deployer().update_current_contract_wasm(new_wasm_hash);
+    }
+
+    /// Upgrade the contract WASM with explicit admin authorization (allowlist subsystem).
+    ///
+    /// This is identical to [`LiquifactEscrow::upgrade`] in behavior but emits a different
+    /// event carrying the admin address as a topic. This allows indexers to attribute
+    /// allowlist-upgrade events specifically.
+    ///
+    /// # Authorization
+    /// Requires the current [`InvoiceEscrow::admin`] to sign.
+    ///
+    /// # Events
+    /// Emits [`AllowlistUpgradeAuthorized`] with the admin address and new WASM hash.
+    pub fn upgrade_allowlist(env: Env, new_wasm_hash: BytesN<32>) {
+        let escrow = Self::load_escrow_require_admin(&env);
+
+        AllowlistUpgradeAuthorized {
+            name: symbol_short!("al_upg"),
+            invoice_id: escrow.invoice_id.clone(),
+            admin: escrow.admin.clone(),
+            new_wasm_hash: new_wasm_hash.clone(),
+        }
+        .publish(&env);
+
+        env.deployer().update_current_contract_wasm(new_wasm_hash);
     }
 } // End of impl LiquifactEscrow

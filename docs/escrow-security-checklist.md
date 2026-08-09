@@ -332,6 +332,16 @@ helpers preserve the ADR-002 canonical sequence (read-only preconditions →
   for the `(2 | 3 | 4)` and `(0 | 1)` sets, with companion const slices
   `TERMINAL_STATUSES` / `PRE_SETTLEMENT_STATUSES` for `guard_status_in` reuse.
 
+  Validation: The helpers are regression‑tested via the integration test suite (currently tests/coverage.rs). The suite explicitly asserts the exact error variant for each entrypoint under three conditions:
+
+    Legal hold active – every gated entrypoint (fund, settle, withdraw, claim_investor_payout, cancel_funding, rotate_beneficiary, sweep_terminal_dust) returns its specific LegalHoldBlocks* error.
+
+    Wrong status – each entrypoint rejects with the correct status‑related error (EscrowNotOpenForFunding, SettlementNotFunded, WithdrawalNotFunded, InvestorClaimNotSettled, CancelFundingNotOpen, RotationNotOpen, DustSweepNotTerminal).
+
+    Operational pause – fund, settle, withdraw, and claim_investor_payout are blocked with the appropriate PausedBlocks* error when the pause is active.
+
+These tests guarantee that the refactored guards preserve the exact behaviour and error codes of the original inline checks, preventing regressions in future modifications.
+
 These helpers are **not** authentication checks — they validate state only.
 Each entrypoint still performs its own `Address::require_auth()` before any storage
 write or token transfer. Behavioural parity (same error code at every site, same
