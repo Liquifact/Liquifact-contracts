@@ -4498,7 +4498,7 @@ impl LiquifactEscrow {
         }
 
         // Amount validation: positive and >= min_contribution_floor.
-        validate_funding_amount(&env, amount);
+        let _ = validate_funding_amount(&env, amount);
 
         // Investor contribution and caps.
         let old_contrib = Self::get_persistent_investor_contribution(&env, investor.clone());
@@ -4599,7 +4599,7 @@ impl LiquifactEscrow {
 
         // If the escrow transitions to funded (status 0 -> 1), write the snapshot.
         // Also set status to funded.
-        let (new_status, funded_snapshot) = if escrow.status == 0 && new_funded > 0 {
+        let (new_status, _funded_snapshot) = if escrow.status == 0 && new_funded > 0 {
             let snapshot = FundingCloseSnapshot {
                 total_principal: new_funded,
                 funding_target: escrow.funding_target,
@@ -4657,7 +4657,7 @@ impl LiquifactEscrow {
             funded_amount: new_funded,
             status: new_status,
             investor_effective_yield_bps: effective_yield,
-            tier_lock_secs: tier_lock_secs,
+            tier_lock_secs,
         }
         .publish(&env);
     }
