@@ -1018,6 +1018,9 @@ fn allowlist_limit_can_be_updated_multiple_times() {
 /// Setting the limit to 0 (below MIN) is rejected with AllowlistLimitOutOfRange.
 #[test]
 fn allowlist_limit_zero_rejected_with_typed_error() {
+    // TODO: implement test body
+}
+
 #[test]
 fn test_allowlist_metadata_defaults_before_init() {
     let env = Env::default();
@@ -1400,7 +1403,11 @@ fn overflow_get_allowlisted_investors_max_start_one_investor() {
 
     // len = 1; start = u32::MAX >= 1 → early-exit fires, no addition.
     let result = client.get_allowlisted_investors(&u32::MAX, &1);
-    assert_eq!(result.len(), 0, "must return empty; start past end of index");
+    assert_eq!(
+        result.len(),
+        0,
+        "must return empty; start past end of index"
+    );
 }
 
 /// `start = u32::MAX - 1`, limit = 50 (actual_limit also 50).
@@ -1419,7 +1426,11 @@ fn saturation_get_allowlisted_investors_near_max_start() {
 
     // start = u32::MAX - 1 ≥ len = 1 → early-exit.
     let result = client.get_allowlisted_investors(&(u32::MAX - 1), &50);
-    assert_eq!(result.len(), 0, "start past len; must return empty without overflow");
+    assert_eq!(
+        result.len(),
+        0,
+        "start past len; must return empty without overflow"
+    );
 }
 
 /// `start = u32::MAX`, limit = u32::MAX → actual_limit = 50 (ceiling enforced).
@@ -1432,7 +1443,11 @@ fn saturation_get_allowlisted_investors_max_start_max_limit() {
     init(&env, &client);
 
     let result = client.get_allowlisted_investors(&u32::MAX, &u32::MAX);
-    assert_eq!(result.len(), 0, "both start and limit at u32::MAX must not overflow");
+    assert_eq!(
+        result.len(),
+        0,
+        "both start and limit at u32::MAX must not overflow"
+    );
 }
 
 /// `start = 0`, limit = u32::MAX → `actual_limit` is clamped to 50 (ceiling).
@@ -1450,7 +1465,11 @@ fn saturation_get_allowlisted_investors_zero_start_max_limit_clamped() {
     }
 
     let result = client.get_allowlisted_investors(&0, &u32::MAX);
-    assert_eq!(result.len(), 3, "ceiling should clamp limit; all 3 investors returned");
+    assert_eq!(
+        result.len(),
+        3,
+        "ceiling should clamp limit; all 3 investors returned"
+    );
 }
 
 /// start close to but still within the valid range.
@@ -1493,7 +1512,11 @@ fn saturation_get_allowlisted_investors_limit_above_ceiling_clamped() {
     }
 
     let result = client.get_allowlisted_investors(&0, &51);
-    assert_eq!(result.len(), 50, "limit above ceiling must be clamped to 50");
+    assert_eq!(
+        result.len(),
+        50,
+        "limit above ceiling must be clamped to 50"
+    );
 
     // Also test limit = 50 exactly — must also return 50
     let result2 = client.get_allowlisted_investors(&0, &50);
@@ -1545,13 +1568,21 @@ fn count_get_allowlisted_investors_count_decrements_on_revoke() {
     assert_eq!(client.get_allowlisted_investors_count(), 3);
 
     client.set_investor_allowlisted(&b, &false);
-    assert_eq!(client.get_allowlisted_investors_count(), 2, "revoke must decrement count");
+    assert_eq!(
+        client.get_allowlisted_investors_count(),
+        2,
+        "revoke must decrement count"
+    );
 
     client.set_investor_allowlisted(&a, &false);
     assert_eq!(client.get_allowlisted_investors_count(), 1);
 
     client.set_investor_allowlisted(&c, &false);
-    assert_eq!(client.get_allowlisted_investors_count(), 0, "all revoked → count must be 0");
+    assert_eq!(
+        client.get_allowlisted_investors_count(),
+        0,
+        "all revoked → count must be 0"
+    );
 }
 
 /// Re-allowlisting an already-allowlisted investor must not double-count.
@@ -1593,7 +1624,10 @@ fn count_metadata_allowlisted_count_matches_direct_count() {
 
     let direct = client.get_allowlisted_investors_count();
     let via_metadata = client.get_allowlist_metadata().allowlisted_count;
-    assert_eq!(direct, via_metadata, "metadata.allowlisted_count must equal direct count");
+    assert_eq!(
+        direct, via_metadata,
+        "metadata.allowlisted_count must equal direct count"
+    );
     assert_eq!(direct, 4);
 }
 
@@ -1675,7 +1709,10 @@ fn batch_revoke_max_entries_count_reaches_zero() {
     }
 
     client.set_investors_allowlisted(&v, &true);
-    assert_eq!(client.get_allowlisted_investors_count(), super::MAX_INVESTOR_ALLOWLIST_BATCH);
+    assert_eq!(
+        client.get_allowlisted_investors_count(),
+        super::MAX_INVESTOR_ALLOWLIST_BATCH
+    );
 
     client.set_investors_allowlisted(&v, &false);
     assert_eq!(

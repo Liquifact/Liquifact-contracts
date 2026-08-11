@@ -62,10 +62,7 @@ fn test_pause_max_duration_at_min_seconds_succeeds() {
 
     // Exactly MIN — boundary, must succeed.
     client.set_pause_max_duration(&MIN_PAUSE_MAX_DURATION_SECS);
-    assert_eq!(
-        client.get_pause_max_duration(),
-        MIN_PAUSE_MAX_DURATION_SECS
-    );
+    assert_eq!(client.get_pause_max_duration(), MIN_PAUSE_MAX_DURATION_SECS);
 }
 
 #[test]
@@ -92,10 +89,7 @@ fn test_pause_max_duration_at_max_seconds_succeeds() {
 
     // Exactly MAX — boundary, must succeed.
     client.set_pause_max_duration(&MAX_PAUSE_MAX_DURATION_SECS);
-    assert_eq!(
-        client.get_pause_max_duration(),
-        MAX_PAUSE_MAX_DURATION_SECS
-    );
+    assert_eq!(client.get_pause_max_duration(), MAX_PAUSE_MAX_DURATION_SECS);
 }
 
 #[test]
@@ -150,10 +144,8 @@ fn test_pause_rate_limit_at_min_limit_min_window_succeeds() {
     let (client, _admin, _sme) = setup_escrow(&env);
 
     // Both at MIN — lower-corner valid configuration.
-    let (limit, window) = client.set_pause_rate_limit(
-        &MIN_PAUSE_TOGGLE_LIMIT,
-        &MIN_PAUSE_TOGGLE_WINDOW_SECS,
-    );
+    let (limit, window) =
+        client.set_pause_rate_limit(&MIN_PAUSE_TOGGLE_LIMIT, &MIN_PAUSE_TOGGLE_WINDOW_SECS);
     assert_eq!(limit, MIN_PAUSE_TOGGLE_LIMIT);
     assert_eq!(window, MIN_PAUSE_TOGGLE_WINDOW_SECS);
 
@@ -169,10 +161,8 @@ fn test_pause_rate_limit_at_max_limit_max_window_succeeds() {
     let (client, _admin, _sme) = setup_escrow(&env);
 
     // Both at MAX — upper-corner valid configuration.
-    let (limit, window) = client.set_pause_rate_limit(
-        &MAX_PAUSE_TOGGLE_LIMIT,
-        &MAX_PAUSE_TOGGLE_WINDOW_SECS,
-    );
+    let (limit, window) =
+        client.set_pause_rate_limit(&MAX_PAUSE_TOGGLE_LIMIT, &MAX_PAUSE_TOGGLE_WINDOW_SECS);
     assert_eq!(limit, MAX_PAUSE_TOGGLE_LIMIT);
     assert_eq!(window, MAX_PAUSE_TOGGLE_WINDOW_SECS);
 }
@@ -233,10 +223,8 @@ fn test_pause_rate_limit_above_max_limit_rejected() {
 
     // limit = MAX + 1 — fuzz over-limit.
     assert_contract_error(
-        client.try_set_pause_rate_limit(
-            &(MAX_PAUSE_TOGGLE_LIMIT + 1),
-            &MIN_PAUSE_TOGGLE_WINDOW_SECS,
-        ),
+        client
+            .try_set_pause_rate_limit(&(MAX_PAUSE_TOGGLE_LIMIT + 1), &MIN_PAUSE_TOGGLE_WINDOW_SECS),
         EscrowError::PauseToggleLimitOutOfRange,
     );
 
@@ -254,10 +242,8 @@ fn test_pause_rate_limit_below_min_window_rejected() {
 
     // window = MIN - 1 — fuzz under-limit.
     assert_contract_error(
-        client.try_set_pause_rate_limit(
-            &MIN_PAUSE_TOGGLE_LIMIT,
-            &(MIN_PAUSE_TOGGLE_WINDOW_SECS - 1),
-        ),
+        client
+            .try_set_pause_rate_limit(&MIN_PAUSE_TOGGLE_LIMIT, &(MIN_PAUSE_TOGGLE_WINDOW_SECS - 1)),
         EscrowError::PauseToggleWindowOutOfRange,
     );
 
@@ -275,10 +261,8 @@ fn test_pause_rate_limit_above_max_window_rejected() {
 
     // window = MAX + 1 — fuzz over-limit.
     assert_contract_error(
-        client.try_set_pause_rate_limit(
-            &MIN_PAUSE_TOGGLE_LIMIT,
-            &(MAX_PAUSE_TOGGLE_WINDOW_SECS + 1),
-        ),
+        client
+            .try_set_pause_rate_limit(&MIN_PAUSE_TOGGLE_LIMIT, &(MAX_PAUSE_TOGGLE_WINDOW_SECS + 1)),
         EscrowError::PauseToggleWindowOutOfRange,
     );
 
@@ -456,10 +440,8 @@ fn test_pause_rate_limit_min_limit_max_window_succeeds() {
 
     // Diagonal: limit at MIN, window at MAX. Both fields are validated
     // independently — a future bug that ANDs the bounds must not slip through.
-    let (limit, window) = client.set_pause_rate_limit(
-        &MIN_PAUSE_TOGGLE_LIMIT,
-        &MAX_PAUSE_TOGGLE_WINDOW_SECS,
-    );
+    let (limit, window) =
+        client.set_pause_rate_limit(&MIN_PAUSE_TOGGLE_LIMIT, &MAX_PAUSE_TOGGLE_WINDOW_SECS);
     assert_eq!(limit, MIN_PAUSE_TOGGLE_LIMIT);
     assert_eq!(window, MAX_PAUSE_TOGGLE_WINDOW_SECS);
 }
@@ -471,10 +453,8 @@ fn test_pause_rate_limit_max_limit_min_window_succeeds() {
     let (client, _admin, _sme) = setup_escrow(&env);
 
     // Inverse diagonal: limit at MAX, window at MIN.
-    let (limit, window) = client.set_pause_rate_limit(
-        &MAX_PAUSE_TOGGLE_LIMIT,
-        &MIN_PAUSE_TOGGLE_WINDOW_SECS,
-    );
+    let (limit, window) =
+        client.set_pause_rate_limit(&MAX_PAUSE_TOGGLE_LIMIT, &MIN_PAUSE_TOGGLE_WINDOW_SECS);
     assert_eq!(limit, MAX_PAUSE_TOGGLE_LIMIT);
     assert_eq!(window, MIN_PAUSE_TOGGLE_WINDOW_SECS);
 }
@@ -498,10 +478,7 @@ fn test_pause_rate_limit_reconfigure_resets_toggle_window() {
 
     // Reconfiguring the rate limit must reset the toggle window so the next
     // toggle is allowed again.
-    client.set_pause_rate_limit(
-        &MIN_PAUSE_TOGGLE_LIMIT,
-        &MIN_PAUSE_TOGGLE_WINDOW_SECS,
-    );
+    client.set_pause_rate_limit(&MIN_PAUSE_TOGGLE_LIMIT, &MIN_PAUSE_TOGGLE_WINDOW_SECS);
 
     client.set_paused(&true);
     assert!(client.is_paused());

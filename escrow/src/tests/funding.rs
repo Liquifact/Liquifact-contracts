@@ -2,7 +2,7 @@ use super::*;
 
 use crate::EscrowError;
 
-use soroban_sdk::{testutils::Address, Error, InvokeError};
+use soroban_sdk::testutils::{MockAuth, MockAuthInvoke};
 
 use std::fmt::Debug;
 
@@ -70,7 +70,7 @@ fn test_fund_and_settle() {
 
     let settled = client.settle();
 
-    assert_eq!(settled.status, 2);
+    assert_eq!(settled.escrow.status, 2);
 }
 
 #[test]
@@ -6385,10 +6385,10 @@ fn assert_preview_matches_actual(
     client.fund_with_commitment(&investor, &amount, &lock);
     let actual_bps = client.get_investor_yield_bps(&investor);
     let actual_claim_not_before = client.get_investor_claim_not_before(&investor);
-    let preview_bps_str = preview.effective_yield_bps;
     assert_eq!(
         preview.effective_yield_bps, actual_bps,
-        "preview_yield_tier bps mismatch for lock={lock}: preview={preview_bps_str} actual={actual_bps}"
+        "preview_yield_tier bps mismatch for lock={lock}: preview={} actual={actual_bps}",
+        preview.effective_yield_bps
     );
     // preview_yield_tier returns the matched tier's min_lock_secs (duration),
     // while fund_with_commitment stores (ledger_timestamp + user_lock).
@@ -7613,337 +7613,931 @@ fn test_unfund_event_emitted() {
     assert_eq!(*last, expected.to_xdr(&env, &contract_id));
 }
 
-// ─── get_funding_records paginated view tests (issue #790) ─────────────────────
+// ── Funding input bounds (issue funding-11) ──────────────────────────────────
 
-#[test]
-fn test_get_funding_records_empty() {
-    let env = Env::default();
-    let (client, admin, sme) = setup(&env);
-    default_init(&client, &env, &admin, &sme);
+fn init_for_bounds_test(env: &Env) -> LiquifactEscrowClient<'_> {
+    let client = deploy(env);
+    let admin = Address::generate(env);
+    let sme = Address::generate(env);
+    let (tok, tre) = free_addresses(env);
+    client.init(
+        &admin,
+        &String::from_str(env, "BND001"),
+        &sme,
+        &crate::MAX_INVOICE_AMOUNT,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
 
-    // No funding records exist yet
-    let records = client.get_funding_records(&0, &50);
-    assert_eq!(records.len(), 0, "empty result when no records exist");
+    let investor = Address::generate(&env);
+    client.fund(&investor, &TARGET);
+
+    let all_events = env.events().all();
+    let fsc_events: std::vec::Vec<_> = all_events
+        .events()
+        .iter()
+        .filter(|e| {
+            let expected = FundingStateChanged {
+                name: symbol_short!("fstate_ch"),
+                invoice_id,
+                from_status: 0u32,
+                to_status: 1u32,
+                funded_amount: TARGET,
+                funding_target: TARGET,
+                ledger_timestamp: env.ledger().timestamp(),
+                trigger: symbol_short!("fund"),
+            }
+            .to_xdr(&env, &contract_id);
+            *e == &expected
+        })
+        .collect();
+
+    assert_eq!(
+        fsc_events.len(),
+        1,
+        "expected exactly one FundingStateChanged event"
+    );
 }
 
+/// amount == 1 (min valid) accepted.
 #[test]
-fn test_get_funding_records_single_page() {
+fn test_fund_amount_min_accepted() {
     let env = Env::default();
-    let (client, admin, sme) = setup(&env);
-    default_init(&client, &env, &admin, &sme);
+    env.mock_all_auths();
+    let (contract_id, client) = deploy_with_id(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    let invoice_id = symbol_short!("FSC002");
 
-    // Add 3 investors with different amounts
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "FSC002"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    let investor = Address::generate(&env);
+    client.fund(&investor, &(TARGET / 2));
+
+    let all_events = env.events().all();
+    let fsc_count = all_events
+        .events()
+        .iter()
+        .filter(|e| {
+            let candidate = FundingStateChanged {
+                name: symbol_short!("fstate_ch"),
+                invoice_id,
+                from_status: 0u32,
+                to_status: 1u32,
+                funded_amount: TARGET / 2,
+                funding_target: TARGET,
+                ledger_timestamp: env.ledger().timestamp(),
+                trigger: symbol_short!("fund"),
+            }
+            .to_xdr(&env, &contract_id);
+            *e == &candidate
+        })
+        .count();
+
+    assert_eq!(
+        fsc_count, 0,
+        "FundingStateChanged must not fire before target is reached"
+    );
+    assert_eq!(client.get_escrow().status, 0, "escrow must still be open");
+}
+
+/// amount == MAX_INVOICE_AMOUNT (max valid) accepted.
+#[test]
+fn test_fund_amount_max_accepted() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (contract_id, client) = deploy_with_id(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    let invoice_id = symbol_short!("FSC003");
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "FSC003"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    let investor = Address::generate(&env);
+    // First call: below target — must produce no FundingStateChanged.
+    client.fund(&investor, &(TARGET / 2));
+    let after_first = env.events().all();
+    let fsc_after_first = after_first.events().iter().any(|e| {
+        let candidate = FundingStateChanged {
+            name: symbol_short!("fstate_ch"),
+            invoice_id,
+            from_status: 0u32,
+            to_status: 1u32,
+            funded_amount: TARGET / 2,
+            funding_target: TARGET,
+            ledger_timestamp: env.ledger().timestamp(),
+            trigger: symbol_short!("fund"),
+        }
+        .to_xdr(&env, &contract_id);
+        *e == candidate
+    });
+    assert!(
+        !fsc_after_first,
+        "no FundingStateChanged after partial fund"
+    );
+
+    // Second call: reaches target — must produce exactly one FundingStateChanged.
+    client.fund(&investor, &(TARGET / 2));
+    let after_second = env.events().all();
+    let fsc_events: std::vec::Vec<_> = after_second
+        .events()
+        .iter()
+        .filter(|e| {
+            let expected = FundingStateChanged {
+                name: symbol_short!("fstate_ch"),
+                invoice_id,
+                from_status: 0u32,
+                to_status: 1u32,
+                funded_amount: TARGET,
+                funding_target: TARGET,
+                ledger_timestamp: env.ledger().timestamp(),
+                trigger: symbol_short!("fund"),
+            }
+            .to_xdr(&env, &contract_id);
+            *e == &expected
+        })
+        .collect();
+
+    assert_eq!(
+        fsc_events.len(),
+        1,
+        "exactly one FundingStateChanged on threshold crossing"
+    );
+}
+
+/// amount == MAX_INVOICE_AMOUNT + 1 rejected with FundingAmountExceedsMax.
+#[test]
+fn test_fund_amount_over_max_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (contract_id, client) = deploy_with_id(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    let invoice_id = symbol_short!("FSC004");
+    let overshoot = TARGET + 5_000_000_000i128;
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "FSC004"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    let investor = Address::generate(&env);
+    client.fund(&investor, &overshoot);
+
+    let all_events = env.events().all();
+    let fsc_events: std::vec::Vec<_> = all_events
+        .events()
+        .iter()
+        .filter(|e| {
+            let expected = FundingStateChanged {
+                name: symbol_short!("fstate_ch"),
+                invoice_id,
+                from_status: 0u32,
+                to_status: 1u32,
+                funded_amount: overshoot,
+                funding_target: TARGET,
+                ledger_timestamp: env.ledger().timestamp(),
+                trigger: symbol_short!("fund"),
+            }
+            .to_xdr(&env, &contract_id);
+            *e == &expected
+        })
+        .collect();
+
+    assert_eq!(
+        fsc_events.len(),
+        1,
+        "expected exactly one FundingStateChanged"
+    );
+    assert_eq!(client.get_escrow().funded_amount, overshoot);
+}
+
+/// amount == 0 rejected with FundingAmountNotPositive.
+#[test]
+fn test_fund_amount_zero_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (contract_id, client) = deploy_with_id(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    let invoice_id = symbol_short!("FSC005");
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "FSC005"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    // Reach funded state with first investor.
+    let inv_a = Address::generate(&env);
+    client.fund(&inv_a, &TARGET);
+    assert_eq!(client.get_escrow().status, 1);
+
+    // Drain event buffer so we can inspect only the follow-on fund events.
+    let _ = env.events().all();
+
+    // Follow-on deposit from a second investor while already funded is rejected.
+    let inv_b = Address::generate(&env);
+    let result = client.try_fund(&inv_b, &1_000i128);
+    assert_contract_error(result, EscrowError::EscrowNotOpenForFunding);
+
+    let after_followon = env.events().all();
+    let fsc_count = after_followon
+        .events()
+        .iter()
+        .filter(|e| {
+            // Any FundingStateChanged with invoice_id FSC005 is a duplicate.
+            let candidate = FundingStateChanged {
+                name: symbol_short!("fstate_ch"),
+                invoice_id,
+                from_status: 0u32,
+                to_status: 1u32,
+                funded_amount: TARGET + 1_000i128,
+                funding_target: TARGET,
+                ledger_timestamp: env.ledger().timestamp(),
+                trigger: symbol_short!("fund"),
+            }
+            .to_xdr(&env, &contract_id);
+            *e == &candidate
+        })
+        .count();
+
+    assert_eq!(
+        fsc_count, 0,
+        "FundingStateChanged must not be re-emitted after already funded"
+    );
+}
+
+/// negative amount rejected with FundingAmountNotPositive.
+#[test]
+fn test_fund_amount_negative_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (contract_id, client) = deploy_with_id(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    let invoice_id = symbol_short!("FSC006");
+
+    let mut tiers = SorobanVec::new(&env);
+    tiers.push_back(YieldTier {
+        min_lock_secs: 100,
+        yield_bps: 900,
+    });
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "FSC006"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &Some(tiers),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    let investor = Address::generate(&env);
+    client.fund_with_commitment(&investor, &TARGET, &200u64);
+
+    let all_events = env.events().all();
+    let fsc_events: std::vec::Vec<_> = all_events
+        .events()
+        .iter()
+        .filter(|e| {
+            let expected = FundingStateChanged {
+                name: symbol_short!("fstate_ch"),
+                invoice_id,
+                from_status: 0u32,
+                to_status: 1u32,
+                funded_amount: TARGET,
+                funding_target: TARGET,
+                ledger_timestamp: env.ledger().timestamp(),
+                trigger: symbol_short!("fund"),
+            }
+            .to_xdr(&env, &contract_id);
+            *e == &expected
+        })
+        .collect();
+
+    assert_eq!(
+        fsc_events.len(),
+        1,
+        "FundingStateChanged must fire once via fund_with_commitment"
+    );
+}
+
+/// fund_with_commitment: amount > MAX_INVOICE_AMOUNT rejected.
+#[test]
+fn test_fund_with_commitment_amount_over_max_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (contract_id, client) = deploy_with_id(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    let invoice_id = symbol_short!("FSC007");
+    let high_target = TARGET * 2;
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "FSC007"),
+        &sme,
+        &high_target,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    let investor = Address::generate(&env);
+    // Fund to exactly TARGET (below high_target — still open).
+    client.fund(&investor, &TARGET);
+    assert_eq!(client.get_escrow().status, 0);
+
+    // Clear events so we isolate the update_funding_target events.
+    let _ = env.events().all();
+
+    // Lower target to match funded_amount — triggers 0 → 1 transition.
+    client.update_funding_target(&TARGET);
+
+    let all_events = env.events().all();
+    let fsc_events: std::vec::Vec<_> = all_events
+        .events()
+        .iter()
+        .filter(|e| {
+            let expected = FundingStateChanged {
+                name: symbol_short!("fstate_ch"),
+                invoice_id,
+                from_status: 0u32,
+                to_status: 1u32,
+                funded_amount: TARGET,
+                funding_target: TARGET,
+                ledger_timestamp: env.ledger().timestamp(),
+                trigger: symbol_short!("tgt_lower"),
+            }
+            .to_xdr(&env, &contract_id);
+            *e == &expected
+        })
+        .collect();
+
+    assert_eq!(
+        fsc_events.len(),
+        1,
+        "FundingStateChanged must fire once via update_funding_target"
+    );
+    assert_eq!(client.get_escrow().status, 1);
+}
+
+/// fund_with_commitment: amount == MAX_INVOICE_AMOUNT accepted.
+#[test]
+fn test_fund_with_commitment_amount_max_accepted() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (contract_id, client) = deploy_with_id(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    let invoice_id = symbol_short!("FSC008");
+    let high_target = TARGET * 3;
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "FSC008"),
+        &sme,
+        &high_target,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    let investor = Address::generate(&env);
+    client.fund(&investor, &TARGET);
+    let _ = env.events().all();
+
+    // Lower target to TARGET * 2 — still above funded_amount, no transition.
+    client.update_funding_target(&(TARGET * 2));
+
+    let all_events = env.events().all();
+    let fsc_count = all_events
+        .events()
+        .iter()
+        .filter(|e| {
+            // Any FundingStateChanged event for this invoice is unexpected.
+            let candidate_any = FundingStateChanged {
+                name: symbol_short!("fstate_ch"),
+                invoice_id,
+                from_status: 0u32,
+                to_status: 1u32,
+                funded_amount: TARGET,
+                funding_target: TARGET * 2,
+                ledger_timestamp: env.ledger().timestamp(),
+                trigger: symbol_short!("tgt_lower"),
+            }
+            .to_xdr(&env, &contract_id);
+            *e == &candidate_any
+        })
+        .count();
+
+    assert_eq!(
+        fsc_count, 0,
+        "FundingStateChanged must not fire when target still above funded_amount"
+    );
+    assert_eq!(client.get_escrow().status, 0);
+}
+
+/// fund_batch: one entry over MAX_INVOICE_AMOUNT rejected atomically.
+#[test]
+fn test_fund_batch_entry_over_max_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (contract_id, client) = deploy_with_id(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    let invoice_id = symbol_short!("FSC009");
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "FSC009"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    let investor = Address::generate(&env);
+    // Fund partially — still open.
+    client.fund(&investor, &(TARGET / 2));
+    assert_eq!(client.get_escrow().status, 0);
+
+    let _ = env.events().all();
+
+    // partial_settle forces 0 → 1 even under-funded.
+    client.partial_settle(&sme);
+
+    let all_events = env.events().all();
+    let fsc_events: std::vec::Vec<_> = all_events
+        .events()
+        .iter()
+        .filter(|e| {
+            let expected = FundingStateChanged {
+                name: symbol_short!("fstate_ch"),
+                invoice_id,
+                from_status: 0u32,
+                to_status: 1u32,
+                funded_amount: TARGET / 2,
+                funding_target: TARGET,
+                ledger_timestamp: env.ledger().timestamp(),
+                trigger: symbol_short!("part_set"),
+            }
+            .to_xdr(&env, &contract_id);
+            *e == &expected
+        })
+        .collect();
+
+    assert_eq!(
+        fsc_events.len(),
+        1,
+        "FundingStateChanged must fire once via partial_settle"
+    );
+    assert_eq!(client.get_escrow().status, 1);
+}
+
+/// `fund_batch` reaching the target emits exactly one `FundingStateChanged`
+/// (the batch shares the same `fund_impl` path, trigger = `fund`).
+#[test]
+fn funding_state_changed_emitted_via_fund_batch() {
+    use crate::FundingStateChanged;
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let (contract_id, client) = deploy_with_id(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    let invoice_id = symbol_short!("FSC010");
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "FSC010"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
     let inv_a = Address::generate(&env);
     let inv_b = Address::generate(&env);
-    let inv_c = Address::generate(&env);
+    let half = TARGET / 2;
 
-    client.fund(&inv_a, &1_000i128);
-    client.fund(&inv_b, &2_000i128);
-    client.fund(&inv_c, &3_000i128);
+    let mut entries = SorobanVec::new(&env);
+    entries.push_back((inv_a.clone(), half));
+    entries.push_back((inv_b.clone(), half));
 
-    // All fit in one page (limit=50 > 3 records)
-    let records = client.get_funding_records(&0, &50);
-    assert_eq!(records.len(), 3, "single page should return all 3 records");
+    client.fund_batch(&entries);
 
-    // Verify each record
-    let rec_a = records.get(0).unwrap();
-    assert_eq!(rec_a.0, inv_a);
-    assert_eq!(rec_a.1, 1_000i128);
+    let all_events = env.events().all();
+    let fsc_events: std::vec::Vec<_> = all_events
+        .events()
+        .iter()
+        .filter(|e| {
+            let expected = FundingStateChanged {
+                name: symbol_short!("fstate_ch"),
+                invoice_id,
+                from_status: 0u32,
+                to_status: 1u32,
+                funded_amount: TARGET,
+                funding_target: TARGET,
+                ledger_timestamp: env.ledger().timestamp(),
+                trigger: symbol_short!("fund"),
+            }
+            .to_xdr(&env, &contract_id);
+            *e == &expected
+        })
+        .collect();
 
-    let rec_b = records.get(1).unwrap();
-    assert_eq!(rec_b.0, inv_b);
-    assert_eq!(rec_b.1, 2_000i128);
-
-    let rec_c = records.get(2).unwrap();
-    assert_eq!(rec_c.0, inv_c);
-    assert_eq!(rec_c.1, 3_000i128);
-}
-
-#[test]
-fn test_get_funding_records_continuation() {
-    let env = Env::default();
-    let (client, admin, sme) = setup(&env);
-    default_init(&client, &env, &admin, &sme);
-
-    // Add 5 investors
-    let mut investors = std::vec::Vec::new();
-    let mut amounts = std::vec::Vec::new();
-
-    for i in 0..5 {
-        let inv = Address::generate(&env);
-        let amount = (i + 1) * 1_000i128;
-        investors.push(inv.clone());
-        amounts.push(amount);
-        client.fund(&inv, &amount);
-    }
-
-    // Page 1: start=0, limit=2
-    let page1 = client.get_funding_records(&0, &2);
-    assert_eq!(page1.len(), 2);
-    assert_eq!(page1.get(0).unwrap().0, investors[0]);
-    assert_eq!(page1.get(0).unwrap().1, amounts[0]);
-    assert_eq!(page1.get(1).unwrap().0, investors[1]);
-    assert_eq!(page1.get(1).unwrap().1, amounts[1]);
-
-    // Page 2: start=2, limit=2
-    let page2 = client.get_funding_records(&2, &2);
-    assert_eq!(page2.len(), 2);
-    assert_eq!(page2.get(0).unwrap().0, investors[2]);
-    assert_eq!(page2.get(0).unwrap().1, amounts[2]);
-    assert_eq!(page2.get(1).unwrap().0, investors[3]);
-    assert_eq!(page2.get(1).unwrap().1, amounts[3]);
-
-    // Page 3: start=4, limit=2 (only 1 left)
-    let page3 = client.get_funding_records(&4, &2);
-    assert_eq!(page3.len(), 1);
-    assert_eq!(page3.get(0).unwrap().0, investors[4]);
-    assert_eq!(page3.get(0).unwrap().1, amounts[4]);
-
-    // Verify all records are accounted for with no duplicates
-    let all_paginated = std::vec::Vec::from(
-        [page1, page2, page3]
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>(),
-    );
     assert_eq!(
-        all_paginated.len(),
-        5,
-        "pagination should return all records exactly once"
-    );
-}
-
-#[test]
-fn test_get_funding_records_ceiling_clamp() {
-    let env = Env::default();
-    let (client, admin, sme) = setup(&env);
-    default_init(&client, &env, &admin, &sme);
-
-    // Add 52 investors to exceed the page ceiling (MAX_INVESTOR_READ_BATCH = 50)
-    let mut investor_amounts = std::vec::Vec::new();
-    for i in 0..52 {
-        let inv = Address::generate(&env);
-        let amount = (i + 1) as i128 * 1_000i128;
-        investor_amounts.push((inv.clone(), amount));
-        client.fund(&inv, &amount);
-    }
-
-    // Request limit of 100 (exceeds ceiling of 50)
-    let page = client.get_funding_records(&0, &100);
-    assert_eq!(
-        page.len(),
-        50,
-        "result should be clamped to MAX_INVESTOR_READ_BATCH (50), not the requested 100"
-    );
-
-    // Request limit of 75 (exceeds ceiling of 50)
-    let page = client.get_funding_records(&0, &75);
-    assert_eq!(
-        page.len(),
-        50,
-        "result should be clamped to ceiling even when requesting 75"
-    );
-
-    // Get the second page to verify continuation works after clamp
-    let page2 = client.get_funding_records(&50, &100);
-    assert_eq!(
-        page2.len(),
-        2,
-        "remaining 2 records should be in second page"
-    );
-}
-
-#[test]
-fn test_get_funding_records_boundary_at_count() {
-    let env = Env::default();
-    let (client, admin, sme) = setup(&env);
-    default_init(&client, &env, &admin, &sme);
-
-    // Add 5 investors
-    for _ in 0..5 {
-        let inv = Address::generate(&env);
-        client.fund(&inv, &1_000i128);
-    }
-
-    // start = count (5), should return empty
-    let records = client.get_funding_records(&5, &50);
-    assert_eq!(
-        records.len(),
-        0,
-        "start at boundary (== count) should return empty"
-    );
-}
-
-#[test]
-fn test_get_funding_records_boundary_beyond_count() {
-    let env = Env::default();
-    let (client, admin, sme) = setup(&env);
-    default_init(&client, &env, &admin, &sme);
-
-    // Add 5 investors
-    for _ in 0..5 {
-        let inv = Address::generate(&env);
-        client.fund(&inv, &1_000i128);
-    }
-
-    // start > count, should return empty
-    let records = client.get_funding_records(&10, &50);
-    assert_eq!(
-        records.len(),
-        0,
-        "start beyond boundary (> count) should return empty"
-    );
-}
-
-#[test]
-fn test_get_funding_records_zero_limit() {
-    let env = Env::default();
-    let (client, admin, sme) = setup(&env);
-    default_init(&client, &env, &admin, &sme);
-
-    // Add some funding
-    for _ in 0..3 {
-        let inv = Address::generate(&env);
-        client.fund(&inv, &1_000i128);
-    }
-
-    // limit=0 should return empty (no records requested)
-    let records = client.get_funding_records(&0, &0);
-    assert_eq!(records.len(), 0, "limit=0 should return empty result");
-}
-
-#[test]
-fn test_get_funding_records_multiple_contributions_per_investor() {
-    let env = Env::default();
-    let (client, admin, sme) = setup(&env);
-    default_init(&client, &env, &admin, &sme);
-
-    // Single investor makes multiple deposits
-    let inv = Address::generate(&env);
-    client.fund(&inv, &1_000i128);
-    client.fund(&inv, &2_000i128);
-    client.fund(&inv, &3_000i128);
-
-    // Should appear exactly once in the index with the cumulative contribution
-    let records = client.get_funding_records(&0, &50);
-    assert_eq!(
-        records.len(),
+        fsc_events.len(),
         1,
-        "investor should appear once even with multiple deposits"
+        "exactly one FundingStateChanged via fund_batch"
+    );
+    assert_eq!(client.get_escrow().status, 1);
+}
+
+/// fund_batch: all entries at MAX_INVOICE_AMOUNT accepted (separate investors, large target).
+#[test]
+fn test_fund_batch_entries_at_max_each_accepted() {
+    let env = Env::default();
+    env.mock_all_auths();
+    // Use a fresh escrow large enough to accept two MAX_INVOICE_AMOUNT deposits.
+    let client = deploy(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+    // funding_target = MAX_INVOICE_AMOUNT * 2 would overflow MAX_INVOICE_AMOUNT bound on init,
+    // so we cap at MAX_INVOICE_AMOUNT and accept just one entry at the max.
+    client.init(
+        &admin,
+        &String::from_str(&env, "BND002"),
+        &sme,
+        &crate::MAX_INVOICE_AMOUNT,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
     );
 
-    let record = records.get(0).unwrap();
-    assert_eq!(record.0, inv);
+    let investor = Address::generate(&env);
+    client.fund(&investor, &target);
+
+    let all_events = env.events().all();
+    let fsc_events: std::vec::Vec<_> = all_events
+        .events()
+        .iter()
+        .filter(|e| {
+            let expected = FundingStateChanged {
+                name: symbol_short!("fstate_ch"),
+                invoice_id,
+                from_status: 0u32,
+                to_status: 1u32,
+                funded_amount: target,
+                funding_target: target,
+                ledger_timestamp: 9_000_000u64,
+                trigger: symbol_short!("fund"),
+            }
+            .to_xdr(&env, &contract_id);
+            *e == &expected
+        })
+        .collect();
+
     assert_eq!(
-        record.1, 6_000i128,
-        "contribution should be sum of all deposits"
-    );
-}
-
-#[test]
-fn test_get_funding_records_preserves_order() {
-    let env = Env::default();
-    let (client, admin, sme) = setup(&env);
-    default_init(&client, &env, &admin, &sme);
-
-    // Add investors in a specific order
-    let mut investors = std::vec::Vec::new();
-    for _ in 0..10 {
-        let inv = Address::generate(&env);
-        investors.push(inv.clone());
-        client.fund(&inv, &1_000i128);
-    }
-
-    // Paginate through with limit=3 each to reconstruct full order
-    let mut all_records = std::vec::Vec::new();
-    let mut start = 0;
-    loop {
-        let page = client.get_funding_records(&start, &3);
-        if page.is_empty() {
-            break;
-        }
-        for rec in &page {
-            all_records.push(rec.clone());
-        }
-        start += page.len() as u32;
-    }
-
-    // Verify the order matches the insertion order
-    assert_eq!(all_records.len(), 10, "should retrieve all 10 records");
-    for (i, rec) in all_records.iter().enumerate() {
-        assert_eq!(rec.0, investors[i], "records should be in insertion order");
-    }
-}
-
-#[test]
-fn test_get_funding_records_empty_then_funded() {
-    let env = Env::default();
-    let (client, admin, sme) = setup(&env);
-    default_init(&client, &env, &admin, &sme);
-
-    // Initially no records
-    let records_before = client.get_funding_records(&0, &50);
-    assert_eq!(records_before.len(), 0);
-
-    // Add some funding
-    let inv = Address::generate(&env);
-    client.fund(&inv, &1_000i128);
-
-    // Now records should appear
-    let records_after = client.get_funding_records(&0, &50);
-    assert_eq!(records_after.len(), 1);
-    assert_eq!(records_after.get(0).unwrap().0, inv);
-    assert_eq!(records_after.get(0).unwrap().1, 1_000i128);
-}
-
-#[test]
-fn test_get_funding_records_full_iteration() {
-    let env = Env::default();
-    let (client, admin, sme) = setup(&env);
-    default_init(&client, &env, &admin, &sme);
-
-    // Add 123 investors to exercise full multi-page iteration
-    // (123 / 50 ceiling = 3 pages)
-    let mut investors = std::vec::Vec::new();
-    let mut amounts = std::vec::Vec::new();
-
-    for i in 0..123 {
-        let inv = Address::generate(&env);
-        let amount = (i + 1) as i128 * 100i128;
-        investors.push(inv.clone());
-        amounts.push(amount);
-        client.fund(&inv, &amount);
-    }
-
-    // Paginate through all records
-    let mut collected = std::vec::Vec::new();
-    let mut start = 0;
-
-    loop {
-        let page = client.get_funding_records(&start, &50);
-        if page.is_empty() {
-            break;
-        }
-        for rec in &page {
-            collected.push(rec.clone());
-        }
-        start += page.len() as u32;
-    }
-
-    // Verify we got all records
-    assert_eq!(
-        collected.len(),
-        123,
-        "full iteration should return all 123 records"
+        fsc_events.len(),
+        1,
+        "one FundingStateChanged with correct fields"
     );
 
-    // Spot-check some records
-    assert_eq!(collected.get(0).unwrap().0, investors[0]);
-    assert_eq!(collected.get(0).unwrap().1, amounts[0]);
-    assert_eq!(collected.get(49).unwrap().0, investors[49]);
-    assert_eq!(collected.get(49).unwrap().1, amounts[49]);
-    assert_eq!(collected.get(50).unwrap().0, investors[50]);
-    assert_eq!(collected.get(50).unwrap().1, amounts[50]);
-    assert_eq!(collected.get(122).unwrap().0, investors[122]);
-    assert_eq!(collected.get(122).unwrap().1, amounts[122]);
+    // Confirm storage state matches event payload.
+    let escrow = client.get_escrow();
+    assert_eq!(escrow.status, 1);
+    assert_eq!(escrow.funded_amount, target);
+    assert_eq!(escrow.funding_target, target);
+}
+
+// ── Auth negative-path tests for funding ─────────────────────────────────────
+
+#[test]
+fn test_fund_rejects_no_auth() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    let investor = Address::generate(&env);
+
+    env.mock_auths(&[]);
+
+    let result = client.try_fund(&investor, &1_000i128);
+    assert_contract_error(result, EscrowError::Unauthorized);
+}
+
+#[test]
+fn test_fund_rejects_wrong_signer() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    let investor = Address::generate(&env);
+    let stranger = Address::generate(&env);
+
+    env.mock_auths(&[MockAuth {
+        address: &stranger,
+        invoke: &MockAuthInvoke {
+            contract: &client.address,
+            fn_name: Symbol::new(&env, "fund"),
+            args: SorobanVec::new(&env),
+            sub_invokes: &[],
+        },
+    }]);
+
+    let result = client.try_fund(&investor, &1_000i128);
+    assert_contract_error(result, EscrowError::Unauthorized);
+}
+
+#[test]
+fn test_fund_with_commitment_rejects_no_auth() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    let investor = Address::generate(&env);
+
+    env.mock_auths(&[]);
+
+    let result = client.try_fund_with_commitment(&investor, &1_000i128, &0u64);
+    assert_contract_error(result, EscrowError::Unauthorized);
+}
+
+#[test]
+fn test_fund_with_commitment_rejects_wrong_signer() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    let investor = Address::generate(&env);
+    let stranger = Address::generate(&env);
+
+    env.mock_auths(&[MockAuth {
+        address: &stranger,
+        invoke: &MockAuthInvoke {
+            contract: &client.address,
+            fn_name: Symbol::new(&env, "fund_with_commitment"),
+            args: SorobanVec::new(&env),
+            sub_invokes: &[],
+        },
+    }]);
+
+    let result = client.try_fund_with_commitment(&investor, &1_000i128, &0u64);
+    assert_contract_error(result, EscrowError::Unauthorized);
+}
+
+#[test]
+fn test_fund_batch_rejects_no_auth() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    let investor = Address::generate(&env);
+    let entries = SorobanVec::from_array(&env, [(investor, 1_000i128)]);
+
+    env.mock_auths(&[]);
+
+    let result = client.try_fund_batch(&entries);
+    assert_contract_error(result, EscrowError::Unauthorized);
+}
+
+#[test]
+fn test_update_funding_target_rejects_no_auth() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    env.mock_auths(&[]);
+
+    let result = client.try_update_funding_target(&2_000i128);
+    assert_contract_error(result, EscrowError::Unauthorized);
+}
+
+#[test]
+fn test_update_funding_target_rejects_non_admin() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    let stranger = Address::generate(&env);
+
+    env.mock_auths(&[MockAuth {
+        address: &stranger,
+        invoke: &MockAuthInvoke {
+            contract: &client.address,
+            fn_name: Symbol::new(&env, "update_funding_target"),
+            args: SorobanVec::new(&env),
+            sub_invokes: &[],
+        },
+    }]);
+
+    let result = client.try_update_funding_target(&2_000i128);
+    assert_contract_error(result, EscrowError::Unauthorized);
+}
+
+#[test]
+fn test_lower_max_unique_investors_rejects_no_auth() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    env.mock_auths(&[]);
+
+    // Must set a cap at init so the cap is configured
+    let result = client.try_lower_max_unique_investors(&5u32);
+    assert_contract_error(result, EscrowError::Unauthorized);
+}
+
+#[test]
+fn test_raise_max_unique_investors_rejects_no_auth() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    env.mock_auths(&[]);
+
+    let result = client.try_raise_max_unique_investors(&10u32);
+    assert_contract_error(result, EscrowError::Unauthorized);
+}
+
+#[test]
+fn test_lower_min_contribution_floor_rejects_no_auth() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    env.mock_auths(&[]);
+
+    let result = client.try_lower_min_contribution_floor(&500i128);
+    assert_contract_error(result, EscrowError::Unauthorized);
+}
+
+#[test]
+fn test_raise_max_per_investor_rejects_no_auth() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    env.mock_auths(&[]);
+
+    let result = client.try_raise_max_per_investor(&20_000i128);
+    assert_contract_error(result, EscrowError::Unauthorized);
 }

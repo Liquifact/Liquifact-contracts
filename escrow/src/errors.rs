@@ -71,13 +71,25 @@ pub enum EscrowError {
     ContractPaused = 201,
 
     // -------------------------------------------------------------------------
-    // Fees Limit Errors (170..179)
-    // -------------------------------------------------------------------------
-    FeesLimitOutOfRange = 170,
-    ProtocolFeeBpsOutOfRange = 171,
-
-    // -------------------------------------------------------------------------
     // SME Collateral Errors (300..309)
     // -------------------------------------------------------------------------
     NoCollateralToClear = 300,
+
+    // -------------------------------------------------------------------------
+    // Pause Configuration & Rate-Limit Errors (230..239)
+    // -------------------------------------------------------------------------
+    /// [`LiquifactEscrow::set_pause_max_duration`] received a duration outside
+    /// [`MIN_PAUSE_MAX_DURATION_SECS`]..=[`MAX_PAUSE_MAX_DURATION_SECS`]. Zero is always allowed.
+    PauseMaxDurationOutOfRange = 230,
+    /// [`LiquifactEscrow::set_pause_rate_limit`] received a toggle limit outside
+    /// [`MIN_PAUSE_TOGGLE_LIMIT`]..=[`MAX_PAUSE_TOGGLE_LIMIT`]. Zero is allowed only with zero window.
+    PauseToggleLimitOutOfRange = 231,
+    /// [`LiquifactEscrow::set_pause_rate_limit`] received a window outside
+    /// [`MIN_PAUSE_TOGGLE_WINDOW_SECS`]..=[`MAX_PAUSE_TOGGLE_WINDOW_SECS`]. Zero is allowed only with zero toggles.
+    PauseToggleWindowOutOfRange = 232,
+    /// [`LiquifactEscrow::set_pause_rate_limit`] received an inconsistent configuration:
+    /// nonzero toggles must have a nonzero window, and nonzero window must have nonzero toggles.
+    PauseRateLimitInvalidCombination = 233,
+    /// [`LiquifactEscrow::set_paused`] blocked because the admin has exceeded the configured pause toggle rate limit.
+    PauseToggleRateLimitExceeded = 234,
 }

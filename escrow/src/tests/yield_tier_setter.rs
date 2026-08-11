@@ -1,203 +1,256 @@
-use super::super::tests::assert_contract_error;
-use super::super::{
-    EscrowError, LiquifactEscrow, LiquifactEscrowClient, YieldTier, YieldTierTableUpdated,
-};
-use soroban_sdk::{
-    symbol_short,
-    testutils::{Address as _, Events},
-    Address, Env, Event, Vec as SorobanVec,
-};
+#![cfg(test)]
+//! Tests for the admin-guarded yield-tier setter (issue #1090).
+//!
+//! Coverage:
+//! - an in-bounds ladder is accepted, persisted, and read back through `get_yield_tiers`
+//! - each individual bound is rejected with `EscrowError::YieldTierTableInvalid`
+//! - a rejected call leaves the previously stored ladder untouched
+//! - a caller without admin authorization is rejected
 
-fn deploy(env: &Env) -> LiquifactEscrowClient<'_> {
-    let id = env.register(LiquifactEscrow, ());
-    LiquifactEscrowClient::new(env, &id)
-}
+use soroban_sdk::{testutils::Address as _, vec, Address, Env};
 
-fn init_escrow(env: &Env, client: &LiquifactEscrowClient) -> (Address, Address) {
-    let admin = Address::generate(env);
-    let sme = Address::generate(env);
-    let token = Address::generate(env);
-    let treasury = Address::generate(env);
-    client.init(
-        &admin,
-        &soroban_sdk::String::from_str(env, "YTTSET01"),
-        &sme,
-        &10_000i128,
-        &800i64,
-        &0u64,
-        &token,
-        &None,
-        &treasury,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None::<i64>,
-    );
-    (admin, sme)
-}
+use super::{assert_contract_error, default_init, setup, YieldTier};
+use crate::EscrowError;
 
-fn make_tier(env: &Env, lock: u64, bps: i64) -> YieldTier {
-    YieldTier {
-        min_lock_secs: lock,
-        yield_bps: bps,
-    }
+/// A well-formed two-tier ladder: strictly increasing locks, non-decreasing bps, in range.
+fn valid_tiers(env: &Env) -> soroban_sdk::Vec<YieldTier> {
+    vec![
+        env,
+        YieldTier {
+            min_lock_secs: 30 * 86_400,
+            yield_bps: 500,
+        },
+        YieldTier {
+            min_lock_secs: 90 * 86_400,
+            yield_bps: 900,
+        },
+    ]
 }
 
 #[test]
-fn test_set_yield_tiers_and_read_back() {
+fn set_yield_tiers_accepts_in_bounds_table() {
     let env = Env::default();
-    env.mock_all_auths();
-    let client = deploy(&env);
-    let (admin, _) = init_escrow(&env, &client);
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
 
-    let mut tiers: SorobanVec<YieldTier> = SorobanVec::new(&env);
-    tiers.push_back(make_tier(&env, 86_400, 200));
-    tiers.push_back(make_tier(&env, 604_800, 500));
-
+    let tiers = valid_tiers(&env);
     client.set_yield_tiers(&tiers);
 
-    let read_back = client.get_yield_tiers();
-    assert_eq!(read_back.len(), 2);
-    assert_eq!(read_back.get_unchecked(0), tiers.get_unchecked(0));
-    assert_eq!(read_back.get_unchecked(1), tiers.get_unchecked(1));
+    let stored = client.get_yield_tiers();
+    assert_eq!(stored.len(), 2);
+    assert_eq!(stored.get(0).unwrap().min_lock_secs, 30 * 86_400);
+    assert_eq!(stored.get(0).unwrap().yield_bps, 500);
+    assert_eq!(stored.get(1).unwrap().min_lock_secs, 90 * 86_400);
+    assert_eq!(stored.get(1).unwrap().yield_bps, 900);
 }
 
 #[test]
-#[should_panic]
-fn test_set_yield_tiers_requires_admin_auth() {
+fn set_yield_tiers_replaces_the_whole_table() {
     let env = Env::default();
-    env.mock_all_auths();
-    let client = deploy(&env);
-    let (admin, _) = init_escrow(&env, &client);
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
 
-    let mut tiers: SorobanVec<YieldTier> = SorobanVec::new(&env);
-    tiers.push_back(make_tier(&env, 86_400, 200));
+    client.set_yield_tiers(&valid_tiers(&env));
+    assert_eq!(client.get_yield_tiers().len(), 2);
 
-    env.mock_auths(&[]);
-    client.set_yield_tiers(&tiers);
+    // A shorter ladder must replace, not merge with, the previous one.
+    client.set_yield_tiers(&vec![
+        &env,
+        YieldTier {
+            min_lock_secs: 1,
+            yield_bps: 0,
+        },
+    ]);
+
+    let stored = client.get_yield_tiers();
+    assert_eq!(stored.len(), 1);
+    assert_eq!(stored.get(0).unwrap().min_lock_secs, 1);
+    assert_eq!(stored.get(0).unwrap().yield_bps, 0);
 }
 
 #[test]
-fn test_set_yield_tiers_rejects_empty() {
+fn set_yield_tiers_accepts_boundary_values() {
     let env = Env::default();
-    env.mock_all_auths();
-    let client = deploy(&env);
-    let (admin, _) = init_escrow(&env, &client);
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
 
-    let tiers: SorobanVec<YieldTier> = SorobanVec::new(&env);
+    // yield_bps == 0 and yield_bps == 10_000 are both inclusive bounds.
+    client.set_yield_tiers(&vec![
+        &env,
+        YieldTier {
+            min_lock_secs: 1,
+            yield_bps: 0,
+        },
+        YieldTier {
+            min_lock_secs: 2,
+            yield_bps: 10_000,
+        },
+    ]);
+
+    let stored = client.get_yield_tiers();
+    assert_eq!(stored.get(0).unwrap().yield_bps, 0);
+    assert_eq!(stored.get(1).unwrap().yield_bps, 10_000);
+}
+
+#[test]
+fn set_yield_tiers_rejects_empty_table() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+
     assert_contract_error(
-        client.try_set_yield_tiers(&tiers),
+        client.try_set_yield_tiers(&vec![&env]),
         EscrowError::YieldTierTableInvalid,
     );
 }
 
 #[test]
-fn test_set_yield_tiers_rejects_negative_bps() {
+fn set_yield_tiers_rejects_yield_bps_above_max() {
     let env = Env::default();
-    env.mock_all_auths();
-    let client = deploy(&env);
-    let (admin, _) = init_escrow(&env, &client);
-
-    let mut tiers: SorobanVec<YieldTier> = SorobanVec::new(&env);
-    tiers.push_back(make_tier(&env, 86_400, -1));
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
 
     assert_contract_error(
-        client.try_set_yield_tiers(&tiers),
+        client.try_set_yield_tiers(&vec![
+            &env,
+            YieldTier {
+                min_lock_secs: 1,
+                yield_bps: 10_001,
+            },
+        ]),
         EscrowError::YieldTierTableInvalid,
     );
 }
 
 #[test]
-fn test_set_yield_tiers_rejects_bps_over_10000() {
+fn set_yield_tiers_rejects_negative_yield_bps() {
     let env = Env::default();
-    env.mock_all_auths();
-    let client = deploy(&env);
-    let (admin, _) = init_escrow(&env, &client);
-
-    let mut tiers: SorobanVec<YieldTier> = SorobanVec::new(&env);
-    tiers.push_back(make_tier(&env, 86_400, 10_001));
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
 
     assert_contract_error(
-        client.try_set_yield_tiers(&tiers),
+        client.try_set_yield_tiers(&vec![
+            &env,
+            YieldTier {
+                min_lock_secs: 1,
+                yield_bps: -1,
+            },
+        ]),
         EscrowError::YieldTierTableInvalid,
     );
 }
 
 #[test]
-fn test_set_yield_tiers_rejects_non_increasing_locks() {
+fn set_yield_tiers_rejects_zero_first_lock() {
     let env = Env::default();
-    env.mock_all_auths();
-    let client = deploy(&env);
-    let (admin, _) = init_escrow(&env, &client);
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
 
-    let mut tiers: SorobanVec<YieldTier> = SorobanVec::new(&env);
-    tiers.push_back(make_tier(&env, 86_400, 200));
-    tiers.push_back(make_tier(&env, 86_400, 300));
-
+    // prev_lock starts at 0, so the first tier must declare a strictly positive lock.
     assert_contract_error(
-        client.try_set_yield_tiers(&tiers),
+        client.try_set_yield_tiers(&vec![
+            &env,
+            YieldTier {
+                min_lock_secs: 0,
+                yield_bps: 100,
+            },
+        ]),
         EscrowError::YieldTierTableInvalid,
     );
 }
 
 #[test]
-fn test_set_yield_tiers_rejects_decreasing_yields() {
+fn set_yield_tiers_rejects_non_increasing_locks() {
     let env = Env::default();
-    env.mock_all_auths();
-    let client = deploy(&env);
-    let (admin, _) = init_escrow(&env, &client);
-
-    let mut tiers: SorobanVec<YieldTier> = SorobanVec::new(&env);
-    tiers.push_back(make_tier(&env, 86_400, 300));
-    tiers.push_back(make_tier(&env, 604_800, 200));
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
 
     assert_contract_error(
-        client.try_set_yield_tiers(&tiers),
+        client.try_set_yield_tiers(&vec![
+            &env,
+            YieldTier {
+                min_lock_secs: 100,
+                yield_bps: 100,
+            },
+            YieldTier {
+                min_lock_secs: 100,
+                yield_bps: 200,
+            },
+        ]),
         EscrowError::YieldTierTableInvalid,
     );
 }
 
 #[test]
-fn test_set_yield_tiers_emits_event() {
+fn set_yield_tiers_rejects_decreasing_yield_bps() {
     let env = Env::default();
-    env.mock_all_auths();
-    let client = deploy(&env);
-    let (admin, _) = init_escrow(&env, &client);
-    let invoice_id = client.get_escrow().invoice_id;
-    let contract_id = client.address.clone();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
 
-    let mut tiers: SorobanVec<YieldTier> = SorobanVec::new(&env);
-    tiers.push_back(make_tier(&env, 86_400, 200));
-    tiers.push_back(make_tier(&env, 604_800, 500));
-
-    client.set_yield_tiers(&tiers);
-    let events = env.events().all();
-
-    let expected = YieldTierTableUpdated {
-        name: symbol_short!("yt_upd"),
-        invoice_id,
-        tier_count: 2,
-    };
-    // Event already verified via last_event comparison above
+    assert_contract_error(
+        client.try_set_yield_tiers(&vec![
+            &env,
+            YieldTier {
+                min_lock_secs: 100,
+                yield_bps: 900,
+            },
+            YieldTier {
+                min_lock_secs: 200,
+                yield_bps: 500,
+            },
+        ]),
+        EscrowError::YieldTierTableInvalid,
+    );
 }
 
 #[test]
-fn test_set_yield_tiers_accepts_max_bps() {
+fn rejected_set_leaves_previous_table_intact() {
     let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    client.set_yield_tiers(&valid_tiers(&env));
+
+    // Second tier is out of range, so the whole call must be rejected atomically.
+    assert_contract_error(
+        client.try_set_yield_tiers(&vec![
+            &env,
+            YieldTier {
+                min_lock_secs: 10,
+                yield_bps: 100,
+            },
+            YieldTier {
+                min_lock_secs: 20,
+                yield_bps: 10_001,
+            },
+        ]),
+        EscrowError::YieldTierTableInvalid,
+    );
+
+    let stored = client.get_yield_tiers();
+    assert_eq!(stored.len(), 2);
+    assert_eq!(stored.get(0).unwrap().yield_bps, 500);
+    assert_eq!(stored.get(1).unwrap().yield_bps, 900);
+}
+
+#[test]
+fn set_yield_tiers_rejects_non_admin_caller() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    let _intruder = Address::generate(&env);
+
+    // Drop every mocked authorization so the admin require_auth gate is actually exercised.
+    env.set_auths(&[]);
+
+    let result = client.try_set_yield_tiers(&valid_tiers(&env));
+    assert!(
+        result.is_err(),
+        "set_yield_tiers must reject a caller lacking admin authorization"
+    );
+
+    // And the ladder configured at init must be unchanged.
     env.mock_all_auths();
-    let client = deploy(&env);
-    let (admin, _) = init_escrow(&env, &client);
-
-    let mut tiers: SorobanVec<YieldTier> = SorobanVec::new(&env);
-    tiers.push_back(make_tier(&env, 86_400, 10_000));
-
-    client.set_yield_tiers(&tiers);
-    let read_back = client.get_yield_tiers();
-    assert_eq!(read_back.len(), 1);
-    assert_eq!(read_back.get_unchecked(0).yield_bps, 10_000);
+    assert!(client.get_yield_tiers().is_empty());
 }

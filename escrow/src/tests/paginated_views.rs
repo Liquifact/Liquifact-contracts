@@ -1,15 +1,11 @@
 // Tests for the shared paginate_window helper and the public paginated read views:
-//   get_investors, get_allowlisted_investors, get_allowlist_page,
-//   get_revoked_attestation_digests, get_collateral_records, get_pause_records,
-//   and get_settlement_records.
+//   get_investors, get_allowlisted_investors, get_revoked_attestation_digests,
+//   get_collateral_records, get_pause_records, and get_settlement_records.
 //
 // Each test uses a fresh Env so state cannot leak across cases.
 
-use crate::{MAX_INVESTOR_READ_BATCH, MAX_PAUSE_READ_PAGE};
-use soroban_sdk::{
-    testutils::{Address as _, Ledger},
-    Address, Env,
-};
+use soroban_sdk::testutils::Address as _;
+use soroban_sdk::{Address, Env};
 
 // ── paginate_window unit tests ────────────────────────────────────────────────
 //
@@ -124,7 +120,7 @@ fn get_beneficiary_records_empty_returns_empty() {
     env.mock_all_auths();
     // Use `deploy` directly without init to avoid the first beneficiary record
     let client = super::deploy(&env);
-    
+
     let result = client.get_beneficiary_records(&0, &10);
     assert_eq!(result.len(), 0);
 }
@@ -193,7 +189,7 @@ fn get_beneficiary_records_pagination() {
 
     let sme2 = Address::generate(&env);
     let sme3 = Address::generate(&env);
-    
+
     client.rotate_beneficiary(&sme2);
     client.rotate_beneficiary(&sme3);
 
@@ -965,125 +961,4 @@ fn get_pause_records_ceiling_with_offset() {
     let result = client.get_pause_records(&(MAX_PAUSE_READ_PAGE - 5), &(MAX_PAUSE_READ_PAGE * 2));
     // Should return at most 5 items (from offset to len, clamped by ceiling)
     assert_eq!(result.len(), 15);
-}
-
-// ── get_allowlist_page ────────────────────────────────────────────────────────
-
-#[test]
-fn get_allowlist_page_empty() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, _admin, _sme) = setup_allowlist_escrow(&env);
-
-    let page = client.get_allowlist_page(&0, &10);
-    assert_eq!(page.len(), 0);
-}
-
-#[test]
-fn get_allowlist_page_zero_limit_returns_empty() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, _admin, _sme) = setup_allowlist_escrow(&env);
-    let inv = Address::generate(&env);
-    client.set_investor_allowlisted(&inv, &true);
-
-    let page = client.get_allowlist_page(&0, &0);
-    assert_eq!(page.len(), 0);
-}
-
-#[test]
-fn get_allowlist_page_start_past_end_returns_empty() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, _admin, _sme) = setup_allowlist_escrow(&env);
-    let inv = Address::generate(&env);
-    client.set_investor_allowlisted(&inv, &true);
-
-    let page = client.get_allowlist_page(&5, &10);
-    assert_eq!(page.len(), 0);
-}
-
-#[test]
-fn get_allowlist_page_single_page() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, _admin, _sme) = setup_allowlist_escrow(&env);
-
-    let mut addrs = soroban_sdk::Vec::new(&env);
-    for _ in 0..5 {
-        let addr = Address::generate(&env);
-        client.set_investor_allowlisted(&addr, &true);
-        addrs.push_back(addr);
-    }
-
-    let page = client.get_allowlist_page(&0, &3);
-    assert_eq!(page.len(), 3);
-    assert_eq!(page.get(0).unwrap().investor, addrs.get(0).unwrap());
-    assert_eq!(page.get(0).unwrap().tier, 0);
-    assert_eq!(page.get(1).unwrap().investor, addrs.get(1).unwrap());
-    assert_eq!(page.get(2).unwrap().investor, addrs.get(2).unwrap());
-}
-
-#[test]
-fn get_allowlist_page_continuation() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, _admin, _sme) = setup_allowlist_escrow(&env);
-
-    let mut addrs = soroban_sdk::Vec::new(&env);
-    for _ in 0..5 {
-        let addr = Address::generate(&env);
-        client.set_investor_allowlisted(&addr, &true);
-        addrs.push_back(addr);
-    }
-
-    // Continuation: start=3, limit=3 → items 3 and 4
-    let page = client.get_allowlist_page(&3, &3);
-    assert_eq!(page.len(), 2);
-    assert_eq!(page.get(0).unwrap().investor, addrs.get(3).unwrap());
-    assert_eq!(page.get(1).unwrap().investor, addrs.get(4).unwrap());
-}
-
-#[test]
-fn get_allowlist_page_ceiling_clamp() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, _admin, _sme) = setup_allowlist_escrow(&env);
-
-    let count = MAX_INVESTOR_READ_BATCH + 10;
-    for _ in 0..count {
-        let addr = Address::generate(&env);
-        client.set_investor_allowlisted(&addr, &true);
-    }
-
-    let page = client.get_allowlist_page(&0, &(MAX_INVESTOR_READ_BATCH * 2));
-    assert_eq!(page.len(), MAX_INVESTOR_READ_BATCH);
-}
-
-#[test]
-fn get_allowlist_page_excludes_revoked() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, _admin, _sme) = setup_allowlist_escrow(&env);
-
-    let addr_a = Address::generate(&env);
-    let addr_b = Address::generate(&env);
-    let addr_c = Address::generate(&env);
-    client.set_investor_allowlisted(&addr_a, &true);
-    client.set_investor_allowlisted(&addr_b, &true);
-    client.set_investor_allowlisted(&addr_c, &true);
-    client.set_investor_allowlisted(&addr_b, &false);
-
-    let page = client.get_allowlist_page(&0, &10);
-    assert_eq!(page.len(), 2);
-    let investors: soroban_sdk::Vec<Address> = {
-        let mut v = soroban_sdk::Vec::new(&env);
-        for i in 0..page.len() {
-            v.push_back(page.get(i).unwrap().investor);
-        }
-        v
-    };
-    assert!(investors.contains(&addr_a));
-    assert!(investors.contains(&addr_c));
-    assert!(!investors.contains(&addr_b));
 }

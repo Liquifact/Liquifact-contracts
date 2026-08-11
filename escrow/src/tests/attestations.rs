@@ -1,9 +1,12 @@
-//! Attestation tests: `bind_primary_attestation_hash` (single-set) and
-//! `append_attestation_digest` (bounded by [`MAX_ATTESTATION_APPEND_ENTRIES`]).
+//! Attestation tests: `bind_primary_attestation_hash` (single-set),
+//! `append_attestation_digest` (single-entry, bounded by [`MAX_ATTESTATION_APPEND_ENTRIES`]),
+//! and `append_attestation_digests` (batch, bounded by [`MAX_ATTESTATION_APPEND_BATCH`]).
 //!
-//! These tests prove the two chain-anchor invariants:
+//! These tests prove the chain-anchor invariants:
 //! 1. The primary hash is **write-once** — a second bind panics regardless of the digest value.
 //! 2. The append log is **capacity-bounded** — the 33rd entry panics; the 32nd succeeds.
+//! 3. The batch append entrypoint is **all-or-nothing** — any guard failure leaves the log
+//!    unchanged, and indices are assigned contiguously from the log length at call time.
 //!
 //! Neither entrypoint stores ZK proofs or performs off-chain verification. They record a
 //! 32-byte digest (e.g. SHA-256 of an IPFS CID or a KYC/KYB document bundle) so that
@@ -770,6 +773,32 @@ fn test_revoked_digests_view_pagination_and_empty_past_end() {
 }
 
 #[test]
+fn test_revoked_digests_view_zero_limit_returns_empty() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    for i in 0u8..3 {
+        client.append_attestation_digest(&digest(&env, i));
+        client.revoke_attestation_digest(&(i as u32));
+    }
+
+    let page = client.get_revoked_attestation_digests(&0, &0);
+    assert_eq!(page.len(), 0);
+}
+
+#[test]
+fn test_revoked_digests_view_large_limit_caps_to_max_page() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    for i in 0u8..25 {
+        client.append_attestation_digest(&digest(&env, i));
+        client.revoke_attestation_digest(&(i as u32));
+    }
+
+    let page = client.get_revoked_attestation_digests(&0, &(crate::MAX_ATTESTATION_READ_PAGE + 10));
+    assert_eq!(page.len(), crate::MAX_ATTESTATION_READ_PAGE);
+}
+
+#[test]
 #[ignore = "branch-specific latent failure"]
 fn test_revoked_digests_view_caps_limit() {
     let env = Env::default();
@@ -1357,24 +1386,16 @@ fn test_batch_append_emits_events_with_correct_indices() {
     let d1 = digest(&env, 0x20);
     let batch = soroban_sdk::vec![&env, d0.clone(), d1.clone()];
 
-    // Clear any prior events emitted during setup/init.
-    let events_before = env.events().all().len();
     client.append_attestation_digests(&batch);
 
     let all_events = env.events().all();
-    let new_events: soroban_sdk::Vec<_> = {
-        let mut v = soroban_sdk::Vec::new(&env);
-        for i in events_before..all_events.len() {
-            v.push_back(all_events.get(i).unwrap());
-        }
-        v
-    };
+    let new_events = all_events.events();
 
     // Expect exactly two new events.
     assert_eq!(new_events.len(), 2);
 
     assert_eq!(
-        new_events.get(0).unwrap(),
+        new_events.first().unwrap().clone(),
         AttestationDigestAppended {
             name: soroban_sdk::symbol_short!("att_app"),
             invoice_id: invoice_id.clone(),
@@ -1385,7 +1406,7 @@ fn test_batch_append_emits_events_with_correct_indices() {
     );
 
     assert_eq!(
-        new_events.get(1).unwrap(),
+        new_events.get(1).unwrap().clone(),
         AttestationDigestAppended {
             name: soroban_sdk::symbol_short!("att_app"),
             invoice_id,
@@ -1396,7 +1417,8 @@ fn test_batch_append_emits_events_with_correct_indices() {
     );
 }
 
-/// Batch append events correctly offset indices when the log is already partially filled.
+/// The index field in events emitted during batch appends must be correctly offset
+/// by the pre-existing log length.
 #[test]
 fn test_batch_append_events_offset_by_existing_log_length() {
     let env = Env::default();
@@ -1408,15 +1430,14 @@ fn test_batch_append_events_offset_by_existing_log_length() {
     client.append_attestation_digest(&digest(&env, 0x01));
     client.append_attestation_digest(&digest(&env, 0x02));
 
-    let events_before = env.events().all().len();
     let d2 = digest(&env, 0xCC);
     let batch = soroban_sdk::vec![&env, d2.clone()];
     client.append_attestation_digests(&batch);
 
     let all_events = env.events().all();
-    // The single new event must be at index 2.
+    // The single new event must be at index 2 (skipping initial 2).
     assert_eq!(
-        all_events.get(events_before).unwrap(),
+        all_events.events().first().unwrap().clone(),
         AttestationDigestAppended {
             name: soroban_sdk::symbol_short!("att_app"),
             invoice_id,
@@ -1458,7 +1479,7 @@ fn test_batch_append_interleaved_with_single_appends() {
 
 /// Batch-appended entries are independently revocable after insertion.
 #[test]
-fn test_revoke_out_of_range_no_event_emitted() {
+fn test_batch_append_entries_are_revocable() {
     let env = Env::default();
     let (client, _) = setup_with_init(&env);
 

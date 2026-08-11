@@ -1,14 +1,39 @@
 use crate::tests::{assert_contract_error, setup};
 use crate::EscrowError;
 use crate::{DEFAULT_SETTLEMENT_LIMIT, MAX_SETTLEMENT_LIMIT, MIN_SETTLEMENT_LIMIT};
-use soroban_sdk::{testutils::Address as _, Address, Env, Error, IntoVal};
+use soroban_sdk::{testutils::Address as _, Address, Env, IntoVal, Vec as SorobanVec};
+
+fn init_escrow(env: &Env, client: &crate::LiquifactEscrowClient, admin: &Address, sme: &Address) {
+    let token = Address::generate(env);
+    let treasury = Address::generate(env);
+    client.init(
+        admin,
+        &soroban_sdk::String::from_str(env, "SETL001"),
+        sme,
+        &10_000i128,
+        &800i64,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+}
 
 #[test]
 fn default_settlement_limit() {
     let env = Env::default();
     let (client, _admin, _sme) = setup(&env);
 
-    // Check default limit
+    // Check default limit before init.
     let limit = client.get_settlement_limit();
     assert_eq!(limit, DEFAULT_SETTLEMENT_LIMIT);
 }
@@ -16,7 +41,8 @@ fn default_settlement_limit() {
 #[test]
 fn admin_sets_settlement_limit() {
     let env = Env::default();
-    let (client, admin, _sme) = setup(&env);
+    let (client, admin, sme) = setup(&env);
+    init_escrow(&env, &client, &admin, &sme);
 
     client.set_settlement_limit(&50);
     assert_eq!(client.get_settlement_limit(), 50);
@@ -31,7 +57,8 @@ fn admin_sets_settlement_limit() {
 #[test]
 fn set_settlement_limit_out_of_range() {
     let env = Env::default();
-    let (client, _admin, _sme) = setup(&env);
+    let (client, admin, sme) = setup(&env);
+    init_escrow(&env, &client, &admin, &sme);
 
     assert_contract_error(
         client.try_set_settlement_limit(&(MIN_SETTLEMENT_LIMIT - 1)),
@@ -61,7 +88,6 @@ fn non_admin_cannot_set_settlement_limit() {
         },
     }]);
 
-    // Should fail with an auth error or admin required error depending on require_auth/require_admin implementation
     let result = client.try_set_settlement_limit(&50u32);
     assert!(result.is_err());
 }

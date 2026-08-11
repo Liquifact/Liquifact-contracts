@@ -66,6 +66,7 @@
 //! Security takeaway: this is not relying on "non-reentrancy" as a magic property. It enforces
 //! post-call accounting invariants at the external-call boundary where token behavior is observed.
 
+use crate::{ensure, fail, EscrowError};
 use soroban_sdk::{token::TokenClient, Address, Env, MuxedAddress};
 
 /// Transfer `amount` of `token_addr` from `from` (typically this escrow contract) to `treasury`,
@@ -109,30 +110,38 @@ pub fn transfer_funding_token_with_balance_checks(
     treasury: &Address,
     amount: i128,
 ) {
-    if amount <= 0 {
-        return;
-    }
+    ensure(env, amount > 0, EscrowError::TransferAmountNotPositive);
     let token = TokenClient::new(env, token_addr);
     let from_before = token.balance(from);
     let treasury_before = token.balance(treasury);
-    if from_before < amount {
-        return;
-    }
+    ensure(
+        env,
+        from_before >= amount,
+        EscrowError::InsufficientTokenBalanceBeforeTransfer,
+    );
 
     token.transfer(from, MuxedAddress::from(treasury.clone()), &amount);
 
     let from_after = token.balance(from);
     let treasury_after = token.balance(treasury);
 
-    let spent = from_before - from_after;
-    let received = treasury_after - treasury_before;
+    let spent = from_before
+        .checked_sub(from_after)
+        .unwrap_or_else(|| fail(env, EscrowError::SenderBalanceUnderflow));
+    let received = treasury_after
+        .checked_sub(treasury_before)
+        .unwrap_or_else(|| fail(env, EscrowError::RecipientBalanceUnderflow));
 
-    if spent != amount {
-        return;
-    }
-    if received != amount {
-        // delta mismatch – invariant violated
-    }
+    ensure(
+        env,
+        spent == amount,
+        EscrowError::SenderBalanceDeltaMismatch,
+    );
+    ensure(
+        env,
+        received == amount,
+        EscrowError::RecipientBalanceDeltaMismatch,
+    );
 }
 
 /// Transfer `amount` of `token` from `from` (external payer) to `to_contract` (this escrow contract),
@@ -178,28 +187,36 @@ pub fn transfer_into_escrow_with_balance_checks(
     to_contract: &Address,
     amount: i128,
 ) {
-    if amount <= 0 {
-        return;
-    }
+    ensure(env, amount > 0, EscrowError::TransferAmountNotPositive);
     let token_client = TokenClient::new(env, token);
     let from_before = token_client.balance(from);
     let contract_before = token_client.balance(to_contract);
-    if from_before < amount {
-        return;
-    }
+    ensure(
+        env,
+        from_before >= amount,
+        EscrowError::InsufficientTokenBalanceBeforeTransfer,
+    );
 
     token_client.transfer(from, MuxedAddress::from(to_contract.clone()), &amount);
 
     let from_after = token_client.balance(from);
     let contract_after = token_client.balance(to_contract);
 
-    let spent = from_before - from_after;
-    let received = contract_after - contract_before;
+    let spent = from_before
+        .checked_sub(from_after)
+        .unwrap_or_else(|| fail(env, EscrowError::SenderBalanceUnderflow));
+    let received = contract_after
+        .checked_sub(contract_before)
+        .unwrap_or_else(|| fail(env, EscrowError::RecipientBalanceUnderflow));
 
-    if received != amount {
-        return;
-    }
-    if spent < 0 {
-        // delta mismatch – invariant violated
-    }
+    ensure(
+        env,
+        received == amount,
+        EscrowError::RecipientBalanceDeltaMismatch,
+    );
+    ensure(
+        env,
+        spent >= 0, // sender delta is non-positive (sender spent at least some tokens)
+        EscrowError::SenderBalanceDeltaMismatch,
+    );
 }
