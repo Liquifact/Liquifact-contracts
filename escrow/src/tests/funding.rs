@@ -6380,7 +6380,6 @@ fn assert_preview_matches_actual(
     lock: u64,
 ) {
     let preview = client.preview_yield_tier(&amount, &lock);
-    let (preview_bps, preview_lock) = (preview.effective_yield_bps, preview.matched_lock_secs);
     let investor = Address::generate(env);
     sac_admin.mint(&investor, &amount);
     client.fund_with_commitment(&investor, &amount, &lock);

@@ -1072,6 +1072,19 @@ pub struct YieldTier {
     pub yield_bps: i64,
 }
 
+/// Named result returned by [`LiquifactEscrow::preview_yield_tier`].
+///
+/// This replaces the former `(i64, u64)` tuple so contract clients can identify
+/// each value without relying on its position in the ABI.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct YieldTierPreview {
+    /// Yield in basis points selected for the proposed commitment.
+    pub effective_yield_bps: i64,
+    /// Minimum lock duration of the matched tier, or `0` when the base yield applies.
+    pub matched_lock_secs: u64,
+}
+
 /// Immutable record of a single protocol-fee disbursement appended to [`DataKey::FeeIndex`]
 /// by [`LiquifactEscrow::withdraw`] whenever `fee > 0`.
 ///
@@ -3673,9 +3686,9 @@ impl LiquifactEscrow {
 
     /// Pure read — no auth, no storage writes, safe for simulation.
     ///
-    /// Returns `(effective_yield_bps, matched_lock_secs)` for a hypothetical contribution of
-    /// `amount` with `lock` seconds, using the **exact same tier-selection rule** applied at
-    /// the first [`LiquifactEscrow::fund_with_commitment`] deposit.
+    /// Returns a [`YieldTierPreview`] for a hypothetical contribution of `amount` with `lock`
+    /// seconds, using the **exact same tier-selection rule** applied at the first
+    /// [`LiquifactEscrow::fund_with_commitment`] deposit.
     ///
     /// The `amount` parameter is accepted to mirror the `fund_with_commitment` signature and
     /// enable future amount-based tier selection; it is not used in the current lock-only
@@ -3690,10 +3703,15 @@ impl LiquifactEscrow {
     ///
     /// > **Note:** this preview reflects the rule applied at **first deposit only**. A
     /// > follow-on [`LiquifactEscrow::fund`] call does not re-select a tier.
-    pub fn preview_yield_tier(env: Env, amount: i128, lock: u64) -> (i64, u64) {
+    pub fn preview_yield_tier(env: Env, amount: i128, lock: u64) -> YieldTierPreview {
         let _ = amount; // accepted for signature parity with fund_with_commitment; unused in lock-only selection
         let escrow = Self::get_escrow(env.clone());
-        Self::effective_yield_for_commitment(&env, escrow.yield_bps, lock)
+        let (effective_yield_bps, matched_lock_secs) =
+            Self::effective_yield_for_commitment(&env, escrow.yield_bps, lock);
+        YieldTierPreview {
+            effective_yield_bps,
+            matched_lock_secs,
+        }
     }
 
     /// Retrieve the currently recorded SME collateral commitment metadata from storage.
