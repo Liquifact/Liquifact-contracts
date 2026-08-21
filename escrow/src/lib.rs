@@ -240,8 +240,19 @@ pub const MAX_INVOICE_AMOUNT: i128 = (1i128 << 63) - 1; // floor(√(i128::MAX /
 /// Mirrors the spirit of `MAX_ATTESTATION_APPEND_ENTRIES` to limit per-call work.
 pub const MAX_FUND_BATCH: u32 = 50;
 
-/// Upper bound on [`LiquifactEscrow::settle_batch`] entries to keep storage/CPU bounded.
-pub const MAX_SETTLE_BATCH: u32 = 50;
+/// Default ceiling on the number of escrow addresses [`LiquifactEscrow::settle_batch`]
+/// processes in a single call when no admin override is stored under [`DataKey::SettlementLimit`].
+pub const DEFAULT_SETTLEMENT_LIMIT: u32 = 50;
+
+/// Minimum allowed value for [`LiquifactEscrow::set_settlement_limit`].
+///
+/// One is the smallest meaningful batch size; zero would make every batch call invalid.
+pub const MIN_SETTLEMENT_LIMIT: u32 = 1;
+
+/// Maximum allowed value for [`LiquifactEscrow::set_settlement_limit`].
+///
+/// Keeps per-call CPU/storage work bounded for batch settlement.
+pub const MAX_SETTLEMENT_LIMIT: u32 = 100;
 
 /// Upper bound on [`LiquifactEscrow::refund_batch`] entries to keep storage/CPU bounded.
 pub const MAX_REFUND_BATCH: u32 = 50;
@@ -640,7 +651,8 @@ pub enum EscrowError {
 
     /// [`LiquifactEscrow::settle_batch`] received an empty escrow addresses vector.
     SettlementBatchEmpty = 223,
-    /// [`LiquifactEscrow::settle_batch`] exceeded [`MAX_SETTLE_BATCH`].
+    /// [`LiquifactEscrow::settle_batch`] exceeded the configured settlement limit
+    /// ([`DataKey::SettlementLimit`]; default [`DEFAULT_SETTLEMENT_LIMIT`]).
     SettlementBatchTooLarge = 224,
     /// [`LiquifactEscrow::unfund`] called when [`InvoiceEscrow::status`] is not 0 (open).
     /// Unfunding is only valid while the escrow is still accepting contributions.
@@ -685,6 +697,9 @@ pub enum EscrowError {
     BumpTtlBatchEmpty = 234,
     /// [`LiquifactEscrow::bump_ttl_batch`] exceeded [`MAX_BUMP_TTL_BATCH`].
     BumpTtlBatchTooLarge = 235,
+    /// [`LiquifactEscrow::set_settlement_limit`] received a limit outside
+    /// [`MIN_SETTLEMENT_LIMIT`]..=[`MAX_SETTLEMENT_LIMIT`].
+    SettlementLimitOutOfRange = 236,
 }
 
 #[inline(always)]
@@ -1029,10 +1044,16 @@ pub enum DataKey {
     /// Number of [`LiquifactEscrow::set_paused`] calls recorded within the current rate-limit
     /// window. Absent ⇒ `0`.
     PauseToggleCountInWindow,
-    /// Admin-configured ceiling on storage entries processed per batch operation.
-    /// **Additive key (ADR-007):** absent ⇒ [`DEFAULT_SETTLEMENT_LIMIT`]. Updatable via
+    /// Admin-configured ceiling on storage TTL extension ledgers used by
+    /// [`LiquifactEscrow::bump_ttl`] and funding-deadline TTL top-ups.
+    /// **Additive key (ADR-007):** absent ⇒ [`INSTANCE_TTL_MIN_EXTENSION_LEDGERS`]. Updatable via
     /// [`LiquifactEscrow::set_storage_limit`].
     StorageLimit,
+    /// Admin-configured ceiling on the number of escrow addresses processed per
+    /// [`LiquifactEscrow::settle_batch`] call.
+    /// **Additive key (ADR-007):** absent ⇒ [`DEFAULT_SETTLEMENT_LIMIT`]. Updatable via
+    /// [`LiquifactEscrow::set_settlement_limit`].
+    SettlementLimit,
 }
 
 // --- Data types ---
@@ -1275,6 +1296,7 @@ pub struct SettlementResult {
 /// - `yield_bps`: Base coupon yield in basis points (`0..=10_000`).
 /// - `maturity`: Maturity timestamp; `0` means no maturity lock.
 /// - `protocol_fee_bps`: Immutable protocol fee applied at [`LiquifactEscrow::withdraw`].
+/// - `settlement_limit`: Maximum escrow addresses processed per [`LiquifactEscrow::settle_batch`].
 /// - `yield_tiers`: Optional tier ladder for investor-specific yields.
 /// - `maturity_max_horizon`: Maximum allowed maturity horizon (seconds from ledger time).
 /// - `funding_deadline`: Optional deadline after which funding is rejected.
@@ -1290,6 +1312,9 @@ pub struct SettlementConfig {
     pub maturity: u64,
     /// Immutable protocol fee in basis points applied at withdraw; `0` before init.
     pub protocol_fee_bps: i64,
+    /// Maximum number of escrow addresses [`LiquifactEscrow::settle_batch`] may process per call;
+    /// [`DEFAULT_SETTLEMENT_LIMIT`] before any admin override.
+    pub settlement_limit: u32,
     /// Optional tier ladder for investor-specific yields; empty before init.
     pub yield_tiers: Vec<YieldTier>,
     /// Maximum allowed maturity horizon in seconds from current ledger time.
@@ -1467,6 +1492,23 @@ pub struct ProtocolFeeUpdated {
     pub invoice_id: Symbol,
     pub old_fee_bps: i64,
     pub new_fee_bps: i64,
+}
+
+/// Emitted by [`LiquifactEscrow::set_settlement_limit`] when the batch-settlement ceiling changes.
+///
+/// # Fields
+/// - `name`: hardcoded `settl_lim` symbol.
+/// - `invoice_id`: escrow invoice identifier.
+/// - `old_limit`: prior settlement-batch ceiling.
+/// - `new_limit`: new settlement-batch ceiling after the update.
+#[contractevent]
+pub struct SettlementLimitUpdated {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    pub old_limit: u32,
+    pub new_limit: u32,
 }
 
 /// Emitted by [`LiquifactEscrow::update_yield_bps`] when the base yield rate is changed.
@@ -3743,10 +3785,17 @@ impl LiquifactEscrow {
         let max_per_investor_cap: Option<i128> =
             env.storage().instance().get(&DataKey::MaxPerInvestorCap);
 
+        let settlement_limit: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::SettlementLimit)
+            .unwrap_or(DEFAULT_SETTLEMENT_LIMIT);
+
         SettlementConfig {
             yield_bps,
             maturity,
             protocol_fee_bps,
+            settlement_limit,
             yield_tiers,
             maturity_max_horizon,
             funding_deadline,
@@ -5476,7 +5525,9 @@ impl LiquifactEscrow {
     ///
     /// # Errors
     /// - [`EscrowError::SettlementBatchEmpty`] if `escrows` is empty
-    /// - [`EscrowError::SettlementBatchTooLarge`] if `escrows.len() > [`MAX_SETTLE_BATCH`]
+    /// - [`EscrowError::SettlementBatchTooLarge`] if `escrows.len()` exceeds the configured
+    ///   settlement limit ([`LiquifactEscrow::get_settlement_limit`], default
+    ///   [`DEFAULT_SETTLEMENT_LIMIT`]).
     ///
     /// Per-entry errors (not funded, maturity not reached, legal hold, paused, auth failure)
     /// terminate the entire batch atomically.
@@ -5487,11 +5538,8 @@ impl LiquifactEscrow {
     pub fn settle_batch(env: Env, escrows: Vec<Address>) {
         let n = escrows.len();
         ensure(&env, n > 0, EscrowError::SettlementBatchEmpty);
-        ensure(
-            &env,
-            n <= MAX_SETTLE_BATCH,
-            EscrowError::SettlementBatchTooLarge,
-        );
+        let limit = Self::get_settlement_limit(env.clone());
+        ensure(&env, n <= limit, EscrowError::SettlementBatchTooLarge);
 
         for i in 0..n {
             let escrow_addr = escrows.get(i).unwrap();
@@ -6229,6 +6277,66 @@ impl LiquifactEscrow {
         env.storage().instance().set(&DataKey::StorageLimit, &limit);
 
         limit
+    }
+
+    /// Read the admin-configured ceiling on the number of escrow addresses processed per
+    /// [`LiquifactEscrow::settle_batch`] call.
+    ///
+    /// Falls back to [`DEFAULT_SETTLEMENT_LIMIT`] when [`DataKey::SettlementLimit`] is unset.
+    pub fn get_settlement_limit(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::SettlementLimit)
+            .unwrap_or(DEFAULT_SETTLEMENT_LIMIT)
+    }
+
+    /// Admin-only setter for the settlement-batch ceiling.
+    ///
+    /// Valid values are [`MIN_SETTLEMENT_LIMIT`]..=[`MAX_SETTLEMENT_LIMIT`]. Out-of-range values
+    /// fail with [`EscrowError::SettlementLimitOutOfRange`]. The call requires the current escrow
+    /// admin to authorize it and emits [`SettlementLimitUpdated`] carrying the old and new limits
+    /// when the stored value changes.
+    ///
+    /// # Errors
+    /// - [`EscrowError::SettlementLimitOutOfRange`] if `new_limit` is outside the configured bounds.
+    ///
+    /// # Events
+    /// Emits [`SettlementLimitUpdated`] with the old and new values on a change.
+    ///
+    /// # Returns
+    /// The newly stored limit.
+    pub fn set_settlement_limit(env: Env, new_limit: u32) -> u32 {
+        let escrow = Self::load_escrow_require_admin(&env);
+
+        ensure(
+            &env,
+            (MIN_SETTLEMENT_LIMIT..=MAX_SETTLEMENT_LIMIT).contains(&new_limit),
+            EscrowError::SettlementLimitOutOfRange,
+        );
+
+        let old_limit: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::SettlementLimit)
+            .unwrap_or(DEFAULT_SETTLEMENT_LIMIT);
+
+        if new_limit == old_limit {
+            return old_limit;
+        }
+
+        env.storage()
+            .instance()
+            .set(&DataKey::SettlementLimit, &new_limit);
+
+        SettlementLimitUpdated {
+            name: symbol_short!("settl_lim"),
+            invoice_id: escrow.invoice_id,
+            old_limit,
+            new_limit,
+        }
+        .publish(&env);
+
+        new_limit
     }
 
     pub fn bump_ttl(env: Env, allowlisted: Vec<Address>) {
@@ -6982,6 +7090,9 @@ pub struct ReconciliationView {
 
 // #[cfg(test)]
 // mod tests;
+
+#[cfg(test)]
+mod settlement_limit_setter_tests;
 
 /// Default starting balance assigned to any address that has never been seen by the
 /// [`DefaultMockToken`] contract.
