@@ -18,6 +18,16 @@
 //! it, or redeploy when stored struct layout changes. See `docs/OPERATOR_RUNBOOK.md` for the full
 //! decision tree.
 //!
+//! ## Event topic versioning ([`EVENT_SCHEMA_VERSION`])
+//!
+//! Every lifecycle event emitted by this contract includes a schema version
+//! as the second topic element: `(event_name, EVENT_SCHEMA_VERSION, ...)`.
+//! The version is set by the [`EVENT_SCHEMA_VERSION`] constant and lets
+//! off-chain consumers detect breaking changes before parsing the payload.
+//! The required payload fields for each event are stable within a schema
+//! version; a bump to [`EVENT_SCHEMA_VERSION`] means new events or fields may
+//! be present, and consumers should switch on this version explicitly.
+//!
 //! ## SME collateral commitment metadata
 //!
 //! [`LiquifactEscrow::record_sme_collateral_commitment`] is an SME-authenticated metadata write for
@@ -164,6 +174,18 @@ mod keys;
 /// See `docs/OPERATOR_RUNBOOK.md` for the full redeploy-vs-upgrade decision tree.
 pub const SCHEMA_VERSION: u32 = 6;
 // See the schema version contract documentation: [Escrow schema versioning](../docs/escrow-schema-versioning.md)
+
+/// Version of the lifecycle event topics emitted by this contract.
+///
+/// Every escrow lifecycle event topic is emitted with this version as the
+/// second topic element: `(event_name, EVENT_SCHEMA_VERSION, ...)`. This
+/// provides a compatibility signal for off-chain consumers so they can
+/// distinguish between event payload/topic schema versions.
+///
+/// Bump this constant when a lifecycle event topic or required payload field
+/// changes in a way that is not backward compatible. Do not bump it for
+/// additive fields that keep old fields stable.
+pub const EVENT_SCHEMA_VERSION: u32 = 1;
 
 /// Upper bound on [`LiquifactEscrow::append_attestation_digest`] entries to keep storage bounded.
 /// Revocation via [`LiquifactEscrow::revoke_attestation_digest`] does not consume a slot.
