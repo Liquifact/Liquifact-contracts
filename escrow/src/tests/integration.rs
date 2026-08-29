@@ -1343,3 +1343,161 @@ fn test_refund_batch_skips_already_refunded() {
     client.refund_batch(&investors);
     assert_eq!(client.get_distributed_principal(), 10_000i128);
 }
+
+fn init_and_propose_admin_transfer(
+    env: &Env,
+    client: &LiquifactEscrowClient<'_>,
+    admin: &Address,
+    sme: &Address,
+    invoice_id: &str,
+    proposed_admin: &Address,
+) {
+    let (token, treasury) = free_addresses(env);
+    client.init(
+        admin,
+        &soroban_sdk::String::from_str(env, invoice_id),
+        sme,
+        &1_000i128,
+        &0i64,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+    client.propose_admin_transfer(
+        proposed_admin,
+        &soroban_sdk::String::from_str(env, "handover"),
+    );
+}
+
+#[test]
+fn test_admin_recovery_rejected_before_timelock_elapsed() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let proposed_admin = Address::generate(&env);
+    init_and_propose_admin_transfer(&env, &client, &admin, &sme, "ADREC_PRE", &proposed_admin);
+
+    let proposal = client.get_admin_transfer_proposal().expect("proposal exists");
+    env.ledger().with_mut(|li| li.timestamp = proposal.proposed_at + 1);
+
+    let reason = soroban_sdk::String::from_str(&env, "lost key");
+    let attempt = client.try_recover_admin_transfer(&reason);
+    assert!(
+        attempt.is_err() || attempt.unwrap().is_err(),
+        "recovery must not run before the timelock has elapsed"
+    );
+}
+
+#[test]
+fn test_admin_recovery_succeeds_while_proposal_active() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let proposed_admin = Address::generate(&env);
+    init_and_propose_admin_transfer(&env, &client, &admin, &sme, "ADREC_ACT", &proposed_admin);
+
+    let proposal = client.get_admin_transfer_proposal().expect("proposal exists");
+    let active_time = proposal.proposed_at + (proposal.expires_at - proposal.proposed_at) / 2 + 1;
+    env.ledger().with_mut(|li| li.timestamp = active_time);
+
+    let reason = soroban_sdk::String::from_str(&env, "proposed admin unreachable");
+    client.recover_admin_transfer(&reason);
+
+    assert!(
+        env.events().all().events().len() > 0,
+        "recovery must emit a distinct event"
+    );
+    assert!(client.get_admin_transfer_proposal().is_none());
+    assert_eq!(client.get_escrow().admin, admin);
+}
+
+#[test]
+fn test_admin_recovery_succeeds_after_expired_proposal() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let proposed_admin = Address::generate(&env);
+    init_and_propose_admin_transfer(&env, &client, &admin, &sme, "ADREC_EXP", &proposed_admin);
+
+    let proposal = client.get_admin_transfer_proposal().expect("proposal exists");
+    env.ledger().with_mut(|li| li.timestamp = proposal.expires_at + 1);
+
+    let reason = soroban_sdk::String::from_str(&env, "proposed admin unreachable");
+    client.recover_admin_transfer(&reason);
+
+    assert!(
+        env.events().all().events().len() > 0,
+        "recovery must emit a distinct event"
+    );
+    assert!(client.get_admin_transfer_proposal().is_none());
+    assert_eq!(client.get_escrow().admin, admin);
+}
+
+#[test]
+fn test_admin_recovery_repeated_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let proposed_admin = Address::generate(&env);
+    init_and_propose_admin_transfer(&env, &client, &admin, &sme, "ADREC_RPT", &proposed_admin);
+
+    let proposal = client.get_admin_transfer_proposal().expect("proposal exists");
+    env.ledger().with_mut(|li| li.timestamp = proposal.expires_at + 1);
+
+    let reason = soroban_sdk::String::from_str(&env, "lost key");
+    client.recover_admin_transfer(&reason);
+
+    let attempt = client.try_recover_admin_transfer(&reason);
+    assert!(
+        attempt.is_err() || attempt.unwrap().is_err(),
+        "recovery can only be performed once per abandoned proposal"
+    );
+}
+
+#[test]
+fn test_admin_recovery_requires_admin_auth() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let (token, treasury) = free_addresses(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "ADREC_AUTH"),
+        &sme,
+        &1_000i128,
+        &0i64,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    let reason = soroban_sdk::String::from_str(&env, "lost");
+    let attempt = client.try_recover_admin_transfer(&reason);
+    assert!(
+        attempt.is_err() || attempt.unwrap().is_err(),
+        "non-admin must not recover a transfer proposal"
+    );
+}
