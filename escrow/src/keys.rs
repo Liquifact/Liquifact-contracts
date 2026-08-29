@@ -90,6 +90,11 @@ pub(crate):: fn funding_token() -> DataKey {
     DataKey::FundingToken
 }
 
+/// Instance-storage immutable SEP-41 funding token scale, set once at `init`.
+pub(crate):: fn funding_token_scale() -> DataKey {
+    DataKey::FundingTokenScale
+}
+
 /// Instance-storage invocation nonce for cross-contract callbacks.
 pub(crate) fn callback_nonce() -> DataKey {
     DataKey::CallbackNonce
