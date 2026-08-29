@@ -1,17 +1,17 @@
-#![allow(dead_code)]
+#allow(dead_code)
 //! Centralized constructors for funding-related storage keys.
 //!
 //! # Purpose
 //!
-//! All persistent and instance-storage keys are defined here as variants of [`DataKey`].
+//! All persistent and instance-storage keys are defined here as variants of `DataKey`.
 //! Typed constructor functions are provided for every key family so that call sites never
-//! build a [`DataKey`] inline — reducing the risk of typos, discriminant drift between
+//! build a `DataKey` inline -- reducing the risk of typos, discriminant drift between
 //! modules, and copy-paste errors when a new key needs to be added.
 //!
 //! ## Collateral keys
 //!
-//! The collateral pledge key family is managed by [`collateral_pledge_key`]. All three
-//! collateral entrypoints (`record_sme_collateral_commitment`, `clear_sme_collateral_commitment`,
+//! The collateral pledge key family is managed by `collateral_pledge_key`. All three
+//! collateral entrypoints (`record_sme_collateral_commitment`, clear_sme_collateral_commitment`,
 //! `get_sme_collateral_commitment`) call this function instead of constructing
 //! `DataKey::SmeCollateralPledge` inline. This ensures any future rename or split of the
 //! collateral key cannot diverge across call sites.
@@ -20,11 +20,11 @@
 //!
 //! Adding a new variant is **backward-compatible** when the new key is read with
 //! `.unwrap_or(default)` and its absence does not change existing entrypoint semantics.
-//! Renaming a variant, changing its XDR discriminant, or altering the stored type of an
-//! existing key is **breaking** and requires a `migrate` path or a full redeploy.
+//! Renaming a variant, changing its XDR discriminant, or altering the stored type of
+//! an existing key is **breaking** and requires a `migrate` path or a full redeploy.
 
-// Key-builder helpers are part of the crate's public API for symmetry. Call sites
-// currently use `DataKey::Variant` literals inline; the helpers are kept so the
+// Key-builder helpers are part of the crate's public API for symmetry. Call
+// sites currently use `DataKey::Variant` literals inline; the helpers are kept so the
 // indirection layer remains available without churn if/when callers migrate.
 
 use crate::DataKey;
@@ -80,7 +80,7 @@ pub(crate) fn funding_deadline() -> DataKey {
     DataKey::FundingDeadline
 }
 
-/// Instance-storage write-once pro-rata snapshot captured at the first funded transition.
+/// Instance-storage write-once prorata snapshot captured at the first funded transition.
 pub(crate) fn funding_close_snapshot() -> DataKey {
     DataKey::FundingCloseSnapshot
 }
@@ -88,4 +88,9 @@ pub(crate) fn funding_close_snapshot() -> DataKey {
 /// Instance-storage immutable SEP-41 funding token address, set once at `init`.
 pub(crate) fn funding_token() -> DataKey {
     DataKey::FundingToken
+}
+
+/// Instance-storage pending admin transfer proposal (address + deadline).
+pub(crate) fn pending_admin_transfer() -> DataKey {
+    DataKey::PendingAdmin
 }
