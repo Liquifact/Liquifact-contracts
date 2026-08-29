@@ -7008,6 +7008,9 @@ pub struct ReconciliationView {
 #[cfg(test)]
 mod settlement_guard_tests;
 
+#[cfg(test)]
+mod settlement_math_boundaries_tests;
+
 /// Default starting balance assigned to any address that has never been seen by the
 /// [`DefaultMockToken`] contract.
 ///
