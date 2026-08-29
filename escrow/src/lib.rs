@@ -692,6 +692,9 @@ pub enum EscrowError {
     /// effect, so a re-entrant or replayed call is rejected here with a dedicated, stable
     /// typed code rather than a misleading `SettlementNotFunded`.
     EscrowAlreadySettled = 236,
+    /// [`LiquifactEscrow::recover_admin`] called before the pending admin proposal's
+    /// timelock has elapsed. Recovery is only available after the proposal expires.
+    AdminRecoveryNotExpired = 237,
 }
 
 #[inline(always)]
@@ -1552,6 +1555,19 @@ pub struct AdminProposalCancelled {
     #[topic]
     pub invoice_id: Symbol,
     pub cancelled_pending: Address,
+}
+
+/// Emitted by [`LiquifactEscrow::recover_admin`] when the current admin clears an
+/// expired, abandoned admin-transfer proposal after the proposal timelock.
+#[contractevent]
+pub struct AdminRecoveredEvent {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    pub current_admin: Address,
+    pub abandoned_pending: Address,
+    pub reason: String,
 }
 
 /// Emitted by [`LiquifactEscrow::transfer_admin`] (the deprecated one-step
@@ -6638,6 +6654,61 @@ impl LiquifactEscrow {
         .publish(&env);
 
         cancelled
+    }
+
+    /// Recover from an abandoned admin-transfer proposal after its timelock has elapsed.
+    ///
+    /// The current [`InvoiceEscrow::admin`] may clear a pending successor proposal once
+    /// [`DataKey::PendingAdminExpiry`] is in the past. This is the bounded recovery path
+    /// for the case where the proposed administrator becomes unreachable and cannot
+    /// call [`LiquifactEscrow::accept_admin`].
+    ///
+    /// # Authorization
+    ///
+    /// **Admin only.** Requires the current [`InvoiceEscrow::admin`] to sign (via
+    /// [`LiquifactEscrow::load_escrow_require_admin`]).
+    ///
+    /// # Arguments
+    /// - `reason`: explicit human-readable reason for the recovery, emitted in
+    ///   [`AdminRecoveredEvent`] for auditability. It is not stored.
+    ///
+    /// # Errors
+    /// - [`EscrowError::NoPendingAdmin`] if no proposal is pending (including a repeated
+    ///   recovery after a successful recovery).
+    /// - [`EscrowError::AdminRecoveryNotExpired`] if the proposal timelock has not elapsed.
+    ///
+    /// # Events
+    /// Emits [`AdminRecoveredEvent`] (topic: `adm_rec`).
+    pub fn recover_admin(env: Env, reason: String) -> Address {
+        let escrow = Self::load_escrow_require_admin(&env);
+
+        let pending: Option<Address> = env.storage().instance().get(&DataKey::PendingAdmin);
+        ensure(&env, pending.is_some(), EscrowError::NoPendingAdmin);
+        let pending = pending.unwrap();
+
+        let expiry: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::PendingAdminExpiry)
+            .unwrap_or_else(|| fail(&env, EscrowError::AdminRecoveryNotExpired));
+        let now = env.ledger().timestamp();
+        ensure(&env, now > expiry, EscrowError::AdminRecoveryNotExpired);
+
+        env.storage().instance().remove(&DataKey::PendingAdmin);
+        env.storage()
+            .instance()
+            .remove(&DataKey::PendingAdminExpiry);
+
+        AdminRecoveredEvent {
+            name: symbol_short!("adm_rec"),
+            invoice_id: escrow.invoice_id.clone(),
+            current_admin: escrow.admin,
+            abandoned_pending: pending.clone(),
+            reason,
+        }
+        .publish(&env);
+
+        pending
     }
 
     /// Transition an **open** escrow (status 0) to **cancelled** (status 4).
