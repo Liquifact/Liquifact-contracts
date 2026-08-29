@@ -407,6 +407,80 @@ fn test_transfer_admin_same_address_panics() {
 }
 
 #[test]
+fn test_recover_admin_proposal_active_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    let new_admin = Address::generate(&env);
+    client.propose_admin(&new_admin, &None);
+    let reason = soroban_sdk::String::from_str(&env, "lost");
+    assert!(client.try_recover_admin(&reason).is_err());
+    assert_eq!(client.get_pending_admin(), Some(new_admin));
+}
+
+#[test]
+fn test_recover_admin_timelock_not_elapsed_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    let new_admin = Address::generate(&env);
+    client.propose_admin(&new_admin, &None);
+    let now = env.ledger().timestamp();
+    env.ledger().set_timestamp(now + 100);
+    let reason = soroban_sdk::String::from_str(&env, "too_soon");
+    assert!(client.try_recover_admin(&reason).is_err());
+}
+
+#[test]
+fn test_recover_admin_expired_proposal_succeeds() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    let new_admin = Address::generate(&env);
+    client.propose_admin(&new_admin, &None);
+    let now = env.ledger().timestamp();
+    env.ledger().set_timestamp(now + 1_000_000);
+    let reason = soroban_sdk::String::from_str(&env, "unreachable");
+    client.recover_admin(&reason);
+    assert_eq!(client.get_pending_admin(), None);
+    assert_eq!(client.get_escrow().admin, admin);
+}
+
+#[test]
+fn test_recover_admin_repeated_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    let new_admin = Address::generate(&env);
+    client.propose_admin(&new_admin, &None);
+    let now = env.ledger().timestamp();
+    env.ledger().set_timestamp(now + 1_000_000);
+    let reason = soroban_sdk::String::from_str(&env, "unreachable");
+    client.recover_admin(&reason);
+    assert!(client.try_recover_admin(&reason).is_err());
+}
+
+#[test]
+#[should_panic]
+fn test_recover_admin_non_admin_panics() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    let new_admin = Address::generate(&env);
+    client.propose_admin(&new_admin, &None);
+    let now = env.ledger().timestamp();
+    env.ledger().set_timestamp(now + 1_000_000);
+    let reason = soroban_sdk::String::from_str(&env, "unreachable");
+    env.mock_auths(&[]);
+    client.recover_admin(&reason);
+}
+
+#[test]
 fn test_rotate_beneficiary_success() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);

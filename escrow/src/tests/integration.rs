@@ -45,6 +45,232 @@ impl MockToken {
         panic!("Token contract transfer should not be invoked by escrow metadata-only flows")
     }
 }
+ 
+#[contract]
+pub struct InitReentryProbe;
+
+#[contractimpl]
+impl InitReentryProbe {
+    pub fn call_init(
+        env: Env,
+        escrow: Address,
+        admin: Address,
+        invoice_id: soroban_sdk::String,
+        sme: Address,
+        funding_token: Address,
+        treasury: Address,
+    ) {
+        LiquifactEscrowClient::new(&env, &escrow).init(
+            &admin,
+            &invoice_id,
+            &sme,
+            &1i128,
+            &0i64,
+            &0u64,
+            &funding_token,
+            &None,
+            &treasury,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None::<i64>,
+        );
+    }
+}
+
+fn init_test_escrow(
+    client: &LiquifactEscrowClient,
+    admin: &Address,
+    sme: &Address,
+    invoice_id: &soroban_sdk::String,
+    funding_token: &Address,
+    treasury: &Address,
+) {
+    client.init(
+        admin,
+        invoice_id,
+        sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        funding_token,
+        &None,
+        treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+}
+
+fn assert_escrow_state_unchanged(before: &InvoiceEscrow, after: &InvoiceEscrow) {
+    assert_eq!(before.invoice_id, after.invoice_id);
+    assert_eq!(before.admin, after.admin);
+    assert_eq!(before.sme_address, after.sme_address);
+    assert_eq!(before.amount, after.amount);
+    assert_eq!(before.funding_target, after.funding_target);
+    assert_eq!(before.funded_amount, after.funded_amount);
+    assert_eq!(before.yield_bps, after.yield_bps);
+    assert_eq!(before.maturity, after.maturity);
+    assert_eq!(before.status, after.status);
+}
+
+fn assert_no_contract_events(env: &Env, contract_id: &Address) {
+    use soroban_sdk::testutils::Events as _;
+    assert_eq!(
+        env.events().all().filter_by_contract(contract_id).events().len(),
+        0,
+        "rejected init must not emit events"
+    );
+}
+
+#[test]
+fn test_init_rejects_same_parameters_different_admin_and_different_token() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let (token, treasury) = free_addresses(&env);
+    let invoice_id = soroban_sdk::String::from_str(&env, "INIT_CONFLICT");
+    init_test_escrow(&client, &admin, &sme, &invoice_id, &token, &treasury);
+    let before = client.get_escrow();
+    let different_admin = Address::generate(&env);
+    let different_token = Address::generate(&env);
+
+    // Same parameters.
+    env.events().all();
+    assert_contract_error(
+        client.try_init(
+            &admin,
+            &invoice_id,
+            &sme,
+            &TARGET,
+            &800i64,
+            &0u64,
+            &token,
+            &None,
+            &treasury,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None::<i64>,
+        ),
+        EscrowError::AlreadyInitialized,
+    );
+    assert_no_contract_events(&env, &client.address);
+    assert_escrow_state_unchanged(&before, &client.get_escrow());
+
+    // Different admin.
+    env.events().all();
+    assert_contract_error(
+        client.try_init(
+            &different_admin,
+            &invoice_id,
+            &sme,
+            &TARGET,
+            &800i64,
+            &0u64,
+            &token,
+            &None,
+            &treasury,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None::<i64>,
+        ),
+        EscrowError::AlreadyInitialized,
+    );
+    assert_no_contract_events(&env, &client.address);
+    assert_escrow_state_unchanged(&before, &client.get_escrow());
+
+    // Different token.
+    env.events().all();
+    assert_contract_error(
+        client.try_init(
+            &admin,
+            &invoice_id,
+            &sme,
+            &TARGET,
+            &800i64,
+            &0u64,
+            &different_token,
+            &None,
+            &treasury,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None::<i64>,
+        ),
+        EscrowError::AlreadyInitialized,
+    );
+    assert_no_contract_events(&env, &client.address);
+    assert_escrow_state_unchanged(&before, &client.get_escrow());
+
+    env.as_contract(&client.address, || {
+        let stored_token: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::FundingToken)
+            .expect("funding token");
+        assert_eq!(stored_token, token);
+    });
+}
+
+#[test]
+fn test_init_rejected_during_another_contract_call() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let (token, treasury) = free_addresses(&env);
+    let invoice_id = soroban_sdk::String::from_str(&env, "INIT_REENTRY");
+    init_test_escrow(&client, &admin, &sme, &invoice_id, &token, &treasury);
+    let before = client.get_escrow();
+
+    let probe_id = env.register(InitReentryProbe, ());
+    let probe = InitReentryProbeClient::new(&env, &probe_id);
+    let other_admin = Address::generate(&env);
+    let other_token = Address::generate(&env);
+    let other_treasury = Address::generate(&env);
+    let other_invoice = soroban_sdk::String::from_str(&env, "INIT_REENTRY2");
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        probe.call_init(
+            &client.address,
+            &other_admin,
+            &other_invoice,
+            &sme,
+            &other_token,
+            &other_treasury,
+        );
+    }));
+    assert!(result.is_err(), "init during another call must be rejected");
+    let after = client.get_escrow();
+    assert_escrow_state_unchanged(&before, &after);
+}
 
 /// **MID-FLOW LEGAL HOLD INTEGRATION TEST (USER-EXPERIENCE NARRATIVE)**
 ///
@@ -1681,4 +1907,162 @@ fn test_refund_batch_skips_already_refunded() {
     investors.push_back(inv.clone());
     client.refund_batch(&investors);
     assert_eq!(client.get_distributed_principal(), 10_000i128);
+}
+
+fn init_and_propose_admin_transfer(
+    env: &Env,
+    client: &LiquifactEscrowClient<'_>,
+    admin: &Address,
+    sme: &Address,
+    invoice_id: &str,
+    proposed_admin: &Address,
+) {
+    let (token, treasury) = free_addresses(env);
+    client.init(
+        admin,
+        &soroban_sdk::String::from_str(env, invoice_id),
+        sme,
+        &1_000i128,
+        &0i64,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+    client.propose_admin_transfer(
+        proposed_admin,
+        &soroban_sdk::String::from_str(env, "handover"),
+    );
+}
+
+#[test]
+fn test_admin_recovery_rejected_before_timelock_elapsed() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let proposed_admin = Address::generate(&env);
+    init_and_propose_admin_transfer(&env, &client, &admin, &sme, "ADREC_PRE", &proposed_admin);
+
+    let proposal = client.get_admin_transfer_proposal().expect("proposal exists");
+    env.ledger().with_mut(|li| li.timestamp = proposal.proposed_at + 1);
+
+    let reason = soroban_sdk::String::from_str(&env, "lost key");
+    let attempt = client.try_recover_admin_transfer(&reason);
+    assert!(
+        attempt.is_err() || attempt.unwrap().is_err(),
+        "recovery must not run before the timelock has elapsed"
+    );
+}
+
+#[test]
+fn test_admin_recovery_succeeds_while_proposal_active() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let proposed_admin = Address::generate(&env);
+    init_and_propose_admin_transfer(&env, &client, &admin, &sme, "ADREC_ACT", &proposed_admin);
+
+    let proposal = client.get_admin_transfer_proposal().expect("proposal exists");
+    let active_time = proposal.proposed_at + (proposal.expires_at - proposal.proposed_at) / 2 + 1;
+    env.ledger().with_mut(|li| li.timestamp = active_time);
+
+    let reason = soroban_sdk::String::from_str(&env, "proposed admin unreachable");
+    client.recover_admin_transfer(&reason);
+
+    assert!(
+        env.events().all().events().len() > 0,
+        "recovery must emit a distinct event"
+    );
+    assert!(client.get_admin_transfer_proposal().is_none());
+    assert_eq!(client.get_escrow().admin, admin);
+}
+
+#[test]
+fn test_admin_recovery_succeeds_after_expired_proposal() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let proposed_admin = Address::generate(&env);
+    init_and_propose_admin_transfer(&env, &client, &admin, &sme, "ADREC_EXP", &proposed_admin);
+
+    let proposal = client.get_admin_transfer_proposal().expect("proposal exists");
+    env.ledger().with_mut(|li| li.timestamp = proposal.expires_at + 1);
+
+    let reason = soroban_sdk::String::from_str(&env, "proposed admin unreachable");
+    client.recover_admin_transfer(&reason);
+
+    assert!(
+        env.events().all().events().len() > 0,
+        "recovery must emit a distinct event"
+    );
+    assert!(client.get_admin_transfer_proposal().is_none());
+    assert_eq!(client.get_escrow().admin, admin);
+}
+
+#[test]
+fn test_admin_recovery_repeated_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let proposed_admin = Address::generate(&env);
+    init_and_propose_admin_transfer(&env, &client, &admin, &sme, "ADREC_RPT", &proposed_admin);
+
+    let proposal = client.get_admin_transfer_proposal().expect("proposal exists");
+    env.ledger().with_mut(|li| li.timestamp = proposal.expires_at + 1);
+
+    let reason = soroban_sdk::String::from_str(&env, "lost key");
+    client.recover_admin_transfer(&reason);
+
+    let attempt = client.try_recover_admin_transfer(&reason);
+    assert!(
+        attempt.is_err() || attempt.unwrap().is_err(),
+        "recovery can only be performed once per abandoned proposal"
+    );
+}
+
+#[test]
+fn test_admin_recovery_requires_admin_auth() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let (token, treasury) = free_addresses(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "ADREC_AUTH"),
+        &sme,
+        &1_000i128,
+        &0i64,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    let reason = soroban_sdk::String::from_str(&env, "lost");
+    let attempt = client.try_recover_admin_transfer(&reason);
+    assert!(
+        attempt.is_err() || attempt.unwrap().is_err(),
+        "non-admin must not recover a transfer proposal"
+    );
 }

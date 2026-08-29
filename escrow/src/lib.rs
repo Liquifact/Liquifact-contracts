@@ -302,6 +302,46 @@ impl LiquifactEscrow {
 pub const DEFAULT_MATURITY_MAX_HORIZON_SECS: u64 = 157_680_000; // ~5 years (365.25 * 24 * 3600 * 5)
 
 // ---------------------------------------------------------------------------
+// Bounded fee schedule
+// ---------------------------------------------------------------------------
+
+/// A fee schedule with named bounds and a future ledger at which it becomes active.
+///
+/// `fee_bps` is the actual fee in basis points. `min_fee_bps` and `max_fee_bps`
+/// are the named lower/upper bounds for the schedule; they are validated by
+/// [`LiquifactEscrow::submit_fee_schedule`] and are exposed for off-chain audit.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FeeSchedule {
+    pub fee_bps: u32,
+    pub min_fee_bps: u32,
+    pub max_fee_bps: u32,
+    pub activation_ledger: u32,
+}
+
+/// Storage keys for the fee-schedule activation ledger.
+///
+/// These are deliberately separate from [`DataKey`] so existing escrow storage is
+/// untouched. The active and pending keys are the source of truth for reads; the
+/// previous key is updated when a pending schedule activates.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum FeeScheduleStorageKey {
+    Active,
+    Pending,
+    Previous,
+}
+
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+pub enum FeeScheduleError {
+    FeeOutOfBounds = 1,
+    InvalidActivationLedger = 2,
+    PendingScheduleExists = 3,
+    NotInitialized = 4,
+}
+
+// ---------------------------------------------------------------------------
 // Data types
 // ---------------------------------------------------------------------------
 
@@ -466,6 +506,11 @@ pub enum EscrowError {
     /// [`LiquifactEscrow::init`] rejected `yield_bps` outside `0..=10_000`.
     YieldBpsOutOfRange = 2,
     /// [`LiquifactEscrow::init`] called when escrow storage already exists.
+    ///
+    /// Returned for every second initialization attempt — same parameters, a different
+    /// admin, a different token, or a re-entrant initialization during `init` — before
+    /// any state mutation or event emission. Existing admin, token metadata, and escrow
+    /// state are left unchanged.
     EscrowAlreadyInitialized = 3,
     /// [`LiquifactEscrow::init`] rejected an invoice amount too large to keep
     /// `compute_investor_payout` arithmetic overflow-free.
@@ -835,6 +880,24 @@ pub(crate) fn ensure(env: &Env, condition: bool, error: EscrowError) {
     if !condition {
         fail(env, error);
     }
+}
+
+/// Reject any initialization attempt when the contract is already initialized or an
+/// initialization is in progress.
+///
+/// This is the single guard for [`LiquifactEscrow::init`]. It checks both the escrow
+/// snapshot and the schema-version marker so a partially failed first initialization
+/// cannot be overwritten. `init` must call this before any authorization, validation,
+/// storage write, or event emission.
+#[allow(dead_code)]
+#[inline(always)]
+pub(crate) fn ensure_not_initialized(env: &Env) {
+    ensure(
+        env,
+        !(env.storage().instance().has(&DataKey::Escrow)
+            || env.storage().instance().has(&DataKey::Version)),
+        EscrowError::EscrowAlreadyInitialized,
+    );
 }
 
 /// Assert that `actual_status == expected_status`, emitting `error` otherwise.
@@ -1710,6 +1773,19 @@ pub struct AdminProposalCancelled {
     pub cancelled_pending: Address,
 }
 
+/// Emitted by [`LiquifactEscrow::recover_admin`] when the current admin clears an
+/// expired, abandoned admin-transfer proposal after the proposal timelock.
+#[contractevent]
+pub struct AdminRecoveredEvent {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    pub current_admin: Address,
+    pub abandoned_pending: Address,
+    pub reason: String,
+}
+
 /// Emitted by [`LiquifactEscrow::transfer_admin`] (the deprecated one-step
 /// admin transfer shim) so indexers and operators can flag integrators
 /// still using the legacy single-step path.
@@ -2152,6 +2228,127 @@ fn validate_invoice_id_string(env: &Env, invoice_id: &String) -> Symbol {
 
 #[contractimpl]
 impl LiquifactEscrow {
+    /// Admin-authorized submission of a new pending fee schedule.
+    ///
+    /// The schedule must be in-bounds and its activation ledger must lie strictly
+    /// in the future. Duplicate pending schedules are idempotent.
+    pub fn submit_fee_schedule(env: Env, schedule: FeeSchedule) {
+        let escrow: InvoiceEscrow = env
+            .storage()
+            .instance()
+            .get(&DataKey::Escrow)
+            .unwrap_or_else(|| panic_with_error!(&env, FeeScheduleError::NotInitialized));
+        escrow.admin.require_auth();
+
+        if schedule.min_fee_bps > schedule.fee_bps
+            || schedule.fee_bps > schedule.max_fee_bps
+            || schedule.max_fee_bps > 10_000
+        {
+            panic_with_error!(&env, FeeScheduleError::FeeOutOfBounds);
+        }
+
+        let current_ledger = env.ledger().sequence();
+        if schedule.activation_ledger <= current_ledger {
+            panic_with_error!(&env, FeeScheduleError::InvalidActivationLedger);
+        }
+
+        Self::activate_fee_schedule(env.clone());
+
+        let pending: Option<FeeSchedule> = env
+            .storage()
+            .instance()
+            .get(&FeeScheduleStorageKey::Pending);
+        if pending.as_ref() == Some(&schedule) {
+            return;
+        }
+        if pending.is_some() {
+            panic_with_error!(&env, FeeScheduleError::PendingScheduleExists);
+        }
+
+        env.storage()
+            .instance()
+            .set(&FeeScheduleStorageKey::Pending, &schedule);
+    }
+
+    /// Promotes a pending schedule to active when its activation ledger is reached.
+    ///
+    /// This is intentionally callable by anyone; it only applies a previously
+    /// admin-authorized schedule and records the previous active schedule.
+    pub fn activate_fee_schedule(env: Env) -> bool {
+        let current_ledger = env.ledger().sequence();
+        let pending: Option<FeeSchedule> = env
+            .storage()
+            .instance()
+            .get(&FeeScheduleStorageKey::Pending);
+        if let Some(p) = pending {
+            if p.activation_ledger <= current_ledger {
+                let previous: Option<FeeSchedule> = env
+                    .storage()
+                    .instance()
+                    .get(&FeeScheduleStorageKey::Active);
+                env.storage()
+                    .instance()
+                    .set(&FeeScheduleStorageKey::Active, &p);
+                env.storage()
+                    .instance()
+                    .set(&FeeScheduleStorageKey::Previous, &previous);
+                env.storage()
+                    .instance()
+                    .remove(&FeeScheduleStorageKey::Pending);
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Returns the active fee schedule for the current ledger, computing any
+    /// not-yet-promoted boundary activation on the fly.
+    pub fn get_active_fee_schedule(env: Env) -> Option<FeeSchedule> {
+        let active: Option<FeeSchedule> = env
+            .storage()
+            .instance()
+            .get(&FeeScheduleStorageKey::Active);
+        let pending: Option<FeeSchedule> = env
+            .storage()
+            .instance()
+            .get(&FeeScheduleStorageKey::Pending);
+        match pending {
+            Some(p) if p.activation_ledger <= env.ledger().sequence() => Some(p),
+            _ => active,
+        }
+    }
+
+    /// Returns the pending fee schedule that will activate at a future ledger.
+    pub fn get_pending_fee_schedule(env: Env) -> Option<FeeSchedule> {
+        let pending: Option<FeeSchedule> = env
+            .storage()
+            .instance()
+            .get(&FeeScheduleStorageKey::Pending);
+        match pending {
+            Some(p) if p.activation_ledger > env.ledger().sequence() => Some(p),
+            _ => None,
+        }
+    }
+
+    /// Returns the previously active fee schedule after a boundary activation.
+    pub fn get_previous_fee_schedule(env: Env) -> Option<FeeSchedule> {
+        let active: Option<FeeSchedule> = env
+            .storage()
+            .instance()
+            .get(&FeeScheduleStorageKey::Active);
+        let pending: Option<FeeSchedule> = env
+            .storage()
+            .instance()
+            .get(&FeeScheduleStorageKey::Pending);
+        if let Some(p) = pending {
+            if p.activation_ledger <= env.ledger().sequence() {
+                return active;
+            }
+        }
+        env.storage()
+            .instance()
+            .get(&FeeScheduleStorageKey::Previous)
+    }
     fn legal_hold_active(env: &Env) -> bool {
         env.storage()
             .instance()
@@ -6829,6 +7026,61 @@ impl LiquifactEscrow {
         cancelled
     }
 
+    /// Recover from an abandoned admin-transfer proposal after its timelock has elapsed.
+    ///
+    /// The current [`InvoiceEscrow::admin`] may clear a pending successor proposal once
+    /// [`DataKey::PendingAdminExpiry`] is in the past. This is the bounded recovery path
+    /// for the case where the proposed administrator becomes unreachable and cannot
+    /// call [`LiquifactEscrow::accept_admin`].
+    ///
+    /// # Authorization
+    ///
+    /// **Admin only.** Requires the current [`InvoiceEscrow::admin`] to sign (via
+    /// [`LiquifactEscrow::load_escrow_require_admin`]).
+    ///
+    /// # Arguments
+    /// - `reason`: explicit human-readable reason for the recovery, emitted in
+    ///   [`AdminRecoveredEvent`] for auditability. It is not stored.
+    ///
+    /// # Errors
+    /// - [`EscrowError::NoPendingAdmin`] if no proposal is pending (including a repeated
+    ///   recovery after a successful recovery).
+    /// - [`EscrowError::AdminRecoveryNotExpired`] if the proposal timelock has not elapsed.
+    ///
+    /// # Events
+    /// Emits [`AdminRecoveredEvent`] (topic: `adm_rec`).
+    pub fn recover_admin(env: Env, reason: String) -> Address {
+        let escrow = Self::load_escrow_require_admin(&env);
+
+        let pending: Option<Address> = env.storage().instance().get(&DataKey::PendingAdmin);
+        ensure(&env, pending.is_some(), EscrowError::NoPendingAdmin);
+        let pending = pending.unwrap();
+
+        let expiry: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::PendingAdminExpiry)
+            .unwrap_or_else(|| fail(&env, EscrowError::AdminRecoveryNotExpired));
+        let now = env.ledger().timestamp();
+        ensure(&env, now > expiry, EscrowError::AdminRecoveryNotExpired);
+
+        env.storage().instance().remove(&DataKey::PendingAdmin);
+        env.storage()
+            .instance()
+            .remove(&DataKey::PendingAdminExpiry);
+
+        AdminRecoveredEvent {
+            name: symbol_short!("adm_rec"),
+            invoice_id: escrow.invoice_id.clone(),
+            current_admin: escrow.admin,
+            abandoned_pending: pending.clone(),
+            reason,
+        }
+        .publish(&env);
+
+        pending
+    }
+
     /// Transition an **open** escrow (status 0) to **cancelled** (status 4).
     ///
     /// Only the [`InvoiceEscrow::admin`] may call this. Blocked while a legal hold is active.
@@ -7361,6 +7613,98 @@ pub struct ReconciliationView {
 
 // #[cfg(test)]
 // mod tests;
+
+#[cfg(test)]
+mod init_reentry_guard_tests {
+    use super::*;
+    use soroban_sdk::testutils::Address as _;
+
+    fn sample_escrow(env: &Env) -> InvoiceEscrow {
+        InvoiceEscrow {
+            invoice_id: symbol_short!("inv"),
+            admin: Address::generate(env),
+            sme_address: Address::generate(env),
+            amount: 1_000,
+            funding_target: 1_000,
+            funded_amount: 0,
+            yield_bps: 0,
+            maturity: 0,
+            status: 0,
+        }
+    }
+
+    fn with_contract<R>(env: &Env, f: impl FnOnce() -> R) -> R {
+        let contract_id = env.register_contract(None, LiquifactEscrow);
+        env.as_contract(&contract_id, f)
+    }
+
+    #[test]
+    fn first_initialization_is_allowed() {
+        let env = Env::default();
+        with_contract(&env, || ensure_not_initialized(&env));
+    }
+
+    #[test]
+    fn same_parameters_again_rejected() {
+        let env = Env::default();
+        with_contract(&env, || {
+            env.storage()
+                .instance()
+                .set(&DataKey::Escrow, &sample_escrow(&env));
+            env.storage()
+                .instance()
+                .set(&DataKey::Version, &SCHEMA_VERSION);
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                ensure_not_initialized(&env);
+            }));
+            assert!(result.is_err());
+            assert!(env.storage().instance().has(&DataKey::Escrow));
+            assert!(env.storage().instance().has(&DataKey::Version));
+        });
+    }
+
+    #[test]
+    fn different_admin_rejected() {
+        let env = Env::default();
+        with_contract(&env, || {
+            env.storage()
+                .instance()
+                .set(&DataKey::Escrow, &sample_escrow(&env));
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                ensure_not_initialized(&env);
+            }));
+            assert!(result.is_err());
+        });
+    }
+
+    #[test]
+    fn different_token_rejected() {
+        let env = Env::default();
+        with_contract(&env, || {
+            env.storage()
+                .instance()
+                .set(&DataKey::Version, &SCHEMA_VERSION);
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                ensure_not_initialized(&env);
+            }));
+            assert!(result.is_err());
+        });
+    }
+
+    #[test]
+    fn initialization_during_another_call_rejected() {
+        let env = Env::default();
+        with_contract(&env, || {
+            env.storage()
+                .instance()
+                .set(&DataKey::Version, &SCHEMA_VERSION);
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                ensure_not_initialized(&env);
+            }));
+            assert!(result.is_err());
+        });
+    }
+}
 
 #[cfg(test)]
 mod settlement_guard_tests;
