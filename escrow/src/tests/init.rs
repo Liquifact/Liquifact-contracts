@@ -154,12 +154,162 @@ fn test_init_unauthorized_panics() {
 }
 
 #[test]
-#[should_panic]
-fn test_double_init_panics() {
+#[test]
+fn test_reinit_same_parameters_rejected() {
+    use soroban_sdk::testutils::Events as _;
+
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
     default_init(&client, &env, &admin, &sme);
+    let escrow = client.get_escrow();
+    let token = client.get_funding_token();
+    let treasury = client.get_treasury();
+    let events_before = env.events().all();
+    assert_contract_error(
+        client.try_init(
+            &admin,
+            &soroban_sdk::String::from_str(&env, "INV001"),
+            &sme,
+            &TARGET,
+            &800i64,
+            &1000u64,
+            &token,
+            &None,
+            &treasury,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None::<i64>,
+        ),
+        EscrowError::AlreadyInitialized,
+    );
+    assert_eq!(client.get_escrow(), escrow);
+    assert_eq!(env.events().all(), events_before);
+}
+
+#[test]
+fn test_reinit_different_admin_rejected() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
     default_init(&client, &env, &admin, &sme);
+    let escrow = client.get_escrow();
+    let other_admin = Address::generate(&env);
+    let token = client.get_funding_token();
+    let treasury = client.get_treasury();
+    let events_before = env.events().all();
+    assert_contract_error(
+        client.try_init(
+            &other_admin,
+            &soroban_sdk::String::from_str(&env, "INV001"),
+            &sme,
+            &TARGET,
+            &800i64,
+            &1000u64,
+            &token,
+            &None,
+            &treasury,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None::<i64>,
+        ),
+        EscrowError::AlreadyInitialized,
+    );
+    assert_eq!(client.get_escrow(), escrow);
+    assert_eq!(env.events().all(), events_before);
+}
+
+#[test]
+fn test_reinit_different_token_rejected() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    let escrow = client.get_escrow();
+    let token_before = client.get_funding_token();
+    let treasury = client.get_treasury();
+    let other_token = Address::generate(&env);
+    let events_before = env.events().all();
+    assert_contract_error(
+        client.try_init(
+            &admin,
+            &soroban_sdk::String::from_str(&env, "INV002"),
+            &sme,
+            &TARGET,
+            &800i64,
+            &1000u64,
+            &other_token,
+            &None,
+            &treasury,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None::<i64>,
+        ),
+        EscrowError::AlreadyInitialized,
+    );
+    assert_eq!(client.get_escrow(), escrow);
+    assert_eq!(client.get_funding_token(), token_before);
+    assert_eq!(env.events().all(), events_before);
+}
+
+#[test]
+fn test_reinit_during_another_call_rejected() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    client.update_maturity(&0u64);
+    let escrow = client.get_escrow();
+    let token = client.get_funding_token();
+    let treasury = client.get_treasury();
+    let events_before = env.events().all();
+    assert_contract_error(
+        client.try_init(
+            &admin,
+            &soroban_sdk::String::from_str(&env, "INV001"),
+            &sme,
+            &TARGET,
+            &800i64,
+            &1000u64,
+            &token,
+            &None,
+            &treasury,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None::<i64>,
+        ),
+        EscrowError::AlreadyInitialized,
+    );
+    assert_eq!(client.get_escrow(), escrow);
+    assert_eq!(env.events().all(), events_before);
 }
 
 #[test]

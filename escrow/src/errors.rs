@@ -17,6 +17,8 @@ pub enum EscrowError {
     Unauthorized = 20,
     AdminAlreadySet = 21,
     PendingAdminNotFound = 22,
+    AdminTransferTimelockNotElapsed = 23,
+    EmptyRecoveryReason = 24,
 
     // -------------------------------------------------------------------------------
     // Token / SEP-41 Safety Wrapper Errors (36..45)
