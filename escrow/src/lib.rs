@@ -202,6 +202,102 @@ pub const MAX_ATTESTATION_REVOKE_BATCH: u32 = 32;
 /// admin-batch API surface.
 pub const MAX_BUMP_TTL_BATCH: u32 = 32;
 
+/// Errors specific to escrow close finalization.
+#[contracterror]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CloseError {
+    /// The caller is not the configured admin.
+    NotAuthorized = 0,
+    /// The escrow was not initialized.
+    NotInitialized = 1,
+    /// The escrow has already been closed.
+    AlreadyClosed = 2,
+    /// The escrow still holds a token balance.
+    ActiveBalance = 3,
+    /// The escrow has an active dispute.
+    ActiveDispute = 4,
+}
+
+/// Metadata captured when an escrow is finalized.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CloseMetadata {
+    pub admin: Address,
+    pub timestamp: u64,
+    pub sequence: u32,
+}
+
+/// Event emitted when an escrow is closed.
+#[contractevent]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CloseFinalizedEvt {
+    CloseFinalized {
+        metadata: CloseMetadata,
+    },
+}
+
+/// Storage key that marks the escrow as closed (one-shot flag).
+const CLOSED_KEY: &str = "EscrowClosed";
+/// Storage key that holds close metadata.
+const CLOSE_METADATA_KEY: &str = "CloseMetadata";
+
+#[contractimpl]
+impl LiquifactEscrow {
+    /// Finalizes the escrow after all balance and dispute obligations have settled.
+    ///
+    /// # Preconditions
+    /// - Only the current escrow admin may close.
+    /// - The escrow's funding-token balance must be zero.
+    /// - There must be no active dispute.
+    /// - The escrow must not already be closed.
+    ///
+    /// # Effects
+    /// - Marks the escrow as closed (one-shot).
+    /// - Stores [`CloseMetadata`].
+    /// - Emits a [`CloseFinalizedEvt`].
+    pub fn close_escrow(env: Env) {
+        let escrow: InvoiceEscrow = env.storage().instance().get(&DataKey::Escrow)
+            .unwrap_or_else(|| panic_with_error!(&env, CloseError::NotInitialized));
+        let admin = escrow.admin;
+        admin.require_auth();
+
+        if env.storage().instance().has(&Symbol::new(&env, CLOSED_KEY)) {
+            panic_with_error!(&env, CloseError::AlreadyClosed);
+        }
+
+        let funding_token: Address = env.storage().instance().get(&DataKey::FundingToken)
+            .unwrap_or_else(|| panic_with_error!(&env, CloseError::NotInitialized));
+        let token = TokenClient::new(&env, &funding_token);
+        let balance = token.balance(&env.current_contract_address());
+        if balance > 0 {
+            panic_with_error!(&env, CloseError::ActiveBalance);
+        }
+
+        if escrow.dispute_active {
+            panic_with_error!(&env, CloseError::ActiveDispute);
+        }
+
+        let metadata = CloseMetadata {
+            admin: admin.clone(),
+            timestamp: env.ledger().timestamp(),
+            sequence: env.ledger().sequence(),
+        };
+
+        env.storage().instance().set(&Symbol::new(&env, CLOSED_KEY), &true);
+        env.storage().instance().set(&Symbol::new(&env, CLOSE_METADATA_KEY), &metadata);
+
+        env.events().publish(CloseFinalizedEvt::CloseFinalized {
+            metadata: metadata.clone(),
+        });
+    }
+
+    /// Returns the close metadata if the escrow has been closed.
+    pub fn get_closure_metadata(env: Env) -> Option<CloseMetadata> {
+        env.storage().instance().get(&Symbol::new(&env, CLOSE_METADATA_KEY))
+    }
+}
+
+
 /// Default maximum maturity horizon in seconds (~5 years) when no explicit horizon is configured.
 pub const DEFAULT_MATURITY_MAX_HORIZON_SECS: u64 = 157_680_000; // ~5 years (365.25 * 24 * 3600 * 5)
 
@@ -2495,6 +2591,13 @@ impl LiquifactEscrow {
     pub fn rebind_registry_ref(env: Env, registry: Option<Address>) {
         let escrow = Self::load_escrow_require_admin(&env);
 
+        // Prevent changing off-chain reference data after any principal has been recorded.
+        ensure(
+            &env,
+            escrow.funded_amount == 0,
+            EscrowError::RegistryImmutableAfterFunding,
+        );
+
         match registry.clone() {
             Some(_) => {
                 env.storage()
@@ -2699,11 +2802,11 @@ impl LiquifactEscrow {
 
         let mut escrow = Self::get_escrow(env.clone());
 
-        // Only permitted in pre-settlement states (open or funded).
+        // Only permitted before any funding has been recorded for the escrow.
         ensure(
             &env,
-            is_pre_settlement_status(escrow.status),
-            EscrowError::RotationNotOpen,
+            escrow.funded_amount == 0,
+            EscrowError::BeneficiaryImmutableAfterFunding,
         );
 
         // Reject a no-op rotation to the current beneficiary.
@@ -7029,6 +7132,9 @@ pub struct ReconciliationView {
 
 #[cfg(test)]
 mod settlement_guard_tests;
+
+#[cfg(test)]
+mod settlement_math_boundaries_tests;
 
 /// Default starting balance assigned to any address that has never been seen by the
 /// [`DefaultMockToken`] contract.

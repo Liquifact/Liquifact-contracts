@@ -37,6 +37,13 @@ pub enum EscrowError {
     InvestorCapReached = 52,
     BelowMinContributionFloor = 53,
     FundingClosed = 54,
+    /// Mutation of SME/beneficiary address is forbidden once any principal has been
+    /// recorded for the escrow instance. This preserves auditability of payout
+    /// destination for funded escrows.
+    BeneficiaryImmutableAfterFunding = 55,
+    /// Registry/reference metadata may not be rebound after funding begins; this
+    /// prevents changing off-chain pointers that clients use to reconcile identity.
+    RegistryImmutableAfterFunding = 56,
 
     // -------------------------------------------------------------------------
     // Batch Operations Errors (80..89)
@@ -63,6 +70,16 @@ pub enum EscrowError {
     MaturityNotReached = 101,
     EscrowNotInFundedState = 102,
     WithdrawAmountInvalid = 103,
+
+    // -------------------------------------------------------------------------
+    // Escrow Close Finalization Errors (110..119)
+    // -------------------------------------------------------------------------
+    /// [`LiquifactEscrow::finalize_close`] cannot finalize while the escrow holds a non-zero balance.
+    EscrowBalanceNotZero = 110,
+    /// [`LiquifactEscrow::finalize_close`] cannot finalize while a dispute is active.
+    ActiveDispute = 111,
+    /// [`LiquifactEscrow::finalize_close`] was already called; close finalization is one-shot.
+    EscrowAlreadyClosed = 112,
 
     // -------------------------------------------------------------------------
     // Legal Hold & Operational Pause (200..209)

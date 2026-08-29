@@ -3688,3 +3688,164 @@ fn update_yield_bps_reflected_in_settlement_config() {
     let config = client.get_settlement_config();
     assert_eq!(config.yield_bps, 750i64);
 }
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Escrow close finalization — one-shot terminal close after obligations settle
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// Create a settled escrow whose token balance is zero and no dispute is open.
+fn close_ready_escrow<'a>(
+    env: &'a Env,
+    invoice_id: &str,
+) -> (
+    super::LiquifactEscrowClient<'a>,
+    StellarTestToken<'a>,
+    Address,
+) {
+    let (client, token, contract_id, _treasury) =
+        setup_claim_env(env, invoice_id, TARGET, 0i64);
+    let investor = Address::generate(env);
+    token.stellar.mint(&investor, &TARGET);
+    client.fund(&investor, &TARGET);
+    client.settle();
+    client.claim_investor_payout(&investor);
+    assert_eq!(
+        token.token.balance(&contract_id),
+        0,
+        "close_ready_escrow must drain the escrow balance"
+    );
+    (client, token, contract_id)
+}
+
+#[test]
+fn finalize_close_succeeds_when_obligations_are_settled() {
+    let env = Env::default();
+    let (client, _token, _contract_id) = close_ready_escrow(&env, "FINAL_OK_001");
+    env.ledger().with_mut(|l| l.timestamp = 42_000);
+
+    client.finalize_close();
+
+    assert_eq!(
+        client.get_escrow().status,
+        5u32,
+        "escrow must enter the terminal closed state after finalization"
+    );
+    assert!(
+        client.get_close_metadata().is_some(),
+        "finalization must expose close metadata"
+    );
+}
+
+#[test]
+fn finalize_close_rejects_active_balance_and_preserves_state() {
+    let env = Env::default();
+    let (client, token, contract_id) = setup_claim_env(&env, "FINAL_BAL_001", TARGET, 0i64);
+    let investor = Address::generate(&env);
+    token.stellar.mint(&investor, &TARGET);
+    client.fund(&investor, &TARGET);
+    client.settle();
+    assert_eq!(token.token.balance(&contract_id), TARGET);
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.finalize_close();
+    }));
+
+    assert!(result.is_err(), "finalize_close must reject a remaining balance");
+    assert_eq!(client.get_escrow().status, 2u32);
+    assert!(
+        client.get_close_metadata().is_none(),
+        "rejected finalization must not write close metadata"
+    );
+}
+
+#[test]
+fn finalize_close_rejects_active_dispute_and_preserves_state() {
+    let env = Env::default();
+    let (client, _token, _contract_id) = close_ready_escrow(&env, "FINAL_DSP_001");
+
+    client.set_dispute(&true);
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.finalize_close();
+    }));
+
+    assert!(result.is_err(), "finalize_close must reject an active dispute");
+    assert!(
+        client.get_close_metadata().is_none(),
+        "disputed finalization must not write close metadata"
+    );
+}
+
+#[test]
+fn finalize_close_rejects_already_closed_and_preserves_metadata() {
+    let env = Env::default();
+    let (client, _token, _contract_id) = close_ready_escrow(&env, "FINAL_ONCE_001");
+
+    client.finalize_close();
+
+    let second = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.finalize_close();
+    }));
+
+    assert!(second.is_err(), "finalization must be one-shot");
+    assert!(
+        client.get_close_metadata().is_some(),
+        "replayed finalization must not erase close metadata"
+    );
+}
+
+#[test]
+fn finalize_close_concurrent_attempts_are_one_shot() {
+    let env = Env::default();
+    let (client, _token, _contract_id) = close_ready_escrow(&env, "FINAL_CONC_001");
+
+    client.finalize_close();
+
+    let concurrent_client = super::LiquifactEscrowClient::new(&env, &client.address);
+    let concurrent = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        concurrent_client.finalize_close();
+    }));
+
+    assert!(
+        concurrent.is_err(),
+        "a concurrent finalize_close in the same ledger must observe the terminal state"
+    );
+    assert_eq!(client.get_escrow().status, 5u32);
+}
+
+#[test]
+fn finalize_close_requires_authorization() {
+    let env = Env::default();
+    let (client, _token, _contract_id) = close_ready_escrow(&env, "FINAL_AUTH_001");
+
+    env.mock_auths(&[]);
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.finalize_close();
+    }));
+
+    assert!(result.is_err(), "finalize_close must require authorization");
+    assert!(
+        client.get_close_metadata().is_none(),
+        "unauthorized finalization must not change state"
+    );
+}
+
+#[test]
+fn finalize_close_emits_final_event() {
+    let env = Env::default();
+    let (client, _token, _contract_id) = close_ready_escrow(&env, "FINAL_EVT_001");
+
+    client.finalize_close();
+
+    let events = env.events().all();
+    let last = events
+        .events()
+        .last()
+        .expect("finalize_close must emit a final event");
+    let topics = last.topics.clone();
+    assert_eq!(
+        topics.get(0).unwrap(),
+        symbol_short!("esc_cls").into(),
+        "final event must use the close-finalization topic"
+    );
+}
