@@ -31,6 +31,12 @@ The `name` field is a `#[topic] Symbol` in every LiquiFact event. It carries the
 short routing symbol passed with `symbol_short!(...)`, such as `funded` or
 `escrow_sd`.
 
+Every event in this contract emits a trailing schema version topic. It is a
+`#[topic] Symbol` named `version` with value `v1`. It is always the final topic
+in the topic list, after all other `#[topic]` fields. Indexers MUST ignore this
+extra topic when reading from a known schema version and SHOULD reject events
+whose version is not `v1` when strict compatibility is required.
+
 ## Event Catalog
 
 The current contract defines 20 event structs.
@@ -62,6 +68,13 @@ The current contract defines 20 event structs.
 | `InvestorAllowlistChanged` | `al_set` | `set_investor_allowlisted`, `set_investors_allowlisted` |
 
 ## Complete Topic And Data Layout
+
+All topic tables below omit the trailing schema version topic for brevity.
+Every event's complete topic list is the table shown plus a final row of the
+form `| <last_index+1> | version | Symbol | v1 |`. The value of `<last_index+1>`
+is one greater than the largest index shown in the table. The version topic is
+additive: it does not change the order, meaning, or data payload of any
+pre-existing topic or field.
 
 ### `EscrowInitialized`
 

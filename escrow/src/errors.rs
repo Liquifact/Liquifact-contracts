@@ -38,6 +38,13 @@ pub enum EscrowError {
     InvestorCapReached = 52,
     BelowMinContributionFloor = 53,
     FundingClosed = 54,
+    /// Mutation of SME/beneficiary address is forbidden once any principal has been
+    /// recorded for the escrow instance. This preserves auditability of payout
+    /// destination for funded escrows.
+    BeneficiaryImmutableAfterFunding = 55,
+    /// Registry/reference metadata may not be rebound after funding begins; this
+    /// prevents changing off-chain pointers that clients use to reconcile identity.
+    RegistryImmutableAfterFunding = 56,
 
     // ----------------------------------------------------------------------------------------------------------
     // Batch Operations Errors (80..89)
