@@ -2473,6 +2473,13 @@ impl LiquifactEscrow {
     pub fn rebind_registry_ref(env: Env, registry: Option<Address>) {
         let escrow = Self::load_escrow_require_admin(&env);
 
+        // Prevent changing off-chain reference data after any principal has been recorded.
+        ensure(
+            &env,
+            escrow.funded_amount == 0,
+            EscrowError::RegistryImmutableAfterFunding,
+        );
+
         match registry.clone() {
             Some(_) => {
                 env.storage()
@@ -2677,11 +2684,11 @@ impl LiquifactEscrow {
 
         let mut escrow = Self::get_escrow(env.clone());
 
-        // Only permitted in pre-settlement states (open or funded).
+        // Only permitted before any funding has been recorded for the escrow.
         ensure(
             &env,
-            is_pre_settlement_status(escrow.status),
-            EscrowError::RotationNotOpen,
+            escrow.funded_amount == 0,
+            EscrowError::BeneficiaryImmutableAfterFunding,
         );
 
         // Reject a no-op rotation to the current beneficiary.
