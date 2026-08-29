@@ -89,3 +89,13 @@ pub(crate) fn funding_close_snapshot() -> DataKey {
 pub(crate) fn funding_token() -> DataKey {
     DataKey::FundingToken
 }
+
+/// Instance-storage invocation nonce for cross-contract callbacks.
+pub(crate) fn callback_nonce() -> DataKey {
+    DataKey::CallbackNonce
+}
+
+/// Instance-storage pending callback context keyed by invocation nonce.
+pub(crate) fn callback_context(nonce: u64) -> DataKey {
+    DataKey::CallbackContext(nonce)
+}

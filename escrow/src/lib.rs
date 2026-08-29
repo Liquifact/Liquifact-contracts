@@ -692,6 +692,19 @@ pub enum EscrowError {
     /// effect, so a re-entrant or replayed call is rejected here with a dedicated, stable
     /// typed code rather than a misleading `SettlementNotFunded`.
     EscrowAlreadySettled = 236,
+
+    /// [`LiquifactEscrow::execute_callback`] called from an origin address different from the registered origin context.
+    CallbackWrongOrigin = 240,
+    /// [`LiquifactEscrow::execute_callback`] called with an invocation nonce that does not match the stored context.
+    CallbackWrongNonce = 241,
+    /// [`LiquifactEscrow::execute_callback`] called with a lifecycle phase different from the expected phase.
+    CallbackWrongPhase = 242,
+    /// [`LiquifactEscrow::execute_callback`] called with a callback context that has already been consumed (replay attempt).
+    CallbackReplayed = 243,
+    /// [`LiquifactEscrow::execute_callback`] or [`LiquifactEscrow::register_callback`] called after the escrow has been cancelled.
+    CallbackAfterCancellation = 244,
+    /// [`LiquifactEscrow::execute_callback`] called with a nonce that has no registered callback context.
+    CallbackNotFound = 245,
 }
 
 #[inline(always)]
@@ -1040,6 +1053,12 @@ pub enum DataKey {
     /// **Additive key (ADR-007):** absent ⇒ [`DEFAULT_SETTLEMENT_LIMIT`]. Updatable via
     /// [`LiquifactEscrow::set_storage_limit`].
     StorageLimit,
+    /// Monotonically increasing invocation nonce counter for cross-contract callbacks.
+    /// Absent ⇒ `0`. Incremented on each callback registration.
+    CallbackNonce,
+    /// Stored cross-contract callback context ([`CallbackContext`]) keyed by invocation nonce.
+    /// Binds expected origin address, invocation nonce, and lifecycle phase.
+    CallbackContext(u64),
 }
 
 // --- Data types ---
@@ -1310,6 +1329,25 @@ pub struct SettlementConfig {
     pub max_unique_investors_cap: Option<u32>,
     /// Optional cap on total principal per single investor; `None` means unlimited.
     pub max_per_investor_cap: Option<i128>,
+}
+
+/// Cross-contract callback context binding origin, nonce, and lifecycle phase.
+///
+/// Ensures callbacks originating from external contracts cannot be replayed,
+/// redirected across phases, or executed by unauthorized origins.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct CallbackContext {
+    /// The external contract address authorized to execute this callback.
+    pub origin: Address,
+    /// Unique invocation nonce assigned when the callback was registered.
+    pub nonce: u64,
+    /// Expected lifecycle phase / flow identifier for this callback.
+    pub phase: u32,
+    /// Ledger timestamp when this callback was registered.
+    pub created_at: u64,
+    /// Whether this callback has already been executed / consumed.
+    pub consumed: bool,
 }
 
 // --- Events ---
@@ -1928,6 +1966,32 @@ pub struct ContractUpgraded {
     #[topic]
     pub invoice_id: Symbol,
     pub new_wasm_hash: BytesN<32>,
+}
+
+/// Emitted when a cross-contract callback is registered.
+#[contractevent]
+pub struct CallbackRegisteredEvent {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    #[topic]
+    pub origin: Address,
+    pub nonce: u64,
+    pub phase: u32,
+}
+
+/// Emitted when a cross-contract callback is successfully executed and consumed.
+#[contractevent]
+pub struct CallbackExecutedEvent {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    #[topic]
+    pub origin: Address,
+    pub nonce: u64,
+    pub phase: u32,
 }
 
 // ---------------------------------------------------------------------------
@@ -6973,6 +7037,174 @@ impl LiquifactEscrow {
             surplus,
         }
     }
+
+    /// Register a pending cross-contract callback with an authorized origin contract and expected phase.
+    ///
+    /// Allocates the next monotonic invocation nonce, stores the [`CallbackContext`] in instance
+    /// storage, and emits [`CallbackRegisteredEvent`].
+    ///
+    /// # Authorization
+    /// Requires the signature of the current [`InvoiceEscrow::admin`].
+    ///
+    /// # Errors
+    /// - [`EscrowError::EscrowNotInitialized`] if escrow storage is missing.
+    /// - [`EscrowError::CallbackAfterCancellation`] if the escrow status is 4 (cancelled).
+    ///
+    /// # Returns
+    /// The allocated unique invocation nonce (`u64`).
+    pub fn register_callback(env: Env, origin: Address, phase: u32) -> u64 {
+        let escrow = Self::load_escrow_require_admin(&env);
+
+        ensure(
+            &env,
+            escrow.status != 4,
+            EscrowError::CallbackAfterCancellation,
+        );
+
+        let current_nonce: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::CallbackNonce)
+            .unwrap_or(0);
+        let next_nonce = current_nonce
+            .checked_add(1)
+            .unwrap_or_else(|| fail(&env, EscrowError::FundedAmountOverflow));
+
+        env.storage()
+            .instance()
+            .set(&DataKey::CallbackNonce, &next_nonce);
+
+        let now = env.ledger().timestamp();
+        let context = CallbackContext {
+            origin: origin.clone(),
+            nonce: next_nonce,
+            phase,
+            created_at: now,
+            consumed: false,
+        };
+
+        env.storage()
+            .instance()
+            .set(&DataKey::CallbackContext(next_nonce), &context);
+
+        CallbackRegisteredEvent {
+            name: symbol_short!("cb_reg"),
+            invoice_id: escrow.invoice_id,
+            origin,
+            nonce: next_nonce,
+            phase,
+        }
+        .publish(&env);
+
+        next_nonce
+    }
+
+    /// Execute and consume a registered cross-contract callback.
+    ///
+    /// Validates that:
+    /// 1. The escrow is not in cancelled status (`status != 4`).
+    /// 2. The caller authorized as `origin` matches the registered origin address.
+    /// 3. The callback context exists for `nonce`.
+    /// 4. The callback has not already been consumed (replay protection).
+    /// 5. The registered `nonce` matches the supplied `nonce`.
+    /// 6. The registered `phase` matches the supplied `phase`.
+    ///
+    /// State mutation: marks `consumed = true` on the context and updates storage atomically
+    /// before emitting [`CallbackExecutedEvent`].
+    ///
+    /// # Authorization
+    /// Requires authorization from `origin` (`origin.require_auth()`).
+    ///
+    /// # Errors
+    /// - [`EscrowError::CallbackAfterCancellation`] if escrow is cancelled (status 4).
+    /// - [`EscrowError::CallbackNotFound`] if no context exists for `nonce`.
+    /// - [`EscrowError::CallbackReplayed`] if the callback has already been consumed.
+    /// - [`EscrowError::CallbackWrongOrigin`] if caller `origin` does not match the registered origin.
+    /// - [`EscrowError::CallbackWrongNonce`] if `nonce` does not match the stored context nonce.
+    /// - [`EscrowError::CallbackWrongPhase`] if `phase` does not match the expected phase.
+    ///
+    /// # Returns
+    /// The updated [`CallbackContext`] snapshot with `consumed == true`.
+    pub fn execute_callback(env: Env, nonce: u64, origin: Address, phase: u32) -> CallbackContext {
+        let escrow = Self::get_escrow(env.clone());
+
+        ensure(
+            &env,
+            escrow.status != 4,
+            EscrowError::CallbackAfterCancellation,
+        );
+
+        origin.require_auth();
+
+        let mut context: CallbackContext = env
+            .storage()
+            .instance()
+            .get(&DataKey::CallbackContext(nonce))
+            .unwrap_or_else(|| fail(&env, EscrowError::CallbackNotFound));
+
+        ensure(&env, !context.consumed, EscrowError::CallbackReplayed);
+
+        ensure(
+            &env,
+            context.origin == origin,
+            EscrowError::CallbackWrongOrigin,
+        );
+
+        ensure(
+            &env,
+            context.nonce == nonce,
+            EscrowError::CallbackWrongNonce,
+        );
+
+        ensure(
+            &env,
+            context.phase == phase,
+            EscrowError::CallbackWrongPhase,
+        );
+
+        context.consumed = true;
+        env.storage()
+            .instance()
+            .set(&DataKey::CallbackContext(nonce), &context);
+
+        CallbackExecutedEvent {
+            name: symbol_short!("cb_exec"),
+            invoice_id: escrow.invoice_id,
+            origin,
+            nonce,
+            phase,
+        }
+        .publish(&env);
+
+        context
+    }
+
+    /// Read-only view returning the registered callback context for a given invocation `nonce`.
+    /// Returns `None` if no callback was registered with this nonce.
+    pub fn get_callback(env: Env, nonce: u64) -> Option<CallbackContext> {
+        env.storage()
+            .instance()
+            .get(&DataKey::CallbackContext(nonce))
+    }
+
+    /// Read-only view returning the current callback invocation nonce counter.
+    /// Returns `0` if no callbacks have been registered.
+    pub fn get_callback_nonce(env: Env) -> u64 {
+        env.storage()
+            .instance()
+            .get(&DataKey::CallbackNonce)
+            .unwrap_or(0)
+    }
+
+    /// Read-only view returning whether the callback for `nonce` has been consumed.
+    /// Returns `false` if the callback is unconsumed or does not exist.
+    pub fn is_callback_consumed(env: Env, nonce: u64) -> bool {
+        let context: Option<CallbackContext> = env
+            .storage()
+            .instance()
+            .get(&DataKey::CallbackContext(nonce));
+        context.map(|c| c.consumed).unwrap_or(false)
+    }
 }
 
 /// Read-only reconciliation snapshot returned by
@@ -7007,6 +7239,9 @@ pub struct ReconciliationView {
 
 #[cfg(test)]
 mod settlement_guard_tests;
+
+#[cfg(test)]
+mod callback_binding_tests;
 
 /// Default starting balance assigned to any address that has never been seen by the
 /// [`DefaultMockToken`] contract.
