@@ -45,6 +45,232 @@ impl MockToken {
         panic!("Token contract transfer should not be invoked by escrow metadata-only flows")
     }
 }
+ 
+#[contract]
+pub struct InitReentryProbe;
+
+#[contractimpl]
+impl InitReentryProbe {
+    pub fn call_init(
+        env: Env,
+        escrow: Address,
+        admin: Address,
+        invoice_id: soroban_sdk::String,
+        sme: Address,
+        funding_token: Address,
+        treasury: Address,
+    ) {
+        LiquifactEscrowClient::new(&env, &escrow).init(
+            &admin,
+            &invoice_id,
+            &sme,
+            &1i128,
+            &0i64,
+            &0u64,
+            &funding_token,
+            &None,
+            &treasury,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None::<i64>,
+        );
+    }
+}
+
+fn init_test_escrow(
+    client: &LiquifactEscrowClient,
+    admin: &Address,
+    sme: &Address,
+    invoice_id: &soroban_sdk::String,
+    funding_token: &Address,
+    treasury: &Address,
+) {
+    client.init(
+        admin,
+        invoice_id,
+        sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        funding_token,
+        &None,
+        treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+}
+
+fn assert_escrow_state_unchanged(before: &InvoiceEscrow, after: &InvoiceEscrow) {
+    assert_eq!(before.invoice_id, after.invoice_id);
+    assert_eq!(before.admin, after.admin);
+    assert_eq!(before.sme_address, after.sme_address);
+    assert_eq!(before.amount, after.amount);
+    assert_eq!(before.funding_target, after.funding_target);
+    assert_eq!(before.funded_amount, after.funded_amount);
+    assert_eq!(before.yield_bps, after.yield_bps);
+    assert_eq!(before.maturity, after.maturity);
+    assert_eq!(before.status, after.status);
+}
+
+fn assert_no_contract_events(env: &Env, contract_id: &Address) {
+    use soroban_sdk::testutils::Events as _;
+    assert_eq!(
+        env.events().all().filter_by_contract(contract_id).events().len(),
+        0,
+        "rejected init must not emit events"
+    );
+}
+
+#[test]
+fn test_init_rejects_same_parameters_different_admin_and_different_token() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let (token, treasury) = free_addresses(&env);
+    let invoice_id = soroban_sdk::String::from_str(&env, "INIT_CONFLICT");
+    init_test_escrow(&client, &admin, &sme, &invoice_id, &token, &treasury);
+    let before = client.get_escrow();
+    let different_admin = Address::generate(&env);
+    let different_token = Address::generate(&env);
+
+    // Same parameters.
+    env.events().all();
+    assert_contract_error(
+        client.try_init(
+            &admin,
+            &invoice_id,
+            &sme,
+            &TARGET,
+            &800i64,
+            &0u64,
+            &token,
+            &None,
+            &treasury,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None::<i64>,
+        ),
+        EscrowError::AlreadyInitialized,
+    );
+    assert_no_contract_events(&env, &client.address);
+    assert_escrow_state_unchanged(&before, &client.get_escrow());
+
+    // Different admin.
+    env.events().all();
+    assert_contract_error(
+        client.try_init(
+            &different_admin,
+            &invoice_id,
+            &sme,
+            &TARGET,
+            &800i64,
+            &0u64,
+            &token,
+            &None,
+            &treasury,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None::<i64>,
+        ),
+        EscrowError::AlreadyInitialized,
+    );
+    assert_no_contract_events(&env, &client.address);
+    assert_escrow_state_unchanged(&before, &client.get_escrow());
+
+    // Different token.
+    env.events().all();
+    assert_contract_error(
+        client.try_init(
+            &admin,
+            &invoice_id,
+            &sme,
+            &TARGET,
+            &800i64,
+            &0u64,
+            &different_token,
+            &None,
+            &treasury,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None::<i64>,
+        ),
+        EscrowError::AlreadyInitialized,
+    );
+    assert_no_contract_events(&env, &client.address);
+    assert_escrow_state_unchanged(&before, &client.get_escrow());
+
+    env.as_contract(&client.address, || {
+        let stored_token: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::FundingToken)
+            .expect("funding token");
+        assert_eq!(stored_token, token);
+    });
+}
+
+#[test]
+fn test_init_rejected_during_another_contract_call() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let (token, treasury) = free_addresses(&env);
+    let invoice_id = soroban_sdk::String::from_str(&env, "INIT_REENTRY");
+    init_test_escrow(&client, &admin, &sme, &invoice_id, &token, &treasury);
+    let before = client.get_escrow();
+
+    let probe_id = env.register(InitReentryProbe, ());
+    let probe = InitReentryProbeClient::new(&env, &probe_id);
+    let other_admin = Address::generate(&env);
+    let other_token = Address::generate(&env);
+    let other_treasury = Address::generate(&env);
+    let other_invoice = soroban_sdk::String::from_str(&env, "INIT_REENTRY2");
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        probe.call_init(
+            &client.address,
+            &other_admin,
+            &other_invoice,
+            &sme,
+            &other_token,
+            &other_treasury,
+        );
+    }));
+    assert!(result.is_err(), "init during another call must be rejected");
+    let after = client.get_escrow();
+    assert_escrow_state_unchanged(&before, &after);
+}
 
 /// **MID-FLOW LEGAL HOLD INTEGRATION TEST (USER-EXPERIENCE NARRATIVE)**
 ///
