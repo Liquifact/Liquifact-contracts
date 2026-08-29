@@ -115,6 +115,117 @@ fn test_legal_hold_midflow_blocks_and_resumes_with_ordered_events() {
     );
 }
 
+#[test]
+fn test_finalize_close_success_after_withdraw() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let target = 50_000_000i128;
+    let (client, escrow_id, _token, _sme) =
+        setup_withdraw_with_token(&env, target, "CLOSE_OK001");
+
+    assert_eq!(client.get_escrow().status, 3u32);
+
+    let events_before = env.events().all().filter_by_contract(&escrow_id).events().len();
+    client.finalize_close();
+
+    let events_after = env.events().all().filter_by_contract(&escrow_id).events().len();
+    assert_eq!(
+        events_after,
+        events_before + 1,
+        "finalization must emit exactly one terminal event"
+    );
+
+    let escrow = client.get_escrow();
+    assert_eq!(escrow.status, 5u32);
+    assert!(
+        client.get_close_metadata().is_some(),
+        "close metadata must be stored after finalization"
+    );
+}
+
+#[test]
+fn test_finalize_close_rejects_active_balance() {
+    use soroban_sdk::token::StellarAssetClient;
+
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let target = 10_000_000i128;
+    let (client, escrow_id, token, _sme) =
+        setup_withdraw_with_token(&env, target, "CLOSE_BAL001");
+
+    let sac_admin = StellarAssetClient::new(&env, &token.address);
+    sac_admin.mint(&escrow_id, &1i128);
+
+    let result = client.try_finalize_close();
+    assert!(result.is_err(), "finalization must fail while balance is nonzero");
+    assert_eq!(client.get_escrow().status, 3u32);
+}
+
+#[test]
+fn test_finalize_close_rejects_active_dispute() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let target = 10_000_000i128;
+    let (client, _escrow_id, _token, _sme) =
+        setup_withdraw_with_token(&env, target, "CLOSE_DSP001");
+
+    env.as_contract(&client.address, || {
+        env.storage().instance().set(&DataKey::Dispute, &true);
+    });
+
+    let result = client.try_finalize_close();
+    assert!(result.is_err(), "finalization must fail while dispute is active");
+    assert_eq!(client.get_escrow().status, 3u32);
+}
+
+#[test]
+fn test_finalize_close_rejects_already_closed() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let target = 10_000_000i128;
+    let (client, _escrow_id, _token, _sme) =
+        setup_withdraw_with_token(&env, target, "CLOSE_ALC001");
+
+    client.finalize_close();
+
+    let result = client.try_finalize_close();
+    assert!(result.is_err(), "second finalization must be rejected");
+    assert_eq!(client.get_escrow().status, 5u32);
+}
+
+#[test]
+fn test_finalize_close_concurrent_calls_only_one_succeeds() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, _escrow_id, _token, _sme) =
+        setup_withdraw_with_token(&env, 10_000_000i128, "CLOSE_CONC001");
+
+    assert!(client.try_finalize_close().is_ok());
+    assert!(client.try_finalize_close().is_err());
+}
+
+#[test]
+fn test_finalize_close_requires_authorization() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, _escrow_id, _token, _sme) =
+        setup_withdraw_with_token(&env, 10_000_000i128, "CLOSE_AUTH001");
+
+    env.set_auths(&[]);
+
+    let result = client.try_finalize_close();
+    assert!(result.is_err(), "finalization must require authorization");
+    assert_eq!(client.get_escrow().status, 3u32);
+}
+
 // --- Gold Standard Integration Test ---
 
 /// **GOLD STANDARD INTEGRATION TEST**
