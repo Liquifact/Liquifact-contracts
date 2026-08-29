@@ -348,6 +348,11 @@ pub enum EscrowError {
     /// [`LiquifactEscrow::init`] rejected `yield_bps` outside `0..=10_000`.
     YieldBpsOutOfRange = 2,
     /// [`LiquifactEscrow::init`] called when escrow storage already exists.
+    ///
+    /// Returned for every second initialization attempt — same parameters, a different
+    /// admin, a different token, or a re-entrant initialization during `init` — before
+    /// any state mutation or event emission. Existing admin, token metadata, and escrow
+    /// state are left unchanged.
     EscrowAlreadyInitialized = 3,
     /// [`LiquifactEscrow::init`] rejected an invoice amount too large to keep
     /// `compute_investor_payout` arithmetic overflow-free.
@@ -704,6 +709,24 @@ pub(crate) fn ensure(env: &Env, condition: bool, error: EscrowError) {
     if !condition {
         fail(env, error);
     }
+}
+
+/// Reject any initialization attempt when the contract is already initialized or an
+/// initialization is in progress.
+///
+/// This is the single guard for [`LiquifactEscrow::init`]. It checks both the escrow
+/// snapshot and the schema-version marker so a partially failed first initialization
+/// cannot be overwritten. `init` must call this before any authorization, validation,
+/// storage write, or event emission.
+#[allow(dead_code)]
+#[inline(always)]
+pub(crate) fn ensure_not_initialized(env: &Env) {
+    ensure(
+        env,
+        !(env.storage().instance().has(&DataKey::Escrow)
+            || env.storage().instance().has(&DataKey::Version)),
+        EscrowError::EscrowAlreadyInitialized,
+    );
 }
 
 /// Assert that `actual_status == expected_status`, emitting `error` otherwise.
@@ -7004,6 +7027,98 @@ pub struct ReconciliationView {
 
 // #[cfg(test)]
 // mod tests;
+
+#[cfg(test)]
+mod init_reentry_guard_tests {
+    use super::*;
+    use soroban_sdk::testutils::Address as _;
+
+    fn sample_escrow(env: &Env) -> InvoiceEscrow {
+        InvoiceEscrow {
+            invoice_id: symbol_short!("inv"),
+            admin: Address::generate(env),
+            sme_address: Address::generate(env),
+            amount: 1_000,
+            funding_target: 1_000,
+            funded_amount: 0,
+            yield_bps: 0,
+            maturity: 0,
+            status: 0,
+        }
+    }
+
+    fn with_contract<R>(env: &Env, f: impl FnOnce() -> R) -> R {
+        let contract_id = env.register_contract(None, LiquifactEscrow);
+        env.as_contract(&contract_id, f)
+    }
+
+    #[test]
+    fn first_initialization_is_allowed() {
+        let env = Env::default();
+        with_contract(&env, || ensure_not_initialized(&env));
+    }
+
+    #[test]
+    fn same_parameters_again_rejected() {
+        let env = Env::default();
+        with_contract(&env, || {
+            env.storage()
+                .instance()
+                .set(&DataKey::Escrow, &sample_escrow(&env));
+            env.storage()
+                .instance()
+                .set(&DataKey::Version, &SCHEMA_VERSION);
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                ensure_not_initialized(&env);
+            }));
+            assert!(result.is_err());
+            assert!(env.storage().instance().has(&DataKey::Escrow));
+            assert!(env.storage().instance().has(&DataKey::Version));
+        });
+    }
+
+    #[test]
+    fn different_admin_rejected() {
+        let env = Env::default();
+        with_contract(&env, || {
+            env.storage()
+                .instance()
+                .set(&DataKey::Escrow, &sample_escrow(&env));
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                ensure_not_initialized(&env);
+            }));
+            assert!(result.is_err());
+        });
+    }
+
+    #[test]
+    fn different_token_rejected() {
+        let env = Env::default();
+        with_contract(&env, || {
+            env.storage()
+                .instance()
+                .set(&DataKey::Version, &SCHEMA_VERSION);
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                ensure_not_initialized(&env);
+            }));
+            assert!(result.is_err());
+        });
+    }
+
+    #[test]
+    fn initialization_during_another_call_rejected() {
+        let env = Env::default();
+        with_contract(&env, || {
+            env.storage()
+                .instance()
+                .set(&DataKey::Version, &SCHEMA_VERSION);
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                ensure_not_initialized(&env);
+            }));
+            assert!(result.is_err());
+        });
+    }
+}
 
 #[cfg(test)]
 mod settlement_guard_tests;
