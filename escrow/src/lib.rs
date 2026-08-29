@@ -184,6 +184,46 @@ pub const MAX_BUMP_TTL_BATCH: u32 = 32;
 pub const DEFAULT_MATURITY_MAX_HORIZON_SECS: u64 = 157_680_000; // ~5 years (365.25 * 24 * 3600 * 5)
 
 // ---------------------------------------------------------------------------
+// Bounded fee schedule
+// ---------------------------------------------------------------------------
+
+/// A fee schedule with named bounds and a future ledger at which it becomes active.
+///
+/// `fee_bps` is the actual fee in basis points. `min_fee_bps` and `max_fee_bps`
+/// are the named lower/upper bounds for the schedule; they are validated by
+/// [`LiquifactEscrow::submit_fee_schedule`] and are exposed for off-chain audit.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FeeSchedule {
+    pub fee_bps: u32,
+    pub min_fee_bps: u32,
+    pub max_fee_bps: u32,
+    pub activation_ledger: u32,
+}
+
+/// Storage keys for the fee-schedule activation ledger.
+///
+/// These are deliberately separate from [`DataKey`] so existing escrow storage is
+/// untouched. The active and pending keys are the source of truth for reads; the
+/// previous key is updated when a pending schedule activates.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum FeeScheduleStorageKey {
+    Active,
+    Pending,
+    Previous,
+}
+
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+pub enum FeeScheduleError {
+    FeeOutOfBounds = 1,
+    InvalidActivationLedger = 2,
+    PendingScheduleExists = 3,
+    NotInitialized = 4,
+}
+
+// ---------------------------------------------------------------------------
 // Data types
 // ---------------------------------------------------------------------------
 
@@ -1970,6 +2010,127 @@ fn validate_invoice_id_string(env: &Env, invoice_id: &String) -> Symbol {
 
 #[contractimpl]
 impl LiquifactEscrow {
+    /// Admin-authorized submission of a new pending fee schedule.
+    ///
+    /// The schedule must be in-bounds and its activation ledger must lie strictly
+    /// in the future. Duplicate pending schedules are idempotent.
+    pub fn submit_fee_schedule(env: Env, schedule: FeeSchedule) {
+        let escrow: InvoiceEscrow = env
+            .storage()
+            .instance()
+            .get(&DataKey::Escrow)
+            .unwrap_or_else(|| panic_with_error!(&env, FeeScheduleError::NotInitialized));
+        escrow.admin.require_auth();
+
+        if schedule.min_fee_bps > schedule.fee_bps
+            || schedule.fee_bps > schedule.max_fee_bps
+            || schedule.max_fee_bps > 10_000
+        {
+            panic_with_error!(&env, FeeScheduleError::FeeOutOfBounds);
+        }
+
+        let current_ledger = env.ledger().sequence();
+        if schedule.activation_ledger <= current_ledger {
+            panic_with_error!(&env, FeeScheduleError::InvalidActivationLedger);
+        }
+
+        Self::activate_fee_schedule(env.clone());
+
+        let pending: Option<FeeSchedule> = env
+            .storage()
+            .instance()
+            .get(&FeeScheduleStorageKey::Pending);
+        if pending.as_ref() == Some(&schedule) {
+            return;
+        }
+        if pending.is_some() {
+            panic_with_error!(&env, FeeScheduleError::PendingScheduleExists);
+        }
+
+        env.storage()
+            .instance()
+            .set(&FeeScheduleStorageKey::Pending, &schedule);
+    }
+
+    /// Promotes a pending schedule to active when its activation ledger is reached.
+    ///
+    /// This is intentionally callable by anyone; it only applies a previously
+    /// admin-authorized schedule and records the previous active schedule.
+    pub fn activate_fee_schedule(env: Env) -> bool {
+        let current_ledger = env.ledger().sequence();
+        let pending: Option<FeeSchedule> = env
+            .storage()
+            .instance()
+            .get(&FeeScheduleStorageKey::Pending);
+        if let Some(p) = pending {
+            if p.activation_ledger <= current_ledger {
+                let previous: Option<FeeSchedule> = env
+                    .storage()
+                    .instance()
+                    .get(&FeeScheduleStorageKey::Active);
+                env.storage()
+                    .instance()
+                    .set(&FeeScheduleStorageKey::Active, &p);
+                env.storage()
+                    .instance()
+                    .set(&FeeScheduleStorageKey::Previous, &previous);
+                env.storage()
+                    .instance()
+                    .remove(&FeeScheduleStorageKey::Pending);
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Returns the active fee schedule for the current ledger, computing any
+    /// not-yet-promoted boundary activation on the fly.
+    pub fn get_active_fee_schedule(env: Env) -> Option<FeeSchedule> {
+        let active: Option<FeeSchedule> = env
+            .storage()
+            .instance()
+            .get(&FeeScheduleStorageKey::Active);
+        let pending: Option<FeeSchedule> = env
+            .storage()
+            .instance()
+            .get(&FeeScheduleStorageKey::Pending);
+        match pending {
+            Some(p) if p.activation_ledger <= env.ledger().sequence() => Some(p),
+            _ => active,
+        }
+    }
+
+    /// Returns the pending fee schedule that will activate at a future ledger.
+    pub fn get_pending_fee_schedule(env: Env) -> Option<FeeSchedule> {
+        let pending: Option<FeeSchedule> = env
+            .storage()
+            .instance()
+            .get(&FeeScheduleStorageKey::Pending);
+        match pending {
+            Some(p) if p.activation_ledger > env.ledger().sequence() => Some(p),
+            _ => None,
+        }
+    }
+
+    /// Returns the previously active fee schedule after a boundary activation.
+    pub fn get_previous_fee_schedule(env: Env) -> Option<FeeSchedule> {
+        let active: Option<FeeSchedule> = env
+            .storage()
+            .instance()
+            .get(&FeeScheduleStorageKey::Active);
+        let pending: Option<FeeSchedule> = env
+            .storage()
+            .instance()
+            .get(&FeeScheduleStorageKey::Pending);
+        if let Some(p) = pending {
+            if p.activation_ledger <= env.ledger().sequence() {
+                return active;
+            }
+        }
+        env.storage()
+            .instance()
+            .get(&FeeScheduleStorageKey::Previous)
+    }
     fn legal_hold_active(env: &Env) -> bool {
         env.storage()
             .instance()
