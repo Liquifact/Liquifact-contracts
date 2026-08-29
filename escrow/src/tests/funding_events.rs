@@ -9,12 +9,19 @@
 //! - `fund_batch` per-entry `EscrowFunded` content with correct per-entry `investor` / `amount`.
 //! - No topic collision across funding lifecycle events (`EscrowFunded`, `FundingStateChanged`,
 //!   `FundingCancelled`, `EscrowUnfunded`).
+//!
+//! Schema versioning: every lifecycle event appends a `u32` schema version as the final topic.
+//! Existing event names, topic positions, and payload fields are unchanged so a consumer built
+//! against the previous schema can still read events emitted by the new contract.
 
 use super::*;
 use soroban_sdk::testutils::Events as _;
 use soroban_sdk::Symbol;
 
 // ── helpers ──────────────────────────────────────────────────────────────────
+
+/// Schema version appended as the final topic of every lifecycle event.
+const EVENT_SCHEMA_VERSION: u32 = 1;
 
 fn init_for_funding(
     env: &Env,
@@ -79,6 +86,14 @@ fn test_escrow_funded_topic_via_direct_extraction() {
         .expect("first topic must be convertible to Symbol");
 
     assert_eq!(topic0, symbol_short!("funded"));
+
+    // Schema version is the final topic; the first topics are unchanged for old consumers.
+    let version: u32 = topics
+        .get(topics.len() - 1)
+        .expect("event must include a schema version topic")
+        .try_into_val(&env)
+        .expect("schema version topic must be convertible to u32");
+    assert_eq!(version, EVENT_SCHEMA_VERSION);
 }
 
 /// Verify full `EscrowFunded` payload from a plain [`LiquifactEscrow::fund`]
@@ -112,6 +127,7 @@ fn test_escrow_funded_payload_from_plain_fund() {
         status: 0,
         investor_effective_yield_bps: 800,
         tier_lock_secs: 0,
+        version: EVENT_SCHEMA_VERSION,
     };
 
     assert_eq!(
@@ -154,6 +170,7 @@ fn test_escrow_funded_status_one_on_funded_transition() {
                 status: 1,
                 investor_effective_yield_bps: 800,
                 tier_lock_secs: 0,
+                version: EVENT_SCHEMA_VERSION,
             };
             **e == expected.to_xdr(&env, &contract_id)
         })
@@ -205,12 +222,21 @@ fn test_funding_cancelled_event_topic_and_payload() {
         "FundingCancelled first topic must be fund_can"
     );
 
+    // Schema version is the final topic; the first topics are unchanged for old consumers.
+    let version: u32 = topics
+        .get(topics.len() - 1)
+        .expect("FundingCancelled must include a schema version topic")
+        .try_into_val(&env)
+        .expect("schema version topic must be convertible to u32");
+    assert_eq!(version, EVENT_SCHEMA_VERSION);
+
     assert_eq!(
         *event,
         FundingCancelled {
             name: symbol_short!("fund_can"),
             invoice_id,
             funded_amount: 30_000i128,
+            version: EVENT_SCHEMA_VERSION,
         }
         .to_xdr(&env, &contract_id),
         "FundingCancelled payload must match expected fields"
@@ -242,6 +268,7 @@ fn test_funding_cancelled_event_zero_funded_amount() {
             name: symbol_short!("fund_can"),
             invoice_id,
             funded_amount: 0i128,
+            version: EVENT_SCHEMA_VERSION,
         }
         .to_xdr(&env, &contract_id),
         "FundingCancelled with zero funded_amount must report 0"
@@ -290,6 +317,7 @@ fn test_fund_batch_per_entry_escrow_funded_content() {
                 status: 0,
                 investor_effective_yield_bps: 800,
                 tier_lock_secs: 0,
+                version: EVENT_SCHEMA_VERSION,
             };
             **e == expected.to_xdr(&env, &contract_id)
         })
@@ -313,6 +341,7 @@ fn test_fund_batch_per_entry_escrow_funded_content() {
                 status: 0,
                 investor_effective_yield_bps: 800,
                 tier_lock_secs: 0,
+                version: EVENT_SCHEMA_VERSION,
             };
             **e == expected.to_xdr(&env, &contract_id)
         })
@@ -336,6 +365,7 @@ fn test_fund_batch_per_entry_escrow_funded_content() {
                 status: 0,
                 investor_effective_yield_bps: 800,
                 tier_lock_secs: 0,
+                version: EVENT_SCHEMA_VERSION,
             };
             **e == expected.to_xdr(&env, &contract_id)
         })
