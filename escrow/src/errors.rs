@@ -65,6 +65,16 @@ pub enum EscrowError {
     WithdrawAmountInvalid = 103,
 
     // -------------------------------------------------------------------------
+    // Escrow Close Finalization Errors (110..119)
+    // -------------------------------------------------------------------------
+    /// [`LiquifactEscrow::finalize_close`] cannot finalize while the escrow holds a non-zero balance.
+    EscrowBalanceNotZero = 110,
+    /// [`LiquifactEscrow::finalize_close`] cannot finalize while a dispute is active.
+    ActiveDispute = 111,
+    /// [`LiquifactEscrow::finalize_close`] was already called; close finalization is one-shot.
+    EscrowAlreadyClosed = 112,
+
+    // -------------------------------------------------------------------------
     // Legal Hold & Operational Pause (200..209)
     // -------------------------------------------------------------------------
     LegalHoldActive = 200,
