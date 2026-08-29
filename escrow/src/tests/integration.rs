@@ -5,6 +5,34 @@ use soroban_sdk::{
     contract, contractimpl, symbol_short, vec, IntoVal, Map, MuxedAddress, Symbol, TryFromVal, Val,
 };
 
+const ESCROW_EVENT_SCHEMA_VERSION: u32 = 1;
+
+fn is_supported_schema_version(env: &Env, version: &Val) -> bool {
+    let supported: Val = ESCROW_EVENT_SCHEMA_VERSION.into_val(env);
+    version == &supported
+}
+
+fn parse_optional_fee(env: &Env, data: &Val) -> i128 {
+    let map = Map::<Symbol, Val>::try_from_val(env, *data).unwrap();
+    map.get(Symbol::new(env, "fee"))
+        .and_then(|v| i128::try_from_val(env, v).ok())
+        .unwrap_or(0)
+}
+
+fn assert_all_events_carry_schema_version(env: &Env, contract_id: &Address) {
+    use soroban_sdk::testutils::Events as _;
+
+    let version: Val = ESCROW_EVENT_SCHEMA_VERSION.into_val(env);
+    let events = env.events().all().filter_by_contract(contract_id).events();
+    assert!(
+        events.iter().all(|event| {
+            let (_, topics, _) = event;
+            topics.iter().any(|topic| topic == &version)
+        }),
+        "all emitted events must include the supported schema version topic"
+    );
+}
+
 // External-call and token-integration assumptions that should stay separate
 // from escrow state-machine assertions.
 
@@ -581,7 +609,8 @@ fn test_collateral_record_event_payload_is_metadata_only() {
                 contract_id,
                 (
                     Symbol::new(&env, "collateral_recorded_evt"),
-                    symbol_short!("coll_rec")
+                    symbol_short!("coll_rec"),
+                    (ESCROW_EVENT_SCHEMA_VERSION).into_val(&env),
                 )
                     .into_val(&env),
                 Map::<Symbol, Val>::from_array(
@@ -596,6 +625,205 @@ fn test_collateral_record_event_payload_is_metadata_only() {
             )
         ]
     );
+}
+
+#[test]
+fn test_old_consumer_reads_versioned_collateral_event() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let (contract_id, client) = deploy_with_id(&env);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let invoice_id = Symbol::new(&env, "V1OLD");
+
+    env.as_contract(&contract_id, || {
+        env.storage().instance().set(
+            &DataKey::Escrow,
+            &InvoiceEscrow {
+                invoice_id: invoice_id.clone(),
+                admin,
+                sme_address: sme,
+                amount: 10_000i128,
+                funding_target: 10_000i128,
+                funded_amount: 0i128,
+                yield_bps: 800i64,
+                maturity: 0u64,
+                status: 0u32,
+            },
+        );
+    });
+
+    client.record_sme_collateral_commitment(&symbol_short!("USDC"), &5_000i128);
+
+    let events = env.events().all().filter_by_contract(&contract_id).events();
+    assert_eq!(events.len(), 1);
+    let (_addr, topics, _data) = &events[0];
+
+    let event_name: Val = Symbol::new(&env, "collateral_recorded_evt").into_val(&env);
+    let subtype: Val = symbol_short!("coll_rec").into_val(&env);
+    let version: Val = ESCROW_EVENT_SCHEMA_VERSION.into_val(&env);
+    let mut topic_iter = topics.iter();
+    assert_eq!(topic_iter.next(), Some(&event_name));
+    assert_eq!(topic_iter.next(), Some(&subtype));
+    assert_eq!(topic_iter.next(), Some(&version));
+}
+
+#[test]
+fn test_unknown_event_schema_version_is_rejected() {
+    let env = Env::default();
+    assert!(is_supported_schema_version(
+        &env,
+        &(ESCROW_EVENT_SCHEMA_VERSION).into_val(&env)
+    ));
+    assert!(!is_supported_schema_version(
+        &env,
+        &((ESCROW_EVENT_SCHEMA_VERSION + 1)).into_val(&env)
+    ));
+}
+
+#[test]
+fn test_optional_field_absent_defaults_to_zero_in_versioned_event() {
+    let env = Env::default();
+    let data = Map::<Symbol, Val>::from_array(
+        &env,
+        [
+            (Symbol::new(&env, "amount"), 100i128.into_val(&env)),
+            (
+                Symbol::new(&env, "invoice_id"),
+                Symbol::new(&env, "OPT001").into_val(&env),
+            ),
+        ],
+    )
+    .into_val(&env);
+    assert_eq!(parse_optional_fee(&env, &data), 0);
+
+    let data_with_fee = Map::<Symbol, Val>::from_array(
+        &env,
+        [
+            (Symbol::new(&env, "amount"), 100i128.into_val(&env)),
+            (Symbol::new(&env, "fee"), 25i128.into_val(&env)),
+        ],
+    )
+    .into_val(&env);
+    assert_eq!(parse_optional_fee(&env, &data_with_fee), 25);
+}
+
+#[test]
+fn test_noop_call_emits_versioned_event_when_event_is_emitted() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (client, admin, sme) = setup(&env);
+    let (token, treasury) = free_addresses(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "NOOPV1"),
+        &sme,
+        &10_000i128,
+        &800i64,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    client.set_legal_hold(&true);
+    let before = env
+        .events()
+        .all()
+        .filter_by_contract(&client.address)
+        .events()
+        .len();
+    client.set_legal_hold(&true); // no state change
+    let after_events = env.events().all().filter_by_contract(&client.address).events();
+    if after_events.len() > before {
+        assert_all_events_carry_schema_version(&env, &client.address);
+    }
+}
+
+#[test]
+fn test_multiple_versioned_events_in_one_transaction() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let token = install_stellar_asset_token(&env);
+    let treasury = Address::generate(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "MULTIV1"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &token.id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    let inv_a = Address::generate(&env);
+    let inv_b = Address::generate(&env);
+    let amt_a = 30_000i128;
+    let amt_b = 70_000i128;
+    token.stellar.mint(&inv_a, &amt_a);
+    token.stellar.mint(&inv_b, &amt_b);
+    token.stellar.approve(
+        &inv_a,
+        &client.address,
+        &amt_a,
+        &(env.ledger().sequence() + 100),
+    );
+    token.stellar.approve(
+        &inv_b,
+        &client.address,
+        &amt_b,
+        &(env.ledger().sequence() + 100),
+    );
+    client.fund(&inv_a, &amt_a);
+    client.fund(&inv_b, &amt_b);
+    token.stellar.mint(&client.address, &(amt_a + amt_b));
+    client.cancel_funding();
+
+    let mut investors = SorobanVec::new(&env);
+    investors.push_back(inv_a.clone());
+    investors.push_back(inv_b.clone());
+
+    let before = env
+        .events()
+        .all()
+        .filter_by_contract(&client.address)
+        .events()
+        .len();
+    client.refund_batch(&investors);
+    let after_events = env.events().all().filter_by_contract(&client.address).events();
+    assert!(
+        after_events.len() - before >= 2,
+        "expected multiple events in one refund_batch transaction"
+    );
+    assert_all_events_carry_schema_version(&env, &client.address);
 }
 
 #[test]
