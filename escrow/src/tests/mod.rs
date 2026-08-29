@@ -70,6 +70,7 @@ mod settlement_config_view;
 mod settlement_limit;
 mod yield_tier_boundaries;
 mod admin_recovery;
+mod release_tests;
 
 /// Registers a new escrow contract instance and returns its contract id.
 pub fn deploy_id(env: &Env) -> Address {

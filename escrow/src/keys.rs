@@ -99,3 +99,8 @@ pub(crate) fn callback_nonce() -> DataKey {
 pub(crate) fn callback_context(nonce: u64) -> DataKey {
     DataKey::CallbackContext(nonce)
 }
+
+/// Instance-storage running total of principal released to the SME via [`LiquifactEscrow::release`].
+pub(crate) fn released_amount() -> DataKey {
+    DataKey::ReleasedAmount
+}

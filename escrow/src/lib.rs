@@ -868,6 +868,16 @@ pub enum EscrowError {
     CallbackAfterCancellation = 244,
     /// [`LiquifactEscrow::execute_callback`] called with a nonce that has no registered callback context.
     CallbackNotFound = 245,
+    /// [`LiquifactEscrow::release`] attempted to release more than the remaining obligation.
+    ReleaseExceedsRemaining = 246,
+    /// [`LiquifactEscrow::release`] received a non-positive amount.
+    ReleaseAmountNotPositive = 247,
+    /// [`LiquifactEscrow::release`] blocked while a legal hold is active.
+    LegalHoldBlocksRelease = 248,
+    /// [`LiquifactEscrow::release`] blocked while operational pause is active.
+    PausedBlocksRelease = 249,
+    /// [`LiquifactEscrow::release`] called while escrow is not in funded status (`status != 1`).
+    ReleaseNotFunded = 250,
 }
 
 #[inline(always)]
@@ -1240,6 +1250,10 @@ pub enum DataKey {
     /// Stored cross-contract callback context ([`CallbackContext`]) keyed by invocation nonce.
     /// Binds expected origin address, invocation nonce, and lifecycle phase.
     CallbackContext(u64),
+    /// Running total of principal already released to the SME via [`LiquifactEscrow::release`].
+    /// Absent ⇒ `0`. Incremented atomically with each successful release transfer.
+    /// Used to enforce that releases do not exceed the remaining obligation.
+    ReleasedAmount,
 }
 
 // --- Data types ---
@@ -1605,6 +1619,26 @@ pub struct FundingParametersUpdated {
     pub max_per_investor_cap: Option<i128>,
     /// New funding deadline, or `None` if unchanged.
     pub funding_deadline: Option<u64>,
+}
+
+#[contractevent]
+pub struct PartialRelease {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    pub amount: i128,
+    pub recipient: Address,
+}
+
+#[contractevent]
+pub struct FinalRelease {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    pub amount: i128,
+    pub recipient: Address,
 }
 
 #[contractevent]
@@ -5908,6 +5942,116 @@ impl LiquifactEscrow {
         }
     }
 
+    /// Admin releases funds to the SME up to the remaining obligation.
+    ///
+    /// The remaining obligation is defined as `funded_amount - released_amount`.
+    /// Emits `PartialRelease` if the release is less than the remaining obligation,
+    /// or `FinalRelease` if the release perfectly matches the remaining obligation.
+    /// A final release transitions the escrow status to 3 (withdrawn).
+    ///
+    /// # Errors
+    /// - [`EscrowError::ReleaseAmountNotPositive`] if amount <= 0.
+    /// - [`EscrowError::ReleaseExceedsRemaining`] if amount > remaining obligation.
+    /// - [`EscrowError::LegalHoldBlocksRelease`] if a legal hold is active.
+    /// - [`EscrowError::PausedBlocksRelease`] if operational pause is active.
+    /// - [`EscrowError::ReleaseNotFunded`] if status != 1.
+    pub fn release(env: Env, amount: i128) -> InvoiceEscrow {
+        ensure(&env, amount > 0, EscrowError::ReleaseAmountNotPositive);
+
+        ensure(
+            &env,
+            !Self::paused_active(&env),
+            EscrowError::PausedBlocksRelease,
+        );
+        guard_not_paused(&env, EscrowError::PausedBlocksRelease);
+        guard_not_legal_hold(&env, EscrowError::LegalHoldBlocksRelease);
+
+        // Load escrow, but require admin authorization.
+        let escrow: InvoiceEscrow = env.storage().instance().get(&DataKey::Escrow).unwrap();
+        escrow.admin.require_auth();
+
+        guard_status_eq(&env, escrow.status, 1, EscrowError::ReleaseNotFunded);
+
+        let released_amount: i128 = env
+            .storage()
+            .instance()
+            .get(&keys::released_amount())
+            .unwrap_or(0);
+
+        let remaining = escrow.funded_amount.checked_sub(released_amount).unwrap();
+        ensure(&env, amount <= remaining, EscrowError::ReleaseExceedsRemaining);
+
+        let mut next_escrow = escrow.clone();
+        let is_final = amount == remaining;
+        
+        let new_released = released_amount.checked_add(amount).unwrap();
+        env.storage().instance().set(&keys::released_amount(), &new_released);
+
+        let sme = escrow.sme_address.clone();
+        let token_addr: Address = Self::funding_token_or_fail(&env);
+
+        let this = env.current_contract_address();
+        let contract_balance = TokenClient::new(&env, &token_addr).balance(&this);
+        ensure(
+            &env,
+            contract_balance >= amount,
+            EscrowError::InsufficientContractBalance,
+        );
+
+        if is_final {
+            next_escrow.status = 3;
+            env.storage().instance().set(&DataKey::Escrow, &next_escrow);
+            
+            // Increase DistributedPrincipal by `amount` to account for funds leaving.
+            let prev_distributed: i128 = env
+                .storage()
+                .instance()
+                .get(&DataKey::DistributedPrincipal)
+                .unwrap_or(0);
+            env.storage().instance().set(
+                &DataKey::DistributedPrincipal,
+                &prev_distributed.saturating_add(amount),
+            );
+
+            FinalRelease {
+                name: symbol_short!("fin_rel"),
+                invoice_id: escrow.invoice_id.clone(),
+                amount,
+                recipient: sme.clone(),
+            }
+            .publish(&env);
+        } else {
+            let prev_distributed: i128 = env
+                .storage()
+                .instance()
+                .get(&DataKey::DistributedPrincipal)
+                .unwrap_or(0);
+            env.storage().instance().set(
+                &DataKey::DistributedPrincipal,
+                &prev_distributed.saturating_add(amount),
+            );
+
+            PartialRelease {
+                name: symbol_short!("part_rel"),
+                invoice_id: escrow.invoice_id.clone(),
+                amount,
+                recipient: sme.clone(),
+            }
+            .publish(&env);
+        }
+
+        // Token transfer with SEP-41 balance-delta verification
+        external_calls::transfer_funding_token_with_balance_checks(
+            &env,
+            &token_addr,
+            &this,
+            &sme,
+            amount,
+        );
+
+        next_escrow
+    }
+
     /// SME pulls funded liquidity, net of the immutable protocol fee.
     ///
     /// Splits `funded_amount` of the bound funding token into a treasury **fee** and an SME
@@ -5958,7 +6102,12 @@ impl LiquifactEscrow {
 
         guard_status_eq(&env, escrow.status, 1, EscrowError::WithdrawalNotFunded);
 
-        let amount = escrow.funded_amount;
+        let released_amount: i128 = env
+            .storage()
+            .instance()
+            .get(&keys::released_amount())
+            .unwrap_or(0);
+        let amount = escrow.funded_amount.checked_sub(released_amount).unwrap();
         let sme = escrow.sme_address.clone();
 
         // Immutable protocol fee split. `fee = funded_amount * fee_bps / 10_000` (floor), with the
