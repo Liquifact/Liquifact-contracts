@@ -934,7 +934,7 @@ fn paused_active_expiry_overflow_fails_safe_as_still_paused() {
     let mut ledger = env.ledger().get();
     ledger.timestamp = 1_000;
     env.ledger().set(ledger);
-    client.set_paused(&true);
+    client.set_paused(&true, &PauseScope::All, &PauseReason::Incident);
 
     // The pause is active and should block fund().
     assert_contract_error(
@@ -971,7 +971,7 @@ fn paused_active_cleared_unblocks_fund() {
     let env = Env::default();
     let (client, _id, _sme) = setup_no_token(&env, "PAUNB", 1_000i128, 0, 0, None);
 
-    client.set_paused(&true);
+    client.set_paused(&true, &PauseScope::All, &PauseReason::Incident);
 
     // Should be blocked.
     assert_contract_error(
@@ -979,7 +979,7 @@ fn paused_active_cleared_unblocks_fund() {
         EscrowError::PausedBlocksFunding,
     );
 
-    client.set_paused(&false);
+    client.set_paused(&false, &PauseScope::All, &PauseReason::Incident);
 
     // After clearing, the error must not be PausedBlocksFunding.
     let pause_blocked = soroban_sdk::Error::from_contract_error(

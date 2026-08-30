@@ -202,102 +202,6 @@ pub const MAX_ATTESTATION_REVOKE_BATCH: u32 = 32;
 /// admin-batch API surface.
 pub const MAX_BUMP_TTL_BATCH: u32 = 32;
 
-/// Errors specific to escrow close finalization.
-#[contracterror]
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum CloseError {
-    /// The caller is not the configured admin.
-    NotAuthorized = 0,
-    /// The escrow was not initialized.
-    NotInitialized = 1,
-    /// The escrow has already been closed.
-    AlreadyClosed = 2,
-    /// The escrow still holds a token balance.
-    ActiveBalance = 3,
-    /// The escrow has an active dispute.
-    ActiveDispute = 4,
-}
-
-/// Metadata captured when an escrow is finalized.
-#[contracttype]
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CloseMetadata {
-    pub admin: Address,
-    pub timestamp: u64,
-    pub sequence: u32,
-}
-
-/// Event emitted when an escrow is closed.
-#[contractevent]
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum CloseFinalizedEvt {
-    CloseFinalized {
-        metadata: CloseMetadata,
-    },
-}
-
-/// Storage key that marks the escrow as closed (one-shot flag).
-const CLOSED_KEY: &str = "EscrowClosed";
-/// Storage key that holds close metadata.
-const CLOSE_METADATA_KEY: &str = "CloseMetadata";
-
-#[contractimpl]
-impl LiquifactEscrow {
-    /// Finalizes the escrow after all balance and dispute obligations have settled.
-    ///
-    /// # Preconditions
-    /// - Only the current escrow admin may close.
-    /// - The escrow's funding-token balance must be zero.
-    /// - There must be no active dispute.
-    /// - The escrow must not already be closed.
-    ///
-    /// # Effects
-    /// - Marks the escrow as closed (one-shot).
-    /// - Stores [`CloseMetadata`].
-    /// - Emits a [`CloseFinalizedEvt`].
-    pub fn close_escrow(env: Env) {
-        let escrow: InvoiceEscrow = env.storage().instance().get(&DataKey::Escrow)
-            .unwrap_or_else(|| panic_with_error!(&env, CloseError::NotInitialized));
-        let admin = escrow.admin;
-        admin.require_auth();
-
-        if env.storage().instance().has(&Symbol::new(&env, CLOSED_KEY)) {
-            panic_with_error!(&env, CloseError::AlreadyClosed);
-        }
-
-        let funding_token: Address = env.storage().instance().get(&DataKey::FundingToken)
-            .unwrap_or_else(|| panic_with_error!(&env, CloseError::NotInitialized));
-        let token = TokenClient::new(&env, &funding_token);
-        let balance = token.balance(&env.current_contract_address());
-        if balance > 0 {
-            panic_with_error!(&env, CloseError::ActiveBalance);
-        }
-
-        if escrow.dispute_active {
-            panic_with_error!(&env, CloseError::ActiveDispute);
-        }
-
-        let metadata = CloseMetadata {
-            admin: admin.clone(),
-            timestamp: env.ledger().timestamp(),
-            sequence: env.ledger().sequence(),
-        };
-
-        env.storage().instance().set(&Symbol::new(&env, CLOSED_KEY), &true);
-        env.storage().instance().set(&Symbol::new(&env, CLOSE_METADATA_KEY), &metadata);
-
-        env.events().publish(CloseFinalizedEvt::CloseFinalized {
-            metadata: metadata.clone(),
-        });
-    }
-
-    /// Returns the close metadata if the escrow has been closed.
-    pub fn get_closure_metadata(env: Env) -> Option<CloseMetadata> {
-        env.storage().instance().get(&Symbol::new(&env, CLOSE_METADATA_KEY))
-    }
-}
-
-
 /// Default maximum maturity horizon in seconds (~5 years) when no explicit horizon is configured.
 pub const DEFAULT_MATURITY_MAX_HORIZON_SECS: u64 = 157_680_000; // ~5 years (365.25 * 24 * 3600 * 5)
 
@@ -868,6 +772,25 @@ pub enum EscrowError {
     CallbackAfterCancellation = 244,
     /// [`LiquifactEscrow::execute_callback`] called with a nonce that has no registered callback context.
     CallbackNotFound = 245,
+
+    /// [`LiquifactEscrow::set_paused(false, scope, _)`] attempted to clear a pause whose
+    /// active [`PauseScope`] does **not** match `scope` (and `scope` is not
+    /// [`PauseScope::All`]). Nothing was cleared; the active pause remains in force. Emitted
+    /// because silently ignoring a wrong-scope unpause would let an operator believe a pause
+    /// was lifted when it was not.
+    PauseScopeMismatch = 246,
+
+    /// [`LiquifactEscrow::rebind_registry_ref`] attempted to change the off-chain registry hint
+    /// after at least one investor principal was recorded (`funded_amount > 0`). The registry
+    /// pointer is a discoverability hint that must stay stable once funding begins.
+    RegistryImmutableAfterFunding = 247,
+
+    /// [`LiquifactEscrow::rotate_beneficiary`] attempted to change the SME beneficiary after at
+    /// least one investor principal was recorded (`funded_amount > 0`).
+    BeneficiaryImmutableAfterFunding = 248,
+
+    /// [`LiquifactEscrow::recover_admin`] called before the admin-recovery timelock deadline.
+    AdminRecoveryNotExpired = 249,
 }
 
 #[inline(always)]
@@ -957,27 +880,29 @@ pub(crate) fn require_funding_open(env: &Env, status: u32) {
 /// check or pick the wrong `LegalHoldBlocks*` variant — the caller passes the typed error
 /// variant that documents which entrypoint was blocked.
 ///
-/// Operational pause guard: asserts that the operational pause ([`DataKey::Paused`]) is not active.
+/// Operational pause guard: asserts that the operational pause does **not** block the
+/// entrypoint family `entry`.
 ///
-/// Replaces the repeated inline pattern `ensure(&env, !Self::paused_active(&env), EscrowError::PausedBlocks*)`
+/// Replaces the repeated inline pattern `ensure(&env, !Self::paused_blocks(&env, entry), EscrowError::PausedBlocks*)`
 /// that previously appeared at risk-bearing entrypoints — `fund_impl`, `settle`, `withdraw`, and
-/// `claim_investor_payout`.
+/// `claim_investor_payout`. The caller passes the [`PauseEntry`] its entrypoint belongs to so an
+/// active scoped pause ([`PauseScope`]) that only targets a different flow does **not** block it.
 ///
 /// # Errors
 /// Panics with the caller-supplied `error` (one of the `EscrowError::PausedBlocks*`
-/// variants) when [`DataKey::Paused`] is `true`.
+/// variants) when the active pause's [`PauseScope`] blocks `entry`.
 ///
 /// # Security notes
-/// - Read-only: performs a single instance-storage read with `unwrap_or(false)` (no panic on
-///   missing key). Does not write or delete any storage key.
+/// - Read-only: performs instance-storage reads with `unwrap_or` defaults (no panic on
+///   missing keys). Does not write or delete any storage key.
 /// - This helper is **not** an authorization check. Callers must still call
 ///   `Address::require_auth()` for the entrypoint's bound role before any storage mutation
 ///   or token transfer, per [ADR-002](docs/adr/ADR-002-auth-boundaries.md).
-/// - The `Paused` flag is independent of the compliance legal hold ([`DataKey::LegalHold`]); an
+/// - The pause is independent of the compliance legal hold ([`DataKey::LegalHold`]); an
 ///   entrypoint that needs both gates must compose `guard_not_paused` with `guard_not_legal_hold`.
 #[inline(always)]
-pub(crate) fn guard_not_paused(env: &Env, error: EscrowError) {
-    ensure(env, !LiquifactEscrow::paused_active(env), error);
+pub(crate) fn guard_not_paused(env: &Env, error: EscrowError, entry: PauseEntry) {
+    ensure(env, !LiquifactEscrow::paused_blocks(env, entry), error);
 }
 
 /// # Errors
@@ -1043,8 +968,19 @@ pub(crate) fn is_terminal_status(status: u32) -> bool {
 /// precondition must wrap it in
 /// `ensure(&env, is_pre_settlement_status(status), error)`.
 #[inline(always)]
+#[allow(dead_code)] // used only from tests (coverage.rs); keep for API symmetry.
 pub(crate) fn is_pre_settlement_status(status: u32) -> bool {
     matches!(status, 0 | 1)
+}
+
+/// `true` when `maturity == 0` (no maturity lock — vacuously reached) or the current
+/// ledger timestamp is `>= maturity` (inclusive boundary). Mirrors the settlement
+/// maturity gate used by [`LiquifactEscrow::settle`] and
+/// [`LiquifactEscrow::get_settlement_readiness`].
+#[allow(dead_code)] // exercised by the integration test tree only
+#[inline(always)]
+pub(crate) fn is_maturity_reached(env: &Env, maturity: u64) -> bool {
+    maturity == 0 || env.ledger().timestamp() >= maturity
 }
 
 pub(crate) fn validate_maturity_bounds(env: &Env, maturity: u64, max_horizon: u64) {
@@ -1230,6 +1166,15 @@ pub enum DataKey {
     /// Number of [`LiquifactEscrow::set_paused`] calls recorded within the current rate-limit
     /// window. Absent ⇒ `0`.
     PauseToggleCountInWindow,
+    /// The typed, scoped pause state ([`PauseState`]) of the currently **active** pause.
+    /// Absent ⇒ no pause is active. Written atomically with [`DataKey::Paused`] and
+    /// [`DataKey::PausedAt`] by [`LiquifactEscrow::set_paused`]; cleared when a matching
+    /// scope is unpaused.
+    ///
+    /// **Additive key (ADR-007):** absent on instances predating this key ⇒ treated as a
+    /// legacy global pause that blocks every gated entrypoint (see
+    /// [`LiquifactEscrow::paused_blocks`]).
+    PauseState,
     /// Admin-configured ceiling on storage entries processed per batch operation.
     /// **Additive key (ADR-007):** absent ⇒ [`DEFAULT_SETTLEMENT_LIMIT`]. Updatable via
     /// [`LiquifactEscrow::set_storage_limit`].
@@ -1243,6 +1188,102 @@ pub enum DataKey {
 }
 
 // --- Data types ---
+
+/// The class of flows a scoped operational pause can block.
+///
+/// The values map 1:1 onto the four pause-gated entrypoint families plus a
+/// catch-all. This is the **stored** scope value written by
+/// [`LiquifactEscrow::set_paused`] and surfaced by
+/// [`LiquifactEscrow::get_pause_state`].
+///
+/// # Semantics
+/// - An active pause stores exactly **one** `PauseScope`. `Funding` blocks only
+///   `fund` / `fund_with_commitment` / `fund_batch`; `Settlement`, `Withdrawal`,
+///   and `Claims` block their single entrypoint family; `All` blocks every gated
+///   entrypoint.
+/// - Clearing a pause requires the matching scope (see [`LiquifactEscrow::set_paused`]).
+///   Clearing with [`PauseScope::All`] clears whatever scope is currently active.
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u32)]
+pub enum PauseScope {
+    Funding = 0,
+    Settlement = 1,
+    Withdrawal = 2,
+    Claims = 3,
+    All = 4,
+}
+
+/// The family of pause-gated operations an entrypoint belongs to. Internal only —
+/// used to decide, at each entrypoint, whether the active [`PauseScope`] blocks it.
+/// This is **not** stored and never crosses the contract boundary.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u32)]
+pub(crate) enum PauseEntry {
+    Funding = 0,
+    Settlement = 1,
+    Withdrawal = 2,
+    Claims = 3,
+}
+
+impl PauseScope {
+    /// Whether an active pause with this scope blocks an operation from `entry`.
+    ///
+    /// [`PauseScope::All`] blocks every entry; otherwise the pause blocks only the
+    /// entry whose family matches its scope.
+    pub(crate) fn blocks(self, entry: PauseEntry) -> bool {
+        matches!(
+            (self, entry),
+            (PauseScope::All, _)
+                | (PauseScope::Funding, PauseEntry::Funding)
+                | (PauseScope::Settlement, PauseEntry::Settlement)
+                | (PauseScope::Withdrawal, PauseEntry::Withdrawal)
+                | (PauseScope::Claims, PauseEntry::Claims)
+        )
+    }
+}
+
+/// The typed, stable reason an operational pause was applied.
+///
+/// Reasons are protocol-constants (not free-form strings) so that off-chain
+/// consumers and dashboards can branch on a small, stable set. They are recorded
+/// in [`PauseState::reason`] and surfaced via
+/// [`LiquifactEscrow::get_pause_state`].
+///
+/// The compliance/legal hold is a separate mechanism ([`DataKey::LegalHold`]) and
+/// is intentionally **not** represented here — a pause reason is operational only.
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u32)]
+pub enum PauseReason {
+    Maintenance = 0,
+    Incident = 1,
+    Security = 2,
+    TokenIntegration = 3,
+}
+
+/// The persisted, typed pause state: which flow is blocked and why.
+///
+/// Stored under [`DataKey::PauseState`] and written atomically by
+/// [`LiquifactEscrow::set_paused`] together with the legacy [`DataKey::Paused`]
+/// boolean and [`DataKey::PausedAt`] timestamp. Absent ⇒ no pause is active.
+///
+/// # Security note
+/// This is a **read-only view** for operators. It is written only by the admin
+/// through [`LiquifactEscrow::set_paused`]; no gate code mutates it, so the typed
+/// reason/scope can never be poisoned by a non-admin path.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PauseState {
+    /// Which flows are blocked by this pause.
+    pub scope: PauseScope,
+    /// Why the pause was applied (stable, typed reason).
+    pub reason: PauseReason,
+    /// Ledger timestamp (seconds) when the pause was activated. Paired with
+    /// [`DataKey::PauseMaxDurationSecs`] to compute auto-expiry in
+    /// [`LiquifactEscrow::paused_blocks`].
+    pub activated_at: u64,
+}
 
 /// Full state of an invoice escrow persisted in contract storage (`DataKey::Escrow`).
 #[contracttype]
@@ -1419,6 +1460,10 @@ pub struct EscrowSummary {
     pub has_primary_attestation: bool,
     /// Number of entries in the attestation append log.
     pub attestation_log_length: u32,
+    /// Whether the operational pause is currently effective ([`LiquifactEscrow::is_paused`]).
+    pub paused: bool,
+    /// Immutable protocol fee in basis points applied at withdraw; `0` before init.
+    pub protocol_fee_bps: i64,
 }
 
 /// Bundled settlement-readiness snapshot returned by
@@ -1835,10 +1880,14 @@ pub struct LegalHoldChanged {
     pub active: u32,
 }
 
-/// Emitted by [`LiquifactEscrow::set_paused`] whenever the operational pause flag is written.
+/// Emitted by [`LiquifactEscrow::set_paused`] whenever the operational pause flag is written
+/// (activated or cleared). Independent of [`LegalHoldChanged`]: this signals the lightweight
+/// incident-response switch, not the compliance hold.
 ///
-/// Independent of [`LegalHoldChanged`]: this signals the lightweight incident-response switch,
-/// not the compliance hold.
+/// Carries the typed [`PauseScope`] and [`PauseReason`] so indexers can explain **why** an
+/// operation is blocked and **which** flows are affected (the default `name` topic is
+/// `symbol_short!("paused")`). On clear (`active == 0`) the `scope`/`reason` fields report the
+/// scope/reason of the pause that was actually lifted.
 #[contractevent]
 pub struct PausedChanged {
     #[topic]
@@ -1847,6 +1896,10 @@ pub struct PausedChanged {
     pub invoice_id: Symbol,
     /// `1` = pause enabled, `0` = cleared.
     pub active: u32,
+    /// Which flows the pause blocks (or, on clear, which scope was lifted).
+    pub scope: PauseScope,
+    /// Why the pause was applied (or, on clear, the reason of the lifted pause).
+    pub reason: PauseReason,
 }
 
 /// Emitted by [`LiquifactEscrow::set_pause_max_duration`] whenever the configured auto-expiry
@@ -2282,10 +2335,8 @@ impl LiquifactEscrow {
             .get(&FeeScheduleStorageKey::Pending);
         if let Some(p) = pending {
             if p.activation_ledger <= current_ledger {
-                let previous: Option<FeeSchedule> = env
-                    .storage()
-                    .instance()
-                    .get(&FeeScheduleStorageKey::Active);
+                let previous: Option<FeeSchedule> =
+                    env.storage().instance().get(&FeeScheduleStorageKey::Active);
                 env.storage()
                     .instance()
                     .set(&FeeScheduleStorageKey::Active, &p);
@@ -2304,10 +2355,8 @@ impl LiquifactEscrow {
     /// Returns the active fee schedule for the current ledger, computing any
     /// not-yet-promoted boundary activation on the fly.
     pub fn get_active_fee_schedule(env: Env) -> Option<FeeSchedule> {
-        let active: Option<FeeSchedule> = env
-            .storage()
-            .instance()
-            .get(&FeeScheduleStorageKey::Active);
+        let active: Option<FeeSchedule> =
+            env.storage().instance().get(&FeeScheduleStorageKey::Active);
         let pending: Option<FeeSchedule> = env
             .storage()
             .instance()
@@ -2332,10 +2381,8 @@ impl LiquifactEscrow {
 
     /// Returns the previously active fee schedule after a boundary activation.
     pub fn get_previous_fee_schedule(env: Env) -> Option<FeeSchedule> {
-        let active: Option<FeeSchedule> = env
-            .storage()
-            .instance()
-            .get(&FeeScheduleStorageKey::Active);
+        let active: Option<FeeSchedule> =
+            env.storage().instance().get(&FeeScheduleStorageKey::Active);
         let pending: Option<FeeSchedule> = env
             .storage()
             .instance()
@@ -2396,6 +2443,57 @@ impl LiquifactEscrow {
         match paused_at.checked_add(max_duration) {
             Some(expires_at) => now < expires_at,
             None => true,
+        }
+    }
+
+    /// Whether the active operational pause blocks the entrypoint family `entry`.
+    ///
+    /// Re-uses [`LiquifactEscrow::paused_active`] for the auto-expiry-aware "is any pause
+    /// active" check, then consults the stored [`PauseState`] `scope`. A stored pause blocks
+    /// an entry if [`PauseScope::All`] is active or the stored scope equals `entry`'s family.
+    /// When a legacy pause ([`DataKey::Paused`] set but no [`DataKey::PauseState`] recorded) is
+    /// active, it is treated as [`PauseScope::All`] so every gated entrypoint stays blocked,
+    /// exactly as before this feature.
+    fn paused_blocks(env: &Env, entry: PauseEntry) -> bool {
+        if !Self::paused_active(env) {
+            return false;
+        }
+        let Some(state): Option<PauseState> = env.storage().instance().get(&DataKey::PauseState)
+        else {
+            // Legacy global pause without typed state — block every gated entrypoint.
+            return true;
+        };
+        state.scope.blocks(entry)
+    }
+
+    /// Read the typed, scoped pause state — which flows are blocked and why.
+    ///
+    /// Returns `None` when no pause is currently effective (including after auto-expiry). When
+    /// an effective pause has no stored [`PauseState`] (a legacy global pause predating this
+    /// key), this returns a synthesized `scope = All`, `reason = Incident` state so the typed
+    /// view stays consistent with [`LiquifactEscrow::is_paused`].
+    ///
+    /// # Security note
+    /// **Pure read** — requires no authorization and performs no state mutation. Operators and
+    /// indexers may call this freely to render the pause reason/scope without being blocked.
+    pub fn get_pause_state(env: Env) -> Option<PauseState> {
+        if !Self::paused_active(&env) {
+            return None;
+        }
+        match env.storage().instance().get(&DataKey::PauseState) {
+            Some(state) => Some(state),
+            None => {
+                let activated_at: u64 = env
+                    .storage()
+                    .instance()
+                    .get(&DataKey::PausedAt)
+                    .unwrap_or(0);
+                Some(PauseState {
+                    scope: PauseScope::All,
+                    reason: PauseReason::Incident,
+                    activated_at,
+                })
+            }
         }
     }
 
@@ -3063,7 +3161,16 @@ impl LiquifactEscrow {
 
         let mut escrow = Self::get_escrow(env.clone());
 
-        // Only permitted before any funding has been recorded for the escrow.
+        // Only permitted while the escrow is open (0) or funded (1); terminal
+        // states (settled/withdrawn/cancelled) can never rotate.
+        ensure(
+            &env,
+            escrow.status == 0 || escrow.status == 1,
+            EscrowError::RotationNotOpen,
+        );
+
+        // Only permitted before any funding has been recorded for the escrow:
+        // once liquidity starts moving the payout destination is immutable.
         ensure(
             &env,
             escrow.funded_amount == 0,
@@ -3365,6 +3472,8 @@ impl LiquifactEscrow {
             sme_collateral_commitment,
             has_primary_attestation: primary_attestation_hash.is_some(),
             attestation_log_length: attestation_append_log.len(),
+            paused: Self::is_paused(env.clone()),
+            protocol_fee_bps: Self::get_protocol_fee_bps(env.clone()),
         }
     }
 
@@ -4319,17 +4428,34 @@ impl LiquifactEscrow {
         last_commitment
     }
 
-    /// Set or clear the lightweight **operational pause**. Only the **current**
+    /// Set or clear the lightweight **operational pause**, carrying a typed [`PauseScope`]
+    /// (which flows are blocked) and [`PauseReason`] (why). Only the **current**
     /// [`InvoiceEscrow::admin`] may call.
     ///
     /// This is an incident-response circuit breaker (e.g. a suspected token bug) that is
     /// **orthogonal to the compliance legal hold**: it carries no compliance semantics and,
     /// unlike [`LiquifactEscrow::set_legal_hold`], has **no** two-phase clear delay — a single
-    /// authorized call toggles it on or off. While active it blocks [`LiquifactEscrow::fund`],
-    /// [`LiquifactEscrow::settle`], [`LiquifactEscrow::withdraw`], and
-    /// [`LiquifactEscrow::claim_investor_payout`]. Legal-hold state is neither read nor written.
+    /// authorized call toggles it on or off. Legal-hold state is neither read nor written.
     ///
-    /// Emits [`PausedChanged`].
+    /// # Activation (`active == true`)
+    /// Stores a [`PauseState`] under [`DataKey::PauseState`] (atomically with [`DataKey::Paused`]
+    /// and [`DataKey::PausedAt`]) recording `scope` and `reason`, and writes the legacy
+    /// `Paused`/`PausedAt` flags so all existing pause logic (auto-expiry, rate limiting, read
+    /// views) continues to work. While active, `scope` decides which of `fund`/
+    /// `fund_with_commitment`/`fund_batch`, `settle`, `withdraw`, and `claim_investor_payout` are
+    /// blocked; [`PauseScope::All`] blocks every gated entrypoint. Reactivating an already-active
+    /// pause refreshes `activated_at` and the recorded reason (idempotent from the caller's
+    /// perspective — [`LiquifactEscrow::is_paused`] stays `true`).
+    ///
+    /// # Clearing (`active == false`)
+    /// - Clears the active pause when `scope == PauseScope::All` or `scope` equals the active
+    ///   pause's scope. Both `Paused`/`PausedAt` and `PauseState` are cleared together (atomic).
+    /// - A `scope` that does **not** match the active pause is rejected with
+    ///   [`EscrowError::PauseScopeMismatch`] — nothing is cleared, so an operator cannot
+    ///   accidentally believe they lifted a pause when they did not.
+    /// - Clearing when no pause is active is a harmless no-op.
+    ///
+    /// Emits [`PausedChanged`] with the effective `scope`/`reason` on every successful toggle.
     ///
     /// # Rate limiting
     /// When [`LiquifactEscrow::set_pause_rate_limit`] has configured a nonzero toggle limit,
@@ -4341,7 +4467,9 @@ impl LiquifactEscrow {
     /// # Errors
     /// - [`EscrowError::PauseToggleRateLimitExceeded`] if the configured toggle-rate limit was
     ///   already reached within the current window.
-    pub fn set_paused(env: Env, active: bool) {
+    /// - [`EscrowError::PauseScopeMismatch`] if `active == false` and `scope`(≠ `All`) does not
+    ///   match the currently active pause's scope.
+    pub fn set_paused(env: Env, active: bool, scope: PauseScope, reason: PauseReason) {
         let escrow = Self::load_escrow_require_admin(&env);
 
         let toggle_limit: u32 = env
@@ -4385,9 +4513,52 @@ impl LiquifactEscrow {
             );
         }
 
-        env.storage().instance().set(&DataKey::Paused, &active);
         if active {
+            env.storage().instance().set(
+                &DataKey::PauseState,
+                &PauseState {
+                    scope,
+                    reason,
+                    activated_at: now,
+                },
+            );
+            env.storage().instance().set(&DataKey::Paused, &true);
             env.storage().instance().set(&DataKey::PausedAt, &now);
+        } else {
+            // Determine the currently effective pause scope, if any.
+            let now_active = Self::paused_active(&env);
+            let existing: Option<PauseState> = env.storage().instance().get(&DataKey::PauseState);
+            let (effective_scope, cleared_reason) = match &existing {
+                Some(s) => (s.scope, s.reason),
+                // Legacy global pause (Paused set, no typed state) is treated as All.
+                None if now_active => (PauseScope::All, PauseReason::Incident),
+                // Nothing to clear — harmless no-op.
+                None => {
+                    PausedChanged {
+                        name: symbol_short!("paused"),
+                        invoice_id: escrow.invoice_id.clone(),
+                        active: 0,
+                        scope,
+                        reason,
+                    }
+                    .publish(&env);
+                    return;
+                }
+            };
+            // Wrong-scope unpause is an explicit error, never a silent no-op.
+            if scope != PauseScope::All && scope != effective_scope {
+                fail(&env, EscrowError::PauseScopeMismatch);
+            }
+            env.storage().instance().remove(&DataKey::PauseState);
+            env.storage().instance().set(&DataKey::Paused, &false);
+            PausedChanged {
+                name: symbol_short!("paused"),
+                invoice_id: escrow.invoice_id.clone(),
+                active: 0,
+                scope: effective_scope,
+                reason: cleared_reason,
+            }
+            .publish(&env);
         }
         if toggle_limit > 0 {
             env.storage()
@@ -4403,12 +4574,16 @@ impl LiquifactEscrow {
             );
         }
 
-        PausedChanged {
-            name: symbol_short!("paused"),
-            invoice_id: escrow.invoice_id.clone(),
-            active: if active { 1 } else { 0 },
+        if active {
+            PausedChanged {
+                name: symbol_short!("paused"),
+                invoice_id: escrow.invoice_id,
+                active: 1,
+                scope,
+                reason,
+            }
+            .publish(&env);
         }
-        .publish(&env);
     }
 
     /// Set the maximum duration (seconds) [`DataKey::Paused`] may remain active before the
@@ -5508,7 +5683,7 @@ impl LiquifactEscrow {
         // Operational pause gate (read-only), before require_auth and orthogonal to legal hold.
         ensure(
             &env,
-            !Self::paused_active(&env),
+            !Self::paused_blocks(&env, PauseEntry::Funding),
             EscrowError::PausedBlocksFunding,
         );
 
@@ -5532,7 +5707,7 @@ impl LiquifactEscrow {
         // env.clone(): env is used again after this call for storage writes and publish.
         let mut escrow = Self::get_escrow(env.clone());
         // Operational pause gate (read-only), independent of the compliance legal hold below.
-        guard_not_paused(&env, EscrowError::PausedBlocksFunding);
+        guard_not_paused(&env, EscrowError::PausedBlocksFunding, PauseEntry::Funding);
         // Legal hold check is intentionally after the escrow read: the escrow is needed for
         // status and yield_bps regardless, and hoisting the hold check before the escrow read
         // would not reduce storage operations (both keys are always read on this path).
@@ -5802,11 +5977,15 @@ impl LiquifactEscrow {
         // Operational pause gate (read-only), before require_auth and orthogonal to legal hold.
         ensure(
             &env,
-            !Self::paused_active(&env),
+            !Self::paused_blocks(&env, PauseEntry::Settlement),
             EscrowError::PausedBlocksSettlement,
         );
         // Operational pause gate (read-only), before require_auth and orthogonal to legal hold.
-        guard_not_paused(&env, EscrowError::PausedBlocksSettlement);
+        guard_not_paused(
+            &env,
+            EscrowError::PausedBlocksSettlement,
+            PauseEntry::Settlement,
+        );
         guard_not_legal_hold(&env, EscrowError::LegalHoldBlocksSettlement);
 
         // env.clone(): env is used again after this call for ledger timestamp, storage set, and publish.
@@ -5947,11 +6126,15 @@ impl LiquifactEscrow {
         // Operational pause gate (read-only), orthogonal to legal hold.
         ensure(
             &env,
-            !Self::paused_active(&env),
+            !Self::paused_blocks(&env, PauseEntry::Withdrawal),
             EscrowError::PausedBlocksWithdrawal,
         );
         // Operational pause gate (read-only), before require_auth and orthogonal to legal hold.
-        guard_not_paused(&env, EscrowError::PausedBlocksWithdrawal);
+        guard_not_paused(
+            &env,
+            EscrowError::PausedBlocksWithdrawal,
+            PauseEntry::Withdrawal,
+        );
         guard_not_legal_hold(&env, EscrowError::LegalHoldBlocksWithdrawal);
 
         let mut escrow = Self::load_escrow_require_sme(&env);
@@ -6075,11 +6258,15 @@ impl LiquifactEscrow {
         // Operational pause gate (read-only), orthogonal to legal hold.
         ensure(
             &env,
-            !Self::paused_active(&env),
+            !Self::paused_blocks(&env, PauseEntry::Claims),
             EscrowError::PausedBlocksInvestorClaims,
         );
         // Operational pause gate (read-only), before require_auth and orthogonal to legal hold.
-        guard_not_paused(&env, EscrowError::PausedBlocksInvestorClaims);
+        guard_not_paused(
+            &env,
+            EscrowError::PausedBlocksInvestorClaims,
+            PauseEntry::Claims,
+        );
         guard_not_legal_hold(&env, EscrowError::LegalHoldBlocksInvestorClaims);
 
         investor.require_auth();
@@ -7605,14 +7792,13 @@ pub struct ReconciliationView {
     pub surplus: i128,
 }
 
-// Test module tree disabled: submodules drifted from the current lib API
-// (referencing methods/variants that no longer exist). Re-enable after the
-// test suite is reconciled with the contract surface.
+// Test module tree: submodules are reconciled with the current lib API and
+// must stay green under `cargo test`.
 // #[cfg(test)]
 // mod test_allowlist_tests;
 
-// #[cfg(test)]
-// mod tests;
+#[cfg(test)]
+mod tests;
 
 #[cfg(test)]
 mod init_reentry_guard_tests {
@@ -7634,7 +7820,7 @@ mod init_reentry_guard_tests {
     }
 
     fn with_contract<R>(env: &Env, f: impl FnOnce() -> R) -> R {
-        let contract_id = env.register_contract(None, LiquifactEscrow);
+        let contract_id = env.register(LiquifactEscrow, ());
         env.as_contract(&contract_id, f)
     }
 

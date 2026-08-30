@@ -259,7 +259,7 @@ fn settle_passes_when_hold_cleared() {
     client.set_legal_hold(&true);
     client.clear_legal_hold();
     let escrow = client.settle();
-    assert_eq!(escrow.status, 2);
+    assert_eq!(escrow.escrow.status, 2);
 }
 
 // ── 4. withdraw ──────────────────────────────────────────────────────────────

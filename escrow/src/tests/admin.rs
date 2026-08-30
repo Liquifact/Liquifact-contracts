@@ -1888,7 +1888,7 @@ fn test_settle_passes_exactly_at_maturity_ledger_time() {
     client.fund(&investor, &5_000i128);
 
     // Advance ledger to exactly maturity — must succeed
-    env.ledger().with_mut(|l| l.timestamp = 5000);
+    env.ledger().set_timestamp(5000);
     let settled = client.settle();
     assert_eq!(settled.escrow.status, 2);
 }
@@ -1930,7 +1930,7 @@ fn test_settle_fails_one_second_before_maturity() {
     client.fund(&investor, &5_000i128);
 
     // One second before maturity — must reject
-    env.ledger().with_mut(|l| l.timestamp = 4999);
+    env.ledger().set_timestamp(4999);
     client.settle();
 }
 
@@ -2369,10 +2369,12 @@ fn test_rotate_beneficiary_then_withdraw_goes_to_new_sme() {
         &TARGET,
         &(env.ledger().sequence() + 10_000),
     );
+    // The beneficiary is immutable once any funding is recorded, so rotate to
+    // the new SME first (escrow still open, funded_amount == 0).
+    client.rotate_beneficiary(&new_sme);
     client.fund(&investor, &TARGET);
     // Mint funded_amount into the escrow contract so withdraw() can transfer it.
     token.stellar.mint(&escrow_id, &TARGET);
-    client.rotate_beneficiary(&new_sme);
     client.withdraw();
     assert_eq!(token.stellar.balance(&new_sme), TARGET);
 }
@@ -2427,7 +2429,9 @@ fn test_rebind_registry_ref_before_and_after_funding() {
     let investor = Address::generate(&env);
     client.fund(&investor, &TARGET);
     let new_registry = Address::generate(&env);
-    let res = std::panic::catch_unwind(|| client.rebind_registry_ref(&Some(new_registry)));
+    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.rebind_registry_ref(&Some(new_registry))
+    }));
     assert!(res.is_err());
 }
 
@@ -3332,11 +3336,11 @@ fn test_pending_admin_remaining_zero_at_and_after_expiry() {
     let window = 100u64;
     client.propose_admin(&new_admin, &Some(window));
     let expiry = client.get_pending_admin_expiry().unwrap();
-    env.ledger().with_mut(|l| l.timestamp = expiry);
+    env.ledger().set_timestamp(expiry);
     assert_eq!(client.get_pending_admin_remaining_secs(), Some(0));
     // accept_admin still succeeds at expiry (inclusive bound)
     client.accept_admin();
-    env.ledger().with_mut(|l| l.timestamp = expiry + 1);
+    env.ledger().set_timestamp(expiry + 1);
     assert_eq!(client.get_pending_admin_remaining_secs(), None);
 }
 
@@ -3349,7 +3353,7 @@ fn test_pending_admin_remaining_consistent_with_accept_admin() {
     let new_admin = Address::generate(&env);
     client.propose_admin(&new_admin, &Some(10));
     let expiry = client.get_pending_admin_expiry().unwrap();
-    env.ledger().with_mut(|l| l.timestamp = expiry + 1);
+    env.ledger().set_timestamp(expiry + 1);
     assert_eq!(client.get_pending_admin_remaining_secs(), Some(0));
     assert_contract_error(client.try_accept_admin(), EscrowError::AdminProposalExpired);
 }

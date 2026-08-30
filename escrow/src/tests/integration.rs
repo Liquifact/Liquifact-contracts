@@ -618,9 +618,7 @@ fn test_escrow_gold_standard_happy_path_open_overfund_snapshot_settle_claim() {
     // === PHASE 4: SETTLE - SME Settles After Maturity ===
 
     // Fast-forward time to maturity
-    env.ledger().with_mut(|li| {
-        li.timestamp = MATURITY_SECS + 1;
-    });
+    env.ledger().set_timestamp(MATURITY_SECS + 1);
 
     let settled_escrow = client.settle();
     assert_eq!(
@@ -843,9 +841,7 @@ fn test_escrow_tiered_yield_with_commitment_locks() {
     );
 
     // Fast-forward past all lock periods
-    env.ledger().with_mut(|li| {
-        li.timestamp = tier3_claim_time + 1;
-    });
+    env.ledger().set_timestamp(tier3_claim_time + 1);
 
     // All investors can now claim with their respective yields
     client.claim_investor_payout(&investor_base);
@@ -1210,7 +1206,7 @@ fn test_collateral_replacement_event_contains_prior_amount() {
     );
 
     // Advance timestamp and record replacement
-    env.ledger().with_mut(|li| li.timestamp = 20000);
+    env.ledger().set_timestamp(20000);
     client.record_sme_collateral_commitment(&symbol_short!("USDC"), &7_000i128);
 
     // Check second event has prior_amount = 5000 (replacement)

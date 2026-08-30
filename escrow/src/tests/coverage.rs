@@ -5,9 +5,9 @@ use super::{
 use crate::{
     AttestationDigestAppended, CollateralClearedEvt, CollateralCommitmentSnapshot,
     CollateralRecordedEvt, DataKey, EscrowCloseSnapshot, EscrowError, FundingCancelled,
-    InvestorRefundedEvt, LiquifactEscrow, LiquifactEscrowClient, PrimaryAttestationBound,
-    RegistryRefRebound, TreasuryDustSwept, YieldTier, DEFAULT_MATURITY_MAX_HORIZON_SECS,
-    MAX_ATTESTATION_APPEND_ENTRIES, SCHEMA_VERSION,
+    InvestorRefundedEvt, LiquifactEscrow, LiquifactEscrowClient, PauseReason, PauseScope,
+    PrimaryAttestationBound, RegistryRefRebound, TreasuryDustSwept, YieldTier,
+    DEFAULT_MATURITY_MAX_HORIZON_SECS, MAX_ATTESTATION_APPEND_ENTRIES, SCHEMA_VERSION,
 };
 use soroban_sdk::{
     symbol_short,
@@ -1034,7 +1034,7 @@ fn test_claim_lock_not_expired() {
     let investor = Address::generate(&env);
     client.fund_with_commitment(&investor, &100, &3600);
 
-    env.ledger().with_mut(|li| li.timestamp = 101);
+    env.ledger().set_timestamp(101);
     client.settle();
 
     client.claim_investor_payout(&investor);
@@ -1568,7 +1568,7 @@ fn test_sweep_terminal_dust_happy_path() {
     let inv = Address::generate(&env);
     token.stellar.mint(&inv, &100);
     client.fund(&inv, &100);
-    env.ledger().with_mut(|li| li.timestamp = 200);
+    env.ledger().set_timestamp(200);
     client.settle();
 
     token.stellar.mint(&client.address, &50);
@@ -1681,7 +1681,7 @@ fn test_sweep_no_balance() {
     &None::<i64>,);
 
     client.fund(&Address::generate(&env), &100);
-    env.ledger().with_mut(|li| li.timestamp = 200);
+    env.ledger().set_timestamp(200);
     client.settle();
 
     client.sweep_terminal_dust(&10);
@@ -1923,11 +1923,11 @@ fn test_sme_collateral_stale_timestamp_rejected() {
     let asset = soroban_sdk::Symbol::new(&env, "GOLD");
 
     // Record at a known higher timestamp so we can move backward.
-    env.ledger().with_mut(|li| li.timestamp = 5000);
+    env.ledger().set_timestamp(5000);
     client.record_sme_collateral_commitment(&asset, &5000);
 
     // Simulate stale replay: move ledger timestamp backward
-    env.ledger().with_mut(|li| li.timestamp = 100);
+    env.ledger().set_timestamp(100);
 
     assert_contract_error(
         client.try_record_sme_collateral_commitment(&asset, &7000),
@@ -1966,7 +1966,7 @@ fn test_sme_collateral_replacement_preserves_prior_amount() {
     assert_eq!(first.amount, 5000);
 
     // Advance timestamp so the replacement is not stale
-    env.ledger().with_mut(|li| li.timestamp = 20000);
+    env.ledger().set_timestamp(20000);
 
     let second = client.record_sme_collateral_commitment(&asset, &7000);
     assert_eq!(second.amount, 7000);
@@ -2107,7 +2107,7 @@ fn test_sweep_too_much() {
     &None::<i64>,);
 
     client.fund(&Address::generate(&env), &100);
-    env.ledger().with_mut(|li| li.timestamp = 200);
+    env.ledger().set_timestamp(200);
     client.settle();
 
     client.sweep_terminal_dust(&(crate::MAX_DUST_SWEEP_AMOUNT + 1));
@@ -2773,7 +2773,7 @@ fn test_get_escrow_summary_tracks_pause_and_protocol_fee() {
     assert_eq!(summary.paused, client.is_paused());
 
     // Activate the operational pause; summary must now report paused == true.
-    client.set_paused(&true);
+    client.set_paused(&true, &PauseScope::All, &PauseReason::Incident);
     let summary = client.get_escrow_summary();
     assert!(summary.paused);
     assert_eq!(summary.paused, client.is_paused());
@@ -2781,7 +2781,7 @@ fn test_get_escrow_summary_tracks_pause_and_protocol_fee() {
     assert_eq!(summary.protocol_fee_bps, fee_bps);
 
     // Clear the pause; summary tracks the flag back to false.
-    client.set_paused(&false);
+    client.set_paused(&false, &PauseScope::All, &PauseReason::Incident);
     let summary = client.get_escrow_summary();
     assert!(!summary.paused);
     assert_eq!(summary.paused, client.is_paused());
@@ -2982,7 +2982,7 @@ fn test_is_settleable_funded_with_maturity_before_returns_false() {
     init_settleable_test(&env, &client, &admin, &sme, maturity);
     fund_to_target_stl(&env, &client);
     // Advance ledger to just before maturity
-    env.ledger().with_mut(|l| l.timestamp = maturity - 1);
+    env.ledger().set_timestamp(maturity - 1);
     assert!(!client.is_settleable());
 }
 
@@ -2994,7 +2994,7 @@ fn test_is_settleable_funded_with_maturity_at_exact_returns_true() {
     let maturity: u64 = 20_000;
     init_settleable_test(&env, &client, &admin, &sme, maturity);
     fund_to_target_stl(&env, &client);
-    env.ledger().with_mut(|l| l.timestamp = maturity);
+    env.ledger().set_timestamp(maturity);
     assert!(client.is_settleable());
 }
 
@@ -3092,7 +3092,7 @@ fn test_settle_event_timestamp_matches_ledger_time() {
     &None::<i64>,);
     fund_to_target_stl(&env, &client);
 
-    env.ledger().with_mut(|l| l.timestamp = settle_ts);
+    env.ledger().set_timestamp(settle_ts);
     client.settle();
 
     // At least one event must be emitted (the settle event)
@@ -3192,7 +3192,7 @@ fn test_settle_event_timestamp_with_maturity() {
     &None::<i64>,);
     fund_to_target_stl(&env, &client);
 
-    env.ledger().with_mut(|l| l.timestamp = settle_ts);
+    env.ledger().set_timestamp(settle_ts);
     client.settle();
 
     // Verify event is emitted
@@ -3209,7 +3209,7 @@ fn test_settle_event_emitted_at_current_ledger_time() {
     let (token, treasury) = free_addresses(&env);
 
     let expected_ts: u64 = 77_777;
-    env.ledger().with_mut(|l| l.timestamp = expected_ts);
+    env.ledger().set_timestamp(expected_ts);
 
     client.init(
         &admin,
@@ -3293,14 +3293,14 @@ fn test_is_settleable_after_partial_settle_with_maturity() {
     // status = 1 (funded) after partial_settle
 
     // Before maturity
-    env.ledger().with_mut(|l| l.timestamp = maturity - 1);
+    env.ledger().set_timestamp(maturity - 1);
     assert!(
         !client.is_settleable(),
         "pre-maturity after partial_settle must not be settleable"
     );
 
     // At maturity
-    env.ledger().with_mut(|l| l.timestamp = maturity);
+    env.ledger().set_timestamp(maturity);
     assert!(
         client.is_settleable(),
         "at-maturity after partial_settle must be settleable"
@@ -3450,7 +3450,7 @@ fn test_collateral_replacement_overwrites_stored_value_and_emits_prior_amount() 
     client.record_sme_collateral_commitment(&asset, &1_000i128);
 
     // Advance timestamp and record the replacement.
-    env.ledger().with_mut(|l| l.timestamp += 100);
+    env.ledger().set_timestamp(env.ledger().timestamp() + 100);
     let new_asset = soroban_sdk::Symbol::new(&env, "BTC");
     client.record_sme_collateral_commitment(&new_asset, &2_500i128);
 
@@ -3470,14 +3470,13 @@ fn test_collateral_backwards_timestamp_rejected() {
     init_for_collateral(&env, &client, &admin, &sme, "COLT004");
 
     // Set a known positive timestamp for the first record
-    env.ledger().with_mut(|l| l.timestamp = 200);
+    env.ledger().set_timestamp(200);
 
     let asset = soroban_sdk::Symbol::new(&env, "GOLD");
     client.record_sme_collateral_commitment(&asset, &100i128);
 
     // Roll ledger backwards ÔÇö replacement must be rejected.
-    env.ledger()
-        .with_mut(|l| l.timestamp = l.timestamp.saturating_sub(1));
+    env.ledger().set_timestamp(env.ledger().timestamp().saturating_sub(1));
     assert_contract_error(
         client.try_record_sme_collateral_commitment(&asset, &200i128),
         EscrowError::CollateralTimestampBackwards,
@@ -3717,8 +3716,8 @@ fn test_state_machine_illegal_transitions_rejected() {
     assert_eq!(client.get_escrow().status, 2);
 
     // In Status 2 (Settled):
-    // - try_settle() should fail with SettlementNotFunded
-    assert_contract_error(client.try_settle(), EscrowError::SettlementNotFunded);
+    // - try_settle() should fail with EscrowAlreadySettled (once-only guard)
+    assert_contract_error(client.try_settle(), EscrowError::EscrowAlreadySettled);
     // - try_withdraw() should fail with WithdrawalNotFunded
     assert_contract_error(client.try_withdraw(), EscrowError::WithdrawalNotFunded);
     // - try_cancel_funding() should fail with CancelFundingNotOpen
@@ -4106,19 +4105,19 @@ fn settlement_validation_maturity_reached_predicate_boundaries() {
     );
 
     let maturity: u64 = 10_000;
-    env.ledger().with_mut(|l| l.timestamp = maturity - 1);
+    env.ledger().set_timestamp(maturity - 1);
     assert!(
         !crate::is_maturity_reached(&env, maturity),
         "one second before maturity must not be reached"
     );
 
-    env.ledger().with_mut(|l| l.timestamp = maturity);
+    env.ledger().set_timestamp(maturity);
     assert!(
         crate::is_maturity_reached(&env, maturity),
         "exact maturity boundary must be inclusive"
     );
 
-    env.ledger().with_mut(|l| l.timestamp = maturity + 1);
+    env.ledger().set_timestamp(maturity + 1);
     assert!(
         crate::is_maturity_reached(&env, maturity),
         "after maturity must be reached"
@@ -4164,11 +4163,11 @@ fn settlement_validation_helper_preserves_settle_error_variants() {
     );
     let investor = Address::generate(&env);
     client.fund(&investor, &super::TARGET);
-    env.ledger().with_mut(|l| l.timestamp = maturity - 1);
+    env.ledger().set_timestamp(maturity - 1);
     assert_contract_error(client.try_settle(), EscrowError::MaturityNotReached);
 
     // At maturity → succeeds
-    env.ledger().with_mut(|l| l.timestamp = maturity);
+    env.ledger().set_timestamp(maturity);
     let settled = client.settle();
     assert_eq!(settled.escrow.status, 2);
 }
@@ -4208,7 +4207,7 @@ fn settlement_validation_readiness_maturity_reached_matches_predicate() {
     let investor = Address::generate(&env);
     client.fund(&investor, &super::TARGET);
 
-    env.ledger().with_mut(|l| l.timestamp = maturity - 1);
+    env.ledger().set_timestamp(maturity - 1);
     let pre = client.get_settlement_readiness();
     assert_eq!(
         pre.maturity_reached,
@@ -4216,7 +4215,7 @@ fn settlement_validation_readiness_maturity_reached_matches_predicate() {
     );
     assert!(!pre.maturity_reached);
 
-    env.ledger().with_mut(|l| l.timestamp = maturity);
+    env.ledger().set_timestamp(maturity);
     let at = client.get_settlement_readiness();
     assert_eq!(
         at.maturity_reached,
