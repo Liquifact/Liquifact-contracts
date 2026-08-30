@@ -176,6 +176,9 @@ pub const MAX_INVESTOR_ALLOWLIST_BATCH: u32 = 32;
 ///
 /// See `docs/OPERATOR_RUNBOOK.md` for the full redeploy-vs-upgrade decision tree.
 pub const SCHEMA_VERSION: u32 = 6;
+
+/// Explicit legacy version before version markers were introduced.
+pub const LEGACY_VERSION: u32 = 5;
 // See the schema version contract documentation: [Escrow schema versioning](../docs/escrow-schema-versioning.md)
 
 /// Version of the lifecycle event topics emitted by this contract.
@@ -724,6 +727,8 @@ pub enum EscrowError {
     AlreadyCurrentSchemaVersion = 91,
     /// [`LiquifactEscrow::migrate`] has no implemented path from the requested version.
     NoMigrationPath = 92,
+    /// Storage lacks a version marker and does not match the known legacy layout.
+    AmbiguousLegacyStorage = 93,
 
     /// [`LiquifactEscrow::fund`] / [`LiquifactEscrow::fund_with_commitment`] received non-positive amount.
     FundingAmountNotPositive = 100,
@@ -6213,7 +6218,17 @@ impl LiquifactEscrow {
         Self::load_escrow_require_admin(&env);
         Self::consume_admin_nonce(&env, expected_nonce);
 
-        let stored: u32 = env.storage().instance().get(&DataKey::Version).unwrap_or(0);
+        let stored: u32 = if env.storage().instance().has(&DataKey::Version) {
+            env.storage().instance().get(&DataKey::Version).unwrap()
+        } else {
+            let has_token = env.storage().instance().has(&DataKey::FundingToken);
+            let has_treasury = env.storage().instance().has(&DataKey::Treasury);
+            if has_token && has_treasury {
+                LEGACY_VERSION
+            } else {
+                fail(&env, EscrowError::AmbiguousLegacyStorage)
+            }
+        };
 
         ensure(
             &env,
@@ -6223,11 +6238,10 @@ impl LiquifactEscrow {
 
         if from_version >= SCHEMA_VERSION {
             fail(&env, EscrowError::AlreadyCurrentSchemaVersion)
+        } else if from_version == LEGACY_VERSION {
+            env.storage().instance().set(&DataKey::Version, &SCHEMA_VERSION);
+            SCHEMA_VERSION
         } else {
-            // No migration path is implemented for any version below SCHEMA_VERSION.
-            // To add one: implement the transformation here, call
-            //   env.storage().instance().set(&DataKey::Version, &NEW_VERSION);
-            // and return NEW_VERSION before reaching this typed error.
             fail(&env, EscrowError::NoMigrationPath)
         }
     }
