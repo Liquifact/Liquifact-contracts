@@ -32,9 +32,6 @@ fn init(env: &Env, client: &LiquifactEscrowClient) -> (Address, Address) {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-        &None::<i64>,
     );
     (admin, sme)
 }

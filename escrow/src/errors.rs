@@ -112,4 +112,6 @@ pub enum EscrowError {
     FeeCheduleInvalidActivation = 242,
     /// `LiquifactEscrow::set_fee_schedule` attempted to submit a schedule identical to the active schedule.
     FeeScheduleSameAsActive = 243,
+    FundingTokenScaleInvalid = 244,
+    FundingTokenScaleNotSet = 245,
 }
