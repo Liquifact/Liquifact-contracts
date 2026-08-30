@@ -3085,9 +3085,7 @@ fn test_cancel_funding_transitions_to_status_4() {
     let (client, admin, sme) = setup(&env);
 
     default_init(&client, &env, &admin, &sme);
-
-    let result = client.cancel_funding();
-
+    let result = client.cancel_funding(&0u32);
     assert_eq!(result.status, 4);
 }
 
@@ -3099,9 +3097,7 @@ fn test_cancel_funding_requires_admin_auth() {
     let (client, admin, sme) = setup(&env);
 
     default_init(&client, &env, &admin, &sme);
-
-    client.cancel_funding();
-
+    client.cancel_funding(&0u32);
     assert!(
         env.auths().iter().any(|(addr, _)| *addr == admin),
         "admin auth was not recorded for cancel_funding"
@@ -3121,8 +3117,7 @@ fn test_cancel_funding_panics_if_already_funded() {
     let investor = Address::generate(&env);
 
     client.fund(&investor, &TARGET);
-
-    client.cancel_funding();
+    client.cancel_funding(&0u32);
 }
 
 #[test]
@@ -3134,10 +3129,8 @@ fn test_cancel_funding_panics_if_already_cancelled() {
     let (client, admin, sme) = setup(&env);
 
     default_init(&client, &env, &admin, &sme);
-
-    client.cancel_funding();
-
-    client.cancel_funding();
+    client.cancel_funding(&0u32);
+    client.cancel_funding(&1u32);
 }
 
 #[test]
@@ -3149,10 +3142,8 @@ fn test_cancel_funding_blocked_by_legal_hold() {
     let (client, admin, sme) = setup(&env);
 
     default_init(&client, &env, &admin, &sme);
-
-    client.set_legal_hold(&true);
-
-    client.cancel_funding();
+    client.set_legal_hold(&true, &0u32);
+    client.cancel_funding(&1u32);
 }
 
 #[test]
@@ -3185,8 +3176,7 @@ fn test_refund_returns_principal_to_investor() {
     token2.stellar.mint(&investor2, &(TARGET / 2));
 
     client2.fund(&investor2, &(TARGET / 2));
-
-    client2.cancel_funding();
+    client2.cancel_funding(&0u32);
 
     let before = token2.token.balance(&investor2);
 
@@ -3211,9 +3201,7 @@ fn test_refund_zeroes_contribution() {
     token.stellar.mint(&investor, &(TARGET / 2));
 
     client.fund(&investor, &(TARGET / 2));
-
-    client.cancel_funding();
-
+    client.cancel_funding(&0u32);
     client.refund(&investor);
 
     assert_eq!(client.get_contribution(&investor), 0);
@@ -3233,9 +3221,7 @@ fn test_refund_marks_investor_refunded() {
     token.stellar.mint(&investor, &(TARGET / 2));
 
     client.fund(&investor, &(TARGET / 2));
-
-    client.cancel_funding();
-
+    client.cancel_funding(&0u32);
     assert!(!client.is_investor_refunded(&investor));
 
     client.refund(&investor);
@@ -3258,9 +3244,7 @@ fn test_refund_double_spend_panics() {
     token.stellar.mint(&investor, &(TARGET / 2));
 
     client.fund(&investor, &(TARGET / 2));
-
-    client.cancel_funding();
-
+    client.cancel_funding(&0u32);
     client.refund(&investor);
 
     client.refund(&investor); // second call must panic
@@ -3275,9 +3259,7 @@ fn test_refund_non_investor_panics() {
     let (client, admin, sme) = setup(&env);
 
     default_init(&client, &env, &admin, &sme);
-
-    client.cancel_funding();
-
+    client.cancel_funding(&0u32);
     let stranger = Address::generate(&env);
 
     client.refund(&stranger);
@@ -3333,9 +3315,7 @@ fn test_refund_requires_investor_auth() {
     token.stellar.mint(&investor, &(TARGET / 2));
 
     client.fund(&investor, &(TARGET / 2));
-
-    client.cancel_funding();
-
+    client.cancel_funding(&0u32);
     client.refund(&investor);
 
     assert!(
@@ -3365,8 +3345,7 @@ fn test_refund_multiple_investors_independent() {
     token.stellar.mint(&inv_b, &amt_b);
     client.fund(&inv_a, &amt_a);
     client.fund(&inv_b, &amt_b);
-
-    client.cancel_funding();
+    client.cancel_funding(&0u32);
 
     let before_a = token.token.balance(&inv_a);
 
@@ -3400,9 +3379,7 @@ fn test_cancel_funding_preserves_funded_amount() {
     default_init(&client, &env, &admin, &sme);
 
     client.fund(&investor, &(TARGET / 2));
-
-    let cancelled = client.cancel_funding();
-
+    let cancelled = client.cancel_funding(&0u32);
     assert_eq!(cancelled.funded_amount, TARGET / 2);
 }
 
@@ -3424,9 +3401,7 @@ fn test_sweep_terminal_dust_allowed_in_cancelled_state() {
     token.stellar.mint(&investor, &(TARGET / 2 + 1));
 
     client.fund(&investor, &(TARGET / 2));
-
-    client.cancel_funding();
-
+    client.cancel_funding(&0u32);
     client.refund(&investor);
 
     // 1 unit of dust remains in the contract

@@ -320,7 +320,7 @@ fn withdraw_blocked_by_legal_hold() {
     default_init(&client, &env, &admin, &sme);
     fund_to_target(&client, &env);
 
-    client.set_legal_hold(&true);
+    client.set_legal_hold(&true, &0u32);
     // Status is 1 but hold is active — must panic.
     client.withdraw();
 }
@@ -335,8 +335,8 @@ fn withdraw_succeeds_after_hold_cleared() {
     env.mock_all_auths();
     let (client, _sme, _sac) = setup_funded_with_token(&env);
 
-    client.set_legal_hold(&true);
-    client.set_legal_hold(&false);
+    client.set_legal_hold(&true, &0u32);
+    client.set_legal_hold(&false, &1u32);
 
     client.withdraw();
     assert_eq!(client.get_escrow().status, 3u32);
@@ -434,7 +434,7 @@ fn legal_hold_set_by_non_admin_panics() {
     env.mock_auths(&[]);
     default_init(&client, &env, &admin, &sme);
     // `sme` is not the admin — must panic.
-    client.set_legal_hold(&true);
+    client.set_legal_hold(&true, &0u32);
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -463,7 +463,7 @@ fn settle_blocked_by_legal_hold() {
     default_init(&client, &env, &admin, &sme);
     fund_to_target(&client, &env);
 
-    client.set_legal_hold(&true);
+    client.set_legal_hold(&true, &0u32);
     client.settle();
 }
 
@@ -846,7 +846,7 @@ fn claim_investor_payout_blocked_by_legal_hold() {
     default_init(&client, &env, &admin, &sme);
     let investor = settle_escrow(&client, &env);
 
-    client.set_legal_hold(&true);
+    client.set_legal_hold(&true, &0u32);
     client.claim_investor_payout(&investor); // must panic
 }
 
@@ -1033,7 +1033,7 @@ fn test_sweep_blocked_under_legal_hold() {
     );
     client.fund(&investor, &1_000i128);
     client.settle();
-    client.set_legal_hold(&true);
+    client.set_legal_hold(&true, &0u32);
     client.sweep_terminal_dust(&1i128);
 }
 
@@ -1618,7 +1618,7 @@ fn test_partial_settle_blocked_by_legal_hold() {
     let (client, admin, sme) = setup(&env);
     default_init(&client, &env, &admin, &sme);
 
-    client.set_legal_hold(&true);
+    client.set_legal_hold(&true, &0u32);
     client.partial_settle(&sme);
 }
 

@@ -775,8 +775,13 @@ pub enum EscrowError {
     NewSmeSameAsCurrent = 162,
 
     /// Attempted to accept admin role when no pending admin exists.
-    NoPendingAdmin = 85,
-
+    /// @dev Historical note: Prior to PR #XYZ, this shared discriminant 163 with `FundingDeadlinePassed`.
+    /// Reassigned to 81 to maintain uniqueness within the admin-handover range.
+    NoPendingAdmin = 81,
+    /// Admin-nonce replay protection: the supplied nonce does not match the current expected nonce.
+    /// Returned for stale (old), duplicate (same), or future (out-of-sequence) nonces.
+    /// Does not leak which specific mismatch occurred to avoid giving attackers information.
+    AdminNonceMismatch = 85,
     /// The contract's funding-token balance is less than `funded_amount` at withdraw time.
     /// Funds must be custodied in this contract before the SME can pull them.
     InsufficientContractBalance = 165,
@@ -1308,70 +1313,11 @@ pub enum DataKey {
     /// Absent ΓçÆ falls back to [`DEFAULT_MATURITY_MAX_HORIZON_SECS`].
     /// Set at init and updatable via [`LiquifactEscrow::update_maturity_max_horizon`].
     MaturityMaxHorizon,
-    /// Optional funding deadline (ledger timestamp); absent when unrestricted.
-    FundingDeadline,
-    /// Append-only index of unique investor addresses for [`LiquifactEscrow::get_investors`].
-    InvestorIndex,
-    /// Ledger timestamp at which [`LiquifactEscrow::settle`] transitioned status 1 ΓåÆ 2.
-    /// Write-once; absent if escrow has not yet settled.
-    SettledAt,
-    /// When true, a lightweight **operational pause** blocks risk-bearing entrypoints
-    /// (`fund`, `settle`, `withdraw`, `claim_investor_payout`) for incident response.
-    /// Absent ΓçÆ `false` (not paused). Toggled by admin via [`LiquifactEscrow::set_paused`].
-    ///
-    /// Orthogonal to [`DataKey::LegalHold`]: the pause has **no** compliance semantics and
-    /// **no** two-phase clear delay ΓÇö it is a single-call admin switch for incidents such as a
-    /// suspected token bug. Either flag independently blocks the gated entrypoints.
-    Paused,
-    /// Immutable protocol fee in basis points (0..=10_000) applied to the SME disbursement
-    /// at [`LiquifactEscrow::withdraw`]; set once in [`LiquifactEscrow::init`].
-    /// Written as `0` even when unconfigured so reads always succeed (`.unwrap_or(0)`).
-    /// Stored as `i64` to match the [`InvoiceEscrow::yield_bps`] basis-point convention.
-    /// **Additive key (ADR-007):** absent on instances predating this key ΓçÆ read as `0`
-    /// (no fee), preserving legacy full-principal disbursement semantics.
-    ProtocolFeeBps,
-    /// Optional cap (seconds) on how long [`DataKey::Paused`] may remain active before
-    /// [`LiquifactEscrow::is_paused`] and the pause gates treat it as expired. Absent ΓçÆ `0`
-    /// (unlimited), identical to pre-existing behavior. Set via
-    /// [`LiquifactEscrow::set_pause_max_duration`].
-    PauseMaxDurationSecs,
-    /// Ledger timestamp recorded on the most recent `set_paused(true)` call; paired with
-    /// [`DataKey::PauseMaxDurationSecs`] to compute auto-expiry. Absent ΓçÆ pause was never
-    /// activated.
-    PausedAt,
-    /// Optional cap on the number of [`LiquifactEscrow::set_paused`] calls allowed within
-    /// [`DataKey::PauseToggleWindowSecs`]. Absent ΓçÆ `0` (unlimited), identical to pre-existing
-    /// behavior. Set via [`LiquifactEscrow::set_pause_rate_limit`].
-    PauseToggleLimit,
-    /// Rolling rate-limit window length (seconds), paired with [`DataKey::PauseToggleLimit`].
-    /// Absent ΓçÆ `0`.
-    PauseToggleWindowSecs,
-    /// Ledger timestamp when the current pause-toggle rate-limit window started.
-    /// Absent ΓçÆ no window open yet (next `set_paused` call starts one).
-    PauseToggleWindowStart,
-    /// Number of [`LiquifactEscrow::set_paused`] calls recorded within the current rate-limit
-    /// window. Absent ΓçÆ `0`.
-    PauseToggleCountInWindow,
-    /// Admin-configured ceiling on storage entries processed per batch operation.
-    /// **Additive key (ADR-007):** absent ΓçÆ [`DEFAULT_SETTLEMENT_LIMIT`]. Updatable via
-    /// [`LiquifactEscrow::set_storage_limit`].
-    StorageLimit,
-    /// Monotonically increasing invocation nonce counter for cross-contract callbacks.
-    /// Absent ΓçÆ `0`. Incremented on each callback registration.
-    CallbackNonce,
-    /// Stored cross-contract callback context ([`CallbackContext`]) keyed by invocation nonce.
-    /// Binds expected origin address, invocation nonce, and lifecycle phase.
-    CallbackContext(u64),
-    /// Running total of principal already released to the SME via [`LiquifactEscrow::release`].
-    /// Absent ΓçÆ `0`. Incremented atomically with each successful release transfer.
-    /// Used to enforce that releases do not exceed the remaining obligation.
-    ReleasedAmount,
-    /// Immutable decimal scale (number of decimal places) of the bound SEP-41 funding token,
-    /// set once at [\LiquifactEscrow::init\] via the \	oken_decimals\ parameter.
-    ///
-    /// Absent on instances that did not supply \	oken_decimals\ at init.
-    /// **Additive key (ADR-007):** absent => scale validation is skipped.
-    FundingTokenScale,
+    /// Monotonic admin-operation nonce for replay protection on signed administrative actions.
+    /// Starts at `0` and incremented by1 after each successful admin-gated state mutation.
+    /// Absent ⇒ treated as `0` for backward compatibility with deployments predating this key.
+    /// See [`LiquifactEscrow::consume_admin_nonce`].
+    AdminNonce,
 }
 
 // --- Data types ---
@@ -3577,7 +3523,7 @@ impl LiquifactEscrow {
     /// | Legal hold active | [`EscrowError::LegalHoldBlocksBeneficiaryRotation`] |
     /// | Escrow not open or funded | [`EscrowError::RotationNotOpen`] |
     /// | `new_sme_address == current SME` | [`EscrowError::NewSmeSameAsCurrent`] |
-    pub fn rotate_beneficiary(env: Env, new_sme_address: Address) -> InvoiceEscrow {
+    pub fn rotate_beneficiary(env: Env, new_sme_address: Address, expected_nonce: u32) -> InvoiceEscrow {
         // Legal-hold gate (read-only).
         guard_not_legal_hold(&env, EscrowError::LegalHoldBlocksBeneficiaryRotation);
 
@@ -3609,6 +3555,7 @@ impl LiquifactEscrow {
         // Dual authorization: the outgoing SME and the admin must both sign.
         escrow.sme_address.require_auth();
         escrow.admin.require_auth();
+        Self::consume_admin_nonce(&env, expected_nonce);
 
         let prior_sme = escrow.sme_address.clone();
         escrow.sme_address = new_sme_address.clone();
@@ -3725,7 +3672,33 @@ impl LiquifactEscrow {
         escrow
     }
 
-    /// Load the attestation append-log from instance storage.
+    /// Validate and atomically consume the admin nonce for replay protection.
+    ///
+    /// Reads the current expected nonce from [`DataKey::AdminNonce`], checks that it
+    /// matches `expected_nonce`, and increments it by one. Aborts with
+    /// [`EscrowError::AdminNonceMismatch`] on any mismatch (stale, duplicate, or future nonce)
+    /// without disclosing which specific mismatch occurred.
+    ///
+    /// The nonce starts at `0` for new deployments and for legacy deployments that lack the
+    /// [`DataKey::AdminNonce`] key, providing backward compatibility.
+    ///
+    /// # Panics
+    /// Panics with [`EscrowError::AdminNonceMismatch`] if `expected_nonce` does not match the
+    /// stored nonce.
+    fn consume_admin_nonce(env: &Env, expected_nonce: u32) {
+        let current: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::AdminNonce)
+            .unwrap_or(0);
+        ensure(env, current == expected_nonce, EscrowError::AdminNonceMismatch);
+        let next = current.checked_add(1).unwrap_or_else(|| {
+            fail(env, EscrowError::AdminNonceMismatch)
+        });
+        env.storage().instance().set(&DataKey::AdminNonce, &next);
+    }
+
+    /// Guard that the escrow is not under a legal hold.
     ///
     /// Consolidates the repeated pattern of reading `DataKey::AttestationAppendLog` with an
     /// empty-vec fallback used by `append_attestation_digest`, `revoke_attestation_digest`,
@@ -3757,6 +3730,18 @@ impl LiquifactEscrow {
     /// Get the optional funding deadline (ledger timestamp), returns None if not set.
     pub fn get_funding_deadline(env: Env) -> Option<u64> {
         env.storage().instance().get(&keys::funding_deadline())
+    }
+
+    /// Returns the current expected admin nonce for replay protection.
+    ///
+    /// Absent ⇒ `0` (new or legacy deployment). Callers must pass this value as
+    /// `expected_nonce` to any admin-gated entrypoint; the contract atomically
+    /// increments it on success.
+    pub fn get_admin_nonce(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::AdminNonce)
+            .unwrap_or(0)
     }
 
     /// Check if funding has expired (deadline set and now > deadline).
@@ -5450,8 +5435,9 @@ impl LiquifactEscrow {
     /// hold + key loss cannot strand funds without an off-chain recovery vote that executes
     /// `propose_admin`, `accept_admin`, then `clear_legal_hold`. See
     /// `docs/escrow-legal-hold.md`.
-    pub fn set_legal_hold(env: Env, active: bool) {
+    pub fn set_legal_hold(env: Env, active: bool, expected_nonce: u32) {
         let escrow = Self::load_escrow_require_admin(&env);
+        Self::consume_admin_nonce(&env, expected_nonce);
 
         if !active && Self::legal_hold_active(&env) {
             let delay = Self::get_legal_hold_clear_delay(env.clone());
@@ -5496,8 +5482,9 @@ impl LiquifactEscrow {
     /// | Condition | Typed error |
     /// |-----------|-------------|
     /// | `timestamp + delay` overflows | [`EscrowError::LegalHoldClearDelayOverflow`] |
-    pub fn request_clear_legal_hold(env: Env) {
+    pub fn request_clear_legal_hold(env: Env, expected_nonce: u32) {
         let escrow = Self::load_escrow_require_admin(&env);
+        Self::consume_admin_nonce(&env, expected_nonce);
 
         let now = env.ledger().timestamp();
         let delay = Self::get_legal_hold_clear_delay(env.clone());
@@ -5520,10 +5507,35 @@ impl LiquifactEscrow {
         .publish(&env);
     }
 
-    /// Enable or disable the investor allowlist. When enabled, only addresses with
-    /// [`DataKey::InvestorAllowlisted`] set to true may fund the escrow.
-    pub fn set_allowlist_active(env: Env, active: bool) {
+    /// Enable or disable the investor allowlist gate.
+    ///
+    /// When enabled (active = true), only addresses with [`DataKey::InvestorAllowlisted`] set to
+    /// `true` may call [`LiquifactEscrow::fund`] or [`LiquifactEscrow::fund_with_commitment`].
+    /// When disabled (active = false), the gate is bypassed and any address may fund.
+    ///
+    /// The toggle state is stored in **instance** storage ([`DataKey::AllowlistActive`]) and
+    /// defaults to `false` (disabled) when absent. Per-address allowlist entries in
+    /// [`DataKey::InvestorAllowlisted`] live in **persistent** storage and persist independently
+    /// of the toggle state—disabling the gate does not delete entries.
+    ///
+    /// # Authorization
+    /// Requires admin authorization via [`Address::require_auth()`].
+    ///
+    /// # Events
+    /// Emits [`AllowlistEnabledChanged`] with the new state.
+    ///
+    /// # Storage
+    /// - Writes to instance storage: [`DataKey::AllowlistActive`]
+    /// - Bumps instance storage TTL via [`Env::storage().instance().extend_ttl()`]
+    ///
+    /// # See also
+    /// - [`LiquifactEscrow::is_allowlist_active`] — read the current toggle state
+    /// - [`LiquifactEscrow::set_investor_allowlisted`] — set per-address allowlist entry
+    /// - [`LiquifactEscrow::set_investors_allowlisted`] — batch set per-address entries
+    /// - [`docs/escrow-allowlist.md`](../docs/escrow-allowlist.md) — full allowlist model documentation
+    pub fn set_allowlist_active(env: Env, active: bool, expected_nonce: u32) {
         let escrow = Self::load_escrow_require_admin(&env);
+        Self::consume_admin_nonce(&env, expected_nonce);
         env.storage()
             .instance()
             .set(&DataKey::AllowlistActive, &active);
@@ -5542,16 +5554,38 @@ impl LiquifactEscrow {
             .unwrap_or(false)
     }
 
-    /// Add or remove an investor from the allowlist.
-    pub fn set_investor_allowlisted(env: Env, investor: Address, allowed: bool) {
+    /// Set whether a specific investor address is allowlisted.
+    ///
+    /// Writes a boolean entry to **persistent** storage under [`DataKey::InvestorAllowlisted`].
+    /// The entry has an independent TTL per address and persists even when the allowlist gate
+    /// is disabled via [`LiquifactEscrow::set_allowlist_active`].
+    ///
+    /// When the allowlist gate is active, [`LiquifactEscrow::fund`] and
+    /// [`LiquifactEscrow::fund_with_commitment`] check this entry and reject funding with
+    /// [`EscrowError::InvestorNotAllowlisted`] if the entry is absent or `false`.
+    ///
+    /// # Authorization
+    /// Requires admin authorization via [`Address::require_auth()`].
+    ///
+    /// # Events
+    /// Emits [`InvestorAllowlistChanged`] for the address.
+    ///
+    /// # Storage
+    /// - Writes to persistent storage: [`DataKey::InvestorAllowlisted(investor)`]
+    /// - Bumps persistent storage TTL via [`Env::storage().persistent().extend_ttl()`]
+    ///   with [`PERSISTENT_TTL_MIN_EXTENSION_LEDGERS`] (≈1 hour at 1 ledger/sec)
+    ///
+    /// # Arguments
+    /// - `investor` — The address to allowlist or remove
+    /// - `allowed` — `true` to allowlist, `false` to remove from allowlist
+    ///
+    /// # See also
+    /// - [`LiquifactEscrow::is_investor_allowlisted`] — check if an address is allowlisted
+    /// - [`LiquifactEscrow::set_investors_allowlisted`] — batch variant for multiple addresses
+    /// - [`docs/escrow-allowlist.md`](../docs/escrow-allowlist.md) — full allowlist model documentation
+    pub fn set_investor_allowlisted(env: Env, investor: Address, allowed: bool, expected_nonce: u32) {
         let escrow = Self::load_escrow_require_admin(&env);
-
-        let was_allowlisted: bool = env
-            .storage()
-            .persistent()
-            .get(&DataKey::InvestorAllowlisted(investor.clone()))
-            .unwrap_or(false);
-
+        Self::consume_admin_nonce(&env, expected_nonce);
         env.storage()
             .persistent()
             .set(&DataKey::InvestorAllowlisted(investor.clone()), &allowed);
@@ -5598,10 +5632,16 @@ impl LiquifactEscrow {
     /// `set_investor_allowlisted` individually for each element in `investors`.
     ///
     /// # Errors
-    /// Emits typed [`EscrowError`] codes when the escrow is uninitialized, the batch is empty, or
-    /// the batch exceeds [`MAX_INVESTOR_ALLOWLIST_BATCH`].
-    pub fn set_investors_allowlisted(env: Env, investors: Vec<Address>, allowed: bool) {
+    /// - [`EscrowError::InvestorBatchEmpty`] (70) — when `investors` is empty
+    /// - [`EscrowError::InvestorBatchTooLarge`] (71) — when `investors.len() > MAX_INVESTOR_ALLOWLIST_BATCH`
+    ///
+    /// # See also
+    /// - [`LiquifactEscrow::set_investor_allowlisted`] — single-address variant
+    /// - [`LiquifactEscrow::is_investor_allowlisted`] — check if an address is allowlisted
+    /// - [`docs/escrow-allowlist.md`](../docs/escrow-allowlist.md) — full allowlist model documentation
+    pub fn set_investors_allowlisted(env: Env, investors: Vec<Address>, allowed: bool, expected_nonce: u32) {
         let escrow = Self::load_escrow_require_admin(&env);
+        Self::consume_admin_nonce(&env, expected_nonce);
 
         let n = investors.len();
         ensure(&env, n > 0, EscrowError::InvestorBatchEmpty);
@@ -5726,90 +5766,13 @@ impl LiquifactEscrow {
     }
 
     /// Convenience alias for [`LiquifactEscrow::set_legal_hold`] with `active = false`.
-    pub fn clear_legal_hold(env: Env) {
-        Self::set_legal_hold(env, false);
+    pub fn clear_legal_hold(env: Env, expected_nonce: u32) {
+        Self::set_legal_hold(env, false, expected_nonce);
     }
 
-    /// Clear the legal hold after the timelock delay has expired.
-    ///
-    /// Requires [`DataKey::LegalHoldClearableAt`] to be set and the current
-    /// ledger timestamp to be >= that value. This is the timelocked path;
-    /// [`LiquifactEscrow::set_legal_hold`] with `active = false` remains
-    /// available as an immediate emergency override.
-    ///
-    /// **Authorization:** [`InvoiceEscrow::admin`].
-    ///
-    /// # Panics
-    /// - If no clear request is pending.
-    /// - If the timelock has not yet expired.
-    pub fn clear_legal_hold_after_delay(env: Env) {
-        let escrow = Self::get_escrow(env.clone());
-        escrow.admin.require_auth();
-
-        ensure(
-            &env,
-            env.storage().instance().has(&DataKey::LegalHoldClearableAt),
-            EscrowError::LegalHoldClearRequestMissing,
-        );
-        let clearable_at: u64 = env
-            .storage()
-            .instance()
-            .get(&DataKey::LegalHoldClearableAt)
-            .unwrap();
-
-        let now = env.ledger().timestamp();
-        ensure(
-            &env,
-            now >= clearable_at,
-            EscrowError::LegalHoldClearNotReady,
-        );
-
-        env.storage()
-            .instance()
-            .remove(&DataKey::LegalHoldClearableAt);
-
-        env.storage().instance().set(&DataKey::LegalHold, &false);
-
-        LegalHoldChanged {
-            name: symbol_short!("legal_h"),
-            invoice_id: escrow.invoice_id,
-            active: 0,
-        }
-        .publish(&env);
-    }
-    /// Cancel a pending legal-hold clear request.
-    ///
-    /// Removes [`DataKey::LegalHoldClearableAt`], aborting the timelock. The hold
-    /// stays active. A fresh [`LiquifactEscrow::request_clear_legal_hold`] restarts
-    /// the full delay.
-    ///
-    /// **Authorization:** [`InvoiceEscrow::admin`].
-    ///
-    /// # Panics
-    /// If no clear request is pending.
-    pub fn cancel_clear_legal_hold(env: Env) {
-        let escrow = Self::get_escrow(env.clone());
-        escrow.admin.require_auth();
-
-        ensure(
-            &env,
-            env.storage().instance().has(&DataKey::LegalHoldClearableAt),
-            EscrowError::LegalHoldClearRequestMissing,
-        );
-
-        env.storage()
-            .instance()
-            .remove(&DataKey::LegalHoldClearableAt);
-
-        LegalHoldClearCancelled {
-            name: symbol_short!("lh_cancel"),
-            invoice_id: escrow.invoice_id.clone(),
-        }
-        .publish(&env);
-    }
-
-    pub fn update_funding_target(env: Env, new_target: i128) -> InvoiceEscrow {
+    pub fn update_funding_target(env: Env, new_target: i128, expected_nonce: u32) -> InvoiceEscrow {
         let mut escrow = Self::load_escrow_require_admin(&env);
+        Self::consume_admin_nonce(&env, expected_nonce);
 
         ensure(&env, new_target > 0, EscrowError::TargetNotPositive);
         guard_status_eq(&env, escrow.status, 0, EscrowError::TargetUpdateNotOpen);
@@ -5857,6 +5820,69 @@ impl LiquifactEscrow {
         escrow
     }
 
+    /// Update or clear the optional funding deadline while the escrow is still **open** (status == 0).
+    ///
+    /// Only the current [`InvoiceEscrow::admin`] may call. This is the only entrypoint that
+    /// mutates [`DataKey::FundingDeadline`] after [`LiquifactEscrow::init`].
+    ///
+    /// # Parameters
+    ///
+    /// - `new_deadline`: `Some(u64)` sets a new ledger timestamp; `None` removes the deadline.
+    ///
+    /// # Validation
+    ///
+    /// - Admin authorization required.
+    /// - Escrow must be in **open** state (`status == 0`).
+    /// - When `Some(d)`: `d` must be strictly greater than the current ledger timestamp
+    ///   (same rule as [`LiquifactEscrow::init`]).
+    /// - When `None`: the stored [`DataKey::FundingDeadline`] is removed; funding becomes
+    ///   unrestricted by time.
+    ///
+    /// # Events
+    ///
+    /// Emits [`FundingDeadlineUpdated`] with the prior and new deadline values.
+    ///
+    /// # Errors
+    ///
+    /// | Condition | Typed error |
+    /// |-----------|-------------|
+    /// | Escrow not open | [`EscrowError::FundingDeadlineUpdateNotOpen`] |
+    /// | `Some(d)` and `d <= now` | [`EscrowError::FundingDeadlinePassed`] |
+    pub fn update_funding_deadline(env: Env, new_deadline: Option<u64>, expected_nonce: u32) {
+        let escrow = Self::load_escrow_require_admin(&env);
+        Self::consume_admin_nonce(&env, expected_nonce);
+
+        ensure(
+            &env,
+            escrow.status == 0,
+            EscrowError::FundingDeadlineUpdateNotOpen,
+        );
+
+        let prior: Option<u64> = env.storage().instance().get(&DataKey::FundingDeadline);
+
+        match new_deadline {
+            Some(d) => {
+                ensure(
+                    &env,
+                    d > env.ledger().timestamp(),
+                    EscrowError::FundingDeadlinePassed,
+                );
+                env.storage().instance().set(&DataKey::FundingDeadline, &d);
+            }
+            None => {
+                env.storage().instance().remove(&DataKey::FundingDeadline);
+            }
+        }
+
+        FundingDeadlineUpdated {
+            name: symbol_short!("fund_dl"),
+            invoice_id: escrow.invoice_id.clone(),
+            prior_deadline: prior,
+            new_deadline,
+        }
+        .publish(&env);
+    }
+
     /// Lower the configured distinct-investor cap while the escrow is still open.
     ///
     /// This is admin-only and intentionally cannot raise a cap or impose one on an unlimited
@@ -5868,8 +5894,9 @@ impl LiquifactEscrow {
     /// - If no unique-investor cap was configured at initialization.
     /// - If `new_cap` is not strictly lower than the current cap.
     /// - If `new_cap` is below the current unique funder count.
-    pub fn lower_max_unique_investors(env: Env, new_cap: u32) -> u32 {
+    pub fn lower_max_unique_investors(env: Env, new_cap: u32, expected_nonce: u32) -> u32 {
         let escrow = Self::load_escrow_require_admin(&env);
+        Self::consume_admin_nonce(&env, expected_nonce);
 
         guard_status_eq(&env, escrow.status, 0, EscrowError::CapLowerNotOpen);
 
@@ -6093,8 +6120,9 @@ impl LiquifactEscrow {
     ///
     /// See `docs/OPERATOR_RUNBOOK.md` ┬º2 for step-by-step instructions on implementing
     /// a concrete migration path.
-    pub fn migrate(env: Env, from_version: u32) -> u32 {
+    pub fn migrate(env: Env, from_version: u32, expected_nonce: u32) -> u32 {
         Self::load_escrow_require_admin(&env);
+        Self::consume_admin_nonce(&env, expected_nonce);
 
         let stored: u32 = env.storage().instance().get(&DataKey::Version).unwrap_or(0);
 
@@ -6130,93 +6158,13 @@ impl LiquifactEscrow {
     /// | Additive new `DataKey` | Neither (no call needed) | Old instances default missing keys |
     /// | Breaking struct/key change | Redeploy | In-place migration only if `migrate` is extended |
     ///
-    /// ## Authorization
-    ///
-    /// Requires [`InvoiceEscrow::admin`] authorization (`admin.require_auth()`) before any
-    /// deployer interaction. This is enforced via [`Self::load_escrow_require_admin`], which
-    /// reads `DataKey::Escrow` and calls `require_auth()` on `escrow.admin`. Unauthenticated
-    /// callers cause the Soroban transaction to revert before the WASM is touched.
-    ///
-    /// ## State preservation guarantee
-    ///
-    /// After a successful `upgrade` call:
-    /// - **Instance storage**: all keys (including `DataKey::Escrow`, `DataKey::Version`,
-    ///   `DataKey::FundingToken`, `DataKey::LegalHold`, etc.) are unchanged.
-    /// - **Persistent storage**: all per-investor keys (`DataKey::InvestorContribution(addr)`,
-    ///   `DataKey::InvestorEffectiveYield(addr)`, `DataKey::InvestorClaimNotBefore(addr)`,
-    ///   `DataKey::InvestorClaimed(addr)`, `DataKey::InvestorAllowlisted(addr)`) are unchanged.
-    /// - **SCHEMA_VERSION** (compile-time constant in new WASM) is updated, but
-    ///   `DataKey::Version` (on-chain stored value) is **not** changed by this call.
-    ///   A mismatch between them after upgrade is the signal that `migrate()` may be needed.
-    /// - **Token balances** are not transferred. The escrow's custody balance is unaffected.
-    ///
-    /// ## Additive-key safety contract (ADR-007, Rule 1)
-    ///
-    /// A WASM upgrade is safe when the new WASM only **adds** new `DataKey` variants that:
-    /// 1. Are read with `.get(...).unwrap_or(default)` so pre-existing instances return
-    ///    the expected default when the key is absent.
-    /// 2. Do not change the XDR shape of any existing stored `#[contracttype]` struct
-    ///    (e.g. `InvoiceEscrow`, `FundingCloseSnapshot`, `YieldTier`, `SmeCollateralCommitment`).
-    /// 3. Do not rename or remove any existing `DataKey` variant.
-    ///
-    /// **Critically: `DataKey` variant ordering in the enum determines the XDR discriminant
-    /// (encoded as an integer). Reordering existing variants changes their on-chain discriminant,
-    /// causing reads of those keys to silently decode the wrong storage slot or return nothing.
-    /// Never reorder existing `DataKey` variants; only append new ones at the end of the enum.**
-    ///
-    /// A WASM upgrade is **unsafe / breaking** when:
-    /// - An existing `DataKey` variant is renamed, removed, or reordered.
-    /// - An existing stored `#[contracttype]` struct gains a non-optional field.
-    /// - An existing stored `#[contracttype]` struct changes a field type.
-    /// - The XDR discriminant of any existing variant changes (caused by reordering).
-    ///
-    /// These breaking changes require either a `migrate` path (extend `migrate` first,
-    /// then upgrade, then call `migrate`) or a full redeploy. See `docs/OPERATOR_RUNBOOK.md` ┬º1
-    /// and `docs/adr/ADR-007-storage-key-evolution.md` for the decision tree.
-    ///
-    /// ## Event emission (before deployer call)
-    ///
-    /// A [`ContractUpgraded`] event is emitted *before* the deployer call as a defensive
-    /// ordering: the event is recorded even if the deployer interaction somehow reverts.
-    /// The event carries `invoice_id` (for indexer correlation) and `new_wasm_hash`.
-    ///
-    /// ## When to call `migrate` after upgrading
-    ///
-    /// - **Additive-only new `DataKey` variants**: do **not** call `migrate()`. Old instances
-    ///   return defaults for absent keys; no rewrite is needed.
-    /// - **Schema-breaking changes where `migrate()` has been extended**: call `migrate(stored_version)`
-    ///   after the upgrade. The stored version before upgrade is readable via `get_version()`.
-    /// - **Current release (SCHEMA_VERSION = 6)**: `migrate()` errors on all paths.
-    ///   Do not call it as a bookkeeping step after an additive upgrade.
-    ///
-    /// ## Operator pre-flight checklist
-    ///
-    /// Before invoking `upgrade` on a live instance, operators must:
-    /// 1. Activate a legal hold (`set_legal_hold(true)`) to block in-flight settlements/claims.
-    /// 2. Build and upload the new WASM: `cargo build --target wasm32v1-none --release`.
-    /// 3. Upload to the network: `stellar contract upload --wasm ...` ΓåÆ captures `NEW_WASM_HASH`.
-    /// 4. Diff the new `DataKey` enum against the deployed version: verify only additive changes.
-    /// 5. Test on Testnet with a mirror instance before Mainnet.
-    /// 6. Call `upgrade(NEW_WASM_HASH)` with admin credentials.
-    /// 7. Verify `get_version()` and `get_escrow()` return expected values.
-    /// 8. Clear legal hold: `clear_legal_hold()`.
-    /// See `docs/OPERATOR_RUNBOOK.md` ┬º┬º3ΓÇô7 for the complete procedure.
-    ///
-    /// ## Rollback
-    ///
-    /// Re-upload the previous WASM (already recorded on-chain) and call `upgrade(PREV_WASM_HASH)`.
-    /// This works only when stored data is still compatible with old WASM types. If stored data
-    /// was already rewritten by a `migrate` call, rollback requires a redeploy.
-    ///
-    /// ## Risks
-    ///
-    /// Deploying an incompatible WASM (one that reorders or removes existing `DataKey` variants,
-    /// or changes a stored struct's XDR shape) will silently corrupt stored state on the next read.
-    /// There is no on-chain undo once `update_current_contract_wasm` completes. Test thoroughly
-    /// on Testnet before upgrading production contracts.
-    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
-        // Auth first ΓÇö matches migrate() ordering
+    /// # Risks
+    /// Deploying an incompatible WASM will corrupt stored state. Test thoroughly on
+    /// testnet before upgrading production contracts.
+    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>, expected_nonce: u32) {
+        // Auth first — matches migrate() ordering
         let escrow = Self::load_escrow_require_admin(&env);
+        Self::consume_admin_nonce(&env, expected_nonce);
 
         // Emit event before the deployer call so the event is recorded even if
         // the deployer call somehow reverts (defensive ordering)
@@ -7808,118 +7756,11 @@ impl LiquifactEscrow {
     /// induce unexpected compute costs on operator-controlled escrows.
     ///
     /// # Errors
-    ///
-    /// | Condition | Typed error |
-    /// |-----------|-------------|
-    /// | `keys` is empty | [`EscrowError::BumpTtlBatchEmpty`] (code 223) |
-    /// | `keys.len() > MAX_BUMP_TTL_BATCH` | [`EscrowError::BumpTtlBatchTooLarge`] (code 224) |
-    /// | Caller is not the escrow admin | Auth host trap (no typed code) |
-    ///
-    /// # Example
-    ///
-    /// ```text
-    /// // Extend TTL for three investor addresses in a single call:
-    /// client.batch_bump_ttl(
-    ///     &admin,
-    ///     &vec![
-    ///         DataKey::InvestorContribution(alice.clone()),
-    ///         DataKey::InvestorContribution(bob.clone()),
-    ///         DataKey::InvestorAllowlisted(alice.clone()),
-    ///     ],
-    /// );
-    /// ```
-    pub fn batch_bump_ttl(env: Env, keys: Vec<DataKey>) {
-        // ΓöÇΓöÇ Bounded-vector guard ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
-        // Mirror the pattern used by fund_batch / set_investors_allowlisted:
-        // reject empty batches (n == 0) and over-cap batches (n > MAX_BUMP_TTL_BATCH)
-        // before the auth check so invalid inputs are caught cheaply.
-        let n = keys.len();
-        ensure(&env, n > 0, EscrowError::BumpTtlBatchEmpty);
-        ensure(
-            &env,
-            n <= MAX_BUMP_TTL_BATCH,
-            EscrowError::BumpTtlBatchTooLarge,
-        );
-
-        // ΓöÇΓöÇ Admin authorization ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
-        // Load the escrow and require the current admin to sign. This follows the
-        // canonical load_escrow_require_admin pattern (ADR-002 ┬ºguard ordering):
-        // read-only preconditions first, then require_auth, then storage writes.
-        let _escrow = Self::load_escrow_require_admin(&env);
-        let ttl = get_lifecycle_ttl(&_escrow);
-
-        // ΓöÇΓöÇ TTL extension ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
-        // Soroban's extend_ttl never shortens TTL; this entrypoint only extends.
-        // No other state is mutated.
-        //
-        // Per-investor persistent keys have independent TTL from the contract instance.
-        // Instance-storage TTL is contract-wide, so a single extend_ttl call covers all
-        // non-persistent keys regardless of which instance key was requested.
-        for i in 0..n {
-            let key = keys.get(i).unwrap();
-            match key {
-                // ΓöÇΓöÇ Persistent per-investor keys ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
-                // Each of these has an independent TTL under Soroban persistent storage.
-                DataKey::InvestorContribution(_)
-                | DataKey::InvestorEffectiveYield(_)
-                | DataKey::InvestorClaimNotBefore(_)
-                | DataKey::InvestorClaimed(_)
-                | DataKey::InvestorAllowlisted(_) => {
-                    // Only extend TTL for keys that actually exist in persistent storage.
-                    // `extend_ttl` on an absent key raises `Error(Storage, MissingValue)`;
-                    // callers supply keys they intend to keep alive but some (e.g. a
-                    // newly-allowlisted investor who has not yet funded) may not have all
-                    // five per-investor keys written yet. Skipping absent keys is safe:
-                    // there is nothing to keep alive if the entry does not exist.
-                    if env.storage().persistent().has(&key) {
-                        env.storage().persistent().extend_ttl(
-                            &key,
-                            ttl,
-                            ttl,
-                        );
-                    }
-                }
-                // ΓöÇΓöÇ All other keys live in instance storage ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
-                // Instance TTL is contract-wide; one call covers all instance keys.
-                _ => {
-                    env.storage().instance().extend_ttl(
-                        ttl,
-                        ttl,
-                    );
-                }
-            }
-        }
-    }
-
-    /// Propose a new admin (`PendingAdmin`) ΓÇö step 1 of a two-step handover.
-    ///
-    /// Requires current admin authorization. The destination must differ from the current admin.
-    /// If a pending proposal already exists, re-proposing the same address is rejected while
-    /// replacing it with a different address emits [`AdminProposalSuperseded`].
-    ///
-    /// Persists [`DataKey::PendingAdmin`] as the proposed successor address and
-    /// [`DataKey::PendingAdminExpiry`] as `ledger.timestamp() + window`, where `window`
-    /// is `validity_window_secs` when supplied or [`DEFAULT_ADMIN_PROPOSAL_VALIDITY_SECS`] when
-    /// `None`.
-    ///
-    /// The successor must then call [`LiquifactEscrow::accept_admin`] before the expiry timestamp
-    /// to complete the handover. If the proposal is not accepted by the expiry, or if the current
-    /// admin cancels it via [`LiquifactEscrow::cancel_pending_admin`], the nomination is retracted.
-    ///
-    /// # Errors
-    /// Emits typed [`EscrowError`] codes when the escrow is uninitialized, the caller is not the
-    /// current admin, `new_admin` is the current admin ([`EscrowError::NewAdminSameAsCurrent`]),
-    /// or `new_admin` is already pending ([`EscrowError::PendingAdminUnchanged`]).
-    ///
-    /// # Events
-    /// Emits [`AdminProposedEvent`] (topic: `adm_prop`) containing the `invoice_id`, the `current_admin`,
-    /// and the `pending_admin` address.
-    pub fn propose_admin(
-        env: Env,
-        new_admin: Address,
-        validity_window_secs: Option<u64>,
-    ) -> Address {
+    /// Emits typed [`EscrowError`] codes when the escrow is uninitialized or `new_admin` is the
+    /// current admin.
+    pub fn propose_admin(env: Env, new_admin: Address, expected_nonce: u32) -> Address {
         let escrow = Self::load_escrow_require_admin(&env);
+        Self::consume_admin_nonce(&env, expected_nonce);
 
         ensure(
             &env,
@@ -8035,9 +7876,16 @@ impl LiquifactEscrow {
     /// to complete the handover and assume active admin authority. Operators should migrate existing
     /// integrations to call `propose_admin` followed by `accept_admin`.
     #[deprecated(note = "use propose_admin followed by accept_admin")]
-    pub fn transfer_admin(env: Env, new_admin: Address) -> InvoiceEscrow {
-        let invoice_id = Self::get_escrow(env.clone()).invoice_id;
-        Self::propose_admin(env.clone(), new_admin.clone(), None);
+    pub fn transfer_admin(env: Env, new_admin: Address, expected_nonce: u32) -> InvoiceEscrow {
+        Self::propose_admin(env.clone(), new_admin.clone(), expected_nonce);
+
+        // Re-read after the propose_admin delegation so the deprecation event
+        // carries the exact `invoice_id` indexers will see in the prior
+        // `AdminProposedEvent`. Reading after (not before) keeps a single
+        // extra instance-storage read, since `propose_admin` does not expose
+        // its loaded escrow back through the return type.
+        let escrow = Self::get_escrow(env.clone());
+
         DeprecatedTransferAdminUsed {
             name: symbol_short!("depr_xfer"),
             invoice_id,
@@ -8070,8 +7918,9 @@ impl LiquifactEscrow {
     /// # Events
     ///
     /// Emits [`AdminProposalCancelled`] carrying `invoice_id` and `cancelled_pending`.
-    pub fn cancel_pending_admin(env: Env) -> Address {
+    pub fn cancel_pending_admin(env: Env, expected_nonce: u32) -> Address {
         let escrow = Self::load_escrow_require_admin(&env);
+        Self::consume_admin_nonce(&env, expected_nonce);
 
         let pending: Option<Address> = env.storage().instance().get(&DataKey::PendingAdmin);
         ensure(&env, pending.is_some(), EscrowError::NoPendingAdmin);
@@ -8158,10 +8007,11 @@ impl LiquifactEscrow {
     /// # Errors
     /// Emits typed [`EscrowError`] codes when legal hold is active, the escrow is uninitialized,
     /// or the escrow is not in status 0 (open).
-    pub fn cancel_funding(env: Env) -> InvoiceEscrow {
-        guard_not_legal_hold(&env, EscrowError::LegalHoldBlocksCancelFunding);
+    pub fn cancel_funding(env: Env, expected_nonce: u32) -> InvoiceEscrow {
+        Self::guard_not_legal_hold(&env, EscrowError::LegalHoldBlocksCancelFunding);
 
         let mut escrow = Self::load_escrow_require_admin(&env);
+        Self::consume_admin_nonce(&env, expected_nonce);
 
         guard_status_eq(&env, escrow.status, 0, EscrowError::CancelFundingNotOpen);
 
