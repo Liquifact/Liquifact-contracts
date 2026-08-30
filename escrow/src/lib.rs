@@ -314,6 +314,16 @@ impl LiquifactEscrow {
             .instance()
             .get(&Symbol::new(&env, CLOSE_METADATA_KEY))
     }
+
+    /// Toggles the dispute active flag. Bumps TTL by the disputed threshold.
+    pub fn set_dispute_active(env: Env, active: bool) {
+        let mut escrow: InvoiceEscrow = env.storage().instance().get(&DataKey::Escrow)
+            .unwrap_or_else(|| panic_with_error!(&env, CloseError::NotInitialized));
+        escrow.admin.require_auth();
+        escrow.dispute_active = active;
+        env.storage().instance().set(&DataKey::Escrow, &escrow);
+        extend_ttl_for_activity(&env, &escrow, None);
+    }
 }
 
 /// Default maximum maturity horizon in seconds (~5 years) when no explicit horizon is configured.
@@ -439,6 +449,39 @@ pub const INSTANCE_TTL_MIN_EXTENSION_LEDGERS: u32 = 60 * 60; // Approx. 1h at 1 
 /// When [`DataKey::StorageLimit`] is unset, persistent extensions also fall back to
 /// [`INSTANCE_TTL_MIN_EXTENSION_LEDGERS`] (equal to this constant today).
 pub const PERSISTENT_TTL_MIN_EXTENSION_LEDGERS: u32 = 60 * 60; // Approx. 1h at 1 ledger/sec.
+
+pub const TTL_ACTIVE_ESCROW_LEDGERS: u32 = 90 * 24 * 60 * 60;
+pub const TTL_DISPUTED_ESCROW_LEDGERS: u32 = 180 * 24 * 60 * 60;
+pub const TTL_TERMINAL_ESCROW_LEDGERS: u32 = 30 * 24 * 60 * 60;
+
+pub(crate) fn get_lifecycle_ttl(escrow: &InvoiceEscrow) -> u32 {
+    if escrow.dispute_active {
+        TTL_DISPUTED_ESCROW_LEDGERS
+    } else if escrow.status >= 2 {
+        TTL_TERMINAL_ESCROW_LEDGERS
+    } else {
+        TTL_ACTIVE_ESCROW_LEDGERS
+    }
+}
+
+pub(crate) fn extend_ttl_for_activity(env: &Env, escrow: &InvoiceEscrow, investor: Option<Address>) {
+    let ttl = get_lifecycle_ttl(escrow);
+    env.storage().instance().extend_ttl(ttl, ttl);
+    if let Some(addr) = investor {
+        let keys = [
+            DataKey::InvestorContribution(addr.clone()),
+            DataKey::InvestorEffectiveYield(addr.clone()),
+            DataKey::InvestorClaimNotBefore(addr.clone()),
+            DataKey::InvestorClaimed(addr.clone()),
+            DataKey::InvestorAllowlisted(addr),
+        ];
+        for k in keys.iter() {
+            if env.storage().persistent().has(k) {
+                env.storage().persistent().extend_ttl(k, ttl, ttl);
+            }
+        }
+    }
+}
 
 /// Minimum allowed value for [`LiquifactEscrow::set_storage_limit`].
 ///
@@ -1407,6 +1450,7 @@ pub struct InvoiceEscrow {
     pub maturity: u64,
     /// 0 = open, 1 = funded, 2 = settled, 3 = withdrawn (SME pulled liquidity), 4 = cancelled (admin-gated; investors may refund)
     pub status: u32,
+    pub dispute_active: bool,
 }
 
 /// SME-reported collateral metadata for off-chain risk review.
@@ -3103,6 +3147,7 @@ impl LiquifactEscrow {
             yield_bps,
             maturity,
             status: 0,
+            dispute_active: false,
         };
 
         env.storage().instance().set(&DataKey::Escrow, &escrow);
@@ -6538,6 +6583,8 @@ impl LiquifactEscrow {
         }
         .publish(&env);
 
+        extend_ttl_for_activity(&env, &escrow, Some(investor.clone()));
+
         escrow
     }
 
@@ -6597,6 +6644,8 @@ impl LiquifactEscrow {
             funded_amount: escrow.funded_amount,
         }
         .publish(&env);
+
+        extend_ttl_for_activity(&env, &escrow, None);
 
         escrow
     }
@@ -6663,8 +6712,10 @@ impl LiquifactEscrow {
 
         escrow.status = 2;
 
-        env.storage().instance().set(&DataKey::SettledAt, &now);
         env.storage().instance().set(&DataKey::Escrow, &escrow);
+
+        // Extend TTL based on lifecycle after settlement
+        extend_ttl_for_activity(&env, &escrow, None);
 
         EscrowSettled {
             name: symbol_short!("escrow_sd"),
@@ -7069,6 +7120,9 @@ impl LiquifactEscrow {
             invoice_id: escrow.invoice_id.clone(),
         }
         .publish(&env);
+
+        // Extend TTL after a successful claim
+        extend_ttl_for_activity(&env, &escrow, Some(investor.clone()));
     }
 
     /// On-chain read-only view that returns the **claimable payout** for an investor, applying
@@ -7600,8 +7654,9 @@ impl LiquifactEscrow {
         // - ADR-007: storage key evolution policy (additive changes / key semantics).
         // - docs/escrow-ledger-time.md: all gating uses `Env::ledger().timestamp()` with `>=`.
 
-        // Admin-configurable horizon (default = INSTANCE_TTL_MIN_EXTENSION_LEDGERS).
-        let ttl = Self::get_storage_limit(env.clone());
+        // Lifecycle-based horizon.
+        let escrow = Self::get_escrow(env.clone());
+        let ttl = get_lifecycle_ttl(&escrow);
 
         // Extend persistent TTL for allowlisted investor entries.
         for addr in allowlisted.iter() {
@@ -7719,6 +7774,7 @@ impl LiquifactEscrow {
         // canonical load_escrow_require_admin pattern (ADR-002 §guard ordering):
         // read-only preconditions first, then require_auth, then storage writes.
         let _escrow = Self::load_escrow_require_admin(&env);
+        let ttl = get_lifecycle_ttl(&_escrow);
 
         // ── TTL extension ─────────────────────────────────────────────────────
         // Soroban's extend_ttl never shortens TTL; this entrypoint only extends.
@@ -7746,8 +7802,8 @@ impl LiquifactEscrow {
                     if env.storage().persistent().has(&key) {
                         env.storage().persistent().extend_ttl(
                             &key,
-                            PERSISTENT_TTL_MIN_EXTENSION_LEDGERS,
-                            PERSISTENT_TTL_MIN_EXTENSION_LEDGERS,
+                            ttl,
+                            ttl,
                         );
                     }
                 }
@@ -7755,8 +7811,8 @@ impl LiquifactEscrow {
                 // Instance TTL is contract-wide; one call covers all instance keys.
                 _ => {
                     env.storage().instance().extend_ttl(
-                        INSTANCE_TTL_MIN_EXTENSION_LEDGERS,
-                        INSTANCE_TTL_MIN_EXTENSION_LEDGERS,
+                        ttl,
+                        ttl,
                     );
                 }
             }
