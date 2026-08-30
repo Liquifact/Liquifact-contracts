@@ -89,7 +89,7 @@ proptest! {
         if amount >= target {
             prop_assert_eq!(after_fund.status, 1);
             let after_settle = client.settle();
-            prop_assert_eq!(after_settle.status, 2);
+            prop_assert_eq!(after_settle.escrow.status, 2);
         } else {
             prop_assert_eq!(after_fund.status, 0);
         }
@@ -395,7 +395,7 @@ fn prop_status_settle_transition() {
     assert_eq!(before_settle.status, 1, "status before settle must be 1");
 
     let after_settle = client.settle();
-    assert_eq!(after_settle.status, 2, "settle must transition to 2");
+    assert_eq!(after_settle.escrow.status, 2, "settle must transition to 2");
 }
 
 #[test]
@@ -569,7 +569,7 @@ fn prop_settled_is_terminal_for_settle() {
     client.settle();
 
     let settled = client.get_escrow();
-    assert_eq!(settled.escrow.status, 2, "must be settled");
+    assert_eq!(settled.status, 2, "must be settled");
 }
 
 #[test]
@@ -1549,7 +1549,7 @@ fn cancelled_escrow<'a>(
         &admin,
         &soroban_sdk::String::from_str(env, invoice_id),
         &sme,
-        &target,
+        &total,
         &800i64,
         &0u64,
         &token,
@@ -1561,9 +1561,6 @@ fn cancelled_escrow<'a>(
         &None,
         &None,
         &None,
-        &None,
-        &None,
-        &None::<i64>,
     );
     for (investor, amount) in contributions {
         client.fund(investor, amount);

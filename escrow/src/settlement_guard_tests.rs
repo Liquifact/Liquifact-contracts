@@ -187,6 +187,152 @@ fn unrelated_escrow_unaffected_by_another_settlement() {
     assert_eq!(client_b.get_escrow().status, 2u32);
 }
 
+/// Issue #1209: a disputed escrow must not release funds while evidence is pending.
+/// The dispute record is preserved and the release path is blocked before any token transfer
+/// or status transition occurs.
+#[test]
+fn dispute_freezes_funds_until_resolved() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let id = env.register(LiquifactEscrow, ());
+    let client = LiquifactEscrowClient::new(&env, &id);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let treasury = Address::generate(&env);
+    let token = Address::generate(&env);
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "DISPUTE01"),
+        &sme,
+        &1_000i128,
+        &800i64,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    let investor = Address::generate(&env);
+    client.fund(&investor, &1_000i128);
+
+    let before = client.get_escrow();
+    assert_eq!(before.status, 1u32, "funded precondition");
+    assert!(!client.is_dispute_active());
+
+    let release_before = client.try_withdraw();
+    assert!(
+        release_before.is_ok(),
+        "release succeeds when no dispute exists"
+    );
+    assert_eq!(
+        client.get_escrow().status,
+        3u32,
+        "status transitions to withdrawn"
+    );
+
+    let env2 = Env::default();
+    env2.mock_all_auths();
+    let id2 = env2.register(LiquifactEscrow, ());
+    let client2 = LiquifactEscrowClient::new(&env2, &id2);
+    let admin2 = Address::generate(&env2);
+    let sme2 = Address::generate(&env2);
+    let treasury2 = Address::generate(&env2);
+    let token2 = Address::generate(&env2);
+    client2.init(
+        &admin2,
+        &String::from_str(&env2, "DISPUTE02"),
+        &sme2,
+        &1_000i128,
+        &800i64,
+        &0u64,
+        &token2,
+        &None,
+        &treasury2,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+    let investor2 = Address::generate(&env2);
+    client2.fund(&investor2, &1_000i128);
+
+    client2.open_dispute(&admin2);
+    assert!(client2.is_dispute_active());
+    assert!(client2.get_dispute_record().is_some());
+
+    let disputed_release = client2.try_withdraw();
+    assert!(
+        disputed_release.is_err(),
+        "withdraw must fail while dispute is active"
+    );
+
+    client2.close_dispute(&admin2, &true);
+    assert!(!client2.is_dispute_active());
+    let resolved_release = client2.try_withdraw();
+    assert!(
+        resolved_release.is_ok(),
+        "release succeeds once dispute is resolved"
+    );
+    assert_eq!(client2.get_escrow().status, 3u32);
+}
+
+#[test]
+fn dispute_close_requires_admin_authority() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let id = env.register(LiquifactEscrow, ());
+    let client = LiquifactEscrowClient::new(&env, &id);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let treasury = Address::generate(&env);
+    let token = Address::generate(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "DISPUTE03"),
+        &sme,
+        &1_000i128,
+        &800i64,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+    let investor = Address::generate(&env);
+    client.fund(&investor, &1_000i128);
+
+    client.open_dispute(&admin);
+    let outsider = Address::generate(&env);
+    let err = client.try_close_dispute(&outsider, &true);
+    assert!(err.is_err(), "non-admin must not close a dispute");
+    assert!(client.is_dispute_active());
+}
+
 /// Edge case for the technical guidance “**make the guard total across all settlement
 /// entrypoints**”: [`LiquifactEscrow::settle_batch`] settles a batch of **distinct** escrows,
 /// each exactly once. A well-formed batch of unrelated targets is fully applied.
