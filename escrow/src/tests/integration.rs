@@ -72,12 +72,12 @@ fn test_legal_hold_midflow_blocks_and_resumes_with_ordered_events() {
     let mut total_events = 0usize;
 
     // --- Phase 1: enable hold, see it reflected ---
-    client.set_legal_hold(&true);
+    client.set_legal_hold(&true, &0u32);
     total_events += env.events().all().events().len();
     assert!(client.get_legal_hold());
 
     // --- Phase 2: clear hold ---
-    client.set_legal_hold(&false);
+    client.set_legal_hold(&false, &1u32);
     total_events += env.events().all().events().len();
     assert!(!client.get_legal_hold());
 
@@ -86,12 +86,12 @@ fn test_legal_hold_midflow_blocks_and_resumes_with_ordered_events() {
     assert_eq!(client.get_escrow().funded_amount, 100_000_000);
 
     // --- Phase 4: enable hold mid-stream (post-fund, pre-settle) ---
-    client.set_legal_hold(&true);
+    client.set_legal_hold(&true, &2u32);
     total_events += env.events().all().events().len();
     assert!(client.get_legal_hold());
 
     // --- Phase 5: clear hold, settle ---
-    client.set_legal_hold(&false);
+    client.set_legal_hold(&false, &3u32);
     total_events += env.events().all().events().len();
     assert!(!client.get_legal_hold());
 
@@ -100,12 +100,12 @@ fn test_legal_hold_midflow_blocks_and_resumes_with_ordered_events() {
     assert_eq!(client.get_escrow().status, 2);
 
     // --- Phase 7: enable hold again after settlement ---
-    client.set_legal_hold(&true);
+    client.set_legal_hold(&true, &4u32);
     total_events += env.events().all().events().len();
     assert!(client.get_legal_hold());
 
     // --- Phase 8: clear hold for cleanup ---
-    client.set_legal_hold(&false);
+    client.set_legal_hold(&false, &5u32);
     total_events += env.events().all().events().len();
     assert!(!client.get_legal_hold());
 
@@ -774,7 +774,7 @@ fn test_legal_hold_midflow_blocks_then_resumes_with_ordered_events() {
     assert_eq!(open_state.status, 0);
 
     // Hold on: next funding + settle attempts must be blocked.
-    client.set_legal_hold(&true);
+    client.set_legal_hold(&true, &0u32);
     assert!(client.get_legal_hold());
 
     let fund_blocked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -794,7 +794,7 @@ fn test_legal_hold_midflow_blocks_then_resumes_with_ordered_events() {
     );
 
     // Hold off: flow resumes and reaches funded + settled.
-    client.clear_legal_hold();
+    client.clear_legal_hold(&1u32);
     assert!(!client.get_legal_hold());
 
     let funded_state = client.fund(&investor, &6_000i128);
@@ -964,7 +964,7 @@ fn test_cancel_refund_sweep_liability_floor() {
     sac.stellar.mint(&escrow_id, &(total + extra));
 
     // Cancel funding (admin)
-    client.cancel_funding();
+    client.cancel_funding(&0u32);
     assert_eq!(client.get_escrow().status, 4u32);
 
     // Refund inv1: should succeed, mark refunded, and increment DistributedPrincipal
@@ -1068,7 +1068,7 @@ fn withdraw_blocked_by_legal_hold_integration() {
     let (client, _escrow_id, _token, _sme) =
         setup_withdraw_with_token(&env, 10_000_000i128, "WD_LH001");
 
-    client.set_legal_hold(&true);
+    client.set_legal_hold(&true, &0u32);
     client.withdraw(); // must panic: LegalHoldBlocksWithdrawal
 }
 

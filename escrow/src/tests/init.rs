@@ -103,7 +103,7 @@ fn test_migrate_requires_admin_auth_before_version_checks() {
     default_init(&client, &env, &admin, &sme);
 
     env.mock_auths(&[]);
-    let result = client.try_migrate(&99u32);
+    let result = client.try_migrate(&99u32, &0u32);
 
     assert!(
         result.is_err(),
@@ -1095,7 +1095,7 @@ fn datakey_distributed_principal_starts_at_zero_and_increments_on_refund() {
 
     token.stellar.mint(&client.address, &500i128);
     client.fund(&investor, &500i128);
-    client.cancel_funding();
+    client.cancel_funding(&0u32);
 
     assert_eq!(client.get_distributed_principal(), 0i128);
 
@@ -1289,7 +1289,7 @@ fn test_update_maturity_zero_accepted() {
         &None,
         &None,
     );
-    let updated = client.update_maturity(&0u64);
+    let updated = client.update_maturity(&0u64, &0u32);
     assert_eq!(updated.maturity, 0);
 }
 
@@ -1316,7 +1316,7 @@ fn test_update_maturity_within_horizon_accepted() {
         &None,
         &None,
     );
-    let updated = client.update_maturity(&2000u64);
+    let updated = client.update_maturity(&2000u64, &0u32);
     assert_eq!(updated.maturity, 2000);
 }
 
@@ -1345,7 +1345,7 @@ fn test_update_maturity_at_horizon_boundary_accepted() {
         &None,
     );
     let at_boundary = now + DEFAULT_MATURITY_MAX_HORIZON_SECS;
-    let updated = client.update_maturity(&at_boundary);
+    let updated = client.update_maturity(&at_boundary, &0u32);
     assert_eq!(updated.maturity, at_boundary);
 }
 
@@ -1373,7 +1373,7 @@ fn test_update_maturity_beyond_horizon_rejected() {
         &None,
         &None,
     );
-    client.update_maturity(&(1000u64 + DEFAULT_MATURITY_MAX_HORIZON_SECS + 1));
+    client.update_maturity(&(1000u64 + DEFAULT_MATURITY_MAX_HORIZON_SECS + 1), &0u32);
 }
 
 #[test]
@@ -1400,7 +1400,7 @@ fn test_update_maturity_in_past_rejected() {
         &None,
         &None,
     );
-    client.update_maturity(&1000u64);
+    client.update_maturity(&1000u64, &0u32);
 }
 
 // ── update_maturity_max_horizon ─────────────────────────────────────────
@@ -1435,11 +1435,11 @@ fn test_update_maturity_max_horizon_by_admin() {
     );
     // Update to a shorter horizon
     let new_horizon = 7200u64; // 2 hours
-    let result = client.update_maturity_max_horizon(&new_horizon);
+    let result = client.update_maturity_max_horizon(&new_horizon, &0u32);
     assert_eq!(result, new_horizon);
     assert_eq!(client.get_maturity_max_horizon(), new_horizon);
     // Update_maturity now uses the new tighter horizon
-    client.update_maturity(&(1000u64 + 3600u64)); // 1h from now — within 2h horizon
+    client.update_maturity(&(1000u64 + 3600u64), &1u32); // 1h from now — within 2h horizon
 }
 
 #[test]
@@ -1466,6 +1466,6 @@ fn test_update_maturity_honors_reduced_horizon() {
         &None,
         &None,
     );
-    client.update_maturity_max_horizon(&3600u64); // 1 hour
-    client.update_maturity(&(1000u64 + 7200u64)); // 2 hours — exceeds new 1h horizon
+    client.update_maturity_max_horizon(&3600u64, &0u32); // 1 hour
+    client.update_maturity(&(1000u64 + 7200u64), &1u32); // 2 hours — exceeds new 1h horizon
 }

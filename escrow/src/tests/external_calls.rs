@@ -232,7 +232,7 @@ fn setup_cancelled_with_token<'a>(
     // Mint tokens into the contract to simulate on-chain custody
     token.stellar.mint(&client.address, &fund_amount);
     client.fund(investor, &fund_amount);
-    client.cancel_funding();
+    client.cancel_funding(&0u32);
     (token, treasury)
 }
 
@@ -314,7 +314,7 @@ fn sweep_liability_floor_allows_sweep_of_excess_above_outstanding() {
     token.stellar.mint(&client.address, &1_001i128);
     client.fund(&investor_a, &500i128);
     client.fund(&investor_b, &500i128);
-    client.cancel_funding();
+    client.cancel_funding(&0u32);
 
     // Refund investor_a ÔåÆ distributed = 500, outstanding = 500
     client.refund(&investor_a);
@@ -361,7 +361,7 @@ fn sweep_liability_floor_blocks_sweep_that_would_eat_into_outstanding() {
     token.stellar.mint(&client.address, &1_001i128);
     client.fund(&investor_a, &500i128);
     client.fund(&investor_b, &500i128);
-    client.cancel_funding();
+    client.cancel_funding(&0u32);
     client.refund(&investor_a);
 
     // balance = 501, outstanding = 500; sweep of 2 ÔåÆ 501 - 2 = 499 < 500 Ô£ù
@@ -396,7 +396,7 @@ fn sweep_liability_floor_zero_funded_amount_allows_sweep() {
         &None,
         &None,
     );
-    client.cancel_funding();
+    client.cancel_funding(&0u32);
 
     // Stray airdrop of 50 tokens
     token.stellar.mint(&client.address, &50i128);
@@ -441,7 +441,7 @@ fn distributed_principal_accumulates_across_multiple_refunds() {
     client.fund(&inv_a, &300i128);
     client.fund(&inv_b, &300i128);
     client.fund(&inv_c, &300i128);
-    client.cancel_funding();
+    client.cancel_funding(&0u32);
 
     assert_eq!(client.get_distributed_principal(), 0i128);
 

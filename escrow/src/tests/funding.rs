@@ -2465,7 +2465,7 @@ fn test_cancel_funding_transitions_to_status_4() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
     default_init(&client, &env, &admin, &sme);
-    let result = client.cancel_funding();
+    let result = client.cancel_funding(&0u32);
     assert_eq!(result.status, 4);
 }
 
@@ -2474,7 +2474,7 @@ fn test_cancel_funding_requires_admin_auth() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
     default_init(&client, &env, &admin, &sme);
-    client.cancel_funding();
+    client.cancel_funding(&0u32);
     assert!(
         env.auths().iter().any(|(addr, _)| *addr == admin),
         "admin auth was not recorded for cancel_funding"
@@ -2489,7 +2489,7 @@ fn test_cancel_funding_panics_if_already_funded() {
     default_init(&client, &env, &admin, &sme);
     let investor = Address::generate(&env);
     client.fund(&investor, &TARGET);
-    client.cancel_funding();
+    client.cancel_funding(&0u32);
 }
 
 #[test]
@@ -2498,8 +2498,8 @@ fn test_cancel_funding_panics_if_already_cancelled() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
     default_init(&client, &env, &admin, &sme);
-    client.cancel_funding();
-    client.cancel_funding();
+    client.cancel_funding(&0u32);
+    client.cancel_funding(&1u32);
 }
 
 #[test]
@@ -2508,8 +2508,8 @@ fn test_cancel_funding_blocked_by_legal_hold() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
     default_init(&client, &env, &admin, &sme);
-    client.set_legal_hold(&true);
-    client.cancel_funding();
+    client.set_legal_hold(&true, &0u32);
+    client.cancel_funding(&1u32);
 }
 
 #[test]
@@ -2533,7 +2533,7 @@ fn test_refund_returns_principal_to_investor() {
     let contract_id2 = client2.address.clone();
     token2.stellar.mint(&contract_id2, &(TARGET / 2));
     client2.fund(&investor2, &(TARGET / 2));
-    client2.cancel_funding();
+    client2.cancel_funding(&0u32);
 
     let before = token2.token.balance(&investor2);
     client2.refund(&investor2);
@@ -2550,7 +2550,7 @@ fn test_refund_zeroes_contribution() {
     let contract_id = client.address.clone();
     token.stellar.mint(&contract_id, &(TARGET / 2));
     client.fund(&investor, &(TARGET / 2));
-    client.cancel_funding();
+    client.cancel_funding(&0u32);
     client.refund(&investor);
     assert_eq!(client.get_contribution(&investor), 0);
 }
@@ -2564,7 +2564,7 @@ fn test_refund_marks_investor_refunded() {
     let contract_id = client.address.clone();
     token.stellar.mint(&contract_id, &(TARGET / 2));
     client.fund(&investor, &(TARGET / 2));
-    client.cancel_funding();
+    client.cancel_funding(&0u32);
     assert!(!client.is_investor_refunded(&investor));
     client.refund(&investor);
     assert!(client.is_investor_refunded(&investor));
@@ -2580,7 +2580,7 @@ fn test_refund_double_spend_panics() {
     let contract_id = client.address.clone();
     token.stellar.mint(&contract_id, &(TARGET / 2));
     client.fund(&investor, &(TARGET / 2));
-    client.cancel_funding();
+    client.cancel_funding(&0u32);
     client.refund(&investor);
     client.refund(&investor); // second call must panic
 }
@@ -2591,7 +2591,7 @@ fn test_refund_non_investor_panics() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
     default_init(&client, &env, &admin, &sme);
-    client.cancel_funding();
+    client.cancel_funding(&0u32);
     let stranger = Address::generate(&env);
     client.refund(&stranger);
 }
@@ -2628,7 +2628,7 @@ fn test_refund_requires_investor_auth() {
     let contract_id = client.address.clone();
     token.stellar.mint(&contract_id, &(TARGET / 2));
     client.fund(&investor, &(TARGET / 2));
-    client.cancel_funding();
+    client.cancel_funding(&0u32);
     client.refund(&investor);
     assert!(
         env.auths().iter().any(|(addr, _)| *addr == investor),
@@ -2649,7 +2649,7 @@ fn test_refund_multiple_investors_independent() {
     token.stellar.mint(&contract_id, &(amt_a + amt_b));
     client.fund(&inv_a, &amt_a);
     client.fund(&inv_b, &amt_b);
-    client.cancel_funding();
+    client.cancel_funding(&0u32);
 
     let before_a = token.token.balance(&inv_a);
     let before_b = token.token.balance(&inv_b);
@@ -2666,7 +2666,7 @@ fn test_cancel_funding_preserves_funded_amount() {
     let investor = Address::generate(&env);
     default_init(&client, &env, &admin, &sme);
     client.fund(&investor, &(TARGET / 2));
-    let cancelled = client.cancel_funding();
+    let cancelled = client.cancel_funding(&0u32);
     assert_eq!(cancelled.funded_amount, TARGET / 2);
 }
 
@@ -2680,7 +2680,7 @@ fn test_sweep_terminal_dust_allowed_in_cancelled_state() {
     // Mint slightly more than the investor contributes to leave dust
     token.stellar.mint(&contract_id, &(TARGET / 2 + 1));
     client.fund(&investor, &(TARGET / 2));
-    client.cancel_funding();
+    client.cancel_funding(&0u32);
     client.refund(&investor);
     // 1 unit of dust remains in the contract
     let swept = client.sweep_terminal_dust(&1i128);

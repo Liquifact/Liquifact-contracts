@@ -30,7 +30,7 @@ fn test_update_maturity_emits_event() {
         &None,
         &None,
     );
-    client.update_maturity(&2000u64);
+    client.update_maturity(&2000u64, &0u32);
     assert_eq!(
         env.events().all().events().last().unwrap().clone(),
         crate::MaturityUpdatedEvent {
@@ -65,7 +65,7 @@ fn test_update_maturity_unchanged_panics() {
         &None,
         &None,
     );
-    client.update_maturity(&2000u64);
+    client.update_maturity(&2000u64, &0u32);
 }
 
 #[test]
@@ -91,7 +91,7 @@ fn test_update_maturity_success() {
         &None,
         &None,
     );
-    let updated = client.update_maturity(&2000u64);
+    let updated = client.update_maturity(&2000u64, &0u32);
     assert_eq!(updated.maturity, 2000u64);
     assert_eq!(updated.status, 0);
 }
@@ -122,7 +122,7 @@ fn test_update_maturity_wrong_state() {
         &None,
     );
     client.fund(&investor, &1_000i128);
-    client.update_maturity(&2000u64);
+    client.update_maturity(&2000u64, &0u32);
 }
 
 #[test]
@@ -153,7 +153,7 @@ fn test_update_maturity_unauthorized() {
         &None,
     );
     env.mock_auths(&[]);
-    client.update_maturity(&2000u64);
+    client.update_maturity(&2000u64, &0u32);
 }
 
 #[test]
@@ -180,7 +180,7 @@ fn test_propose_admin_sets_pending_without_changing_admin() {
         &None,
         &None,
     );
-    let pending = client.propose_admin(&new_admin);
+    let pending = client.propose_admin(&new_admin, &0u32);
     assert_eq!(pending, new_admin);
     assert_eq!(client.get_pending_admin(), Some(new_admin));
     assert_eq!(client.get_escrow().admin, admin);
@@ -211,7 +211,7 @@ fn test_accept_admin_promotes_pending_and_clears_pending() {
         &None,
     );
 
-    client.propose_admin(&new_admin);
+    client.propose_admin(&new_admin, &0u32);
     let updated = client.accept_admin();
     assert_eq!(updated.admin, new_admin);
     assert_eq!(client.get_escrow().admin, new_admin);
@@ -244,7 +244,7 @@ fn test_transfer_admin_deprecated_shim_only_proposes() {
         &None,
     );
 
-    let unchanged = client.transfer_admin(&new_admin);
+    let unchanged = client.transfer_admin(&new_admin, &0u32);
     assert_eq!(unchanged.admin, admin);
     assert_eq!(client.get_pending_admin(), Some(new_admin));
 }
@@ -279,7 +279,7 @@ fn test_transfer_admin_emits_proposal_and_deprecation_events_in_order() {
     let all_before = env.events().all();
     let events_before = all_before.events().len();
 
-    client.transfer_admin(&new_admin);
+    client.transfer_admin(&new_admin, &0u32);
 
     let all_events = env.events().all();
     let events = all_events.events();
@@ -328,7 +328,7 @@ fn test_propose_admin_does_not_emit_deprecation_event() {
     let all_before = env.events().all();
     let events_before = all_before.events().len();
 
-    client.propose_admin(&new_admin);
+    client.propose_admin(&new_admin, &0u32);
 
     let all_events = env.events().all();
     let events = all_events.events();
@@ -378,7 +378,7 @@ fn test_transfer_admin_deprecation_event_proposed_address_matches_call_arg() {
     let new_admin = Address::generate(&env);
     default_init(&client, &env, &admin, &sme);
 
-    client.transfer_admin(&new_admin);
+    client.transfer_admin(&new_admin, &0u32);
 
     let all_events = env.events().all();
     let events = all_events.events();
@@ -415,7 +415,7 @@ fn test_transfer_admin_does_not_emit_deprecation_event_on_rejection() {
 
     // Same-address proposal: propose_admin aborts with `NewAdminSameAsCurrent`.
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        client.transfer_admin(&admin);
+        client.transfer_admin(&admin, &0u32);
     }));
     assert!(result.is_err(), "transfer_admin(current_admin) must reject");
 
@@ -477,7 +477,7 @@ fn test_transfer_admin_same_address_panics() {
         &None,
         &None,
     );
-    client.propose_admin(&admin);
+    client.propose_admin(&admin, &0u32);
 }
 
 #[test]
@@ -487,7 +487,7 @@ fn test_transfer_admin_uninitialized_panics() {
     env.mock_all_auths();
     let client = deploy(&env);
     let new_admin = Address::generate(&env);
-    client.propose_admin(&new_admin);
+    client.propose_admin(&new_admin, &0u32);
 }
 
 #[test]
@@ -507,7 +507,7 @@ fn test_accept_admin_requires_pending_admin_auth() {
     let (client, admin, sme) = setup(&env);
     let new_admin = Address::generate(&env);
     default_init(&client, &env, &admin, &sme);
-    client.propose_admin(&new_admin);
+    client.propose_admin(&new_admin, &0u32);
     env.mock_auths(&[]);
     client.accept_admin();
 }
@@ -520,8 +520,8 @@ fn test_propose_admin_overwrites_prior_pending() {
     let second = Address::generate(&env);
     default_init(&client, &env, &admin, &sme);
 
-    client.propose_admin(&first);
-    client.propose_admin(&second);
+    client.propose_admin(&first, &0u32);
+    client.propose_admin(&second, &1u32);
 
     assert_eq!(client.get_pending_admin(), Some(second.clone()));
     let updated = client.accept_admin();
@@ -538,7 +538,7 @@ fn test_propose_admin_emits_event() {
     let new_admin = Address::generate(&env);
     default_init(&client, &env, &admin, &sme);
 
-    client.propose_admin(&new_admin);
+    client.propose_admin(&new_admin, &0u32);
 
     assert_eq!(
         env.events().all().events().last().unwrap().clone(),
@@ -564,7 +564,7 @@ fn test_propose_admin_requires_current_admin_auth() {
     default_init(&client, &env, &admin, &sme);
     env.mock_auths(&[]);
     let new_admin = Address::generate(&env);
-    client.propose_admin(&new_admin);
+    client.propose_admin(&new_admin, &0u32);
 }
 
 /// Assert `propose_admin` rejects `NewAdminSameAsCurrent`
@@ -574,7 +574,7 @@ fn test_propose_admin_same_address_panics() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
     default_init(&client, &env, &admin, &sme);
-    client.propose_admin(&admin);
+    client.propose_admin(&admin, &0u32);
 }
 
 /// Assert `accept_admin` by wrong address panics
@@ -586,7 +586,7 @@ fn test_accept_admin_by_wrong_address_panics() {
     let (client, admin, sme) = setup(&env);
     let new_admin = Address::generate(&env);
     default_init(&client, &env, &admin, &sme);
-    client.propose_admin(&new_admin);
+    client.propose_admin(&new_admin, &0u32);
     let wrong_admin = Address::generate(&env);
     env.mock_auths(&[soroban_sdk::testutils::MockAuth {
         address: &wrong_admin,
@@ -611,7 +611,7 @@ fn test_admin_handover_lifecycle() {
     default_init(&client, &env, &old_admin, &sme);
 
     // 1. Propose admin
-    let pending = client.propose_admin(&new_admin);
+    let pending = client.propose_admin(&new_admin, &0u32);
     assert_eq!(pending, new_admin.clone());
     assert_eq!(client.get_pending_admin(), Some(new_admin.clone()));
 
@@ -633,7 +633,7 @@ fn test_admin_handover_lifecycle() {
     );
 
     // 3. New admin can perform admin-gated actions
-    let latest = client.update_funding_target(&20_000i128);
+    let latest = client.update_funding_target(&20_000i128, &1u32);
     assert_eq!(latest.funding_target, 20_000i128);
 
     // 4. Old admin can no longer perform admin-gated actions
@@ -647,7 +647,7 @@ fn test_admin_handover_lifecycle() {
         },
     }]);
     assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        client.update_funding_target(&30_000i128);
+        client.update_funding_target(&30_000i128, &2u32);
     }))
     .is_err());
 }
@@ -658,7 +658,7 @@ fn test_migrate_at_current_version_panics() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
     default_init(&client, &env, &admin, &sme);
-    client.migrate(&SCHEMA_VERSION);
+    client.migrate(&SCHEMA_VERSION, &0u32);
 }
 
 #[test]
@@ -667,7 +667,7 @@ fn test_migrate_wrong_from_version_panics() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
     default_init(&client, &env, &admin, &sme);
-    client.migrate(&99u32);
+    client.migrate(&99u32, &0u32);
 }
 
 #[test]
@@ -681,7 +681,7 @@ fn test_migrate_no_path_branch() {
         env.storage().instance().set(&DataKey::Version, &4u32);
     });
     // migrate(4) should hit the "No migration path" branch.
-    client.migrate(&4u32);
+    client.migrate(&4u32, &0u32);
 }
 
 #[test]
@@ -691,7 +691,7 @@ fn test_migrate_from_zero_uninitialized_panics() {
     env.mock_all_auths();
     let client = deploy(&env);
     // Uninitialized storage returns version 0; migrate(0) hits the no-path branch.
-    client.migrate(&0u32);
+    client.migrate(&0u32, &0u32);
 }
 
 // ── migrate() exhaustive typed-error contract tests ──────────────────────────
@@ -714,7 +714,7 @@ fn test_migrate_rejects_non_admin_before_version_check() {
     default_init(&client, &env, &admin, &sme);
 
     env.mock_auths(&[]);
-    let result = client.try_migrate(&99u32);
+    let result = client.try_migrate(&99u32, &0u32);
 
     assert!(
         result.is_err(),
@@ -740,7 +740,7 @@ fn test_migrate_version_mismatch_stored_neq_claimed() {
     default_init(&client, &env, &admin, &sme);
 
     assert_contract_error(
-        client.try_migrate(&(SCHEMA_VERSION - 1)),
+        client.try_migrate(&(SCHEMA_VERSION - 1), &0u32),
         EscrowError::MigrationVersionMismatch,
     );
     assert_eq!(
@@ -759,7 +759,7 @@ fn test_migrate_far_below_stored_raises_mismatch() {
     default_init(&client, &env, &admin, &sme);
 
     assert_contract_error(
-        client.try_migrate(&0u32),
+        client.try_migrate(&0u32, &0u32),
         EscrowError::MigrationVersionMismatch,
     );
     assert_eq!(client.get_version(), SCHEMA_VERSION);
@@ -775,7 +775,7 @@ fn test_migrate_at_schema_version_raises_already_current() {
     default_init(&client, &env, &admin, &sme);
 
     assert_contract_error(
-        client.try_migrate(&SCHEMA_VERSION),
+        client.try_migrate(&SCHEMA_VERSION, &0u32),
         EscrowError::AlreadyCurrentSchemaVersion,
     );
     assert_eq!(client.get_version(), SCHEMA_VERSION);
@@ -791,7 +791,7 @@ fn test_migrate_above_schema_version_raises_already_current() {
     default_init(&client, &env, &admin, &sme);
 
     assert_contract_error(
-        client.try_migrate(&(SCHEMA_VERSION + 1)),
+        client.try_migrate(&(SCHEMA_VERSION + 1), &0u32),
         EscrowError::AlreadyCurrentSchemaVersion,
     );
     assert_eq!(client.get_version(), SCHEMA_VERSION);
@@ -811,7 +811,7 @@ fn test_migrate_below_schema_version_matching_stored_raises_no_path() {
         env.storage().instance().set(&DataKey::Version, &older);
     });
 
-    assert_contract_error(client.try_migrate(&older), EscrowError::NoMigrationPath);
+    assert_contract_error(client.try_migrate(&older, &0u32), EscrowError::NoMigrationPath);
     assert_eq!(
         client.get_version(),
         older,
@@ -835,7 +835,7 @@ fn test_migrate_all_historical_versions_raise_no_path() {
         });
 
         assert_contract_error(
-            client.try_migrate(&historical),
+            client.try_migrate(&historical, &0u32),
             EscrowError::NoMigrationPath,
         );
         assert_eq!(client.get_version(), historical);
@@ -851,7 +851,7 @@ fn test_migrate_from_zero_uninitialized_raises_no_path() {
     env.mock_all_auths();
     let client = deploy(&env);
 
-    assert_contract_error(client.try_migrate(&0u32), EscrowError::NoMigrationPath);
+    assert_contract_error(client.try_migrate(&0u32, &0u32), EscrowError::NoMigrationPath);
 
     let stored_after: u32 = env.as_contract(&client.address, || {
         env.storage().instance().get(&DataKey::Version).unwrap_or(0)
@@ -891,7 +891,7 @@ fn test_migrate_version_immutable_across_all_error_branches() {
             }
         }
 
-        let result = client.try_migrate(&claimed);
+        let result = client.try_migrate(&claimed, &0u32);
         assert_contract_error(result, expected);
 
         let actual_stored: u32 = env.as_contract(&client.address, || {
@@ -1058,7 +1058,7 @@ fn test_legal_hold_blocks_settle_withdraw_claim_and_fund() {
         &None,
     );
     client.fund(&investor, &TARGET);
-    client.set_legal_hold(&true);
+    client.set_legal_hold(&true, &0u32);
     assert!(client.get_legal_hold());
 
     assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -1071,18 +1071,18 @@ fn test_legal_hold_blocks_settle_withdraw_claim_and_fund() {
     }))
     .is_err());
 
-    client.clear_legal_hold();
+    client.clear_legal_hold(&1u32);
     assert!(!client.get_legal_hold());
     let settled = client.settle();
     assert_eq!(settled.status, 2);
 
-    client.set_legal_hold(&true);
+    client.set_legal_hold(&true, &2u32);
     assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         client.claim_investor_payout(&investor);
     }))
     .is_err());
 
-    client.clear_legal_hold();
+    client.clear_legal_hold(&3u32);
     client.claim_investor_payout(&investor);
     assert!(client.is_investor_claimed(&investor));
 }
@@ -1112,7 +1112,7 @@ fn test_legal_hold_blocks_new_funds_when_open() {
         &None,
         &None,
     );
-    client.set_legal_hold(&true);
+    client.set_legal_hold(&true, &0u32);
     client.fund(&investor, &1i128);
 }
 
@@ -1157,7 +1157,7 @@ fn test_update_funding_target_by_admin_succeeds() {
         &None,
     );
 
-    let updated = client.update_funding_target(&10_000i128);
+    let updated = client.update_funding_target(&10_000i128, &0u32);
     assert_eq!(updated.funding_target, 10_000i128);
     assert_eq!(updated.status, 0);
 }
@@ -1193,7 +1193,7 @@ fn test_update_funding_target_by_non_admin_panics() {
     );
 
     env.mock_auths(&[]);
-    client.update_funding_target(&10_000i128);
+    client.update_funding_target(&10_000i128, &0u32);
 }
 
 #[test]
@@ -1228,7 +1228,7 @@ fn test_update_funding_target_fails_when_funded() {
         &None,
     );
     client.fund(&investor, &5_000i128);
-    client.update_funding_target(&10_000i128);
+    client.update_funding_target(&10_000i128, &0u32);
 }
 
 #[test]
@@ -1263,7 +1263,7 @@ fn test_update_funding_target_below_funded_panics() {
         &None,
     );
     client.fund(&investor, &4_000i128);
-    client.update_funding_target(&3_000i128);
+    client.update_funding_target(&3_000i128, &0u32);
 }
 
 #[test]
@@ -1296,7 +1296,7 @@ fn test_update_funding_target_zero_panics() {
         &None,
         &None,
     );
-    client.update_funding_target(&0i128);
+    client.update_funding_target(&0i128, &0u32);
 }
 
 // --- FundingTargetUpdated event and rejection coverage ---
@@ -1337,7 +1337,7 @@ fn test_update_funding_target_event_fields() {
         &None,
     );
 
-    client.update_funding_target(&9_000i128);
+    client.update_funding_target(&9_000i128, &0u32);
 
     assert_eq!(
         env.events().all(),
@@ -1386,7 +1386,7 @@ fn test_update_funding_target_fails_when_settled() {
     );
     client.fund(&investor, &5_000i128); // status ├ö├Ñ├å 1 (funded)
     client.settle(); // status ├ö├Ñ├å 2 (settled)
-    client.update_funding_target(&6_000i128);
+    client.update_funding_target(&6_000i128, &0u32);
 }
 
 /// `update_funding_target` must be rejected when the escrow is in the **withdrawn**
@@ -1398,7 +1398,7 @@ fn test_update_funding_target_fails_when_withdrawn() {
     env.mock_all_auths();
     let (client, _escrow_id, _sme) = init_and_fund_with_real_token(&env, 5_000i128, "WD001");
     client.withdraw(); // status → 3 (withdrawn)
-    client.update_funding_target(&6_000i128);
+    client.update_funding_target(&6_000i128, &0u32);
 }
 
 /// Setting the new target exactly equal to `funded_amount` is the boundary case
@@ -1437,7 +1437,7 @@ fn test_update_funding_target_equal_to_funded_amount_succeeds() {
     client.fund(&investor, &4_000i128); // funded_amount == 4_000, status still 0
 
     // new_target == funded_amount: boundary ├ö├ç├Â must not panic.
-    let updated = client.update_funding_target(&4_000i128);
+    let updated = client.update_funding_target(&4_000i128, &0u32);
     assert_eq!(updated.funding_target, 4_000i128);
     assert_eq!(updated.funded_amount, 4_000i128);
     assert_eq!(updated.status, 0);
@@ -1474,7 +1474,7 @@ fn test_update_funding_target_negative_panics() {
         &None,
         &None,
     );
-    client.update_funding_target(&-1i128);
+    client.update_funding_target(&-1i128, &0u32);
 }
 // --- update_maturity: open-only, ledger time semantics, MaturityUpdatedEvent ---
 
@@ -1516,7 +1516,7 @@ fn test_update_maturity_event_fields() {
         &None,
     );
 
-    client.update_maturity(&2000u64);
+    client.update_maturity(&2000u64, &0u32);
 
     assert_eq!(
         env.events().all(),
@@ -1564,7 +1564,7 @@ fn test_update_maturity_fails_when_funded() {
         &None,
     );
     client.fund(&investor, &5_000i128); // status ├ö├Ñ├å 1 (funded)
-    client.update_maturity(&2000u64);
+    client.update_maturity(&2000u64, &0u32);
 }
 
 /// `update_maturity` must be rejected when the escrow is **settled**
@@ -1602,7 +1602,7 @@ fn test_update_maturity_fails_when_settled() {
     );
     client.fund(&investor, &5_000i128); // status ├ö├Ñ├å 1
     client.settle(); // status ├ö├Ñ├å 2
-    client.update_maturity(&2000u64);
+    client.update_maturity(&2000u64, &0u32);
 }
 
 /// `update_maturity` must be rejected when the escrow is **withdrawn**
@@ -1614,7 +1614,7 @@ fn test_update_maturity_fails_when_withdrawn() {
     env.mock_all_auths();
     let (client, _escrow_id, _sme) = init_and_fund_with_real_token(&env, 5_000i128, "MAT004");
     client.withdraw(); // status → 3
-    client.update_maturity(&2000u64);
+    client.update_maturity(&2000u64, &0u32);
 }
 
 /// Setting maturity to zero is valid ├ö├ç├Â it means no maturity gate.
@@ -1648,7 +1648,7 @@ fn test_update_maturity_to_zero_succeeds() {
         &None,
         &None,
     );
-    let updated = client.update_maturity(&0u64);
+    let updated = client.update_maturity(&0u64, &0u32);
     assert_eq!(updated.maturity, 0u64);
     assert_eq!(updated.status, 0);
 }
@@ -1766,8 +1766,8 @@ fn test_update_maturity_twice_overwrites() {
         &None,
     );
 
-    client.update_maturity(&2000u64);
-    let updated = client.update_maturity(&3000u64);
+    client.update_maturity(&2000u64, &0u32);
+    let updated = client.update_maturity(&3000u64, &1u32);
     assert_eq!(updated.maturity, 3000u64);
     assert_eq!(client.get_escrow().maturity, 3000u64);
 }
@@ -1800,10 +1800,10 @@ fn test_update_maturity_edge_cases_success() {
         &None,
     );
 
-    let updated1 = client.update_maturity(&2000u64);
+    let updated1 = client.update_maturity(&2000u64, &0u32);
     assert_eq!(updated1.maturity, 2000u64);
 
-    let updated2 = client.update_maturity(&500u64);
+    let updated2 = client.update_maturity(&500u64, &1u32);
     assert_eq!(updated2.maturity, 500u64);
 }
 
@@ -1847,7 +1847,7 @@ fn auth_audit_propose_admin_requires_current_admin() {
     let (client, _, _, _, _) = auth_audit_init_funded(&env);
     let new_admin = Address::generate(&env);
     env.mock_auths(&[]);
-    client.propose_admin(&new_admin);
+    client.propose_admin(&new_admin, &0u32);
 }
 
 #[test]
@@ -1855,7 +1855,7 @@ fn auth_audit_propose_admin_requires_current_admin() {
 fn auth_audit_accept_admin_requires_pending_admin() {
     let env = Env::default();
     let (client, _, _, _, pending_admin) = auth_audit_init_funded(&env);
-    client.propose_admin(&pending_admin);
+    client.propose_admin(&pending_admin, &0u32);
     env.mock_auths(&[]);
     client.accept_admin();
 }
@@ -1920,7 +1920,7 @@ fn auth_audit_set_legal_hold_requires_admin() {
     let (client, admin, sme) = setup(&env);
     default_init(&client, &env, &admin, &sme);
     env.mock_auths(&[]);
-    client.set_legal_hold(&true);
+    client.set_legal_hold(&true, &0u32);
 }
 
 #[test]
@@ -1953,7 +1953,7 @@ fn auth_audit_set_allowlist_active_requires_admin() {
     let (client, admin, sme) = setup(&env);
     default_init(&client, &env, &admin, &sme);
     env.mock_auths(&[]);
-    client.set_allowlist_active(&true);
+    client.set_allowlist_active(&true, &0u32);
 }
 
 #[test]
@@ -2031,7 +2031,7 @@ fn auth_audit_cancel_funding_requires_admin() {
     env.mock_all_auths();
     default_init(&client, &env, &admin, &sme);
     env.mock_auths(&[]);
-    client.cancel_funding();
+    client.cancel_funding(&0u32);
 }
 
 #[test]
@@ -2040,7 +2040,7 @@ fn auth_audit_refund_requires_investor() {
     let env = Env::default();
     let (client, _, _, investor, _) = auth_audit_init_funded(&env);
     env.mock_all_auths();
-    client.cancel_funding();
+    client.cancel_funding(&0u32);
     env.mock_auths(&[]);
     client.refund(&investor);
 }
@@ -2053,7 +2053,7 @@ fn auth_audit_set_investors_allowlisted_requires_admin() {
     env.mock_all_auths();
     default_init(&client, &env, &admin, &sme);
     env.mock_auths(&[]);
-    client.set_investors_allowlisted(&soroban_sdk::Vec::new(&env), &true);
+    client.set_investors_allowlisted(&soroban_sdk::Vec::new(&env), &true, &0u32);
 }
 
 #[test]
@@ -2064,7 +2064,7 @@ fn auth_audit_update_funding_target_requires_admin() {
     env.mock_all_auths();
     default_init(&client, &env, &admin, &sme);
     env.mock_auths(&[]);
-    client.update_funding_target(&100_000i128);
+    client.update_funding_target(&100_000i128, &0u32);
 }
 
 #[test]
@@ -2075,7 +2075,7 @@ fn auth_audit_lower_max_unique_investors_requires_admin() {
     env.mock_all_auths();
     default_init(&client, &env, &admin, &sme);
     env.mock_auths(&[]);
-    client.lower_max_unique_investors(&1u32);
+    client.lower_max_unique_investors(&1u32, &0u32);
 }
 
 #[test]
@@ -2086,7 +2086,7 @@ fn auth_audit_update_maturity_requires_admin() {
     env.mock_all_auths();
     default_init(&client, &env, &admin, &sme);
     env.mock_auths(&[]);
-    client.update_maturity(&5000u64);
+    client.update_maturity(&5000u64, &0u32);
 }
 
 #[test]
@@ -2097,7 +2097,7 @@ fn auth_audit_rotate_beneficiary_requires_auth() {
     env.mock_all_auths();
     default_init(&client, &env, &admin, &sme);
     env.mock_auths(&[]);
-    client.rotate_beneficiary(&Address::generate(&env));
+    client.rotate_beneficiary(&Address::generate(&env), &0u32);
 }
 
 #[test]
@@ -2118,9 +2118,9 @@ fn auth_audit_clear_legal_hold_requires_admin() {
     let (client, admin, sme) = setup(&env);
     env.mock_all_auths();
     default_init(&client, &env, &admin, &sme);
-    client.set_legal_hold(&true);
+    client.set_legal_hold(&true, &0u32);
     env.mock_auths(&[]);
-    client.clear_legal_hold();
+    client.clear_legal_hold(&1u32);
 }
 
 #[test]
@@ -2131,7 +2131,7 @@ fn auth_audit_request_clear_legal_hold_requires_admin() {
     env.mock_all_auths();
     default_init(&client, &env, &admin, &sme);
     env.mock_auths(&[]);
-    client.request_clear_legal_hold();
+    client.request_clear_legal_hold(&0u32);
 }
 
 #[test]
@@ -2228,7 +2228,7 @@ fn test_rotate_beneficiary_success_dual_auth() {
     let new_sme = Address::generate(&env);
     default_init(&client, &env, &admin, &sme);
 
-    let updated = client.rotate_beneficiary(&new_sme);
+    let updated = client.rotate_beneficiary(&new_sme, &0u32);
     assert_eq!(updated.sme_address, new_sme);
     assert_eq!(client.get_escrow().sme_address, new_sme);
 }
@@ -2288,7 +2288,7 @@ fn test_rotate_beneficiary_no_auth_fails() {
     let new_sme = Address::generate(&env);
     default_init(&client, &env, &admin, &sme);
     env.mock_auths(&[]); // No auth
-    client.rotate_beneficiary(&new_sme);
+    client.rotate_beneficiary(&new_sme, &0u32);
 }
 
 #[test]
@@ -2298,7 +2298,7 @@ fn test_rotate_beneficiary_new_same_as_current_fails() {
     env.mock_all_auths();
     let (client, admin, sme) = setup(&env);
     default_init(&client, &env, &admin, &sme);
-    client.rotate_beneficiary(&sme);
+    client.rotate_beneficiary(&sme, &0u32);
 }
 
 #[test]
@@ -2312,7 +2312,7 @@ fn test_rotate_beneficiary_in_settled_state_fails() {
     default_init(&client, &env, &admin, &sme);
     client.fund(&investor, &TARGET);
     client.settle(); // status 2
-    client.rotate_beneficiary(&new_sme);
+    client.rotate_beneficiary(&new_sme, &0u32);
 }
 
 #[test]
@@ -2326,7 +2326,7 @@ fn test_rotate_beneficiary_in_withdrawn_state_fails() {
     default_init(&client, &env, &admin, &sme);
     client.fund(&investor, &TARGET);
     client.withdraw(); // status 3
-    client.rotate_beneficiary(&new_sme);
+    client.rotate_beneficiary(&new_sme, &0u32);
 }
 
 #[test]
@@ -2339,8 +2339,8 @@ fn test_rotate_beneficiary_in_cancelled_state_fails() {
     let investor = Address::generate(&env);
     default_init(&client, &env, &admin, &sme);
     client.fund(&investor, &TARGET);
-    client.cancel_funding(); // status 4
-    client.rotate_beneficiary(&new_sme);
+    client.cancel_funding(&0u32); // status 4
+    client.rotate_beneficiary(&new_sme, &1u32);
 }
 
 #[test]
@@ -2351,8 +2351,8 @@ fn test_rotate_beneficiary_with_legal_hold_fails() {
     let (client, admin, sme) = setup(&env);
     let new_sme = Address::generate(&env);
     default_init(&client, &env, &admin, &sme);
-    client.set_legal_hold(&true);
-    client.rotate_beneficiary(&new_sme);
+    client.set_legal_hold(&true, &0u32);
+    client.rotate_beneficiary(&new_sme, &1u32);
 }
 
 #[test]
@@ -2364,7 +2364,7 @@ fn test_rotate_beneficiary_in_funded_state_success() {
     let investor = Address::generate(&env);
     default_init(&client, &env, &admin, &sme);
     client.fund(&investor, &TARGET); // status 1
-    let updated = client.rotate_beneficiary(&new_sme);
+    let updated = client.rotate_beneficiary(&new_sme, &0u32);
     assert_eq!(updated.sme_address, new_sme);
 }
 
@@ -2403,7 +2403,7 @@ fn test_rotate_beneficiary_then_withdraw_goes_to_new_sme() {
     client.fund(&investor, &TARGET);
     // Mint funded_amount into the escrow contract so withdraw() can transfer it.
     token.stellar.mint(&escrow_id, &TARGET);
-    client.rotate_beneficiary(&new_sme);
+    client.rotate_beneficiary(&new_sme, &0u32);
     client.withdraw();
     assert_eq!(token.stellar.balance(&new_sme), TARGET);
 }

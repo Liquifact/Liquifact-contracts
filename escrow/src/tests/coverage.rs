@@ -92,7 +92,7 @@ fn typed_error_codes_cover_allowlist_attestation_and_dust_guards() {
         &None,
     );
 
-    client.set_allowlist_active(&true);
+    client.set_allowlist_active(&true, &0u32);
     let investor = Address::generate(&env);
     assert_contract_error(
         client.try_fund(&investor, &10),
@@ -245,7 +245,7 @@ fn typed_error_codes_cover_range_boundaries() {
         &None,
         &None,
     );
-    treasury_client.cancel_funding();
+    treasury_client.cancel_funding(&0u32);
     env.as_contract(&treasury_client.address, || {
         env.storage().instance().remove(&DataKey::Treasury);
     });
@@ -274,7 +274,7 @@ fn typed_error_codes_cover_range_boundaries() {
         &None,
         &None,
     );
-    hold_sweep_client.set_legal_hold(&true);
+    hold_sweep_client.set_legal_hold(&true, &0u32);
     assert_contract_error(
         hold_sweep_client.try_sweep_terminal_dust(&1),
         EscrowError::LegalHoldBlocksTreasuryDustSweep,
@@ -305,7 +305,7 @@ fn typed_error_codes_cover_range_boundaries() {
     );
     token.stellar.mint(&floor_client.address, &fund_amount);
     floor_client.fund(&sweep_investor, &fund_amount);
-    floor_client.cancel_funding();
+    floor_client.cancel_funding(&0u32);
     assert_contract_error(
         floor_client.try_sweep_terminal_dust(&1),
         EscrowError::SweepExceedsLiabilityFloor,
@@ -399,12 +399,12 @@ fn typed_error_codes_cover_range_boundaries() {
         &None,
     );
     assert_contract_error(
-        admin_client.try_update_funding_target(&0),
-        EscrowError::TargetNotPositive,
+        admin_client.try_update_funding_target(&0, &0u32),
+            EscrowError::TargetNotPositive,
     );
     assert_contract_error(
-        admin_client.try_propose_admin(&admin),
-        EscrowError::NewAdminSameAsCurrent,
+        admin_client.try_propose_admin(&admin, &1u32),
+            EscrowError::NewAdminSameAsCurrent,
     );
 
     // Migration group: 90ÔÇô92
@@ -428,17 +428,17 @@ fn typed_error_codes_cover_range_boundaries() {
         &None,
     );
     assert_contract_error(
-        migrate_client.try_migrate(&(SCHEMA_VERSION - 1)),
-        EscrowError::MigrationVersionMismatch,
+        migrate_client.try_migrate(&(SCHEMA_VERSION - 1), &0u32),
+            EscrowError::MigrationVersionMismatch,
     );
     assert_contract_error(
-        migrate_client.try_migrate(&SCHEMA_VERSION),
-        EscrowError::AlreadyCurrentSchemaVersion,
+        migrate_client.try_migrate(&SCHEMA_VERSION, &1u32),
+            EscrowError::AlreadyCurrentSchemaVersion,
     );
     env.as_contract(&migrate_client.address, || {
         env.storage().instance().set(&DataKey::Version, &0u32);
     });
-    assert_contract_error(migrate_client.try_migrate(&0), EscrowError::NoMigrationPath);
+    assert_contract_error(migrate_client.try_migrate(&0, &2u32), EscrowError::NoMigrationPath);
 
     // Funding group: 100 (skip legacy 108)
     let fund_client = super::deploy(&env);
@@ -485,12 +485,12 @@ fn typed_error_codes_cover_range_boundaries() {
         &None,
         &None,
     );
-    settle_client.set_legal_hold(&true);
+    settle_client.set_legal_hold(&true, &0u32);
     assert_contract_error(
         settle_client.try_settle(),
         EscrowError::LegalHoldBlocksSettlement,
     );
-    settle_client.clear_legal_hold();
+    settle_client.clear_legal_hold(&1u32);
     assert_contract_error(
         settle_client.try_claim_investor_payout(&investor),
         EscrowError::NoContributionToClaim,
@@ -516,13 +516,13 @@ fn typed_error_codes_cover_range_boundaries() {
         &None,
         &None,
     );
-    refund_client.set_legal_hold(&true);
+    refund_client.set_legal_hold(&true, &0u32);
     assert_contract_error(
-        refund_client.try_cancel_funding(),
+        refund_client.try_cancel_funding(&0u32),
         EscrowError::LegalHoldBlocksCancelFunding,
     );
-    refund_client.clear_legal_hold();
-    refund_client.cancel_funding();
+    refund_client.clear_legal_hold(&1u32);
+    refund_client.cancel_funding(&2u32);
     assert_contract_error(
         refund_client.try_refund(&investor),
         EscrowError::NoContributionToRefund,
@@ -548,14 +548,14 @@ fn typed_error_codes_cover_range_boundaries() {
         &None,
         &None,
     );
-    lh_client.set_legal_hold(&true);
+    lh_client.set_legal_hold(&true, &0u32);
     assert_contract_error(
-        lh_client.try_set_legal_hold(&false),
+        lh_client.try_set_legal_hold(&false, &1u32),
         EscrowError::LegalHoldClearRequestMissing,
     );
-    lh_client.request_clear_legal_hold();
+    lh_client.request_clear_legal_hold(&2u32);
     assert_contract_error(
-        lh_client.try_set_legal_hold(&false),
+        lh_client.try_set_legal_hold(&false, &3u32),
         EscrowError::LegalHoldClearNotReady,
     );
 
@@ -579,15 +579,15 @@ fn typed_error_codes_cover_range_boundaries() {
         &None,
         &None,
     );
-    rot_client.set_legal_hold(&true);
+    rot_client.set_legal_hold(&true, &0u32);
     let new_sme = Address::generate(&env);
     assert_contract_error(
-        rot_client.try_rotate_beneficiary(&new_sme),
+        rot_client.try_rotate_beneficiary(&new_sme, &1u32),
         EscrowError::LegalHoldBlocksBeneficiaryRotation,
     );
-    rot_client.clear_legal_hold();
+    rot_client.clear_legal_hold(&2u32);
     assert_contract_error(
-        rot_client.try_rotate_beneficiary(&sme),
+        rot_client.try_rotate_beneficiary(&sme, &3u32),
         EscrowError::NewSmeSameAsCurrent,
     );
 
@@ -615,8 +615,8 @@ fn typed_error_codes_cover_range_boundaries() {
     rot_terminal.fund(&investor, &100);
     rot_terminal.settle();
     assert_contract_error(
-        rot_terminal.try_rotate_beneficiary(&new_sme),
-        EscrowError::RotationNotOpen,
+        rot_terminal.try_rotate_beneficiary(&new_sme, &0u32),
+            EscrowError::RotationNotOpen,
     );
 }
 
@@ -649,9 +649,9 @@ fn test_clear_without_record_returns_error() {
         &None,
         &None,
     );
-    client.set_legal_hold(&true);
+    client.set_legal_hold(&true, &0u32);
     assert_contract_error(
-        client.try_request_clear_legal_hold(),
+        client.try_request_clear_legal_hold(&1u32),
         EscrowError::LegalHoldClearDelayOverflow,
     );
 }
@@ -683,8 +683,8 @@ fn test_migrate_wrong_version() {
     );
 
     assert_contract_error(
-        client.try_migrate(&(SCHEMA_VERSION - 1)),
-        EscrowError::MigrationVersionMismatch,
+        client.try_migrate(&(SCHEMA_VERSION - 1), &0u32),
+            EscrowError::MigrationVersionMismatch,
     );
 }
 
@@ -715,8 +715,8 @@ fn test_migrate_already_current() {
     );
 
     assert_contract_error(
-        client.try_migrate(&SCHEMA_VERSION),
-        EscrowError::AlreadyCurrentSchemaVersion,
+        client.try_migrate(&SCHEMA_VERSION, &0u32),
+            EscrowError::AlreadyCurrentSchemaVersion,
     );
 }
 
@@ -750,7 +750,7 @@ fn test_migrate_no_path() {
         env.storage().instance().set(&DataKey::Version, &0u32);
     });
 
-    assert_contract_error(client.try_migrate(&0), EscrowError::NoMigrationPath);
+    assert_contract_error(client.try_migrate(&0, &0u32), EscrowError::NoMigrationPath);
 }
 
 #[test]
@@ -779,11 +779,11 @@ fn test_admin_handover_and_maturity_updates() {
         &None,
     );
 
-    let updated = client.update_maturity(&200);
+    let updated = client.update_maturity(&200, &0u32);
     assert_eq!(updated.maturity, 200);
 
     let new_admin = Address::generate(&env);
-    let pending = client.propose_admin(&new_admin);
+    let pending = client.propose_admin(&new_admin, &1u32);
     assert_eq!(pending, new_admin);
     assert_eq!(client.get_escrow().admin, admin);
     assert_eq!(client.get_pending_admin(), Some(new_admin.clone()));
@@ -1562,7 +1562,7 @@ fn test_bump_ttl_covers_persistent_investor_keys() {
         &None,
         &None,
     );
-    client.set_investor_allowlisted(&investor, &true);
+    client.set_investor_allowlisted(&investor, &true, &0u32);
     client.fund(&investor, &100);
     client.settle();
     client.claim_investor_payout(&investor);
@@ -1738,7 +1738,7 @@ fn test_update_funding_target_happy_path() {
         &None,
     );
 
-    let updated = client.update_funding_target(&200);
+    let updated = client.update_funding_target(&200, &0u32);
     assert_eq!(updated.funding_target, 200);
 }
 
@@ -1769,7 +1769,7 @@ fn test_update_funding_target_too_low() {
     );
 
     client.fund(&Address::generate(&env), &50);
-    client.update_funding_target(&40);
+    client.update_funding_target(&40, &0u32);
 }
 
 #[test]
@@ -1935,9 +1935,9 @@ fn test_clear_legal_hold_convenience() {
         &None,
     );
 
-    client.set_legal_hold(&true);
+    client.set_legal_hold(&true, &0u32);
     assert!(client.get_legal_hold());
-    client.clear_legal_hold();
+    client.clear_legal_hold(&1u32);
     assert!(!client.get_legal_hold());
 }
 
@@ -2157,7 +2157,7 @@ fn test_update_target_invalid() {
         &None,
     );
 
-    client.update_funding_target(&0);
+    client.update_funding_target(&0, &0u32);
 }
 
 #[test]
@@ -2496,13 +2496,13 @@ fn test_get_escrow_summary_after_state_changes() {
     );
 
     // Make state changes
-    client.set_allowlist_active(&true);
+    client.set_allowlist_active(&true, &0u32);
     assert!(client.is_allowlist_active());
 
-    client.set_investor_allowlisted(&investor, &true);
+    client.set_investor_allowlisted(&investor, &true, &1u32);
     assert!(client.is_investor_allowlisted(&investor));
 
-    client.set_investor_allowlisted(&investor, &false);
+    client.set_investor_allowlisted(&investor, &false, &2u32);
     assert!(!client.is_investor_allowlisted(&investor));
 }
 
