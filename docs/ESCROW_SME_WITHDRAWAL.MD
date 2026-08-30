@@ -8,18 +8,37 @@
 
 ## 1. What `withdraw` does (and does not do)
 
-`withdraw` is a **pure on-chain state transition**. It moves the escrow from
-`status 1` (funded) to `status 3` (withdrawn) by rewriting the
-`DataKey::Escrow` entry atomically inside a single Soroban host-function call.
+> **Schema note (on-chain disbursement):** On the current schema, `withdraw` performs the SEP-41
+> token transfer **on-chain**, drawing from the principal custodied in this contract. Sections
+> below that describe `withdraw` as a "pure state transition" with no token movement reflect the
+> older v1 model where disbursement was delegated to an integration layer. The behavior of record
+> immutability (`funded_amount`, `FundingCloseSnapshot`, per-investor contributions) still holds.
 
-It does **not**:
+### 1.1 Protocol fee split (on-chain disbursement)
 
-- Transfer tokens to the SME or any investor.
-- Zero or modify `funded_amount`, `funding_target`, or any investor contribution record.
-- Emit anything resembling a payment instruction.
+When principal is custodied on-chain, `withdraw` splits `funded_amount` using the immutable
+`protocol_fee_bps` configured at `init` (basis points, `0..=10_000`, default `0`, stored under
+`DataKey::ProtocolFeeBps`):
 
-Token movement is the responsibility of the **integration layer** that calls
-into this contract. See `escrow/src/external_calls.rs` and the
+```text
+fee        = funded_amount * protocol_fee_bps / 10_000   (integer floor, checked)
+sme_payout = funded_amount - fee
+```
+
+- `fee` is transferred to the immutable `DataKey::Treasury`; `sme_payout` to `sme_address`.
+- **Conservation:** `sme_payout + fee == funded_amount`. Floor rounding leaves any residue with the
+  SME, so the treasury is never over-credited.
+- **Dependency:** the fee is only realized on this on-chain disbursement path. Off-chain `settle`,
+  investor `refund`, and `claim_investor_payout` are unaffected.
+- **Zero-fee default:** with `protocol_fee_bps == 0` no treasury transfer occurs and the SME
+  receives the full `funded_amount`.
+- **Event:** `SmeWithdrew` carries `amount` (net SME payout) and `fee` (treasury share) separately.
+
+See [`escrow-numeric-model.md`](escrow-numeric-model.md) for the authoritative math and overflow
+analysis.
+
+Token movement (for deployments still using the v1 delegated model) is the responsibility of the
+**integration layer** that calls into this contract. See `escrow/src/external_calls.rs` and the
 [Token Integration Checklist](../ESCROW_TOKEN_INTEGRATION_CHECKLIST.md).
 
 ---

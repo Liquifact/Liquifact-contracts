@@ -128,7 +128,9 @@ active it blocks `settle`, `withdraw`, `claim_investor_payout`, and
 `SmeCollateralCommitment` — a **ledger record only**. The SME may call
 `record_sme_collateral_commitment` to log an asset symbol, amount, and
 timestamp. This does **not** custody collateral, freeze tokens, or trigger
-liquidation. It is metadata for transparency and indexing.
+liquidation. It is metadata for transparency and indexing. The
+`batch_record_collateral` entrypoint provides atomic batch processing of
+multiple collateral commitments.
 
 ### Attestation
 Two complementary audit mechanisms, both admin-only:

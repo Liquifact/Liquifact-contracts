@@ -24,6 +24,7 @@ Multiple principals interact with the escrow (admin, SME, investors, treasury). 
 | `propose_admin` | current `admin` |
 | `accept_admin` | pending admin stored in `DataKey::PendingAdmin` |
 | `record_sme_collateral_commitment` | `sme_address` |
+| `batch_record_collateral` | `sme_address` |
 
 `admin` and `treasury` are stored at `init`; `treasury` is immutable, while `admin` rotates only through a two-step handover. The current admin calls `propose_admin(new_admin)`, which stores `DataKey::PendingAdmin` without changing authority. The pending address must then call `accept_admin()`, which requires its own authorization, promotes it into `InvoiceEscrow::admin`, and clears `DataKey::PendingAdmin`. The deprecated `transfer_admin` shim must not be treated as an immediate transfer; it only creates the pending proposal.
 
@@ -49,3 +50,25 @@ Certain administrative entrypoints enforce a no-op guard to reject updates that 
 - **`update_maturity`**: Rejects `new_maturity == old_maturity` (`MaturityUnchanged`).
 - **`propose_admin`**: Rejects `new_admin == current_admin` (`NewAdminSameAsCurrent`).
 - **`rotate_beneficiary`**: Rejects `new_sme == current_sme` (`NewSmeSameAsCurrent`).
+
+## Shared gate helpers (issue #626)
+
+The repeated pre-`require_auth` checks are centralised in private helpers so a new
+risk-bearing entrypoint cannot accidentally omit or diverge from them:
+
+| Helper | Signature | Replaces |
+|---|---|---|
+| `guard_not_legal_hold` | `fn(env, error)` | inline `ensure(!legal_hold_active, LegalHoldBlocks*)` in `sweep_terminal_dust`, `rotate_beneficiary`, `fund_impl`, `partial_settle`, `settle`, `withdraw`, `claim_investor_payout`, `cancel_funding` |
+| `guard_status_eq` | `fn(env, status, expected, error)` | inline `ensure(status == expected, ...)` checks |
+| `guard_status_in` | `fn(env, status, &[allowed], error)` | inline `ensure(matches!(status, ...), ...)` membership checks |
+| `is_terminal_status` | predicate | inline `(status == 2 || status == 3 || status == 4)`, used by `sweep_terminal_dust` |
+| `is_pre_settlement_status` | predicate | inline `(status == 0 || status == 1)`, used by `rotate_beneficiary` |
+| `require_funding_open` | `fn(env, status)` | inline `ensure(status == 0, EscrowNotOpenForFunding)`, used by `fund_impl` |
+
+All helpers are `#[inline(always)]` `pub(crate) fn` (or `const`) at the top of `escrow/src/lib.rs`
+so they are inlined at call sites with no measurable cost; they preserve ADR-002's
+canonical sequence (read-only preconditions → `Address::require_auth()` → storage writes
+and token transfers) and the exact `EscrowError` variant at every call site. The
+predicates (`is_terminal_status`, `is_pre_settlement_status`) are deliberately
+separable from the `ensure`-side guards so that view helpers and tests can reuse
+the same status-set definition without hiding a panic.
