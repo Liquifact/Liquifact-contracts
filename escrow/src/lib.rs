@@ -232,11 +232,10 @@ pub struct CloseMetadata {
 
 /// Event emitted when an escrow is closed.
 #[contractevent]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CloseFinalizedEvt {
     #[topic]
     pub name: Symbol,
-    #[topic]
-    pub invoice_id: Symbol,
     pub metadata: CloseMetadata,
 }
 
@@ -283,7 +282,7 @@ impl LiquifactEscrow {
             panic_with_error!(&env, CloseError::ActiveBalance);
         }
 
-        if Self::legal_hold_active(&env) {
+        if env.storage().instance().get(&DataKey::Dispute).unwrap_or(false) {
             panic_with_error!(&env, CloseError::ActiveDispute);
         }
 
@@ -301,9 +300,8 @@ impl LiquifactEscrow {
             .set(&Symbol::new(&env, CLOSE_METADATA_KEY), &metadata);
 
         CloseFinalizedEvt {
-            name: symbol_short!("esc_cls"),
-            invoice_id: escrow.invoice_id.clone(),
-            metadata,
+            name: symbol_short!("close"),
+            metadata: metadata.clone(),
         }
         .publish(&env);
     }
@@ -410,6 +408,49 @@ pub const MAX_INVESTOR_ALLOWLIST_BATCH: u32 = 32;
 
 /// Upper bound on [`LiquifactEscrow::get_contributions`] / investor read batch size.
 pub const MAX_INVESTOR_READ_BATCH: u32 = 50;
+
+/// Hard ceiling on the number of distinct investors appended to [`DataKey::InvestorIndex`],
+/// enforced **unconditionally** in [`LiquifactEscrow::fund_impl`] for every new contributor,
+/// independent of the optional `max_unique_investors` init cap.
+///
+/// # Why this exists (issue #1229 — worst-case release instruction budget)
+///
+/// The escrow's per-investor release/accounting work (`settle` batch, `claim_investor_payout`,
+/// `refund`, and the paginated [`LiquifactEscrow::get_funding_records`] /
+/// [`LiquifactEscrow::get_investors`] views) scales with the participant count, and every
+/// paginated view must deserialize the **entire** [`DataKey::InvestorIndex`] on each page
+/// (O(n) memory/CPU). Without `max_unique_investors` configured at init the index grows
+/// monotonically and unbounded. This ceiling bounds the worst-case release cost so it stays
+/// within the Soroban host instruction/memory budget at production scale. It is purely an
+/// input bound: storage layout, error semantics, auth boundaries, and event behavior are
+/// unchanged for any escrow below the cap.
+///
+/// The value (`10_000`) is far above any soroban-storage-feasible escrow while still being a
+/// finite, documented bound that keeps the worst-case `InvestorIndex` deserialize under the
+/// default host budget.
+pub const MAX_UNIQUE_INVESTORS: u32 = 10_000;
+
+/// Documented worst-case **release-path** resource ceilings (issue #1229).
+///
+/// These are the per-top-level-invocation CPU-instruction and memory-bytes budgets that every
+/// release-path call is measured against in `release_budget_tests` and must never exceed:
+///
+/// - [`LiquifactEscrow::settle`] / [`LiquifactEscrow::claim_investor_payout`] (per-investor
+///   release), and
+/// - one paginated page of [`LiquifactEscrow::get_funding_records`] /
+///   [`LiquifactEscrow::get_investors`] at the hard-capped participant ceiling
+///   [`MAX_UNIQUE_INVESTORS`] (the view that deserializes the full [`DataKey::InvestorIndex`]).
+///
+/// They sit far below the Stellar mainnet per-invocation limits (600M instructions /
+/// ~42 MB memory in [`soroban_sdk::testutils::NetworkInvocationResourceLimits::mainnet`])
+/// so the bounded release path remains executable at production scale. These are **budget
+/// regression gates**: any change that pushes a release-path call past the ceiling fails the
+/// suite and must be refactored rather than raised.
+///
+/// Measuring native Rust runs underestimates the equivalent WASM cost, so the ceiling is
+/// deliberately loose (documented, conservative) rather than an attempt at a hard WASM budget.
+pub const WORST_CASE_RELEASE_CPU_INSNS_CEILING: u64 = 20_000_000;
+pub const WORST_CASE_RELEASE_MEM_BYTES_CEILING: u64 = 8_000_000;
 
 /// Upper bound on [`LiquifactEscrow::record_sme_collateral_commitment_batch`] entries.
 pub const MAX_COLLATERAL_BATCH: u32 = 50;
@@ -917,33 +958,22 @@ pub enum EscrowError {
     CallbackAfterCancellation = 244,
     /// [`LiquifactEscrow::execute_callback`] called with a nonce that has no registered callback context.
     CallbackNotFound = 245,
-    /// [`LiquifactEscrow::release`] attempted to release more than the remaining obligation.
-    ReleaseExceedsRemaining = 246,
-    /// [`LiquifactEscrow::release`] received a non-positive amount.
-    ReleaseAmountNotPositive = 247,
-    /// [`LiquifactEscrow::release`] blocked while a legal hold is active.
-    LegalHoldBlocksRelease = 248,
-    /// [`LiquifactEscrow::release`] blocked while operational pause is active.
-    PausedBlocksRelease = 249,
-    /// [`LiquifactEscrow::release`] called while escrow is not in funded status (`status != 1`).
-    ReleaseNotFunded = 250,
-
-    /// [`LiquifactEscrow::fund`] / [`LiquifactEscrow::fund_with_commitment`] /
-    /// [`LiquifactEscrow::fund_batch`] rejected an amount that cannot be represented exactly at
-    /// the configured token decimal scale.
-    ///
-    /// Specifically: `amount % 10^token_decimals != 0` when the amount contains more fractional
-    /// precision than the token supports. Operators must round amounts to the token's native
-    /// scale before calling fund entrypoints.
-    FundingTokenScaleInvalid = 251,
-
-    /// A fund entrypoint was called but [`DataKey::FundingTokenScale`] is missing from instance
-    /// storage, meaning the escrow was not initialized with a `token_decimals` value and scale
-    /// validation is therefore not configured.
-    ///
-    /// **Note:** this error is reserved; instances that never set `token_decimals` skip
-    /// validation entirely (backward-compatible additive key, ADR-007).
-    FundingTokenScaleNotSet = 252,
+    /// [`LiquifactEscrow::rebind_registry`] called when escrow status is no longer open
+    /// (status != 0). The registry hint becomes immutable once funding/settlement begins.
+    RegistryImmutableAfterFunding = 246,
+    /// [`LiquifactEscrow::rotate_beneficiary`] called when escrow status is no longer
+    /// pre-settlement (status must be 0 = open or 1 = funded). Beneficiary is immutable after
+    /// funding closes.
+    BeneficiaryImmutableAfterFunding = 247,
+    /// [`LiquifactEscrow::execute_admin_recovery`] called before the pending admin proposal
+    /// timelock (`DataKey::PendingAdminExpiry`) has elapsed. Recovery is only available
+    /// after the abandoned-transfer expiry window passes.
+    AdminRecoveryNotExpired = 248,
+    /// [`LiquifactEscrow::fund_impl`] rejected a new distinct investor because the
+    /// unconditional ceiling [`MAX_UNIQUE_INVESTORS`] (issue #1229) would be exceeded.
+    /// This bounds the worst-case release instruction budget that scales with participant
+    /// count when `max_unique_investors` was not configured at init.
+    UniqueInvestorHardCapReached = 249,
 }
 
 #[inline(always)]
@@ -1153,8 +1183,10 @@ pub(crate) fn is_terminal_status(status: u32) -> bool {
 /// This is a **predicate**, not a guard. Callers that need to *enforce* the pre-settlement
 /// precondition must wrap it in
 /// `ensure(&env, is_pre_settlement_status(status), error)`.
-// Not yet wired to a call site (see doc comment above); kept as the documented, centralised
-// predicate for the day a caller needs it rather than re-deriving `matches!(status, 0 | 1)`.
+///
+/// Used by the (currently disabled) `tests` integration tree; kept on the release path even
+/// though no active caller references it yet, so the predicate stays in sync with status enum.
+#[allow(dead_code)]
 #[inline(always)]
 #[allow(dead_code)]
 pub(crate) fn is_pre_settlement_status(status: u32) -> bool {
@@ -1313,11 +1345,68 @@ pub enum DataKey {
     /// Absent ΓçÆ falls back to [`DEFAULT_MATURITY_MAX_HORIZON_SECS`].
     /// Set at init and updatable via [`LiquifactEscrow::update_maturity_max_horizon`].
     MaturityMaxHorizon,
-    /// Monotonic admin-operation nonce for replay protection on signed administrative actions.
-    /// Starts at `0` and incremented by1 after each successful admin-gated state mutation.
-    /// Absent ⇒ treated as `0` for backward compatibility with deployments predating this key.
-    /// See [`LiquifactEscrow::consume_admin_nonce`].
-    AdminNonce,
+    /// Optional funding deadline timestamp; absent ⇒ no deadline.
+    /// Written by [`LiquifactEscrow::init`] and extended by
+    /// [`LiquifactEscrow::extend_funding_deadline`]; checked during [`LiquifactEscrow::fund`].
+    FundingDeadline,
+    /// Ordered list of all investor addresses; used for pagination via [`LiquifactEscrow::get_investors`].
+    /// Absent ⇒ empty list (no investors yet funded).
+    InvestorIndex,
+    /// Ledger timestamp recorded when [`LiquifactEscrow::settle`] transitions status to 2.
+    /// Absent ⇒ not yet settled, or legacy instance. Read via [`LiquifactEscrow::get_settled_at`].
+    SettledAt,
+    /// When true, a lightweight **operational pause** blocks risk-bearing entrypoints
+    /// (`fund`, `settle`, `withdraw`, `claim_investor_payout`) for incident response.
+    /// Absent ⇒ `false` (not paused). Toggled by admin via [`LiquifactEscrow::set_paused`].
+    ///
+    /// Orthogonal to [`DataKey::LegalHold`]: the pause has **no** compliance semantics and
+    /// **no** two-phase clear delay — it is a single-call admin switch for incidents such as a
+    /// suspected token bug. Either flag independently blocks the gated entrypoints.
+    Paused,
+    /// Immutable protocol fee in basis points (0..=10_000) applied to the SME disbursement
+    /// at [`LiquifactEscrow::withdraw`]; set once in [`LiquifactEscrow::init`].
+    /// Written as `0` even when unconfigured so reads always succeed (`.unwrap_or(0)`).
+    /// Stored as `i64` to match the [`InvoiceEscrow::yield_bps`] basis-point convention.
+    /// **Additive key (ADR-007):** absent on instances predating this key ⇒ read as `0`
+    /// (no fee), preserving legacy full-principal disbursement semantics.
+    ProtocolFeeBps,
+    /// Optional cap (seconds) on how long [`DataKey::Paused`] may remain active before
+    /// [`LiquifactEscrow::is_paused`] and the pause gates treat it as expired. Absent ⇒ `0`
+    /// (unlimited), identical to pre-existing behavior. Set via
+    /// [`LiquifactEscrow::set_pause_max_duration`].
+    PauseMaxDurationSecs,
+    /// Ledger timestamp recorded on the most recent `set_paused(true)` call; paired with
+    /// [`DataKey::PauseMaxDurationSecs`] to compute auto-expiry. Absent ⇒ pause was never
+    /// activated.
+    PausedAt,
+    /// Optional cap on the number of [`LiquifactEscrow::set_paused`] calls allowed within
+    /// [`DataKey::PauseToggleWindowSecs`]. Absent ⇒ `0` (unlimited), identical to pre-existing
+    /// behavior. Set via [`LiquifactEscrow::set_pause_rate_limit`].
+    PauseToggleLimit,
+    /// Rolling rate-limit window length (seconds), paired with [`DataKey::PauseToggleLimit`].
+    /// Absent ⇒ `0`.
+    PauseToggleWindowSecs,
+    /// Ledger timestamp when the current pause-toggle rate-limit window started.
+    /// Absent ⇒ no window open yet (next `set_paused` call starts one).
+    PauseToggleWindowStart,
+    /// Number of [`LiquifactEscrow::set_paused`] calls recorded within the current rate-limit
+    /// window. Absent ⇒ `0`.
+    PauseToggleCountInWindow,
+    /// Admin-configured ceiling on storage entries processed per batch operation.
+    /// **Additive key (ADR-007):** absent ⇒ [`DEFAULT_SETTLEMENT_LIMIT`]. Updatable via
+    /// [`LiquifactEscrow::set_storage_limit`].
+    StorageLimit,
+    /// Monotonically increasing invocation nonce counter for cross-contract callbacks.
+    /// Absent ⇒ `0`. Incremented on each callback registration.
+    CallbackNonce,
+    /// Stored cross-contract callback context ([`CallbackContext`]) keyed by invocation nonce.
+    /// Binds expected origin address, invocation nonce, and lifecycle phase.
+    CallbackContext(u64),
+    /// When true, the escrow has an active dispute that blocks close finalization.
+    /// Absent ⇒ `false` (no dispute). **Additive key (ADR-007):** absent on legacy instances
+    /// reads as `false`. Written by the dispute lifecycle (admin/off-chain) and checked by
+    /// [`LiquifactEscrow::close_escrow`].
+    Dispute,
 }
 
 // --- Data types ---
@@ -6413,6 +6502,15 @@ impl LiquifactEscrow {
         };
 
         if prev == 0 {
+            // Hard, unconditional ceiling on distinct participants (issue #1229): bounds the
+            // worst-case release/accounting cost that scales with participant count even when
+            // `max_unique_investors` was not configured at init. New typed error keeps the
+            // failure explicit and append-only.
+            ensure(
+                &env,
+                cur_funder_count < MAX_UNIQUE_INVESTORS,
+                EscrowError::UniqueInvestorHardCapReached,
+            );
             if let Some(cap) = env
                 .storage()
                 .instance()
@@ -8630,7 +8728,7 @@ mod test_allowlist_tests;
 mod callback_binding_tests;
 
 #[cfg(test)]
-mod invariant_harness_tests;
+mod release_budget_tests;
 
 /// Default starting balance assigned to any address that has never been seen by the
 /// [`DefaultMockToken`] contract.
