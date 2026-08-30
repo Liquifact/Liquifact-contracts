@@ -412,6 +412,49 @@ pub const MAX_INVESTOR_ALLOWLIST_BATCH: u32 = 32;
 /// Upper bound on [`LiquifactEscrow::get_contributions`] / investor read batch size.
 pub const MAX_INVESTOR_READ_BATCH: u32 = 50;
 
+/// Hard ceiling on the number of distinct investors appended to [`DataKey::InvestorIndex`],
+/// enforced **unconditionally** in [`LiquifactEscrow::fund_impl`] for every new contributor,
+/// independent of the optional `max_unique_investors` init cap.
+///
+/// # Why this exists (issue #1229 — worst-case release instruction budget)
+///
+/// The escrow's per-investor release/accounting work (`settle` batch, `claim_investor_payout`,
+/// `refund`, and the paginated [`LiquifactEscrow::get_funding_records`] /
+/// [`LiquifactEscrow::get_investors`] views) scales with the participant count, and every
+/// paginated view must deserialize the **entire** [`DataKey::InvestorIndex`] on each page
+/// (O(n) memory/CPU). Without `max_unique_investors` configured at init the index grows
+/// monotonically and unbounded. This ceiling bounds the worst-case release cost so it stays
+/// within the Soroban host instruction/memory budget at production scale. It is purely an
+/// input bound: storage layout, error semantics, auth boundaries, and event behavior are
+/// unchanged for any escrow below the cap.
+///
+/// The value (`10_000`) is far above any soroban-storage-feasible escrow while still being a
+/// finite, documented bound that keeps the worst-case `InvestorIndex` deserialize under the
+/// default host budget.
+pub const MAX_UNIQUE_INVESTORS: u32 = 10_000;
+
+/// Documented worst-case **release-path** resource ceilings (issue #1229).
+///
+/// These are the per-top-level-invocation CPU-instruction and memory-bytes budgets that every
+/// release-path call is measured against in `release_budget_tests` and must never exceed:
+///
+/// - [`LiquifactEscrow::settle`] / [`LiquifactEscrow::claim_investor_payout`] (per-investor
+///   release), and
+/// - one paginated page of [`LiquifactEscrow::get_funding_records`] /
+///   [`LiquifactEscrow::get_investors`] at the hard-capped participant ceiling
+///   [`MAX_UNIQUE_INVESTORS`] (the view that deserializes the full [`DataKey::InvestorIndex`]).
+///
+/// They sit far below the Stellar mainnet per-invocation limits (600M instructions /
+/// ~42 MB memory in [`soroban_sdk::testutils::NetworkInvocationResourceLimits::mainnet`])
+/// so the bounded release path remains executable at production scale. These are **budget
+/// regression gates**: any change that pushes a release-path call past the ceiling fails the
+/// suite and must be refactored rather than raised.
+///
+/// Measuring native Rust runs underestimates the equivalent WASM cost, so the ceiling is
+/// deliberately loose (documented, conservative) rather than an attempt at a hard WASM budget.
+pub const WORST_CASE_RELEASE_CPU_INSNS_CEILING: u64 = 20_000_000;
+pub const WORST_CASE_RELEASE_MEM_BYTES_CEILING: u64 = 8_000_000;
+
 /// Upper bound on [`LiquifactEscrow::record_sme_collateral_commitment_batch`] entries.
 pub const MAX_COLLATERAL_BATCH: u32 = 50;
 
@@ -881,6 +924,11 @@ pub enum EscrowError {
     /// timelock (`DataKey::PendingAdminExpiry`) has elapsed. Recovery is only available
     /// after the abandoned-transfer expiry window passes.
     AdminRecoveryNotExpired = 248,
+    /// [`LiquifactEscrow::fund_impl`] rejected a new distinct investor because the
+    /// unconditional ceiling [`MAX_UNIQUE_INVESTORS`] (issue #1229) would be exceeded.
+    /// This bounds the worst-case release instruction budget that scales with participant
+    /// count when `max_unique_investors` was not configured at init.
+    UniqueInvestorHardCapReached = 249,
 }
 
 #[inline(always)]
@@ -5608,6 +5656,15 @@ impl LiquifactEscrow {
         };
 
         if prev == 0 {
+            // Hard, unconditional ceiling on distinct participants (issue #1229): bounds the
+            // worst-case release/accounting cost that scales with participant count even when
+            // `max_unique_investors` was not configured at init. New typed error keeps the
+            // failure explicit and append-only.
+            ensure(
+                &env,
+                cur_funder_count < MAX_UNIQUE_INVESTORS,
+                EscrowError::UniqueInvestorHardCapReached,
+            );
             if let Some(cap) = env
                 .storage()
                 .instance()
@@ -7733,6 +7790,9 @@ mod settlement_guard_tests;
 
 #[cfg(test)]
 mod callback_binding_tests;
+
+#[cfg(test)]
+mod release_budget_tests;
 
 /// Default starting balance assigned to any address that has never been seen by the
 /// [`DefaultMockToken`] contract.
