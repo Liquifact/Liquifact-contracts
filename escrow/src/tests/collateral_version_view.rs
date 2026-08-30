@@ -45,6 +45,7 @@ fn deploy_and_init(env: &Env) -> (LiquifactEscrowClient<'_>, Address, Address) {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     (client, admin, sme)

@@ -9,9 +9,9 @@
 //! `MIN_PAUSE_*_SECS` / `MAX_PAUSE_*_SECS` contract constants.
 
 use super::super::{
-    EscrowError, LiquifactEscrow, LiquifactEscrowClient, MAX_PAUSE_MAX_DURATION_SECS,
-    MAX_PAUSE_TOGGLE_LIMIT, MAX_PAUSE_TOGGLE_WINDOW_SECS, MIN_PAUSE_MAX_DURATION_SECS,
-    MIN_PAUSE_TOGGLE_LIMIT, MIN_PAUSE_TOGGLE_WINDOW_SECS,
+    EscrowError, LiquifactEscrow, LiquifactEscrowClient, PauseReason, PauseScope,
+    MAX_PAUSE_MAX_DURATION_SECS, MAX_PAUSE_TOGGLE_LIMIT, MAX_PAUSE_TOGGLE_WINDOW_SECS,
+    MIN_PAUSE_MAX_DURATION_SECS, MIN_PAUSE_TOGGLE_LIMIT, MIN_PAUSE_TOGGLE_WINDOW_SECS,
 };
 use crate::tests::assert_contract_error;
 use soroban_sdk::{
@@ -47,6 +47,7 @@ fn setup_escrow(env: &Env) -> (LiquifactEscrowClient<'_>, Address, Address) {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     (client, admin, sme)
@@ -302,9 +303,9 @@ fn test_set_paused_within_rate_limit_succeeds() {
     client.set_pause_rate_limit(&2u32, &60u64);
 
     // First two toggles within the window must succeed.
-    client.set_paused(&true);
+    client.set_paused(&true, &PauseScope::All, &PauseReason::Incident);
     assert!(client.is_paused());
-    client.set_paused(&false);
+    client.set_paused(&false, &PauseScope::All, &PauseReason::Incident);
     assert!(!client.is_paused());
 }
 
@@ -319,12 +320,12 @@ fn test_set_paused_third_toggle_within_window_rejected() {
 
     // Burn the quota.
     // Counts every call, including no-op true→true transitions.
-    client.set_paused(&true);
-    client.set_paused(&false);
+    client.set_paused(&true, &PauseScope::All, &PauseReason::Incident);
+    client.set_paused(&false, &PauseScope::All, &PauseReason::Incident);
 
     // Third toggle within the same window must be rejected.
     assert_contract_error(
-        client.try_set_paused(&true),
+        client.try_set_paused(&true, &PauseScope::All, &PauseReason::Incident),
         EscrowError::PauseToggleRateLimitExceeded,
     );
 
@@ -342,11 +343,11 @@ fn test_pause_window_expiry_resets_counter() {
     client.set_pause_rate_limit(&1u32, &60u64);
 
     // Burn the quota.
-    client.set_paused(&true);
+    client.set_paused(&true, &PauseScope::All, &PauseReason::Incident);
 
     // Still within the window — toggle rejected.
     assert_contract_error(
-        client.try_set_paused(&false),
+        client.try_set_paused(&false, &PauseScope::All, &PauseReason::Incident),
         EscrowError::PauseToggleRateLimitExceeded,
     );
 
@@ -356,7 +357,7 @@ fn test_pause_window_expiry_resets_counter() {
     env.ledger().set(ledger_info);
 
     // After window expiry, the counter must reset and the next toggle succeeds.
-    client.set_paused(&false);
+    client.set_paused(&false, &PauseScope::All, &PauseReason::Incident);
     assert!(!client.is_paused());
 }
 
@@ -368,7 +369,7 @@ fn test_pause_rate_limit_invalid_reconfigure_preserves_window() {
 
     // Configure a valid rate limit and burn the quota.
     client.set_pause_rate_limit(&1u32, &60u64);
-    client.set_paused(&true);
+    client.set_paused(&true, &PauseScope::All, &PauseReason::Incident);
 
     // Attempt an invalid reconfigure (limit > MAX).
     assert_contract_error(
@@ -382,7 +383,7 @@ fn test_pause_rate_limit_invalid_reconfigure_preserves_window() {
     assert_eq!(limit, 1u32);
     assert_eq!(window, 60u64);
     assert_contract_error(
-        client.try_set_paused(&false),
+        client.try_set_paused(&false, &PauseScope::All, &PauseReason::Incident),
         EscrowError::PauseToggleRateLimitExceeded,
     );
 }
@@ -397,11 +398,11 @@ fn test_set_paused_rate_limit_one_per_window() {
     client.set_pause_rate_limit(&MIN_PAUSE_TOGGLE_LIMIT, &MIN_PAUSE_TOGGLE_WINDOW_SECS);
 
     // First toggle consumes the quota.
-    client.set_paused(&true);
+    client.set_paused(&true, &PauseScope::All, &PauseReason::Incident);
 
     // Second toggle must be rejected.
     assert_contract_error(
-        client.try_set_paused(&false),
+        client.try_set_paused(&false, &PauseScope::All, &PauseReason::Incident),
         EscrowError::PauseToggleRateLimitExceeded,
     );
 }
@@ -469,10 +470,10 @@ fn test_pause_rate_limit_reconfigure_resets_toggle_window() {
     client.set_pause_rate_limit(&2u32, &MIN_PAUSE_TOGGLE_WINDOW_SECS);
 
     // Burn the quota: two toggles succeed, third is rejected.
-    client.set_paused(&true);
-    client.set_paused(&false);
+    client.set_paused(&true, &PauseScope::All, &PauseReason::Incident);
+    client.set_paused(&false, &PauseScope::All, &PauseReason::Incident);
     assert_contract_error(
-        client.try_set_paused(&true),
+        client.try_set_paused(&true, &PauseScope::All, &PauseReason::Incident),
         EscrowError::PauseToggleRateLimitExceeded,
     );
 
@@ -480,6 +481,6 @@ fn test_pause_rate_limit_reconfigure_resets_toggle_window() {
     // toggle is allowed again.
     client.set_pause_rate_limit(&MIN_PAUSE_TOGGLE_LIMIT, &MIN_PAUSE_TOGGLE_WINDOW_SECS);
 
-    client.set_paused(&true);
+    client.set_paused(&true, &PauseScope::All, &PauseReason::Incident);
     assert!(client.is_paused());
 }

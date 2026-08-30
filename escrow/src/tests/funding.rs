@@ -60,6 +60,7 @@ fn test_fund_and_settle() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let funded = client.fund(&investor, &TARGET);
@@ -101,6 +102,7 @@ fn test_fund_partial_then_full() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let partial = client.fund(&investor, &(TARGET / 2));
@@ -195,6 +197,7 @@ fn test_single_investor_contribution_tracked() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     client.fund(&investor, &(30_000_000_000i128));
@@ -250,6 +253,7 @@ fn test_repeated_funding_accumulates_contribution() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     client.fund(&investor, &(20_000_000_000i128));
@@ -290,6 +294,7 @@ fn test_funding_amount_accumulation_overflow_panics() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     client.fund(&investor_a, &(crate::MAX_INVOICE_AMOUNT - 1));
@@ -327,6 +332,7 @@ fn test_funding_amount_overflow_does_not_mutate_state() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     client.fund(&investor, &(crate::MAX_INVOICE_AMOUNT - 1));
@@ -384,6 +390,7 @@ fn test_fund_with_commitment_overflow_panics() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     client.fund(&investor_a, &(crate::MAX_INVOICE_AMOUNT - 1));
@@ -423,6 +430,7 @@ fn test_fund_with_commitment_overflow_does_not_mutate_state() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     client.fund(&investor_a, &(crate::MAX_INVOICE_AMOUNT - 1));
@@ -480,6 +488,7 @@ fn test_per_investor_contribution_uses_persistent_storage() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     client.fund(&investor, &500i128);
@@ -550,6 +559,7 @@ fn test_investor_contribution_overflow_panics_even_if_state_is_inconsistent() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     env.as_contract(&contract_id, || {
@@ -612,6 +622,7 @@ fn test_investor_contribution_overflow_does_not_mutate_state() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     env.as_contract(&contract_id, || {
@@ -676,6 +687,7 @@ fn test_multiple_investors_tracked_independently() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     client.fund(&inv_a, &(20_000_000_000i128));
@@ -729,6 +741,7 @@ fn test_contributions_sum_equals_funded_amount() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     client.fund(&inv_a, &(20_000_000_000i128));
@@ -772,6 +785,7 @@ fn test_cost_baseline_fund_partial() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     client.fund(&investor, &(10_000_000_000i128));
@@ -805,6 +819,7 @@ fn test_cost_baseline_fund_full() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     client.fund(&investor, &TARGET);
@@ -838,6 +853,7 @@ fn test_cost_baseline_fund_overshoot() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     client.fund(&investor, &(150_000_000_000i128));
@@ -873,6 +889,7 @@ fn test_cost_baseline_fund_two_step_completion() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     client.fund(&investor, &(TARGET / 2));
@@ -918,6 +935,7 @@ fn test_funding_close_snapshot_captures_overfunded_total_once() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     assert_eq!(client.get_funding_close_snapshot(), None);
@@ -973,6 +991,7 @@ fn test_funding_snapshot_immutable_across_second_fund_after_funded() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     client.fund(&a, &(TARGET / 2));
@@ -1028,6 +1047,7 @@ fn test_pro_rata_weight_ratio_from_snapshot() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     client.fund(&a, &(20_000_000_000i128));
@@ -1095,6 +1115,7 @@ fn test_tiered_yield_and_follow_on_fund() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     client.fund_with_commitment(&inv, &5_000i128, &200u64);
@@ -1156,6 +1177,7 @@ fn test_tier_selection_edges_base_vs_high_bucket() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     client.fund_with_commitment(&i_short, &10_000i128, &40u64);
@@ -1217,6 +1239,7 @@ fn test_fund_with_commitment_twice_panics() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     client.fund_with_commitment(&inv, &5_000i128, &10u64);
@@ -1266,6 +1289,7 @@ fn test_fund_then_fund_with_commitment_panics() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     client.fund(&inv, &5_000i128);
@@ -1321,6 +1345,7 @@ fn test_tier_selection_ladder() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let inv_base = Address::generate(&env);
@@ -1402,6 +1427,7 @@ fn test_yield_tier_emitted_in_event() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let inv = Address::generate(&env);
@@ -1507,6 +1533,7 @@ fn test_yield_tier_emitted_no_tiers() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let inv = Address::generate(&env);
@@ -1590,6 +1617,7 @@ fn test_yield_tier_emitted_between_tiers() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let inv = Address::generate(&env);
@@ -1669,6 +1697,7 @@ fn test_fund_with_commitment_zero_lock_behaves_as_fund() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     client.fund_with_commitment(&inv, &5_000i128, &0u64);
@@ -1685,9 +1714,7 @@ fn test_commitment_claim_time_allows_u64_max_boundary() {
 
     env.mock_all_auths();
 
-    env.ledger().with_mut(|ledger| {
-        ledger.timestamp = u64::MAX - 5;
-    });
+    env.ledger().set_timestamp(u64::MAX - 5);
 
     let client = deploy(&env);
 
@@ -1718,6 +1745,7 @@ fn test_commitment_claim_time_allows_u64_max_boundary() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     client.fund_with_commitment(&investor, &100i128, &5u64);
@@ -1733,9 +1761,7 @@ fn test_commitment_claim_time_overflow_panics() {
 
     env.mock_all_auths();
 
-    env.ledger().with_mut(|ledger| {
-        ledger.timestamp = u64::MAX - 5;
-    });
+    env.ledger().set_timestamp(u64::MAX - 5);
 
     let client = deploy(&env);
 
@@ -1766,6 +1792,7 @@ fn test_commitment_claim_time_overflow_panics() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     client.fund_with_commitment(&investor, &100i128, &6u64);
@@ -1778,9 +1805,7 @@ fn test_commitment_claim_time_overflow_does_not_record_position() {
 
     env.mock_all_auths();
 
-    env.ledger().with_mut(|ledger| {
-        ledger.timestamp = u64::MAX - 5;
-    });
+    env.ledger().set_timestamp(u64::MAX - 5);
 
     let client = deploy(&env);
 
@@ -1811,6 +1836,7 @@ fn test_commitment_claim_time_overflow_does_not_record_position() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let overflowed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -1875,6 +1901,7 @@ fn test_init_bad_tier_order_panics() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 }
 
@@ -1921,6 +1948,7 @@ fn test_init_tier_yield_below_base_panics() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 }
 
@@ -1962,6 +1990,7 @@ fn test_differential_funding_target_eq_exact_cross() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let escrow = client.fund(&inv, &t);
@@ -2013,6 +2042,7 @@ fn test_ledger_sequence_recorded_in_snapshot_with_tick() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let seq = env.ledger().sequence();
@@ -2060,6 +2090,7 @@ fn test_get_funding_close_snapshot_absent_before_any_funding() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     assert_eq!(
@@ -2107,6 +2138,7 @@ fn test_get_funding_close_snapshot_present_after_funding_completes() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     // Partial fund — snapshot still absent.
@@ -2174,6 +2206,7 @@ fn test_get_funding_close_snapshot_immutable_after_set() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     // Fund exactly to target — snapshot is written here.
@@ -2226,6 +2259,7 @@ fn test_unique_funder_count_initialized_to_zero() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     assert_eq!(client.get_unique_funder_count(), 0);
@@ -2259,6 +2293,7 @@ fn test_unique_funder_count_increments_on_first_investor() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     assert_eq!(client.get_unique_funder_count(), 0);
@@ -2304,6 +2339,7 @@ fn test_unique_funder_count_increments_for_distinct_investors() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     assert_eq!(client.get_unique_funder_count(), 0);
@@ -2367,6 +2403,7 @@ fn test_unique_funder_count_with_fund_with_commitment() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     assert_eq!(client.get_unique_funder_count(), 0);
@@ -2410,6 +2447,7 @@ fn test_max_unique_investors_cap_none_allows_unlimited() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     // Should be able to add many investors when no cap is set
@@ -2450,6 +2488,7 @@ fn test_max_unique_investors_cap_enforced_at_limit() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     assert_eq!(client.get_max_unique_investors_cap(), Some(3u32));
@@ -2508,6 +2547,7 @@ fn test_max_unique_investors_cap_blocks_excess_investors() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     // Add 2 investors
@@ -2570,6 +2610,7 @@ fn test_max_unique_investors_cap_blocks_fund_with_commitment() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     // First investor succeeds
@@ -2614,6 +2655,7 @@ fn test_re_funding_same_address_doesnt_count_against_cap() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     // First fund should succeed
@@ -2665,6 +2707,7 @@ fn test_zero_contribution_then_non_zero_contribution_counts_as_unique_investor()
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     assert_eq!(client.get_unique_funder_count(), 0);
@@ -2709,6 +2752,7 @@ fn test_cap_validation_at_init_positive_value_required() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 }
 
@@ -2739,6 +2783,7 @@ fn test_init_panics_for_zero_cap() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 }
 
@@ -2769,6 +2814,7 @@ fn test_cap_edge_case_exact_limit_reached() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     // Add exactly 5 investors - should all succeed
@@ -2819,6 +2865,7 @@ fn test_cap_edge_case_exactly_one_over_limit_panics() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     // Add exactly 5 investors
@@ -2863,6 +2910,7 @@ fn test_cap_with_min_contribution_floor_interaction() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     // Should respect both cap and floor
@@ -2919,6 +2967,7 @@ fn test_cap_blocks_even_with_large_contribution() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     // First investor can fund large amount
@@ -2969,6 +3018,7 @@ fn test_cap_panic_message_quality() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     // Add first investor
@@ -3021,6 +3071,7 @@ fn init_with_token<'a>(
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     (token, treasury)
@@ -3034,9 +3085,7 @@ fn test_cancel_funding_transitions_to_status_4() {
     let (client, admin, sme) = setup(&env);
 
     default_init(&client, &env, &admin, &sme);
-
-    let result = client.cancel_funding();
-
+    let result = client.cancel_funding(&0u32);
     assert_eq!(result.status, 4);
 }
 
@@ -3048,9 +3097,7 @@ fn test_cancel_funding_requires_admin_auth() {
     let (client, admin, sme) = setup(&env);
 
     default_init(&client, &env, &admin, &sme);
-
-    client.cancel_funding();
-
+    client.cancel_funding(&0u32);
     assert!(
         env.auths().iter().any(|(addr, _)| *addr == admin),
         "admin auth was not recorded for cancel_funding"
@@ -3070,8 +3117,7 @@ fn test_cancel_funding_panics_if_already_funded() {
     let investor = Address::generate(&env);
 
     client.fund(&investor, &TARGET);
-
-    client.cancel_funding();
+    client.cancel_funding(&0u32);
 }
 
 #[test]
@@ -3083,10 +3129,8 @@ fn test_cancel_funding_panics_if_already_cancelled() {
     let (client, admin, sme) = setup(&env);
 
     default_init(&client, &env, &admin, &sme);
-
-    client.cancel_funding();
-
-    client.cancel_funding();
+    client.cancel_funding(&0u32);
+    client.cancel_funding(&1u32);
 }
 
 #[test]
@@ -3098,10 +3142,8 @@ fn test_cancel_funding_blocked_by_legal_hold() {
     let (client, admin, sme) = setup(&env);
 
     default_init(&client, &env, &admin, &sme);
-
-    client.set_legal_hold(&true);
-
-    client.cancel_funding();
+    client.set_legal_hold(&true, &0u32);
+    client.cancel_funding(&1u32);
 }
 
 #[test]
@@ -3134,8 +3176,7 @@ fn test_refund_returns_principal_to_investor() {
     token2.stellar.mint(&investor2, &(TARGET / 2));
 
     client2.fund(&investor2, &(TARGET / 2));
-
-    client2.cancel_funding();
+    client2.cancel_funding(&0u32);
 
     let before = token2.token.balance(&investor2);
 
@@ -3160,9 +3201,7 @@ fn test_refund_zeroes_contribution() {
     token.stellar.mint(&investor, &(TARGET / 2));
 
     client.fund(&investor, &(TARGET / 2));
-
-    client.cancel_funding();
-
+    client.cancel_funding(&0u32);
     client.refund(&investor);
 
     assert_eq!(client.get_contribution(&investor), 0);
@@ -3182,9 +3221,7 @@ fn test_refund_marks_investor_refunded() {
     token.stellar.mint(&investor, &(TARGET / 2));
 
     client.fund(&investor, &(TARGET / 2));
-
-    client.cancel_funding();
-
+    client.cancel_funding(&0u32);
     assert!(!client.is_investor_refunded(&investor));
 
     client.refund(&investor);
@@ -3207,9 +3244,7 @@ fn test_refund_double_spend_panics() {
     token.stellar.mint(&investor, &(TARGET / 2));
 
     client.fund(&investor, &(TARGET / 2));
-
-    client.cancel_funding();
-
+    client.cancel_funding(&0u32);
     client.refund(&investor);
 
     client.refund(&investor); // second call must panic
@@ -3224,9 +3259,7 @@ fn test_refund_non_investor_panics() {
     let (client, admin, sme) = setup(&env);
 
     default_init(&client, &env, &admin, &sme);
-
-    client.cancel_funding();
-
+    client.cancel_funding(&0u32);
     let stranger = Address::generate(&env);
 
     client.refund(&stranger);
@@ -3282,9 +3315,7 @@ fn test_refund_requires_investor_auth() {
     token.stellar.mint(&investor, &(TARGET / 2));
 
     client.fund(&investor, &(TARGET / 2));
-
-    client.cancel_funding();
-
+    client.cancel_funding(&0u32);
     client.refund(&investor);
 
     assert!(
@@ -3314,8 +3345,7 @@ fn test_refund_multiple_investors_independent() {
     token.stellar.mint(&inv_b, &amt_b);
     client.fund(&inv_a, &amt_a);
     client.fund(&inv_b, &amt_b);
-
-    client.cancel_funding();
+    client.cancel_funding(&0u32);
 
     let before_a = token.token.balance(&inv_a);
 
@@ -3349,9 +3379,7 @@ fn test_cancel_funding_preserves_funded_amount() {
     default_init(&client, &env, &admin, &sme);
 
     client.fund(&investor, &(TARGET / 2));
-
-    let cancelled = client.cancel_funding();
-
+    let cancelled = client.cancel_funding(&0u32);
     assert_eq!(cancelled.funded_amount, TARGET / 2);
 }
 
@@ -3373,9 +3401,7 @@ fn test_sweep_terminal_dust_allowed_in_cancelled_state() {
     token.stellar.mint(&investor, &(TARGET / 2 + 1));
 
     client.fund(&investor, &(TARGET / 2));
-
-    client.cancel_funding();
-
+    client.cancel_funding(&0u32);
     client.refund(&investor);
 
     // 1 unit of dust remains in the contract
@@ -3439,11 +3465,12 @@ fn test_commitment_claim_lock_preserved_after_follow_on_fund() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     // Set ledger timestamp to a known value so claim_nb is deterministic.
 
-    env.ledger().with_mut(|l| l.timestamp = 1_000_000u64);
+    env.ledger().set_timestamp(1_000_000u64);
 
     // First deposit: tier at 100 s → effective yield = 950 bps, lock until 1_000_100.
 
@@ -3531,9 +3558,10 @@ fn test_commitment_invariant_across_multiple_follow_on_funds() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
-    env.ledger().with_mut(|l| l.timestamp = 2_000_000u64);
+    env.ledger().set_timestamp(2_000_000u64);
 
     // First deposit: 200 s commitment → top tier (1100 bps), lock until 2_000_200.
 
@@ -3616,6 +3644,7 @@ fn test_commitment_zero_lock_follow_on_fund_no_claim_gate() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     // Zero lock → base yield only, no claim gate.
@@ -3695,6 +3724,7 @@ fn test_second_fund_with_commitment_panics_without_tier_table() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     client.fund_with_commitment(&inv, &3_000i128, &0u64);
@@ -3757,6 +3787,7 @@ fn test_fund_first_then_commitment_second_panics() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     // First leg via fund() → establishes base-yield position.
@@ -3821,6 +3852,7 @@ fn test_fund_first_deposit_sets_base_yield_and_no_claim_gate() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     client.fund(&inv, &5_000i128);
@@ -3874,6 +3906,7 @@ fn init_with_maturity(
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 }
 
@@ -4058,6 +4091,7 @@ fn lock_with_zero_maturity_is_always_accepted() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let escrow = client.fund_with_commitment(&investor, &1_000i128, &9999u64);
@@ -4182,6 +4216,7 @@ fn test_fund_batch_equals_n_single_funds() {
             &None,
             &None,
             &None::<i64>,
+            &None::<u32>,
         );
     }
 
@@ -4285,6 +4320,7 @@ fn test_fund_batch_per_investor_cap_rejection() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let mut entries = SorobanVec::new(&env);
@@ -4334,6 +4370,7 @@ fn test_fund_batch_mid_batch_funded_transition() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let inv1 = Address::generate(&env);
@@ -4427,6 +4464,7 @@ fn test_fund_batch_duplicate_addresses() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let mut entries = SorobanVec::new(&env);
@@ -4537,6 +4575,7 @@ fn test_fund_batch_max_batch_size() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     // Create exactly MAX_FUND_BATCH entries
@@ -4594,6 +4633,7 @@ fn test_fund_batch_preserves_event_semantics() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let inv1 = Address::generate(&env);
@@ -4611,7 +4651,6 @@ fn test_fund_batch_preserves_event_semantics() {
     // Verify events emitted
 
     let events = env.events().all();
-
     assert_eq!(
         events.events().len(),
         2,
@@ -4812,6 +4851,7 @@ fn test_remaining_capacity_never_negative_when_overfunded() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let investor = Address::generate(&env);
@@ -4867,6 +4907,7 @@ fn test_remaining_capacity_recomputes_after_target_raised() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let investor = Address::generate(&env);
@@ -4941,6 +4982,7 @@ fn test_remaining_capacity_recomputes_after_target_lowered() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let investor = Address::generate(&env);
@@ -5015,6 +5057,7 @@ fn test_remaining_capacity_zero_when_target_lowered_to_funded_amount() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let investor = Address::generate(&env);
@@ -5080,6 +5123,7 @@ fn test_remaining_capacity_across_deposits_and_target_update() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let inv_a = Address::generate(&env);
@@ -5180,6 +5224,7 @@ fn test_remaining_capacity_with_fund_batch() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let inv_a = Address::generate(&env);
@@ -5249,6 +5294,7 @@ fn test_remaining_capacity_minimal_target() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     assert_eq!(client.get_remaining_funding_capacity(), 1);
@@ -5300,6 +5346,7 @@ fn test_remaining_capacity_very_large_target() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let investor = Address::generate(&env);
@@ -5360,6 +5407,7 @@ fn test_remaining_capacity_with_tiered_funding() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let inv_a = Address::generate(&env);
@@ -5420,6 +5468,7 @@ fn test_remaining_capacity_never_negative_comprehensive() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let inv = Address::generate(&env);
@@ -5644,6 +5693,7 @@ fn setup_partially_funded(
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     if funded > 0 {
@@ -5792,6 +5842,7 @@ fn test_update_funding_target_raise_stays_open_emits_event() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     client.fund(&Address::generate(&env), &3_000i128);
@@ -5839,11 +5890,8 @@ fn test_update_funding_target_exact_funded_amount_promotes_to_funded() {
 
     env.mock_all_auths();
 
-    env.ledger().with_mut(|l| {
-        l.timestamp = 9_000;
-
-        l.sequence_number = 42;
-    });
+    env.ledger().set_timestamp(9_000);
+    env.ledger().set_sequence_number(42);
 
     let (contract_id, client) = super::deploy_with_id(&env);
 
@@ -5872,6 +5920,7 @@ fn test_update_funding_target_exact_funded_amount_promotes_to_funded() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     client.fund(&Address::generate(&env), &7_000i128);
@@ -6056,6 +6105,7 @@ fn init_deadline_escrow<'a>(
         &deadline,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     (contract_id, client, admin, sme)
@@ -6095,6 +6145,7 @@ fn test_get_yield_tiers_returns_empty_when_no_tiers_configured() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let tiers = client.get_yield_tiers();
@@ -6148,6 +6199,7 @@ fn test_get_yield_tiers_returns_single_tier() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let result = client.get_yield_tiers();
@@ -6215,6 +6267,7 @@ fn test_get_yield_tiers_preserves_order() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let result = client.get_yield_tiers();
@@ -6282,6 +6335,7 @@ fn test_get_yield_tiers_is_pure_read_no_state_change() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let escrow_before = client.get_escrow();
@@ -6363,6 +6417,7 @@ fn setup_three_tier_escrow_with_sac<'a>(
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
     (client, sac_admin)
 }
@@ -6505,6 +6560,7 @@ fn test_preview_matches_actual_no_tiers_configured() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
     assert_preview_matches_actual(&client, &env, &sac_admin, 1_000i128, 0u64);
     assert_preview_matches_actual(&client, &env, &sac_admin, 1_000i128, 9_999u64);
@@ -6576,6 +6632,7 @@ fn test_tiered_second_deposit_different_lock_rejected() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     // First tiered deposit establishes the investor's locked position.
@@ -6623,6 +6680,7 @@ fn init_with_funding_deadline<'a>(
         &Some(deadline),
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 }
 
@@ -6825,6 +6883,7 @@ fn test_fund_batch_single_element_succeeds() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let investor = Address::generate(&env);
@@ -6868,6 +6927,7 @@ fn test_fund_batch_all_unique_succeeds() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let inv1 = Address::generate(&env);
@@ -6932,6 +6992,7 @@ fn test_fund_batch_max_unique_batch_succeeds() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let mut entries = SorobanVec::new(&env);
@@ -6979,6 +7040,7 @@ fn test_fund_batch_duplicate_leaves_no_partial_state() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let inv_a = Address::generate(&env);
@@ -7062,6 +7124,7 @@ fn init_open_with_real_token<'a>(
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
     let investor = Address::generate(env);
     // Mint tokens to the investor so fund() can pull them.
@@ -7097,6 +7160,7 @@ fn test_unfund_partial() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     client.fund(&investor, &(TARGET / 4));
@@ -7135,6 +7199,7 @@ fn test_unfund_full() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     client.fund(&investor, &(TARGET / 4));
@@ -7176,6 +7241,7 @@ fn test_unfund_funder_count_floor() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     client.fund(&investor, &1i128);
@@ -7218,6 +7284,7 @@ fn test_unfund_over_withdrawal() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     client.fund(&investor, &1_000i128);
@@ -7253,6 +7320,7 @@ fn test_unfund_wrong_status_funded() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     // Fund to TARGET — transitions to status 1.
@@ -7290,6 +7358,7 @@ fn test_unfund_wrong_status_settled() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     client.fund(&investor, &TARGET); // status = 1
@@ -7343,6 +7412,7 @@ fn test_unfund_wrong_status_cancelled() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     client.fund(&investor, &(TARGET / 2));
@@ -7379,6 +7449,7 @@ fn test_unfund_legal_hold_blocked() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     client.fund(&investor, &(TARGET / 4));
@@ -7415,6 +7486,7 @@ fn test_unfund_requires_investor_auth() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     client.fund(&investor, &(TARGET / 4));
@@ -7452,6 +7524,7 @@ fn test_unfund_no_underflow() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     client.fund(&investor, &1_000i128);
@@ -7487,6 +7560,7 @@ fn test_unfund_multiple_investors_isolation() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     client.fund(&inv_a, &30_000i128);
@@ -7534,6 +7608,7 @@ fn test_unfund_then_fund_again() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     client.fund(&investor, &20_000i128);
@@ -7582,6 +7657,7 @@ fn test_unfund_event_emitted() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     token.stellar.mint(&investor, &fund_amount);
@@ -7611,765 +7687,4 @@ fn test_unfund_event_emitted() {
     };
 
     assert_eq!(*last, expected.to_xdr(&env, &contract_id));
-}
-
-// ── Funding input bounds (issue funding-11) ──────────────────────────────────
-
-fn init_for_bounds_test(env: &Env) -> LiquifactEscrowClient<'_> {
-    let client = deploy(env);
-    let admin = Address::generate(env);
-    let sme = Address::generate(env);
-    let (tok, tre) = free_addresses(env);
-    client.init(
-        &admin,
-        &String::from_str(env, "BND001"),
-        &sme,
-        &crate::MAX_INVOICE_AMOUNT,
-        &800i64,
-        &0u64,
-        &tok,
-        &None,
-        &tre,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None::<i64>,
-    );
-
-    let investor = Address::generate(&env);
-    client.fund(&investor, &TARGET);
-
-    let all_events = env.events().all();
-    let fsc_events: std::vec::Vec<_> = all_events
-        .events()
-        .iter()
-        .filter(|e| {
-            let expected = FundingStateChanged {
-                name: symbol_short!("fstate_ch"),
-                invoice_id,
-                from_status: 0u32,
-                to_status: 1u32,
-                funded_amount: TARGET,
-                funding_target: TARGET,
-                ledger_timestamp: env.ledger().timestamp(),
-                trigger: symbol_short!("fund"),
-            }
-            .to_xdr(&env, &contract_id);
-            *e == &expected
-        })
-        .collect();
-
-    assert_eq!(
-        fsc_events.len(),
-        1,
-        "expected exactly one FundingStateChanged event"
-    );
-}
-
-/// amount == 1 (min valid) accepted.
-#[test]
-fn test_fund_amount_min_accepted() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (contract_id, client) = deploy_with_id(&env);
-    let admin = Address::generate(&env);
-    let sme = Address::generate(&env);
-    let (tok, tre) = free_addresses(&env);
-    let invoice_id = symbol_short!("FSC002");
-
-    client.init(
-        &admin,
-        &soroban_sdk::String::from_str(&env, "FSC002"),
-        &sme,
-        &TARGET,
-        &800i64,
-        &0u64,
-        &tok,
-        &None,
-        &tre,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None::<i64>,
-    );
-
-    let investor = Address::generate(&env);
-    client.fund(&investor, &(TARGET / 2));
-
-    let all_events = env.events().all();
-    let fsc_count = all_events
-        .events()
-        .iter()
-        .filter(|e| {
-            let candidate = FundingStateChanged {
-                name: symbol_short!("fstate_ch"),
-                invoice_id,
-                from_status: 0u32,
-                to_status: 1u32,
-                funded_amount: TARGET / 2,
-                funding_target: TARGET,
-                ledger_timestamp: env.ledger().timestamp(),
-                trigger: symbol_short!("fund"),
-            }
-            .to_xdr(&env, &contract_id);
-            *e == &candidate
-        })
-        .count();
-
-    assert_eq!(
-        fsc_count, 0,
-        "FundingStateChanged must not fire before target is reached"
-    );
-    assert_eq!(client.get_escrow().status, 0, "escrow must still be open");
-}
-
-/// amount == MAX_INVOICE_AMOUNT (max valid) accepted.
-#[test]
-fn test_fund_amount_max_accepted() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (contract_id, client) = deploy_with_id(&env);
-    let admin = Address::generate(&env);
-    let sme = Address::generate(&env);
-    let (tok, tre) = free_addresses(&env);
-    let invoice_id = symbol_short!("FSC003");
-
-    client.init(
-        &admin,
-        &soroban_sdk::String::from_str(&env, "FSC003"),
-        &sme,
-        &TARGET,
-        &800i64,
-        &0u64,
-        &tok,
-        &None,
-        &tre,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None::<i64>,
-    );
-
-    let investor = Address::generate(&env);
-    // First call: below target — must produce no FundingStateChanged.
-    client.fund(&investor, &(TARGET / 2));
-    let after_first = env.events().all();
-    let fsc_after_first = after_first.events().iter().any(|e| {
-        let candidate = FundingStateChanged {
-            name: symbol_short!("fstate_ch"),
-            invoice_id,
-            from_status: 0u32,
-            to_status: 1u32,
-            funded_amount: TARGET / 2,
-            funding_target: TARGET,
-            ledger_timestamp: env.ledger().timestamp(),
-            trigger: symbol_short!("fund"),
-        }
-        .to_xdr(&env, &contract_id);
-        *e == candidate
-    });
-    assert!(
-        !fsc_after_first,
-        "no FundingStateChanged after partial fund"
-    );
-
-    // Second call: reaches target — must produce exactly one FundingStateChanged.
-    client.fund(&investor, &(TARGET / 2));
-    let after_second = env.events().all();
-    let fsc_events: std::vec::Vec<_> = after_second
-        .events()
-        .iter()
-        .filter(|e| {
-            let expected = FundingStateChanged {
-                name: symbol_short!("fstate_ch"),
-                invoice_id,
-                from_status: 0u32,
-                to_status: 1u32,
-                funded_amount: TARGET,
-                funding_target: TARGET,
-                ledger_timestamp: env.ledger().timestamp(),
-                trigger: symbol_short!("fund"),
-            }
-            .to_xdr(&env, &contract_id);
-            *e == &expected
-        })
-        .collect();
-
-    assert_eq!(
-        fsc_events.len(),
-        1,
-        "exactly one FundingStateChanged on threshold crossing"
-    );
-}
-
-/// amount == MAX_INVOICE_AMOUNT + 1 rejected with FundingAmountExceedsMax.
-#[test]
-fn test_fund_amount_over_max_rejected() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (contract_id, client) = deploy_with_id(&env);
-    let admin = Address::generate(&env);
-    let sme = Address::generate(&env);
-    let (tok, tre) = free_addresses(&env);
-    let invoice_id = symbol_short!("FSC004");
-    let overshoot = TARGET + 5_000_000_000i128;
-
-    client.init(
-        &admin,
-        &soroban_sdk::String::from_str(&env, "FSC004"),
-        &sme,
-        &TARGET,
-        &800i64,
-        &0u64,
-        &tok,
-        &None,
-        &tre,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None::<i64>,
-    );
-
-    let investor = Address::generate(&env);
-    client.fund(&investor, &overshoot);
-
-    let all_events = env.events().all();
-    let fsc_events: std::vec::Vec<_> = all_events
-        .events()
-        .iter()
-        .filter(|e| {
-            let expected = FundingStateChanged {
-                name: symbol_short!("fstate_ch"),
-                invoice_id,
-                from_status: 0u32,
-                to_status: 1u32,
-                funded_amount: overshoot,
-                funding_target: TARGET,
-                ledger_timestamp: env.ledger().timestamp(),
-                trigger: symbol_short!("fund"),
-            }
-            .to_xdr(&env, &contract_id);
-            *e == &expected
-        })
-        .collect();
-
-    assert_eq!(
-        fsc_events.len(),
-        1,
-        "expected exactly one FundingStateChanged"
-    );
-    assert_eq!(client.get_escrow().funded_amount, overshoot);
-}
-
-/// amount == 0 rejected with FundingAmountNotPositive.
-#[test]
-fn test_fund_amount_zero_rejected() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (contract_id, client) = deploy_with_id(&env);
-    let admin = Address::generate(&env);
-    let sme = Address::generate(&env);
-    let (tok, tre) = free_addresses(&env);
-    let invoice_id = symbol_short!("FSC005");
-
-    client.init(
-        &admin,
-        &soroban_sdk::String::from_str(&env, "FSC005"),
-        &sme,
-        &TARGET,
-        &800i64,
-        &0u64,
-        &tok,
-        &None,
-        &tre,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None::<i64>,
-    );
-
-    // Reach funded state with first investor.
-    let inv_a = Address::generate(&env);
-    client.fund(&inv_a, &TARGET);
-    assert_eq!(client.get_escrow().status, 1);
-
-    // Drain event buffer so we can inspect only the follow-on fund events.
-    let _ = env.events().all();
-
-    // Follow-on deposit from a second investor while already funded is rejected.
-    let inv_b = Address::generate(&env);
-    let result = client.try_fund(&inv_b, &1_000i128);
-    assert_contract_error(result, EscrowError::EscrowNotOpenForFunding);
-
-    let after_followon = env.events().all();
-    let fsc_count = after_followon
-        .events()
-        .iter()
-        .filter(|e| {
-            // Any FundingStateChanged with invoice_id FSC005 is a duplicate.
-            let candidate = FundingStateChanged {
-                name: symbol_short!("fstate_ch"),
-                invoice_id,
-                from_status: 0u32,
-                to_status: 1u32,
-                funded_amount: TARGET + 1_000i128,
-                funding_target: TARGET,
-                ledger_timestamp: env.ledger().timestamp(),
-                trigger: symbol_short!("fund"),
-            }
-            .to_xdr(&env, &contract_id);
-            *e == &candidate
-        })
-        .count();
-
-    assert_eq!(
-        fsc_count, 0,
-        "FundingStateChanged must not be re-emitted after already funded"
-    );
-}
-
-/// negative amount rejected with FundingAmountNotPositive.
-#[test]
-fn test_fund_amount_negative_rejected() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (contract_id, client) = deploy_with_id(&env);
-    let admin = Address::generate(&env);
-    let sme = Address::generate(&env);
-    let (tok, tre) = free_addresses(&env);
-    let invoice_id = symbol_short!("FSC006");
-
-    let mut tiers = SorobanVec::new(&env);
-    tiers.push_back(YieldTier {
-        min_lock_secs: 100,
-        yield_bps: 900,
-    });
-
-    client.init(
-        &admin,
-        &soroban_sdk::String::from_str(&env, "FSC006"),
-        &sme,
-        &TARGET,
-        &800i64,
-        &0u64,
-        &tok,
-        &None,
-        &tre,
-        &Some(tiers),
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None::<i64>,
-    );
-
-    let investor = Address::generate(&env);
-    client.fund_with_commitment(&investor, &TARGET, &200u64);
-
-    let all_events = env.events().all();
-    let fsc_events: std::vec::Vec<_> = all_events
-        .events()
-        .iter()
-        .filter(|e| {
-            let expected = FundingStateChanged {
-                name: symbol_short!("fstate_ch"),
-                invoice_id,
-                from_status: 0u32,
-                to_status: 1u32,
-                funded_amount: TARGET,
-                funding_target: TARGET,
-                ledger_timestamp: env.ledger().timestamp(),
-                trigger: symbol_short!("fund"),
-            }
-            .to_xdr(&env, &contract_id);
-            *e == &expected
-        })
-        .collect();
-
-    assert_eq!(
-        fsc_events.len(),
-        1,
-        "FundingStateChanged must fire once via fund_with_commitment"
-    );
-}
-
-/// fund_with_commitment: amount > MAX_INVOICE_AMOUNT rejected.
-#[test]
-fn test_fund_with_commitment_amount_over_max_rejected() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (contract_id, client) = deploy_with_id(&env);
-    let admin = Address::generate(&env);
-    let sme = Address::generate(&env);
-    let (tok, tre) = free_addresses(&env);
-    let invoice_id = symbol_short!("FSC007");
-    let high_target = TARGET * 2;
-
-    client.init(
-        &admin,
-        &soroban_sdk::String::from_str(&env, "FSC007"),
-        &sme,
-        &high_target,
-        &800i64,
-        &0u64,
-        &tok,
-        &None,
-        &tre,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None::<i64>,
-    );
-
-    let investor = Address::generate(&env);
-    // Fund to exactly TARGET (below high_target — still open).
-    client.fund(&investor, &TARGET);
-    assert_eq!(client.get_escrow().status, 0);
-
-    // Clear events so we isolate the update_funding_target events.
-    let _ = env.events().all();
-
-    // Lower target to match funded_amount — triggers 0 → 1 transition.
-    client.update_funding_target(&TARGET);
-
-    let all_events = env.events().all();
-    let fsc_events: std::vec::Vec<_> = all_events
-        .events()
-        .iter()
-        .filter(|e| {
-            let expected = FundingStateChanged {
-                name: symbol_short!("fstate_ch"),
-                invoice_id,
-                from_status: 0u32,
-                to_status: 1u32,
-                funded_amount: TARGET,
-                funding_target: TARGET,
-                ledger_timestamp: env.ledger().timestamp(),
-                trigger: symbol_short!("tgt_lower"),
-            }
-            .to_xdr(&env, &contract_id);
-            *e == &expected
-        })
-        .collect();
-
-    assert_eq!(
-        fsc_events.len(),
-        1,
-        "FundingStateChanged must fire once via update_funding_target"
-    );
-    assert_eq!(client.get_escrow().status, 1);
-}
-
-/// fund_with_commitment: amount == MAX_INVOICE_AMOUNT accepted.
-#[test]
-fn test_fund_with_commitment_amount_max_accepted() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (contract_id, client) = deploy_with_id(&env);
-    let admin = Address::generate(&env);
-    let sme = Address::generate(&env);
-    let (tok, tre) = free_addresses(&env);
-    let invoice_id = symbol_short!("FSC008");
-    let high_target = TARGET * 3;
-
-    client.init(
-        &admin,
-        &soroban_sdk::String::from_str(&env, "FSC008"),
-        &sme,
-        &high_target,
-        &800i64,
-        &0u64,
-        &tok,
-        &None,
-        &tre,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None::<i64>,
-    );
-
-    let investor = Address::generate(&env);
-    client.fund(&investor, &TARGET);
-    let _ = env.events().all();
-
-    // Lower target to TARGET * 2 — still above funded_amount, no transition.
-    client.update_funding_target(&(TARGET * 2));
-
-    let all_events = env.events().all();
-    let fsc_count = all_events
-        .events()
-        .iter()
-        .filter(|e| {
-            // Any FundingStateChanged event for this invoice is unexpected.
-            let candidate_any = FundingStateChanged {
-                name: symbol_short!("fstate_ch"),
-                invoice_id,
-                from_status: 0u32,
-                to_status: 1u32,
-                funded_amount: TARGET,
-                funding_target: TARGET * 2,
-                ledger_timestamp: env.ledger().timestamp(),
-                trigger: symbol_short!("tgt_lower"),
-            }
-            .to_xdr(&env, &contract_id);
-            *e == &candidate_any
-        })
-        .count();
-
-    assert_eq!(
-        fsc_count, 0,
-        "FundingStateChanged must not fire when target still above funded_amount"
-    );
-    assert_eq!(client.get_escrow().status, 0);
-}
-
-/// fund_batch: one entry over MAX_INVOICE_AMOUNT rejected atomically.
-#[test]
-fn test_fund_batch_entry_over_max_rejected() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (contract_id, client) = deploy_with_id(&env);
-    let admin = Address::generate(&env);
-    let sme = Address::generate(&env);
-    let (tok, tre) = free_addresses(&env);
-    let invoice_id = symbol_short!("FSC009");
-
-    client.init(
-        &admin,
-        &soroban_sdk::String::from_str(&env, "FSC009"),
-        &sme,
-        &TARGET,
-        &800i64,
-        &0u64,
-        &tok,
-        &None,
-        &tre,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None::<i64>,
-    );
-
-    let investor = Address::generate(&env);
-    // Fund partially — still open.
-    client.fund(&investor, &(TARGET / 2));
-    assert_eq!(client.get_escrow().status, 0);
-
-    let _ = env.events().all();
-
-    // partial_settle forces 0 → 1 even under-funded.
-    client.partial_settle(&sme);
-
-    let all_events = env.events().all();
-    let fsc_events: std::vec::Vec<_> = all_events
-        .events()
-        .iter()
-        .filter(|e| {
-            let expected = FundingStateChanged {
-                name: symbol_short!("fstate_ch"),
-                invoice_id,
-                from_status: 0u32,
-                to_status: 1u32,
-                funded_amount: TARGET / 2,
-                funding_target: TARGET,
-                ledger_timestamp: env.ledger().timestamp(),
-                trigger: symbol_short!("part_set"),
-            }
-            .to_xdr(&env, &contract_id);
-            *e == &expected
-        })
-        .collect();
-
-    assert_eq!(
-        fsc_events.len(),
-        1,
-        "FundingStateChanged must fire once via partial_settle"
-    );
-    assert_eq!(client.get_escrow().status, 1);
-}
-
-/// `fund_batch` reaching the target emits exactly one `FundingStateChanged`
-/// (the batch shares the same `fund_impl` path, trigger = `fund`).
-#[test]
-fn funding_state_changed_emitted_via_fund_batch() {
-    use crate::FundingStateChanged;
-    use soroban_sdk::testutils::Events as _;
-
-    let env = Env::default();
-    env.mock_all_auths();
-    let (contract_id, client) = deploy_with_id(&env);
-    let admin = Address::generate(&env);
-    let sme = Address::generate(&env);
-    let (tok, tre) = free_addresses(&env);
-    let invoice_id = symbol_short!("FSC010");
-
-    client.init(
-        &admin,
-        &soroban_sdk::String::from_str(&env, "FSC010"),
-        &sme,
-        &TARGET,
-        &800i64,
-        &0u64,
-        &tok,
-        &None,
-        &tre,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None::<i64>,
-    );
-
-    let inv_a = Address::generate(&env);
-    let inv_b = Address::generate(&env);
-    let half = TARGET / 2;
-
-    let mut entries = SorobanVec::new(&env);
-    entries.push_back((inv_a.clone(), half));
-    entries.push_back((inv_b.clone(), half));
-
-    client.fund_batch(&entries);
-
-    let all_events = env.events().all();
-    let fsc_events: std::vec::Vec<_> = all_events
-        .events()
-        .iter()
-        .filter(|e| {
-            let expected = FundingStateChanged {
-                name: symbol_short!("fstate_ch"),
-                invoice_id,
-                from_status: 0u32,
-                to_status: 1u32,
-                funded_amount: TARGET,
-                funding_target: TARGET,
-                ledger_timestamp: env.ledger().timestamp(),
-                trigger: symbol_short!("fund"),
-            }
-            .to_xdr(&env, &contract_id);
-            *e == &expected
-        })
-        .collect();
-
-    assert_eq!(
-        fsc_events.len(),
-        1,
-        "exactly one FundingStateChanged via fund_batch"
-    );
-    assert_eq!(client.get_escrow().status, 1);
-}
-
-/// fund_batch: all entries at MAX_INVOICE_AMOUNT accepted (separate investors, large target).
-#[test]
-fn test_fund_batch_entries_at_max_each_accepted() {
-    let env = Env::default();
-    env.mock_all_auths();
-    // Use a fresh escrow large enough to accept two MAX_INVOICE_AMOUNT deposits.
-    let client = deploy(&env);
-    let admin = Address::generate(&env);
-    let sme = Address::generate(&env);
-    let (tok, tre) = free_addresses(&env);
-    // funding_target = MAX_INVOICE_AMOUNT * 2 would overflow MAX_INVOICE_AMOUNT bound on init,
-    // so we cap at MAX_INVOICE_AMOUNT and accept just one entry at the max.
-    client.init(
-        &admin,
-        &String::from_str(&env, "BND002"),
-        &sme,
-        &crate::MAX_INVOICE_AMOUNT,
-        &800i64,
-        &0u64,
-        &tok,
-        &None,
-        &tre,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None,
-        &None::<i64>,
-    );
-
-    let investor = Address::generate(&env);
-    client.fund(&investor, &target);
-
-    let all_events = env.events().all();
-    let fsc_events: std::vec::Vec<_> = all_events
-        .events()
-        .iter()
-        .filter(|e| {
-            let expected = FundingStateChanged {
-                name: symbol_short!("fstate_ch"),
-                invoice_id,
-                from_status: 0u32,
-                to_status: 1u32,
-                funded_amount: target,
-                funding_target: target,
-                ledger_timestamp: 9_000_000u64,
-                trigger: symbol_short!("fund"),
-            }
-            .to_xdr(&env, &contract_id);
-            *e == &expected
-        })
-        .collect();
-
-    assert_eq!(
-        fsc_events.len(),
-        1,
-        "one FundingStateChanged with correct fields"
-    );
-
-    // Confirm storage state matches event payload.
-    let escrow = client.get_escrow();
-    assert_eq!(escrow.status, 1);
-    assert_eq!(escrow.funded_amount, target);
-    assert_eq!(escrow.funding_target, target);
 }

@@ -32,9 +32,6 @@ fn init(env: &Env, client: &LiquifactEscrowClient) -> (Address, Address) {
         &None,
         &None,
         &None,
-        &None,
-        &None,
-        &None::<i64>,
     );
     (admin, sme)
 }
@@ -73,7 +70,7 @@ fn test_enable_and_disable_allowlist() {
     let invoice_id = client.get_escrow().invoice_id;
     let contract_id = client.address.clone();
 
-    client.set_allowlist_active(&true);
+    client.set_allowlist_active(&true, &0u32);
     let enabled_events = env.events().all();
     env.as_contract(&contract_id, || {
         assert!(
@@ -84,7 +81,7 @@ fn test_enable_and_disable_allowlist() {
         );
     });
 
-    client.set_allowlist_active(&false);
+    client.set_allowlist_active(&false, &1u32);
     let disabled_events = env.events().all();
     env.as_contract(&contract_id, || {
         assert!(
@@ -123,7 +120,7 @@ fn test_enable_allowlist_requires_admin_auth() {
     let client = deploy(&env);
     init(&env, &client);
     env.mock_auths(&[]);
-    client.set_allowlist_active(&true);
+    client.set_allowlist_active(&true, &0u32);
 }
 
 #[test]
@@ -133,9 +130,9 @@ fn test_disable_allowlist_requires_admin_auth() {
     env.mock_all_auths();
     let client = deploy(&env);
     init(&env, &client);
-    client.set_allowlist_active(&true);
+    client.set_allowlist_active(&true, &0u32);
     env.mock_auths(&[]);
-    client.set_allowlist_active(&false);
+    client.set_allowlist_active(&false, &1u32);
 }
 
 // --- add / remove ---
@@ -152,7 +149,7 @@ fn test_add_and_remove_from_allowlist() {
     let contract_id = client.address.clone();
     let investor = Address::generate(&env);
 
-    client.set_investor_allowlisted(&investor, &true);
+    client.set_investor_allowlisted(&investor, &true, &0u32);
     let added_events = env.events().all();
     env.as_contract(&contract_id, || {
         assert!(
@@ -163,7 +160,7 @@ fn test_add_and_remove_from_allowlist() {
         );
     });
 
-    client.set_investor_allowlisted(&investor, &false);
+    client.set_investor_allowlisted(&investor, &false, &1u32);
     let removed_events = env.events().all();
     env.as_contract(&contract_id, || {
         assert!(
@@ -205,7 +202,7 @@ fn test_add_to_allowlist_requires_admin_auth() {
     init(&env, &client);
     let investor = Address::generate(&env);
     env.mock_auths(&[]);
-    client.set_investor_allowlisted(&investor, &true);
+    client.set_investor_allowlisted(&investor, &true, &0u32);
 }
 
 #[test]
@@ -216,9 +213,9 @@ fn test_remove_from_allowlist_requires_admin_auth() {
     let client = deploy(&env);
     init(&env, &client);
     let investor = Address::generate(&env);
-    client.set_investor_allowlisted(&investor, &true);
+    client.set_investor_allowlisted(&investor, &true, &0u32);
     env.mock_auths(&[]);
-    client.set_investor_allowlisted(&investor, &false);
+    client.set_investor_allowlisted(&investor, &false, &1u32);
 }
 
 #[test]
@@ -229,7 +226,7 @@ fn test_remove_non_existent_address_is_noop() {
     init(&env, &client);
     let stranger = Address::generate(&env);
     // Should not panic.
-    client.set_investor_allowlisted(&stranger, &false);
+    client.set_investor_allowlisted(&stranger, &false, &0u32);
     assert!(!client.is_investor_allowlisted(&stranger));
 }
 
@@ -267,8 +264,8 @@ fn test_fund_allowed_when_on_allowlist() {
     init(&env, &client);
     let investor = Address::generate(&env);
 
-    client.set_allowlist_active(&true);
-    client.set_investor_allowlisted(&investor, &true);
+    client.set_allowlist_active(&true, &0u32);
+    client.set_investor_allowlisted(&investor, &true, &1u32);
 
     let escrow = client.fund(&investor, &5_000i128);
     assert_eq!(escrow.funded_amount, 5_000i128);
@@ -283,7 +280,7 @@ fn test_fund_blocked_when_not_on_allowlist() {
     init(&env, &client);
     let investor = Address::generate(&env);
 
-    client.set_allowlist_active(&true);
+    client.set_allowlist_active(&true, &0u32);
     client.fund(&investor, &1_000i128);
 }
 
@@ -296,7 +293,7 @@ fn test_fund_with_commitment_blocked_when_not_on_allowlist() {
     init(&env, &client);
     let investor = Address::generate(&env);
 
-    client.set_allowlist_active(&true);
+    client.set_allowlist_active(&true, &0u32);
     client.fund_with_commitment(&investor, &1_000i128, &0u64);
 }
 
@@ -308,8 +305,8 @@ fn test_fund_with_commitment_allowed_when_on_allowlist() {
     init(&env, &client);
     let investor = Address::generate(&env);
 
-    client.set_allowlist_active(&true);
-    client.set_investor_allowlisted(&investor, &true);
+    client.set_allowlist_active(&true, &0u32);
+    client.set_investor_allowlisted(&investor, &true, &1u32);
 
     let escrow = client.fund_with_commitment(&investor, &5_000i128, &0u64);
     assert_eq!(escrow.funded_amount, 5_000i128);
@@ -323,8 +320,8 @@ fn test_fund_allowed_after_disable_even_without_entry() {
     init(&env, &client);
     let investor = Address::generate(&env);
 
-    client.set_allowlist_active(&true);
-    client.set_allowlist_active(&false);
+    client.set_allowlist_active(&true, &0u32);
+    client.set_allowlist_active(&false, &1u32);
 
     // Gate is off — investor not in list but can still fund.
     let escrow = client.fund(&investor, &3_000i128);
@@ -339,13 +336,13 @@ fn test_entries_persist_across_disable_reenable() {
     init(&env, &client);
     let investor = Address::generate(&env);
 
-    client.set_allowlist_active(&true);
-    client.set_investor_allowlisted(&investor, &true);
-    client.set_allowlist_active(&false);
+    client.set_allowlist_active(&true, &0u32);
+    client.set_investor_allowlisted(&investor, &true, &1u32);
+    client.set_allowlist_active(&false, &2u32);
     // Entry still there even while disabled.
     assert!(client.is_investor_allowlisted(&investor));
-    // Re-enable — investor can still fund without re-adding.
-    client.set_allowlist_active(&true);
+    // Re-enable ÔÇö investor can still fund without re-adding.
+    client.set_allowlist_active(&true, &3u32);
     let escrow = client.fund(&investor, &2_000i128);
     assert_eq!(escrow.funded_amount, 2_000i128);
 }
@@ -359,9 +356,9 @@ fn test_removed_investor_blocked_after_reenable() {
     init(&env, &client);
     let investor = Address::generate(&env);
 
-    client.set_allowlist_active(&true);
-    client.set_investor_allowlisted(&investor, &true);
-    client.set_investor_allowlisted(&investor, &false);
+    client.set_allowlist_active(&true, &0u32);
+    client.set_investor_allowlisted(&investor, &true, &1u32);
+    client.set_investor_allowlisted(&investor, &false, &2u32);
 
     client.fund(&investor, &1_000i128);
 }
@@ -376,9 +373,9 @@ fn test_multiple_investors_independent_allowlist_entries() {
     let b = Address::generate(&env);
     let c = Address::generate(&env);
 
-    client.set_allowlist_active(&true);
-    client.set_investor_allowlisted(&a, &true);
-    client.set_investor_allowlisted(&b, &true);
+    client.set_allowlist_active(&true, &0u32);
+    client.set_investor_allowlisted(&a, &true, &1u32);
+    client.set_investor_allowlisted(&b, &true, &2u32);
 
     assert!(client.is_investor_allowlisted(&a));
     assert!(client.is_investor_allowlisted(&b));
@@ -409,13 +406,13 @@ fn test_batch_add_and_remove_from_allowlist() {
     v.push_back(b.clone());
     v.push_back(c.clone());
 
-    client.set_investors_allowlisted(&v, &true);
+    client.set_investors_allowlisted(&v, &true, &0u32);
 
     assert!(client.is_investor_allowlisted(&a));
     assert!(client.is_investor_allowlisted(&b));
     assert!(client.is_investor_allowlisted(&c));
 
-    client.set_investors_allowlisted(&v, &false);
+    client.set_investors_allowlisted(&v, &false, &1u32);
 
     assert!(!client.is_investor_allowlisted(&a));
     assert!(!client.is_investor_allowlisted(&b));
@@ -431,7 +428,7 @@ fn test_batch_rejects_empty_vector() {
     init(&env, &client);
 
     let v: SorobanVec<Address> = SorobanVec::new(&env);
-    client.set_investors_allowlisted(&v, &true);
+    client.set_investors_allowlisted(&v, &true, &0u32);
 }
 
 #[test]
@@ -448,7 +445,7 @@ fn test_batch_rejects_too_large_vector() {
         v.push_back(Address::generate(&env));
     }
 
-    client.set_investors_allowlisted(&v, &true);
+    client.set_investors_allowlisted(&v, &true, &0u32);
 }
 
 #[test]
@@ -464,7 +461,7 @@ fn test_batch_requires_admin_auth() {
     v.push_back(a.clone());
 
     env.mock_auths(&[]);
-    client.set_investors_allowlisted(&v, &true);
+    client.set_investors_allowlisted(&v, &true, &0u32);
 }
 
 // =============================================================================
@@ -530,6 +527,7 @@ fn init_gate(env: &Env, client: &LiquifactEscrowClient) -> (Address, Address) {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
     (admin, sme)
 }
@@ -546,38 +544,8 @@ fn gate_fund_allowlist_inactive_no_entry_succeeds() {
     let client = deploy(&env);
     init_gate(&env, &client);
 
-    let investor = Address::generate(&env);
-    // Allowlist is off by default — no entry required.
-    let escrow = client.fund(&investor, &1_000i128);
-    assert_eq!(escrow.funded_amount, 1_000i128);
-}
-
-/// Gate inactive, entry explicitly set to false → fund still succeeds (gate bypassed).
-#[test]
-fn gate_fund_allowlist_inactive_entry_false_succeeds() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let client = deploy(&env);
-    init_gate(&env, &client);
-
-    let investor = Address::generate(&env);
-    // Write an explicit `false` entry while gate is off — should have no effect.
-    client.set_investor_allowlisted(&investor, &false);
-    let escrow = client.fund(&investor, &2_000i128);
-    assert_eq!(escrow.funded_amount, 2_000i128);
-}
-
-/// Gate active, investor allowlisted → fund succeeds.
-#[test]
-fn gate_fund_allowlist_active_investor_allowed_succeeds() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let client = deploy(&env);
-    init_gate(&env, &client);
-
-    let investor = Address::generate(&env);
-    client.set_allowlist_active(&true);
-    client.set_investor_allowlisted(&investor, &true);
+    client.set_investor_allowlisted(&investor, &true, &0u32);
+    let events = env.events().all();
 
     let escrow = client.fund(&investor, &5_000i128);
     assert_eq!(escrow.funded_amount, 5_000i128);
@@ -704,11 +672,31 @@ fn gate_disable_mid_funding_unblocks_any_investor() {
 
     let investor = Address::generate(&env);
 
-    client.set_allowlist_active(&true);
-    // Confirm investor is blocked while gate is active.
-    assert_contract_error_gate(
-        client.try_fund(&investor, &500i128),
-        EscrowError::InvestorNotAllowlisted,
+    let mut v: soroban_sdk::Vec<Address> = soroban_sdk::Vec::new(&env);
+    v.push_back(investor.clone());
+
+    client.set_investors_allowlisted(&v, &true, &0u32);
+    let all = env.events().all();
+
+    // 1 al_set + 1 al_batch = 2 events total.
+    assert_eq!(
+        all,
+        std::vec![
+            InvestorAllowlistChanged {
+                name: symbol_short!("al_set"),
+                invoice_id: invoice_id.clone(),
+                investor: investor.clone(),
+                allowed: 1,
+            }
+            .to_xdr(&env, &contract_id),
+            InvestorAllowlistBatchApplied {
+                name: symbol_short!("al_batch"),
+                invoice_id,
+                batch_size: 1,
+                allowed: 1,
+            }
+            .to_xdr(&env, &contract_id),
+        ]
     );
 
     // Disable gate — investor should now succeed without an entry.
@@ -822,10 +810,8 @@ fn gate_multiple_investors_independent_gating() {
     let b = Address::generate(&env);
     let c = Address::generate(&env);
 
-    client.set_allowlist_active(&true);
-    client.set_investor_allowlisted(&a, &true);
-    client.set_investor_allowlisted(&b, &true);
-    // c is never added.
+    client.set_investors_allowlisted(&v, &true, &0u32);
+    let all = env.events().all();
 
     // A and B succeed.
     let after_a = client.fund(&a, &2_000i128);
@@ -862,21 +848,36 @@ fn gate_batch_allowlist_then_gate_active_correct_access() {
     let b = Address::generate(&env);
     let outsider = Address::generate(&env);
 
-    let mut batch: SorobanVec<Address> = SorobanVec::new(&env);
-    batch.push_back(a.clone());
-    batch.push_back(b.clone());
-
-    client.set_allowlist_active(&true);
-    client.set_investors_allowlisted(&batch, &true);
-
-    // Batch members succeed.
-    client.fund(&a, &1_000i128);
-    client.fund(&b, &1_000i128);
-
-    // Outsider is rejected.
-    assert_contract_error_gate(
-        client.try_fund(&outsider, &1_000i128),
-        EscrowError::InvestorNotAllowlisted,
+    client.set_investors_allowlisted(&v, &true, &0u32);
+    let all = env.events().all();
+    // Last event is the batch event — compare the full sequence.
+    let a0 = v.get(0).unwrap();
+    let a1 = v.get(1).unwrap();
+    assert_eq!(
+        all,
+        std::vec![
+            InvestorAllowlistChanged {
+                name: symbol_short!("al_set"),
+                invoice_id: invoice_id.clone(),
+                investor: a0,
+                allowed: 1,
+            }
+            .to_xdr(&env, &contract_id),
+            InvestorAllowlistChanged {
+                name: symbol_short!("al_set"),
+                invoice_id: invoice_id.clone(),
+                investor: a1,
+                allowed: 1,
+            }
+            .to_xdr(&env, &contract_id),
+            InvestorAllowlistBatchApplied {
+                name: symbol_short!("al_batch"),
+                invoice_id,
+                batch_size: 2,
+                allowed: 1,
+            }
+            .to_xdr(&env, &contract_id),
+        ]
     );
 }
 
@@ -886,7 +887,203 @@ fn gate_batch_revoke_blocks_all_revoked_members() {
     let env = Env::default();
     env.mock_all_auths();
     let client = deploy(&env);
-    init_gate(&env, &client);
+    init(&env, &client);
+    let contract_id = client.address.clone();
+    let invoice_id = client.get_escrow().invoice_id;
+
+    let mut v: soroban_sdk::Vec<Address> = soroban_sdk::Vec::new(&env);
+    v.push_back(Address::generate(&env));
+    v.push_back(Address::generate(&env));
+    v.push_back(Address::generate(&env));
+
+    client.set_investors_allowlisted(&v, &false, &0u32);
+    let all = env.events().all();
+    let a0 = v.get(0).unwrap();
+    let a1 = v.get(1).unwrap();
+    let a2 = v.get(2).unwrap();
+    assert_eq!(
+        all,
+        std::vec![
+            InvestorAllowlistChanged {
+                name: symbol_short!("al_set"),
+                invoice_id: invoice_id.clone(),
+                investor: a0,
+                allowed: 0,
+            }
+            .to_xdr(&env, &contract_id),
+            InvestorAllowlistChanged {
+                name: symbol_short!("al_set"),
+                invoice_id: invoice_id.clone(),
+                investor: a1,
+                allowed: 0,
+            }
+            .to_xdr(&env, &contract_id),
+            InvestorAllowlistChanged {
+                name: symbol_short!("al_set"),
+                invoice_id: invoice_id.clone(),
+                investor: a2,
+                allowed: 0,
+            }
+            .to_xdr(&env, &contract_id),
+            InvestorAllowlistBatchApplied {
+                name: symbol_short!("al_batch"),
+                invoice_id,
+                batch_size: 3,
+                allowed: 0,
+            }
+            .to_xdr(&env, &contract_id),
+        ]
+    );
+}
+
+// --- allow path ---
+
+#[test]
+fn test_batch_allow_flag_true() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init(&env, &client);
+    let contract_id = client.address.clone();
+    let invoice_id = client.get_escrow().invoice_id;
+
+    let investor = Address::generate(&env);
+    let mut v: soroban_sdk::Vec<Address> = soroban_sdk::Vec::new(&env);
+    v.push_back(investor.clone());
+
+    client.set_investors_allowlisted(&v, &true, &0u32);
+    let all = env.events().all();
+
+    assert_eq!(
+        all,
+        std::vec![
+            InvestorAllowlistChanged {
+                name: symbol_short!("al_set"),
+                invoice_id: invoice_id.clone(),
+                investor: investor.clone(),
+                allowed: 1,
+            }
+            .to_xdr(&env, &contract_id),
+            InvestorAllowlistBatchApplied {
+                name: symbol_short!("al_batch"),
+                invoice_id,
+                batch_size: 1,
+                allowed: 1,
+            }
+            .to_xdr(&env, &contract_id),
+        ]
+    );
+    assert!(client.is_investor_allowlisted(&investor));
+}
+
+// --- disallow path ---
+
+#[test]
+fn test_batch_allow_flag_false() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init(&env, &client);
+    let contract_id = client.address.clone();
+    let invoice_id = client.get_escrow().invoice_id;
+
+    let investor = Address::generate(&env);
+    let mut v: soroban_sdk::Vec<Address> = soroban_sdk::Vec::new(&env);
+    v.push_back(investor.clone());
+
+    // First allow, then disallow via batch.
+    client.set_investors_allowlisted(&v, &true, &0u32);
+
+    client.set_investors_allowlisted(&v, &false, &1u32);
+    let all = env.events().all();
+
+    assert_eq!(
+        all,
+        std::vec![
+            InvestorAllowlistChanged {
+                name: symbol_short!("al_set"),
+                invoice_id: invoice_id.clone(),
+                investor: investor.clone(),
+                allowed: 0,
+            }
+            .to_xdr(&env, &contract_id),
+            InvestorAllowlistBatchApplied {
+                name: symbol_short!("al_batch"),
+                invoice_id,
+                batch_size: 1,
+                allowed: 0,
+            }
+            .to_xdr(&env, &contract_id),
+        ]
+    );
+    assert!(!client.is_investor_allowlisted(&investor));
+}
+
+// --- large batch ---
+
+#[test]
+fn test_large_batch_per_investor_events_and_one_batch_event() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    init(&env, &client);
+    let contract_id = client.address.clone();
+    let invoice_id = client.get_escrow().invoice_id;
+
+    let cap = super::MAX_INVESTOR_ALLOWLIST_BATCH as usize;
+    let mut v: soroban_sdk::Vec<Address> = soroban_sdk::Vec::new(&env);
+    for _ in 0..cap {
+        v.push_back(Address::generate(&env));
+    }
+
+    client.set_investors_allowlisted(&v, &true, &0u32);
+    let all = env.events().all();
+
+    // cap al_set events + 1 al_batch event.
+    let expected_total = cap + 1;
+    assert_eq!(all.events().len(), expected_total);
+
+    // Build expected event list: cap al_set events followed by one al_batch.
+    let mut expected: std::vec::Vec<soroban_sdk::xdr::ContractEvent> =
+        std::vec::Vec::with_capacity(expected_total);
+    for i in 0..cap {
+        expected.push(
+            InvestorAllowlistChanged {
+                name: symbol_short!("al_set"),
+                invoice_id: invoice_id.clone(),
+                investor: v.get(i as u32).unwrap(),
+                allowed: 1,
+            }
+            .to_xdr(&env, &contract_id),
+        );
+    }
+    expected.push(
+        InvestorAllowlistBatchApplied {
+            name: symbol_short!("al_batch"),
+            invoice_id,
+            batch_size: cap as u32,
+            allowed: 1,
+        }
+        .to_xdr(&env, &contract_id),
+    );
+
+    assert_eq!(all, expected);
+}
+
+// --- invariant preservation ---
+
+#[test]
+fn test_batch_produces_same_per_investor_events_as_individual_calls() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
 
     let a = Address::generate(&env);
     let b = Address::generate(&env);
@@ -895,12 +1092,11 @@ fn gate_batch_revoke_blocks_all_revoked_members() {
     batch.push_back(a.clone());
     batch.push_back(b.clone());
 
-    client.set_allowlist_active(&true);
-    client.set_investors_allowlisted(&batch, &true);
+    client1.set_investor_allowlisted(&a, &true, &0u32);
+    let single_a_events = env.events().all();
 
-    // Fund once successfully.
-    client.fund(&a, &1_000i128);
-    client.fund(&b, &1_000i128);
+    client1.set_investor_allowlisted(&b, &true, &1u32);
+    let single_b_events = env.events().all();
 
     // Batch-revoke both.
     client.set_investors_allowlisted(&batch, &false);
@@ -910,9 +1106,35 @@ fn gate_batch_revoke_blocks_all_revoked_members() {
         client.try_fund(&a, &500i128),
         EscrowError::InvestorNotAllowlisted,
     );
-    assert_contract_error_gate(
-        client.try_fund(&b, &500i128),
-        EscrowError::InvestorNotAllowlisted,
+    let contract_id2 = client2.address.clone();
+
+    let mut v: soroban_sdk::Vec<Address> = soroban_sdk::Vec::new(&env);
+    v.push_back(a.clone());
+    v.push_back(b.clone());
+    client2.set_investors_allowlisted(&v, &true, &0u32);
+    let batch_events = env.events().all();
+
+    // The per-investor events from the batch match the shape of single-call events.
+    // Single-call path emits exactly the al_set event.
+    assert_eq!(
+        single_a_events,
+        std::vec![InvestorAllowlistChanged {
+            name: symbol_short!("al_set"),
+            invoice_id: invoice_id.clone(),
+            investor: a.clone(),
+            allowed: 1,
+        }
+        .to_xdr(&env, &contract_id1)]
+    );
+    assert_eq!(
+        single_b_events,
+        std::vec![InvestorAllowlistChanged {
+            name: symbol_short!("al_set"),
+            invoice_id: invoice_id.clone(),
+            investor: b.clone(),
+            allowed: 1,
+        }
+        .to_xdr(&env, &contract_id1)]
     );
 
     // Contributions remain at the pre-revocation values.

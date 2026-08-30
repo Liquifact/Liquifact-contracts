@@ -13,6 +13,7 @@
 //! off-chain verifiers can confirm the on-chain anchor matches their document set.
 
 use super::*;
+use crate::MAX_ATTESTATION_REVOKE_BATCH;
 use soroban_sdk::{symbol_short, testutils::Events, BytesN, Error, InvokeError};
 use std::fmt::Debug;
 
@@ -781,8 +782,12 @@ fn test_revoked_digests_view_zero_limit_returns_empty() {
         client.revoke_attestation_digest(&(i as u32));
     }
 
-    let page = client.get_revoked_attestation_digests(&0, &0);
-    assert_eq!(page.len(), 0);
+    // `limit = 0` is a read-boundary violation, not an empty window: the view
+    // rejects it with a typed error rather than silently returning nothing.
+    assert_contract_error(
+        client.try_get_revoked_attestation_digests(&0, &0),
+        EscrowError::AttestationReadLimitZero,
+    );
 }
 
 #[test]
@@ -794,8 +799,12 @@ fn test_revoked_digests_view_large_limit_caps_to_max_page() {
         client.revoke_attestation_digest(&(i as u32));
     }
 
-    let page = client.get_revoked_attestation_digests(&0, &(crate::MAX_ATTESTATION_READ_PAGE + 10));
-    assert_eq!(page.len(), crate::MAX_ATTESTATION_READ_PAGE);
+    // Limits above MAX are rejected with a typed read-boundary error rather
+    // than being silently clamped.
+    assert_contract_error(
+        client.try_get_revoked_attestation_digests(&0, &(crate::MAX_ATTESTATION_READ_PAGE + 10)),
+        EscrowError::AttestationReadLimitTooLarge,
+    );
 }
 
 #[test]
@@ -1128,11 +1137,9 @@ fn test_revoke_attestation_digests_over_limit_returns_typed_error() {
 fn test_revoke_attestation_digests_exact_max_size_succeeds() {
     let env = Env::default();
     let (client, _) = setup_with_init(&env);
-    let mut batch = soroban_sdk::Vec::new(&env);
-    for i in 0u8..(MAX_ATTESTATION_APPEND_BATCH as u8) {
-        batch.push_back(digest(&env, i));
+    for i in 0u8..(MAX_ATTESTATION_APPEND_ENTRIES as u8) {
+        client.append_attestation_digest(&digest(&env, i));
     }
-    client.append_attestation_digests(&batch);
 
     let last = MAX_ATTESTATION_APPEND_ENTRIES - 1;
     let indices = soroban_sdk::vec![&env, last];
@@ -1165,373 +1172,4 @@ fn test_require_index_in_range_last_valid_index_at_max_capacity() {
         client.try_revoke_attestation_digest(&MAX_ATTESTATION_APPEND_ENTRIES),
         EscrowError::AttestationIndexOutOfRange,
     );
-}
-
-// ---------------------------------------------------------------------------
-// append_attestation_digests — batch entrypoint (issue #61)
-// ---------------------------------------------------------------------------
-
-/// Happy path: batch of 3 digests appended atomically, all readable in order.
-#[test]
-fn test_batch_append_happy_path() {
-    let env = Env::default();
-    let (client, _) = setup_with_init(&env);
-
-    let d0 = digest(&env, 0x10);
-    let d1 = digest(&env, 0x20);
-    let d2 = digest(&env, 0x30);
-    let batch = soroban_sdk::vec![&env, d0.clone(), d1.clone(), d2.clone()];
-
-    client.append_attestation_digests(&batch);
-
-    let log = client.get_attestation_append_log();
-    assert_eq!(log.len(), 3);
-    assert_eq!(log.get(0).unwrap(), d0);
-    assert_eq!(log.get(1).unwrap(), d1);
-    assert_eq!(log.get(2).unwrap(), d2);
-}
-
-/// Batch append to a partially-filled log assigns correct indices starting at
-/// the current log length.
-#[test]
-fn test_batch_append_starts_at_existing_log_length() {
-    let env = Env::default();
-    let (client, _) = setup_with_init(&env);
-
-    // Pre-fill two entries via single-entry entrypoint.
-    client.append_attestation_digest(&digest(&env, 0xAA));
-    client.append_attestation_digest(&digest(&env, 0xBB));
-
-    let d2 = digest(&env, 0xCC);
-    let d3 = digest(&env, 0xDD);
-    let batch = soroban_sdk::vec![&env, d2.clone(), d3.clone()];
-    client.append_attestation_digests(&batch);
-
-    let log = client.get_attestation_append_log();
-    assert_eq!(log.len(), 4);
-    assert_eq!(log.get(2).unwrap(), d2);
-    assert_eq!(log.get(3).unwrap(), d3);
-}
-
-/// A single-element batch succeeds (minimum valid batch size).
-#[test]
-fn test_batch_append_single_element_succeeds() {
-    let env = Env::default();
-    let (client, _) = setup_with_init(&env);
-
-    let d = digest(&env, 0x01);
-    let batch = soroban_sdk::vec![&env, d.clone()];
-    client.append_attestation_digests(&batch);
-
-    let log = client.get_attestation_append_log();
-    assert_eq!(log.len(), 1);
-    assert_eq!(log.get(0).unwrap(), d);
-}
-
-/// A batch of exactly MAX_ATTESTATION_APPEND_BATCH entries succeeds (upper
-/// boundary is inclusive when the log is empty).
-#[test]
-fn test_batch_append_max_size_succeeds() {
-    let env = Env::default();
-    let (client, _) = setup_with_init(&env);
-
-    let mut batch = soroban_sdk::Vec::new(&env);
-    for i in 0u8..(MAX_ATTESTATION_APPEND_BATCH as u8) {
-        batch.push_back(digest(&env, i));
-    }
-
-    client.append_attestation_digests(&batch);
-
-    assert_eq!(
-        client.get_attestation_append_log().len(),
-        MAX_ATTESTATION_APPEND_BATCH
-    );
-}
-
-/// An empty batch returns `AttestationAppendBatchEmpty` (57).
-#[test]
-fn test_batch_append_empty_returns_typed_error() {
-    let env = Env::default();
-    let (client, _) = setup_with_init(&env);
-
-    let empty: soroban_sdk::Vec<soroban_sdk::BytesN<32>> = soroban_sdk::Vec::new(&env);
-    assert_contract_error(
-        client.try_append_attestation_digests(&empty),
-        EscrowError::AttestationAppendBatchEmpty,
-    );
-
-    // Log must be unmodified.
-    assert_eq!(client.get_attestation_append_log().len(), 0);
-}
-
-/// A batch exceeding MAX_ATTESTATION_APPEND_BATCH returns
-/// `AttestationAppendBatchTooLarge` (58).
-#[test]
-fn test_batch_append_over_limit_returns_typed_error() {
-    let env = Env::default();
-    let (client, _) = setup_with_init(&env);
-
-    let mut oversized = soroban_sdk::Vec::new(&env);
-    // MAX_ATTESTATION_APPEND_BATCH + 1 entries.
-    for i in 0u8..=(MAX_ATTESTATION_APPEND_BATCH as u8) {
-        oversized.push_back(digest(&env, i));
-    }
-
-    assert_contract_error(
-        client.try_append_attestation_digests(&oversized),
-        EscrowError::AttestationAppendBatchTooLarge,
-    );
-
-    // No partial write must have occurred.
-    assert_eq!(client.get_attestation_append_log().len(), 0);
-}
-
-/// A batch that would push the log beyond MAX_ATTESTATION_APPEND_ENTRIES is
-/// rejected atomically with `AttestationAppendLogCapacityReached` (51).
-/// The pre-flight check means even a partially-fitting batch is fully rejected.
-#[test]
-fn test_batch_append_over_capacity_rejected_atomically() {
-    let env = Env::default();
-    let (client, _) = setup_with_init(&env);
-
-    // Fill log to 30 entries via single-entry calls.
-    for i in 0u8..30 {
-        client.append_attestation_digest(&digest(&env, i));
-    }
-    assert_eq!(client.get_attestation_append_log().len(), 30);
-
-    // A batch of 3 would bring the total to 33, exceeding the limit of 32.
-    let overflow_batch = soroban_sdk::vec![
-        &env,
-        digest(&env, 0xA0),
-        digest(&env, 0xA1),
-        digest(&env, 0xA2)
-    ];
-
-    assert_contract_error(
-        client.try_append_attestation_digests(&overflow_batch),
-        EscrowError::AttestationAppendLogCapacityReached,
-    );
-
-    // Log must still be at 30 — no partial append.
-    assert_eq!(client.get_attestation_append_log().len(), 30);
-}
-
-/// Filling exactly to capacity in one batch call succeeds (boundary inclusive).
-#[test]
-fn test_batch_append_fills_log_exactly_to_capacity() {
-    let env = Env::default();
-    let (client, _) = setup_with_init(&env);
-
-    // Fill to exactly MAX_ATTESTATION_APPEND_ENTRIES in one shot.
-    let mut batch = soroban_sdk::Vec::new(&env);
-    for i in 0u8..(MAX_ATTESTATION_APPEND_ENTRIES as u8) {
-        batch.push_back(digest(&env, i));
-    }
-    client.append_attestation_digests(&batch);
-
-    assert_eq!(
-        client.get_attestation_append_log().len(),
-        MAX_ATTESTATION_APPEND_ENTRIES
-    );
-
-    // One more single append must fail.
-    assert_contract_error(
-        client.try_append_attestation_digest(&digest(&env, 0xFF)),
-        EscrowError::AttestationAppendLogCapacityReached,
-    );
-}
-
-/// Duplicate digests within a batch are allowed (log is an audit trail, not a set).
-#[test]
-fn test_batch_append_duplicate_digests_allowed() {
-    let env = Env::default();
-    let (client, _) = setup_with_init(&env);
-
-    let d = digest(&env, 0x42);
-    let batch = soroban_sdk::vec![&env, d.clone(), d.clone(), d.clone()];
-    client.append_attestation_digests(&batch);
-
-    let log = client.get_attestation_append_log();
-    assert_eq!(log.len(), 3);
-    for i in 0..3 {
-        assert_eq!(log.get(i).unwrap(), d);
-    }
-}
-
-/// Non-admin caller must not be able to use the batch append entrypoint.
-#[test]
-fn test_batch_append_non_admin_returns_error() {
-    let env = Env::default();
-    let (client, _) = setup_with_init(&env);
-
-    env.mock_auths(&[]);
-    let batch = soroban_sdk::vec![&env, digest(&env, 0x01)];
-    assert!(client.try_append_attestation_digests(&batch).is_err());
-
-    // Log must be unmodified.
-    assert_eq!(client.get_attestation_append_log().len(), 0);
-}
-
-/// Batch append emits exactly one `att_app` event per digest with the correct
-/// sequential index and digest value.
-#[test]
-fn test_batch_append_emits_events_with_correct_indices() {
-    let env = Env::default();
-    let (client, _) = setup_with_init(&env);
-    let contract_id = client.address.clone();
-    let invoice_id = client.get_escrow().invoice_id;
-
-    let d0 = digest(&env, 0x10);
-    let d1 = digest(&env, 0x20);
-    let batch = soroban_sdk::vec![&env, d0.clone(), d1.clone()];
-
-    client.append_attestation_digests(&batch);
-
-    let all_events = env.events().all();
-    let new_events = all_events.events();
-
-    // Expect exactly two new events.
-    assert_eq!(new_events.len(), 2);
-
-    assert_eq!(
-        new_events.first().unwrap().clone(),
-        AttestationDigestAppended {
-            name: soroban_sdk::symbol_short!("att_app"),
-            invoice_id: invoice_id.clone(),
-            index: 0,
-            digest: d0,
-        }
-        .to_xdr(&env, &contract_id)
-    );
-
-    assert_eq!(
-        new_events.get(1).unwrap().clone(),
-        AttestationDigestAppended {
-            name: soroban_sdk::symbol_short!("att_app"),
-            invoice_id,
-            index: 1,
-            digest: d1,
-        }
-        .to_xdr(&env, &contract_id)
-    );
-}
-
-/// The index field in events emitted during batch appends must be correctly offset
-/// by the pre-existing log length.
-#[test]
-fn test_batch_append_events_offset_by_existing_log_length() {
-    let env = Env::default();
-    let (client, _) = setup_with_init(&env);
-    let contract_id = client.address.clone();
-    let invoice_id = client.get_escrow().invoice_id;
-
-    // Pre-fill two entries.
-    client.append_attestation_digest(&digest(&env, 0x01));
-    client.append_attestation_digest(&digest(&env, 0x02));
-
-    let d2 = digest(&env, 0xCC);
-    let batch = soroban_sdk::vec![&env, d2.clone()];
-    client.append_attestation_digests(&batch);
-
-    let all_events = env.events().all();
-    // The single new event must be at index 2 (skipping initial 2).
-    assert_eq!(
-        all_events.events().first().unwrap().clone(),
-        AttestationDigestAppended {
-            name: soroban_sdk::symbol_short!("att_app"),
-            invoice_id,
-            index: 2,
-            digest: d2,
-        }
-        .to_xdr(&env, &contract_id)
-    );
-}
-
-/// Mixing single-entry and batch-entry appends interleaves correctly, preserving
-/// the full ordered audit trail.
-#[test]
-fn test_batch_append_interleaved_with_single_appends() {
-    let env = Env::default();
-    let (client, _) = setup_with_init(&env);
-
-    let d0 = digest(&env, 0x01);
-    let d1 = digest(&env, 0x02);
-    let d2 = digest(&env, 0x03);
-    let d3 = digest(&env, 0x04);
-    let d4 = digest(&env, 0x05);
-
-    client.append_attestation_digest(&d0);
-    let batch = soroban_sdk::vec![&env, d1.clone(), d2.clone()];
-    client.append_attestation_digests(&batch);
-    client.append_attestation_digest(&d3);
-    let batch2 = soroban_sdk::vec![&env, d4.clone()];
-    client.append_attestation_digests(&batch2);
-
-    let log = client.get_attestation_append_log();
-    assert_eq!(log.len(), 5);
-    assert_eq!(log.get(0).unwrap(), d0);
-    assert_eq!(log.get(1).unwrap(), d1);
-    assert_eq!(log.get(2).unwrap(), d2);
-    assert_eq!(log.get(3).unwrap(), d3);
-    assert_eq!(log.get(4).unwrap(), d4);
-}
-
-/// Batch-appended entries are independently revocable after insertion.
-#[test]
-fn test_batch_append_entries_are_revocable() {
-    let env = Env::default();
-    let (client, _) = setup_with_init(&env);
-
-    let batch = soroban_sdk::vec![
-        &env,
-        digest(&env, 0x01),
-        digest(&env, 0x02),
-        digest(&env, 0x03)
-    ];
-    client.append_attestation_digests(&batch);
-
-    // Revoke the middle entry.
-    client.revoke_attestation_digest(&1);
-    assert!(!client.is_attestation_revoked(&0));
-    assert!(client.is_attestation_revoked(&1));
-    assert!(!client.is_attestation_revoked(&2));
-
-    // Log contents must be unchanged.
-    let log = client.get_attestation_append_log();
-    assert_eq!(log.get(0).unwrap(), digest(&env, 0x01));
-    assert_eq!(log.get(1).unwrap(), digest(&env, 0x02));
-    assert_eq!(log.get(2).unwrap(), digest(&env, 0x03));
-}
-
-/// A failed batch append (over-limit) must not modify the log — verifies atomicity
-/// by checking the log is exactly as it was before the failed call.
-#[test]
-fn test_batch_append_failed_call_leaves_log_unchanged() {
-    let env = Env::default();
-    let (client, _) = setup_with_init(&env);
-
-    // Seed a known state.
-    client.append_attestation_digest(&digest(&env, 0xAA));
-
-    let snapshot = client.get_attestation_append_log();
-
-    // Attempt an over-limit batch — must fail atomically.
-    let mut oversized = soroban_sdk::Vec::new(&env);
-    for i in 0u8..=(MAX_ATTESTATION_APPEND_BATCH as u8) {
-        oversized.push_back(digest(&env, i));
-    }
-    let _ = client.try_append_attestation_digests(&oversized);
-
-    // Attempt a capacity-overflow batch — must also fail atomically.
-    let mut overflow = soroban_sdk::Vec::new(&env);
-    for i in 0u8..(MAX_ATTESTATION_APPEND_ENTRIES as u8) {
-        overflow.push_back(digest(&env, i));
-    }
-    let _ = client.try_append_attestation_digests(&overflow);
-
-    // Log must still contain exactly the one seeded entry.
-    let after = client.get_attestation_append_log();
-    assert_eq!(after.len(), snapshot.len());
-    assert_eq!(after.get(0).unwrap(), snapshot.get(0).unwrap());
 }

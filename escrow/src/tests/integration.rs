@@ -79,6 +79,7 @@ impl InitReentryProbe {
             &None,
             &None,
             &None::<i64>,
+        &None::<u32>,
         );
     }
 }
@@ -110,6 +111,7 @@ fn init_test_escrow(
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 }
 
@@ -168,6 +170,7 @@ fn test_init_rejects_same_parameters_different_admin_and_different_token() {
             &None,
             &None,
             &None::<i64>,
+        &None::<u32>,
         ),
         EscrowError::AlreadyInitialized,
     );
@@ -196,6 +199,7 @@ fn test_init_rejects_same_parameters_different_admin_and_different_token() {
             &None,
             &None,
             &None::<i64>,
+        &None::<u32>,
         ),
         EscrowError::AlreadyInitialized,
     );
@@ -224,6 +228,7 @@ fn test_init_rejects_same_parameters_different_admin_and_different_token() {
             &None,
             &None,
             &None::<i64>,
+        &None::<u32>,
         ),
         EscrowError::AlreadyInitialized,
     );
@@ -314,6 +319,7 @@ fn test_legal_hold_midflow_blocks_and_resumes_with_ordered_events() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     // We will not fund or settle — just exercise legal hold at multiple points.
@@ -325,13 +331,13 @@ fn test_legal_hold_midflow_blocks_and_resumes_with_ordered_events() {
     let mut event_count = 0usize;
 
     // --- Phase 1: enable hold, see it reflected ---
-    client.set_legal_hold(&true);
-    event_count += env.events().all().events().len();
+    client.set_legal_hold(&true, &0u32);
+    total_events += env.events().all().events().len();
     assert!(client.get_legal_hold());
 
     // --- Phase 2: clear hold ---
-    client.set_legal_hold(&false);
-    event_count += env.events().all().events().len();
+    client.set_legal_hold(&false, &1u32);
+    total_events += env.events().all().events().len();
     assert!(!client.get_legal_hold());
 
     // --- Phase 3: fund (hold is off) ---
@@ -339,13 +345,13 @@ fn test_legal_hold_midflow_blocks_and_resumes_with_ordered_events() {
     assert_eq!(client.get_escrow().funded_amount, 100_000_000);
 
     // --- Phase 4: enable hold mid-stream (post-fund, pre-settle) ---
-    client.set_legal_hold(&true);
-    event_count += env.events().all().events().len();
+    client.set_legal_hold(&true, &2u32);
+    total_events += env.events().all().events().len();
     assert!(client.get_legal_hold());
 
     // --- Phase 5: clear hold, settle ---
-    client.set_legal_hold(&false);
-    event_count += env.events().all().events().len();
+    client.set_legal_hold(&false, &3u32);
+    total_events += env.events().all().events().len();
     assert!(!client.get_legal_hold());
 
     // --- Phase 6: settle ---
@@ -353,13 +359,13 @@ fn test_legal_hold_midflow_blocks_and_resumes_with_ordered_events() {
     assert_eq!(client.get_escrow().status, 2);
 
     // --- Phase 7: enable hold again after settlement ---
-    client.set_legal_hold(&true);
-    event_count += env.events().all().events().len();
+    client.set_legal_hold(&true, &4u32);
+    total_events += env.events().all().events().len();
     assert!(client.get_legal_hold());
 
     // --- Phase 8: clear hold for cleanup ---
-    client.set_legal_hold(&false);
-    event_count += env.events().all().events().len();
+    client.set_legal_hold(&false, &5u32);
+    total_events += env.events().all().events().len();
     assert!(!client.get_legal_hold());
 
     // --- Event verification ---
@@ -541,6 +547,7 @@ fn test_escrow_gold_standard_happy_path_open_overfund_snapshot_settle_claim() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let initial_escrow = client.get_escrow();
@@ -618,9 +625,7 @@ fn test_escrow_gold_standard_happy_path_open_overfund_snapshot_settle_claim() {
     // === PHASE 4: SETTLE - SME Settles After Maturity ===
 
     // Fast-forward time to maturity
-    env.ledger().with_mut(|li| {
-        li.timestamp = MATURITY_SECS + 1;
-    });
+    env.ledger().set_timestamp(MATURITY_SECS + 1);
 
     let settled_escrow = client.settle();
     assert_eq!(
@@ -773,6 +778,7 @@ fn test_escrow_tiered_yield_with_commitment_locks() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let investor_base = Address::generate(&env);
@@ -843,9 +849,7 @@ fn test_escrow_tiered_yield_with_commitment_locks() {
     );
 
     // Fast-forward past all lock periods
-    env.ledger().with_mut(|li| {
-        li.timestamp = tier3_claim_time + 1;
-    });
+    env.ledger().set_timestamp(tier3_claim_time + 1);
 
     // All investors can now claim with their respective yields
     client.claim_investor_payout(&investor_base);
@@ -902,6 +906,7 @@ fn test_collateral_record_is_metadata_only_and_does_not_invoke_token_contract() 
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let commitment = client.record_sme_collateral_commitment(&symbol_short!("USDC"), &5_000i128);
@@ -1075,6 +1080,7 @@ fn test_noop_call_emits_versioned_event_when_event_is_emitted() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     client.set_legal_hold(&true);
@@ -1119,6 +1125,7 @@ fn test_multiple_versioned_events_in_one_transaction() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let inv_a = Address::generate(&env);
@@ -1210,7 +1217,7 @@ fn test_collateral_replacement_event_contains_prior_amount() {
     );
 
     // Advance timestamp and record replacement
-    env.ledger().with_mut(|li| li.timestamp = 20000);
+    env.ledger().set_timestamp(20000);
     client.record_sme_collateral_commitment(&symbol_short!("USDC"), &7_000i128);
 
     // Check second event has prior_amount = 5000 (replacement)
@@ -1337,6 +1344,7 @@ fn test_legal_hold_midflow_blocks_then_resumes_with_ordered_events() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     // Initial funding succeeds while hold is off.
@@ -1344,7 +1352,7 @@ fn test_legal_hold_midflow_blocks_then_resumes_with_ordered_events() {
     assert_eq!(open_state.status, 0);
 
     // Hold on: next funding + settle attempts must be blocked.
-    client.set_legal_hold(&true);
+    client.set_legal_hold(&true, &0u32);
     assert!(client.get_legal_hold());
 
     let fund_blocked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -1364,7 +1372,7 @@ fn test_legal_hold_midflow_blocks_then_resumes_with_ordered_events() {
     );
 
     // Hold off: flow resumes and reaches funded + settled.
-    client.clear_legal_hold();
+    client.clear_legal_hold(&1u32);
     assert!(!client.get_legal_hold());
 
     let funded_state = client.fund(&investor, &6_000i128);
@@ -1463,6 +1471,7 @@ fn setup_withdraw_with_token<'a>(
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let investor = soroban_sdk::Address::generate(env);
@@ -1470,6 +1479,101 @@ fn setup_withdraw_with_token<'a>(
     client.fund(&investor, &target);
 
     (client, escrow_id, token, sme)
+}
+
+/// Cancel -> partial refund -> sweep liability-floor lifecycle.
+///
+/// Steps:
+/// 1. Init escrow with a real SAC token and fund by multiple investors (remain Open).
+/// 2. Mint `funded_amount + extra_dust` into the contract to simulate stray tokens.
+/// 3. Admin `cancel_funding` -> status 4 (cancelled).
+/// 4. One investor calls `refund` (distributed_principal increments).
+/// 5. Attempt a sweep larger than the extra dust fails (liability floor enforced).
+/// 6. Sweep up to the extra dust succeeds and transfers to treasury.
+/// 7. Double-refund of same investor panics with `NoContributionToRefund` behavior.
+#[test]
+fn test_cancel_refund_sweep_liability_floor() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let sac = install_stellar_asset_token(&env);
+    use crate::LiquifactEscrow;
+
+    // Deploy escrow instance bound to the SAC token
+    let escrow_id = env.register(LiquifactEscrow, ());
+    let client = LiquifactEscrowClient::new(&env, &escrow_id);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let treasury = Address::generate(&env);
+
+    // Small target so test numbers are easy to reason about
+    let target = 1_000_000i128;
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "CANREF001"),
+        &sme,
+        &target,
+        &800i64,
+        &0u64,
+        &sac.id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+    );
+
+    // Two investors fund while escrow remains OPEN (status 0)
+    let inv1 = Address::generate(&env);
+    let inv2 = Address::generate(&env);
+    let a1 = 200_000i128;
+    let a2 = 300_000i128;
+    client.fund(&inv1, &a1);
+    client.fund(&inv2, &a2);
+    let total = a1 + a2;
+    assert_eq!(client.get_escrow().funded_amount, total);
+
+    // Mint funded_amount + extra dust into the escrow contract
+    let extra = 50_000i128;
+    sac.stellar.mint(&escrow_id, &(total + extra));
+
+    // Cancel funding (admin)
+    client.cancel_funding(&0u32);
+    assert_eq!(client.get_escrow().status, 4u32);
+
+    // Refund inv1: should succeed, mark refunded, and increment DistributedPrincipal
+    client.refund(&inv1);
+    assert!(client.is_investor_refunded(&inv1));
+    assert_eq!(client.get_distributed_principal(), a1);
+
+    // Double-refund for inv1 must panic (no contribution to refund)
+    let dup_refund = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.refund(&inv1);
+    }));
+    assert!(dup_refund.is_err(), "double-refund must panic");
+
+    // Attempt sweep larger than allowed extra must fail (liability floor)
+    let too_large = extra + 1i128;
+    let sweep_fail = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.sweep_terminal_dust(&too_large);
+    }));
+    assert!(
+        sweep_fail.is_err(),
+        "sweep exceeding extra dust must be blocked"
+    );
+
+    // Sweep exactly the extra dust should succeed and transfer to treasury
+    let swept = client.sweep_terminal_dust(&extra);
+    assert_eq!(swept, extra);
+    assert_eq!(sac.token.balance(&treasury), extra);
+
+    // Refund remaining investor to complete distributed principal accounting
+    client.refund(&inv2);
+    assert!(client.is_investor_refunded(&inv2));
+    assert_eq!(client.get_distributed_principal(), total);
 }
 
 /// SME receives exactly `funded_amount` tokens and the escrow contract balance
@@ -1543,7 +1647,7 @@ fn withdraw_blocked_by_legal_hold_integration() {
     let (client, _escrow_id, _token, _sme) =
         setup_withdraw_with_token(&env, 10_000_000i128, "WD_LH001");
 
-    client.set_legal_hold(&true);
+    client.set_legal_hold(&true, &0u32);
     client.withdraw(); // must panic: LegalHoldBlocksWithdrawal
 }
 
@@ -1582,6 +1686,7 @@ fn withdraw_rejected_wrong_status_open() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
     // No funding — status is 0.
     client.withdraw(); // must panic: WithdrawalNotFunded
@@ -1626,6 +1731,7 @@ fn withdraw_rejected_insufficient_contract_balance() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let investor = soroban_sdk::Address::generate(&env);
@@ -1728,6 +1834,7 @@ fn test_cancellation_refund_sweep_lifecycle() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let alice = soroban_sdk::Address::generate(&env);
@@ -1826,6 +1933,7 @@ fn test_refund_batch_matches_individual_refunds() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let inv_a = Address::generate(&env);
@@ -1889,6 +1997,7 @@ fn test_refund_batch_skips_already_refunded() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
     let inv = Address::generate(&env);
     token.stellar.mint(&inv, &10_000i128);
@@ -1937,6 +2046,7 @@ fn init_and_propose_admin_transfer(
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
     client.propose_admin_transfer(
         proposed_admin,
@@ -2057,6 +2167,7 @@ fn test_admin_recovery_requires_admin_auth() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let reason = soroban_sdk::String::from_str(&env, "lost");

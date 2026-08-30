@@ -50,6 +50,7 @@ fn setup_open(
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
     (client, admin, sme, tok, tre)
 }
@@ -140,6 +141,7 @@ fn test_lower_max_unique_investors_rejects_when_cancelled() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
     cancel(&client, &admin);
     let result = client.try_lower_max_unique_investors(&5u32);
@@ -175,6 +177,7 @@ fn test_lower_min_contribution_floor_rejects_when_cancelled() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
     cancel(&client, &admin);
     let result = client.try_lower_min_contribution_floor(&50i128);
@@ -246,6 +249,7 @@ fn test_lower_max_unique_investors_succeeds_when_open() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
     // Lowering from 10 to 5 should succeed while open.
     client.lower_max_unique_investors(&5u32);

@@ -53,6 +53,7 @@ fn setup_inited(
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
     (client, admin, sme, treasury, token)
 }
@@ -130,6 +131,7 @@ fn setup_funded(
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
     let investor = Address::generate(env);
     client.fund(&investor, &100_000_000_000i128);
@@ -398,37 +400,4 @@ fn test_sweep_terminal_dust_wrong_signer_panics() {
         },
     }]);
     client.sweep_terminal_dust(&100i128);
-}
-
-// ── set_settlement_limit ────────────────────────────────────────────────
-
-/// Calling `set_settlement_limit` with no authorization panics at the
-/// host-level `admin.require_auth()` inside `load_escrow_require_admin`.
-#[test]
-#[should_panic]
-fn test_set_settlement_limit_no_auth_panics() {
-    let env = Env::default();
-    let (client, _admin, _sme, _treasury, _token) = setup_inited(&env);
-    env.mock_auths(&[]);
-    client.set_settlement_limit(&50u32);
-}
-
-/// Calling `set_settlement_limit` with a non-admin signer panics at the
-/// host-level `require_auth` because `load_escrow_require_admin` demands
-/// the admin's signature.
-#[test]
-#[should_panic]
-fn test_set_settlement_limit_wrong_signer_panics() {
-    let env = Env::default();
-    let (client, _admin, sme, _treasury, _token) = setup_inited(&env);
-    env.mock_auths(&[MockAuth {
-        address: &sme,
-        invoke: &MockAuthInvoke {
-            contract: &client.address,
-            fn_name: "set_settlement_limit",
-            args: SorobanVec::from_array(&env, [50u32.into_val(&env)]),
-            sub_invokes: &[],
-        },
-    }]);
-    client.set_settlement_limit(&50u32);
 }

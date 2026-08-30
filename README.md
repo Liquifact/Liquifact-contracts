@@ -169,8 +169,9 @@ liquifact-contracts/
 | `sweep_terminal_dust` | Treasury | Treasury sweeps rounding residue from a terminal escrow. |
 | `migrate` | Admin | Schema version gate — **typed errors on all paths** in the current release (codes 90–92). |
 | `set_legal_hold` | Admin | Admin activates/clears compliance hold. |
-| `set_paused` | Admin | Admin toggles a lightweight operational pause (incident response) that blocks `fund`, `settle`, `withdraw`, and `claim_investor_payout`. Orthogonal to legal hold; single-call toggle with no clear delay. |
+| `set_paused(active, scope, reason)` | Admin | Admin toggles a lightweight operational pause (incident response) that blocks `fund`, `settle`, `withdraw`, and `claim_investor_payout`, carrying a typed [`PauseScope`] (which flows) and [`PauseReason`] (why). Orthogonal to legal hold; single-call toggle with no clear delay. |
 | `is_paused` | — | Read the current operational pause flag (defaults to `false`). Reflects auto-expiry once a pause max duration is configured. |
+| `get_pause_state` | — | Pure read of the typed pause state: `Option<PauseState>` with the active `scope`, `reason`, and `activated_at`, or `None` when not paused. Never blocked, no auth. |
 | `set_pause_max_duration` | Admin | Configure how long (seconds) an operational pause may stay active before it auto-expires. `0` disables the limit (legacy behavior: pause blocks indefinitely until explicitly cleared). Nonzero values must fall within `[MIN_PAUSE_MAX_DURATION_SECS, MAX_PAUSE_MAX_DURATION_SECS]` or the call fails with `PauseMaxDurationOutOfRange` (code 223). Emits `PauseMaxDurationUpdated`. |
 | `get_pause_max_duration` | — | Read the configured pause auto-expiry duration (`0` = unlimited). |
 | `set_pause_rate_limit` | Admin | Configure a cap (`max_toggles`) on `set_paused` calls allowed within a rolling `window_secs` window. `(0, 0)` disables rate limiting (legacy behavior). A nonzero `max_toggles` must pair with a nonzero `window_secs` (`PauseRateLimitInvalidCombination`, code 226) and both must fall within their configured bounds (`PauseToggleLimitOutOfRange` code 224, `PauseToggleWindowOutOfRange` code 225). Reconfiguring resets the current window. Emits `PauseRateLimitUpdated`. |
@@ -344,11 +345,15 @@ The escrow supports cancellation by the admin under specific criteria, unlocking
 - **Legal hold:** governance-controlled; misuse risk is mitigated by using a
   multisig `admin` and operational policy (see
   [`docs/OPERATOR_RUNBOOK.md`](docs/OPERATOR_RUNBOOK.md)).
-- **Operational pause:** admin-only `set_paused` is a lightweight incident-response
-  circuit breaker, **orthogonal to legal hold** — no compliance semantics and no
-  clear delay. It gates `fund`, `settle`, `withdraw`, and `claim_investor_payout`
-  as a read-only precondition before `require_auth` (typed errors 201–204). Either
-  flag blocks independently; clearing one never clears the other.
+- **Operational pause:** admin-only `set_paused(active, scope, reason)` is a
+  lightweight incident-response circuit breaker, **orthogonal to legal hold** — no
+  compliance semantics and no clear delay. It carries a typed [`PauseScope`] (which
+  flows are blocked: `Funding`/`Settlement`/`Withdrawal`/`Claims`/`All`) and a typed
+  [`PauseReason`]; gates are scope-aware so a single-scope pause only blocks that
+  family. Safe read-only [`LiquifactEscrow::get_pause_state`] exposes `(scope,
+  reason)` without auth. A wrong-scope unpause fails with `PauseScopeMismatch` (246);
+  gates fire as a read-only precondition before `require_auth` (typed errors 210–213).
+  Either flag blocks independently; clearing one never clears the other.
 - **Pause limit configuration:** two independent, admin-configurable bounds guard the
   pause circuit breaker itself, both defaulting to **disabled** so pre-existing
   deployments behave identically until an admin opts in:

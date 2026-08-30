@@ -32,6 +32,7 @@ fn init_open(
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
     (token, treasury)
 }
@@ -81,6 +82,7 @@ fn init_funded_with_real_token<'a>(
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
     sac_admin.mint(investor, &TARGET);
     client.fund(investor, &TARGET);
@@ -118,6 +120,7 @@ fn init_settled<'a>(
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
     let sac_admin = StellarAssetClient::new(env, &token);
     sac_admin.mint(investor, &TARGET);
@@ -135,7 +138,7 @@ fn fund_blocked_when_paused() {
     let (client, admin, sme) = setup(&env);
     let investor = Address::generate(&env);
     init_open(&client, &env, &admin, &sme, "PAU001");
-    client.set_paused(&true);
+    client.set_paused(&true, &PauseScope::All, &PauseReason::Incident);
     client.fund(&investor, &TARGET);
 }
 
@@ -145,9 +148,9 @@ fn fund_succeeds_after_unpause() {
     let (client, admin, sme) = setup(&env);
     let investor = Address::generate(&env);
     init_open(&client, &env, &admin, &sme, "PAU002");
-    client.set_paused(&true);
+    client.set_paused(&true, &PauseScope::All, &PauseReason::Incident);
     assert!(client.is_paused());
-    client.set_paused(&false);
+    client.set_paused(&false, &PauseScope::All, &PauseReason::Incident);
     assert!(!client.is_paused());
     let escrow = client.fund(&investor, &TARGET);
     assert_eq!(escrow.status, 1);
@@ -162,7 +165,7 @@ fn fund_with_commitment_blocked_when_paused() {
     let (client, admin, sme) = setup(&env);
     let investor = Address::generate(&env);
     init_open(&client, &env, &admin, &sme, "PAU003");
-    client.set_paused(&true);
+    client.set_paused(&true, &PauseScope::All, &PauseReason::Incident);
     client.fund_with_commitment(&investor, &TARGET, &0u64);
 }
 
@@ -172,8 +175,8 @@ fn fund_with_commitment_succeeds_after_unpause() {
     let (client, admin, sme) = setup(&env);
     let investor = Address::generate(&env);
     init_open(&client, &env, &admin, &sme, "PAU004");
-    client.set_paused(&true);
-    client.set_paused(&false);
+    client.set_paused(&true, &PauseScope::All, &PauseReason::Incident);
+    client.set_paused(&false, &PauseScope::All, &PauseReason::Incident);
     let escrow = client.fund_with_commitment(&investor, &TARGET, &0u64);
     assert_eq!(escrow.status, 1);
 }
@@ -187,7 +190,7 @@ fn fund_batch_blocked_when_paused() {
     let (client, admin, sme) = setup(&env);
     let investor = Address::generate(&env);
     init_open(&client, &env, &admin, &sme, "PAU005");
-    client.set_paused(&true);
+    client.set_paused(&true, &PauseScope::All, &PauseReason::Incident);
     let entries = SorobanVec::from_array(&env, [(investor.clone(), TARGET)]);
     client.fund_batch(&entries);
 }
@@ -198,8 +201,8 @@ fn fund_batch_succeeds_after_unpause() {
     let (client, admin, sme) = setup(&env);
     let investor = Address::generate(&env);
     init_open(&client, &env, &admin, &sme, "PAU006");
-    client.set_paused(&true);
-    client.set_paused(&false);
+    client.set_paused(&true, &PauseScope::All, &PauseReason::Incident);
+    client.set_paused(&false, &PauseScope::All, &PauseReason::Incident);
     let entries = SorobanVec::from_array(&env, [(investor.clone(), TARGET)]);
     let escrow = client.fund_batch(&entries);
     assert_eq!(escrow.status, 1);
@@ -214,7 +217,7 @@ fn settle_blocked_when_paused() {
     let (client, admin, sme) = setup(&env);
     let investor = Address::generate(&env);
     init_funded(&client, &env, &admin, &sme, &investor, "PAU007");
-    client.set_paused(&true);
+    client.set_paused(&true, &PauseScope::All, &PauseReason::Incident);
     client.settle();
 }
 
@@ -224,10 +227,10 @@ fn settle_succeeds_after_unpause() {
     let (client, admin, sme) = setup(&env);
     let investor = Address::generate(&env);
     init_funded(&client, &env, &admin, &sme, &investor, "PAU008");
-    client.set_paused(&true);
-    client.set_paused(&false);
-    let escrow = client.settle();
-    assert_eq!(escrow.status, 2);
+    client.set_paused(&true, &PauseScope::All, &PauseReason::Incident);
+    client.set_paused(&false, &PauseScope::All, &PauseReason::Incident);
+    let result = client.settle();
+    assert_eq!(result.escrow.status, 2);
 }
 
 // ── 5. withdraw ──────────────────────────────────────────────────────────────
@@ -241,7 +244,7 @@ fn withdraw_blocked_when_paused() {
     let sme = Address::generate(&env);
     let investor = Address::generate(&env);
     let (client, _escrow_id) = init_funded_with_real_token(&env, &admin, &sme, &investor, "PAU009");
-    client.set_paused(&true);
+    client.set_paused(&true, &PauseScope::All, &PauseReason::Incident);
     client.withdraw();
 }
 
@@ -253,8 +256,8 @@ fn withdraw_succeeds_after_unpause() {
     let sme = Address::generate(&env);
     let investor = Address::generate(&env);
     let (client, _escrow_id) = init_funded_with_real_token(&env, &admin, &sme, &investor, "PAU010");
-    client.set_paused(&true);
-    client.set_paused(&false);
+    client.set_paused(&true, &PauseScope::All, &PauseReason::Incident);
+    client.set_paused(&false, &PauseScope::All, &PauseReason::Incident);
     let escrow = client.withdraw();
     assert_eq!(escrow.status, 3);
 }
@@ -269,7 +272,7 @@ fn claim_investor_payout_blocked_when_paused() {
     let investor = Address::generate(&env);
     init_funded(&client, &env, &admin, &sme, &investor, "PAU011");
     client.settle();
-    client.set_paused(&true);
+    client.set_paused(&true, &PauseScope::All, &PauseReason::Incident);
     client.claim_investor_payout(&investor);
 }
 
@@ -280,8 +283,8 @@ fn claim_investor_payout_succeeds_after_unpause() {
     let investor = Address::generate(&env);
     init_funded(&client, &env, &admin, &sme, &investor, "PAU012");
     client.settle();
-    client.set_paused(&true);
-    client.set_paused(&false);
+    client.set_paused(&true, &PauseScope::All, &PauseReason::Incident);
+    client.set_paused(&false, &PauseScope::All, &PauseReason::Incident);
     client.claim_investor_payout(&investor);
     assert!(client.is_investor_claimed(&investor));
 }
@@ -295,7 +298,7 @@ fn read_views_unaffected_by_pause() {
     let investor = Address::generate(&env);
     init_funded(&client, &env, &admin, &sme, &investor, "PAU013");
 
-    client.set_paused(&true);
+    client.set_paused(&true, &PauseScope::All, &PauseReason::Incident);
     assert!(client.is_paused());
 
     // get_escrow
@@ -342,7 +345,7 @@ fn read_views_unaffected_by_pause_on_open_escrow() {
     let (client, admin, sme) = setup(&env);
     init_open(&client, &env, &admin, &sme, "PAU014");
 
-    client.set_paused(&true);
+    client.set_paused(&true, &PauseScope::All, &PauseReason::Incident);
     assert!(client.is_paused());
 
     // get_escrow on open escrow
@@ -365,9 +368,9 @@ fn set_paused_by_admin_succeeds() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
     init_open(&client, &env, &admin, &sme, "PAU015");
-    client.set_paused(&true);
+    client.set_paused(&true, &PauseScope::All, &PauseReason::Incident);
     assert!(client.is_paused());
-    client.set_paused(&false);
+    client.set_paused(&false, &PauseScope::All, &PauseReason::Incident);
     assert!(!client.is_paused());
 }
 
@@ -378,7 +381,7 @@ fn set_paused_by_non_admin_panics() {
     let (client, admin, sme) = setup(&env);
     init_open(&client, &env, &admin, &sme, "PAU016");
     env.mock_auths(&[]);
-    client.set_paused(&true);
+    client.set_paused(&true, &PauseScope::All, &PauseReason::Incident);
 }
 
 // ── 9. Redundant no-op calls ─────────────────────────────────────────────────
@@ -388,10 +391,10 @@ fn set_paused_true_when_already_true_is_noop() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
     init_open(&client, &env, &admin, &sme, "PAU017");
-    client.set_paused(&true);
+    client.set_paused(&true, &PauseScope::All, &PauseReason::Incident);
     assert!(client.is_paused());
     // Second call should succeed (no-op)
-    client.set_paused(&true);
+    client.set_paused(&true, &PauseScope::All, &PauseReason::Incident);
     assert!(client.is_paused());
 }
 
@@ -402,7 +405,7 @@ fn set_paused_false_when_already_false_is_noop() {
     init_open(&client, &env, &admin, &sme, "PAU018");
     assert!(!client.is_paused());
     // Default is false, calling set_paused(false) should succeed
-    client.set_paused(&false);
+    client.set_paused(&false, &PauseScope::All, &PauseReason::Incident);
     assert!(!client.is_paused());
 }
 
@@ -415,7 +418,7 @@ fn set_paused_emits_event() {
     let contract_id = client.address.clone();
     init_open(&client, &env, &admin, &sme, "PAU019");
 
-    client.set_paused(&true);
+    client.set_paused(&true, &PauseScope::All, &PauseReason::Incident);
     let events = env.events().all();
     let last = events.events().last().unwrap().clone();
     assert_eq!(
@@ -424,11 +427,13 @@ fn set_paused_emits_event() {
             name: symbol_short!("paused"),
             invoice_id: client.get_escrow().invoice_id,
             active: 1,
+            scope: PauseScope::All,
+            reason: PauseReason::Incident,
         }
         .to_xdr(&env, &contract_id)
     );
 
-    client.set_paused(&false);
+    client.set_paused(&false, &PauseScope::All, &PauseReason::Incident);
     let events = env.events().all();
     let last = events.events().last().unwrap().clone();
     assert_eq!(
@@ -437,6 +442,8 @@ fn set_paused_emits_event() {
             name: symbol_short!("paused"),
             invoice_id: client.get_escrow().invoice_id,
             active: 0,
+            scope: PauseScope::All,
+            reason: PauseReason::Incident,
         }
         .to_xdr(&env, &contract_id)
     );
@@ -451,7 +458,7 @@ fn pause_orthogonal_to_legal_hold() {
     init_open(&client, &env, &admin, &sme, "PAU020");
 
     // Pause doesn't affect legal hold
-    client.set_paused(&true);
+    client.set_paused(&true, &PauseScope::All, &PauseReason::Incident);
     assert!(!client.get_legal_hold());
 
     // Legal hold doesn't affect pause
@@ -460,7 +467,7 @@ fn pause_orthogonal_to_legal_hold() {
     assert!(client.get_legal_hold());
 
     // Clearing pause leaves legal hold intact
-    client.set_paused(&false);
+    client.set_paused(&false, &PauseScope::All, &PauseReason::Incident);
     assert!(!client.is_paused());
     assert!(client.get_legal_hold());
 
@@ -480,7 +487,7 @@ fn pause_gate_fires_before_status_validation_fund() {
     let investor = Address::generate(&env);
     init_funded(&client, &env, &admin, &sme, &investor, "PAU021");
     // Escrow is funded (status=1), but paused should block before "not open for funding"
-    client.set_paused(&true);
+    client.set_paused(&true, &PauseScope::All, &PauseReason::Incident);
     client.fund(&investor, &TARGET);
 }
 
@@ -491,7 +498,7 @@ fn pause_gate_fires_before_legal_hold_fund() {
     let (client, admin, sme) = setup(&env);
     let investor = Address::generate(&env);
     init_open(&client, &env, &admin, &sme, "PAU022");
-    client.set_paused(&true);
+    client.set_paused(&true, &PauseScope::All, &PauseReason::Incident);
     client.set_legal_hold(&true);
     // Should panic with PausedBlocksFunding, not LegalHoldBlocksFunding
     client.fund(&investor, &TARGET);
@@ -504,7 +511,7 @@ fn pause_gate_fires_before_legal_hold_settle() {
     let (client, admin, sme) = setup(&env);
     let investor = Address::generate(&env);
     init_funded(&client, &env, &admin, &sme, &investor, "PAU023");
-    client.set_paused(&true);
+    client.set_paused(&true, &PauseScope::All, &PauseReason::Incident);
     client.set_legal_hold(&true);
     // Should panic with PausedBlocksSettlement, not LegalHoldBlocksSettlement
     client.settle();
@@ -519,7 +526,7 @@ fn pause_gate_fires_before_legal_hold_withdraw() {
     let sme = Address::generate(&env);
     let investor = Address::generate(&env);
     let (client, _escrow_id) = init_funded_with_real_token(&env, &admin, &sme, &investor, "PAU024");
-    client.set_paused(&true);
+    client.set_paused(&true, &PauseScope::All, &PauseReason::Incident);
     client.set_legal_hold(&true);
     // Should panic with PausedBlocksWithdrawal, not LegalHoldBlocksWithdrawal
     client.withdraw();
@@ -533,7 +540,7 @@ fn pause_gate_fires_before_legal_hold_claim() {
     let investor = Address::generate(&env);
     init_funded(&client, &env, &admin, &sme, &investor, "PAU025");
     client.settle();
-    client.set_paused(&true);
+    client.set_paused(&true, &PauseScope::All, &PauseReason::Incident);
     client.set_legal_hold(&true);
     // Should panic with PausedBlocksInvestorClaims, not LegalHoldBlocksInvestorClaims
     client.claim_investor_payout(&investor);
@@ -547,7 +554,7 @@ fn fund_returns_typed_error_when_paused() {
     let (client, admin, sme) = setup(&env);
     let investor = Address::generate(&env);
     init_open(&client, &env, &admin, &sme, "PAU026");
-    client.set_paused(&true);
+    client.set_paused(&true, &PauseScope::All, &PauseReason::Incident);
     assert_contract_error(
         client.try_fund(&investor, &TARGET),
         EscrowError::PausedBlocksFunding,
@@ -560,7 +567,7 @@ fn settle_returns_typed_error_when_paused() {
     let (client, admin, sme) = setup(&env);
     let investor = Address::generate(&env);
     init_funded(&client, &env, &admin, &sme, &investor, "PAU027");
-    client.set_paused(&true);
+    client.set_paused(&true, &PauseScope::All, &PauseReason::Incident);
     assert_contract_error(client.try_settle(), EscrowError::PausedBlocksSettlement);
 }
 
@@ -572,7 +579,7 @@ fn withdraw_returns_typed_error_when_paused() {
     let sme = Address::generate(&env);
     let investor = Address::generate(&env);
     let (client, _escrow_id) = init_funded_with_real_token(&env, &admin, &sme, &investor, "PAU028");
-    client.set_paused(&true);
+    client.set_paused(&true, &PauseScope::All, &PauseReason::Incident);
     assert_contract_error(client.try_withdraw(), EscrowError::PausedBlocksWithdrawal);
 }
 
@@ -583,7 +590,7 @@ fn claim_returns_typed_error_when_paused() {
     let investor = Address::generate(&env);
     init_funded(&client, &env, &admin, &sme, &investor, "PAU029");
     client.settle();
-    client.set_paused(&true);
+    client.set_paused(&true, &PauseScope::All, &PauseReason::Incident);
     assert_contract_error(
         client.try_claim_investor_payout(&investor),
         EscrowError::PausedBlocksInvestorClaims,
@@ -600,16 +607,163 @@ fn pause_toggle_cycle() {
     init_open(&client, &env, &admin, &sme, "PAU030");
 
     assert!(!client.is_paused());
-    client.set_paused(&true);
+    client.set_paused(&true, &PauseScope::All, &PauseReason::Incident);
     assert!(client.is_paused());
-    client.set_paused(&false);
+    client.set_paused(&false, &PauseScope::All, &PauseReason::Incident);
     assert!(!client.is_paused());
-    client.set_paused(&true);
+    client.set_paused(&true, &PauseScope::All, &PauseReason::Incident);
     assert!(client.is_paused());
-    client.set_paused(&false);
+    client.set_paused(&false, &PauseScope::All, &PauseReason::Incident);
     assert!(!client.is_paused());
 
     // Funding should succeed after cycle
     let escrow = client.fund(&investor, &TARGET);
     assert_eq!(escrow.status, 1);
+}
+
+// ── 15. Typed pause reason + scope ─────────────────────────────────────────────
+
+#[test]
+fn get_pause_state_defaults_to_none() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    init_open(&client, &env, &admin, &sme, "PAUSC001");
+    assert_eq!(client.get_pause_state(), None);
+    assert!(!client.is_paused());
+}
+
+// pause one scope: a Funding-scoped pause blocks only funding, other flows stay open.
+#[test]
+fn pause_single_scope_funding_blocks_only_funding() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    init_funded(&client, &env, &admin, &sme, &investor, "PAUSC002");
+
+    client.set_paused(&true, &PauseScope::Funding, &PauseReason::Maintenance);
+    assert!(client.is_paused());
+
+    // Funding is blocked with the typed error.
+    assert_contract_error(
+        client.try_fund(&investor, &TARGET),
+        EscrowError::PausedBlocksFunding,
+    );
+    // Settlement is a different scope and must still proceed.
+    assert_eq!(client.settle().escrow.status, 2);
+
+    // The typed, read-only state is exposed even while other flows run.
+    let state = client.get_pause_state().unwrap();
+    assert_eq!(state.scope, PauseScope::Funding);
+    assert_eq!(state.reason, PauseReason::Maintenance);
+}
+
+// pause one scope on the Settlement family must NOT block funding.
+#[test]
+fn pause_settlement_scope_blocks_only_settlement() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    init_open(&client, &env, &admin, &sme, "PAUSC003");
+
+    client.set_paused(
+        &true,
+        &PauseScope::Settlement,
+        &PauseReason::TokenIntegration,
+    );
+    assert!(client.is_paused());
+
+    // Funding is a different scope and must still succeed.
+    assert_eq!(client.fund(&investor, &TARGET).status, 1);
+    // Settlement is blocked with the typed error.
+    assert_contract_error(client.try_settle(), EscrowError::PausedBlocksSettlement);
+}
+
+// pause all scopes: blocks every gated entrypoint family.
+#[test]
+fn pause_all_scope_blocks_every_gated_entrypoint() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    init_funded(&client, &env, &admin, &sme, &investor, "PAUSC004");
+
+    client.set_paused(&true, &PauseScope::All, &PauseReason::Security);
+    assert!(client.is_paused());
+    assert_contract_error(
+        client.try_fund(&investor, &TARGET),
+        EscrowError::PausedBlocksFunding,
+    );
+    assert_contract_error(client.try_settle(), EscrowError::PausedBlocksSettlement);
+
+    let state = client.get_pause_state().unwrap();
+    assert_eq!(state.scope, PauseScope::All);
+    assert_eq!(state.reason, PauseReason::Security);
+}
+
+// unpause wrong scope: a non-matching clear is rejected and the pause stays in force.
+#[test]
+fn unpause_wrong_scope_errors_and_keeps_pause() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    init_open(&client, &env, &admin, &sme, "PAUSC005");
+    client.set_paused(&true, &PauseScope::Funding, &PauseReason::Incident);
+    assert!(client.is_paused());
+
+    // Clearing a different (wrong) scope fails with a typed error, never a silent no-op.
+    assert_contract_error(
+        client.try_set_paused(&false, &PauseScope::Settlement, &PauseReason::Incident),
+        EscrowError::PauseScopeMismatch,
+    );
+    // The pause is still effective.
+    assert!(client.is_paused());
+    assert_contract_error(
+        client.try_fund(&investor, &TARGET),
+        EscrowError::PausedBlocksFunding,
+    );
+
+    // A matching clear succeeds.
+    client.set_paused(&false, &PauseScope::Funding, &PauseReason::Incident);
+    assert!(!client.is_paused());
+    assert_eq!(client.get_pause_state(), None);
+}
+
+// unpause with scope=All clears whatever specific scope is active.
+#[test]
+fn unpause_all_scope_clears_specific_scope() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    init_open(&client, &env, &admin, &sme, "PAUSC006");
+    client.set_paused(&true, &PauseScope::Settlement, &PauseReason::Incident);
+    assert!(client.is_paused());
+
+    client.set_paused(&false, &PauseScope::All, &PauseReason::Incident);
+    assert!(!client.is_paused());
+    assert_eq!(client.get_pause_state(), None);
+}
+
+// already paused: re-activating the same scope is an idempotent refresh.
+#[test]
+fn pause_same_scope_again_is_idempotent_refresh() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    init_open(&client, &env, &admin, &sme, "PAUSC007");
+    client.set_paused(&true, &PauseScope::Withdrawal, &PauseReason::Maintenance);
+    assert!(client.is_paused());
+
+    client.set_paused(&true, &PauseScope::Withdrawal, &PauseReason::Maintenance);
+    assert!(client.is_paused());
+    let state = client.get_pause_state().unwrap();
+    assert_eq!(state.scope, PauseScope::Withdrawal);
+    assert_eq!(state.reason, PauseReason::Maintenance);
+}
+
+// unauthorized pause: a non-admin cannot set a scoped pause.
+#[test]
+#[should_panic]
+fn scoped_pause_by_non_admin_panics() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    init_open(&client, &env, &admin, &sme, "PAUSC008");
+    env.mock_auths(&[]);
+    client.set_paused(&true, &PauseScope::Funding, &PauseReason::Security);
 }
