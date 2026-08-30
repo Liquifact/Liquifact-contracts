@@ -18,6 +18,16 @@
 //! it, or redeploy when stored struct layout changes. See `docs/OPERATOR_RUNBOOK.md` for the full
 //! decision tree.
 //!
+//! ## Event topic versioning ([`EVENT_SCHEMA_VERSION`])
+//!
+//! Every lifecycle event emitted by this contract includes a schema version
+//! as the second topic element: `(event_name, EVENT_SCHEMA_VERSION, ...)`.
+//! The version is set by the [`EVENT_SCHEMA_VERSION`] constant and lets
+//! off-chain consumers detect breaking changes before parsing the payload.
+//! The required payload fields for each event are stable within a schema
+//! version; a bump to [`EVENT_SCHEMA_VERSION`] means new events or fields may
+//! be present, and consumers should switch on this version explicitly.
+//!
 //! ## SME collateral commitment metadata
 //!
 //! [`LiquifactEscrow::record_sme_collateral_commitment`] is an SME-authenticated metadata write for
@@ -165,6 +175,18 @@ mod keys;
 pub const SCHEMA_VERSION: u32 = 6;
 // See the schema version contract documentation: [Escrow schema versioning](../docs/escrow-schema-versioning.md)
 
+/// Version of the lifecycle event topics emitted by this contract.
+///
+/// Every escrow lifecycle event topic is emitted with this version as the
+/// second topic element: `(event_name, EVENT_SCHEMA_VERSION, ...)`. This
+/// provides a compatibility signal for off-chain consumers so they can
+/// distinguish between event payload/topic schema versions.
+///
+/// Bump this constant when a lifecycle event topic or required payload field
+/// changes in a way that is not backward compatible. Do not bump it for
+/// additive fields that keep old fields stable.
+pub const EVENT_SCHEMA_VERSION: u32 = 1;
+
 /// Upper bound on [`LiquifactEscrow::append_attestation_digest`] entries to keep storage bounded.
 /// Revocation via [`LiquifactEscrow::revoke_attestation_digest`] does not consume a slot.
 pub const MAX_ATTESTATION_APPEND_ENTRIES: u32 = 32;
@@ -180,8 +202,144 @@ pub const MAX_ATTESTATION_REVOKE_BATCH: u32 = 32;
 /// admin-batch API surface.
 pub const MAX_BUMP_TTL_BATCH: u32 = 32;
 
+/// Errors specific to escrow close finalization.
+#[contracterror]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CloseError {
+    /// The caller is not the configured admin.
+    NotAuthorized = 0,
+    /// The escrow was not initialized.
+    NotInitialized = 1,
+    /// The escrow has already been closed.
+    AlreadyClosed = 2,
+    /// The escrow still holds a token balance.
+    ActiveBalance = 3,
+    /// The escrow has an active dispute.
+    ActiveDispute = 4,
+}
+
+/// Metadata captured when an escrow is finalized.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CloseMetadata {
+    pub admin: Address,
+    pub timestamp: u64,
+    pub sequence: u32,
+}
+
+/// Event emitted when an escrow is closed.
+#[contractevent]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CloseFinalizedEvt {
+    CloseFinalized {
+        metadata: CloseMetadata,
+    },
+}
+
+/// Storage key that marks the escrow as closed (one-shot flag).
+const CLOSED_KEY: &str = "EscrowClosed";
+/// Storage key that holds close metadata.
+const CLOSE_METADATA_KEY: &str = "CloseMetadata";
+
+#[contractimpl]
+impl LiquifactEscrow {
+    /// Finalizes the escrow after all balance and dispute obligations have settled.
+    ///
+    /// # Preconditions
+    /// - Only the current escrow admin may close.
+    /// - The escrow's funding-token balance must be zero.
+    /// - There must be no active dispute.
+    /// - The escrow must not already be closed.
+    ///
+    /// # Effects
+    /// - Marks the escrow as closed (one-shot).
+    /// - Stores [`CloseMetadata`].
+    /// - Emits a [`CloseFinalizedEvt`].
+    pub fn close_escrow(env: Env) {
+        let escrow: InvoiceEscrow = env.storage().instance().get(&DataKey::Escrow)
+            .unwrap_or_else(|| panic_with_error!(&env, CloseError::NotInitialized));
+        let admin = escrow.admin;
+        admin.require_auth();
+
+        if env.storage().instance().has(&Symbol::new(&env, CLOSED_KEY)) {
+            panic_with_error!(&env, CloseError::AlreadyClosed);
+        }
+
+        let funding_token: Address = env.storage().instance().get(&DataKey::FundingToken)
+            .unwrap_or_else(|| panic_with_error!(&env, CloseError::NotInitialized));
+        let token = TokenClient::new(&env, &funding_token);
+        let balance = token.balance(&env.current_contract_address());
+        if balance > 0 {
+            panic_with_error!(&env, CloseError::ActiveBalance);
+        }
+
+        if escrow.dispute_active {
+            panic_with_error!(&env, CloseError::ActiveDispute);
+        }
+
+        let metadata = CloseMetadata {
+            admin: admin.clone(),
+            timestamp: env.ledger().timestamp(),
+            sequence: env.ledger().sequence(),
+        };
+
+        env.storage().instance().set(&Symbol::new(&env, CLOSED_KEY), &true);
+        env.storage().instance().set(&Symbol::new(&env, CLOSE_METADATA_KEY), &metadata);
+
+        env.events().publish(CloseFinalizedEvt::CloseFinalized {
+            metadata: metadata.clone(),
+        });
+    }
+
+    /// Returns the close metadata if the escrow has been closed.
+    pub fn get_closure_metadata(env: Env) -> Option<CloseMetadata> {
+        env.storage().instance().get(&Symbol::new(&env, CLOSE_METADATA_KEY))
+    }
+}
+
+
 /// Default maximum maturity horizon in seconds (~5 years) when no explicit horizon is configured.
 pub const DEFAULT_MATURITY_MAX_HORIZON_SECS: u64 = 157_680_000; // ~5 years (365.25 * 24 * 3600 * 5)
+
+// ---------------------------------------------------------------------------
+// Bounded fee schedule
+// ---------------------------------------------------------------------------
+
+/// A fee schedule with named bounds and a future ledger at which it becomes active.
+///
+/// `fee_bps` is the actual fee in basis points. `min_fee_bps` and `max_fee_bps`
+/// are the named lower/upper bounds for the schedule; they are validated by
+/// [`LiquifactEscrow::submit_fee_schedule`] and are exposed for off-chain audit.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FeeSchedule {
+    pub fee_bps: u32,
+    pub min_fee_bps: u32,
+    pub max_fee_bps: u32,
+    pub activation_ledger: u32,
+}
+
+/// Storage keys for the fee-schedule activation ledger.
+///
+/// These are deliberately separate from [`DataKey`] so existing escrow storage is
+/// untouched. The active and pending keys are the source of truth for reads; the
+/// previous key is updated when a pending schedule activates.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum FeeScheduleStorageKey {
+    Active,
+    Pending,
+    Previous,
+}
+
+#[contracterror]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
+pub enum FeeScheduleError {
+    FeeOutOfBounds = 1,
+    InvalidActivationLedger = 2,
+    PendingScheduleExists = 3,
+    NotInitialized = 4,
+}
 
 // ---------------------------------------------------------------------------
 // Data types
@@ -348,6 +506,11 @@ pub enum EscrowError {
     /// [`LiquifactEscrow::init`] rejected `yield_bps` outside `0..=10_000`.
     YieldBpsOutOfRange = 2,
     /// [`LiquifactEscrow::init`] called when escrow storage already exists.
+    ///
+    /// Returned for every second initialization attempt — same parameters, a different
+    /// admin, a different token, or a re-entrant initialization during `init` — before
+    /// any state mutation or event emission. Existing admin, token metadata, and escrow
+    /// state are left unchanged.
     EscrowAlreadyInitialized = 3,
     /// [`LiquifactEscrow::init`] rejected an invoice amount too large to keep
     /// `compute_investor_payout` arithmetic overflow-free.
@@ -714,6 +877,19 @@ pub enum EscrowError {
     DisputeAlreadyOpen = 246,
     /// No dispute is active for this escrow.
     DisputeNotOpen = 247,
+
+    /// [`LiquifactEscrow::execute_callback`] called from an origin address different from the registered origin context.
+    CallbackWrongOrigin = 240,
+    /// [`LiquifactEscrow::execute_callback`] called with an invocation nonce that does not match the stored context.
+    CallbackWrongNonce = 241,
+    /// [`LiquifactEscrow::execute_callback`] called with a lifecycle phase different from the expected phase.
+    CallbackWrongPhase = 242,
+    /// [`LiquifactEscrow::execute_callback`] called with a callback context that has already been consumed (replay attempt).
+    CallbackReplayed = 243,
+    /// [`LiquifactEscrow::execute_callback`] or [`LiquifactEscrow::register_callback`] called after the escrow has been cancelled.
+    CallbackAfterCancellation = 244,
+    /// [`LiquifactEscrow::execute_callback`] called with a nonce that has no registered callback context.
+    CallbackNotFound = 245,
 }
 
 #[inline(always)]
@@ -726,6 +902,24 @@ pub(crate) fn ensure(env: &Env, condition: bool, error: EscrowError) {
     if !condition {
         fail(env, error);
     }
+}
+
+/// Reject any initialization attempt when the contract is already initialized or an
+/// initialization is in progress.
+///
+/// This is the single guard for [`LiquifactEscrow::init`]. It checks both the escrow
+/// snapshot and the schema-version marker so a partially failed first initialization
+/// cannot be overwritten. `init` must call this before any authorization, validation,
+/// storage write, or event emission.
+#[allow(dead_code)]
+#[inline(always)]
+pub(crate) fn ensure_not_initialized(env: &Env) {
+    ensure(
+        env,
+        !(env.storage().instance().has(&DataKey::Escrow)
+            || env.storage().instance().has(&DataKey::Version)),
+        EscrowError::EscrowAlreadyInitialized,
+    );
 }
 
 /// Assert that `actual_status == expected_status`, emitting `error` otherwise.
@@ -1078,6 +1272,12 @@ pub enum DataKey {
     /// **Additive key (ADR-007):** absent ⇒ [`DEFAULT_SETTLEMENT_LIMIT`]. Updatable via
     /// [`LiquifactEscrow::set_storage_limit`].
     StorageLimit,
+    /// Monotonically increasing invocation nonce counter for cross-contract callbacks.
+    /// Absent ⇒ `0`. Incremented on each callback registration.
+    CallbackNonce,
+    /// Stored cross-contract callback context ([`CallbackContext`]) keyed by invocation nonce.
+    /// Binds expected origin address, invocation nonce, and lifecycle phase.
+    CallbackContext(u64),
 }
 
 // --- Data types ---
@@ -1370,6 +1570,25 @@ pub struct SettlementConfig {
     pub max_per_investor_cap: Option<i128>,
 }
 
+/// Cross-contract callback context binding origin, nonce, and lifecycle phase.
+///
+/// Ensures callbacks originating from external contracts cannot be replayed,
+/// redirected across phases, or executed by unauthorized origins.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct CallbackContext {
+    /// The external contract address authorized to execute this callback.
+    pub origin: Address,
+    /// Unique invocation nonce assigned when the callback was registered.
+    pub nonce: u64,
+    /// Expected lifecycle phase / flow identifier for this callback.
+    pub phase: u32,
+    /// Ledger timestamp when this callback was registered.
+    pub created_at: u64,
+    /// Whether this callback has already been executed / consumed.
+    pub consumed: bool,
+}
+
 // --- Events ---
 
 #[contractevent]
@@ -1610,6 +1829,19 @@ pub struct AdminProposalCancelled {
     #[topic]
     pub invoice_id: Symbol,
     pub cancelled_pending: Address,
+}
+
+/// Emitted by [`LiquifactEscrow::recover_admin`] when the current admin clears an
+/// expired, abandoned admin-transfer proposal after the proposal timelock.
+#[contractevent]
+pub struct AdminRecoveredEvent {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    pub current_admin: Address,
+    pub abandoned_pending: Address,
+    pub reason: String,
 }
 
 /// Emitted by [`LiquifactEscrow::transfer_admin`] (the deprecated one-step
@@ -1988,6 +2220,32 @@ pub struct ContractUpgraded {
     pub new_wasm_hash: BytesN<32>,
 }
 
+/// Emitted when a cross-contract callback is registered.
+#[contractevent]
+pub struct CallbackRegisteredEvent {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    #[topic]
+    pub origin: Address,
+    pub nonce: u64,
+    pub phase: u32,
+}
+
+/// Emitted when a cross-contract callback is successfully executed and consumed.
+#[contractevent]
+pub struct CallbackExecutedEvent {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    #[topic]
+    pub origin: Address,
+    pub nonce: u64,
+    pub phase: u32,
+}
+
 // ---------------------------------------------------------------------------
 // Contract
 // ---------------------------------------------------------------------------
@@ -2028,6 +2286,127 @@ fn validate_invoice_id_string(env: &Env, invoice_id: &String) -> Symbol {
 
 #[contractimpl]
 impl LiquifactEscrow {
+    /// Admin-authorized submission of a new pending fee schedule.
+    ///
+    /// The schedule must be in-bounds and its activation ledger must lie strictly
+    /// in the future. Duplicate pending schedules are idempotent.
+    pub fn submit_fee_schedule(env: Env, schedule: FeeSchedule) {
+        let escrow: InvoiceEscrow = env
+            .storage()
+            .instance()
+            .get(&DataKey::Escrow)
+            .unwrap_or_else(|| panic_with_error!(&env, FeeScheduleError::NotInitialized));
+        escrow.admin.require_auth();
+
+        if schedule.min_fee_bps > schedule.fee_bps
+            || schedule.fee_bps > schedule.max_fee_bps
+            || schedule.max_fee_bps > 10_000
+        {
+            panic_with_error!(&env, FeeScheduleError::FeeOutOfBounds);
+        }
+
+        let current_ledger = env.ledger().sequence();
+        if schedule.activation_ledger <= current_ledger {
+            panic_with_error!(&env, FeeScheduleError::InvalidActivationLedger);
+        }
+
+        Self::activate_fee_schedule(env.clone());
+
+        let pending: Option<FeeSchedule> = env
+            .storage()
+            .instance()
+            .get(&FeeScheduleStorageKey::Pending);
+        if pending.as_ref() == Some(&schedule) {
+            return;
+        }
+        if pending.is_some() {
+            panic_with_error!(&env, FeeScheduleError::PendingScheduleExists);
+        }
+
+        env.storage()
+            .instance()
+            .set(&FeeScheduleStorageKey::Pending, &schedule);
+    }
+
+    /// Promotes a pending schedule to active when its activation ledger is reached.
+    ///
+    /// This is intentionally callable by anyone; it only applies a previously
+    /// admin-authorized schedule and records the previous active schedule.
+    pub fn activate_fee_schedule(env: Env) -> bool {
+        let current_ledger = env.ledger().sequence();
+        let pending: Option<FeeSchedule> = env
+            .storage()
+            .instance()
+            .get(&FeeScheduleStorageKey::Pending);
+        if let Some(p) = pending {
+            if p.activation_ledger <= current_ledger {
+                let previous: Option<FeeSchedule> = env
+                    .storage()
+                    .instance()
+                    .get(&FeeScheduleStorageKey::Active);
+                env.storage()
+                    .instance()
+                    .set(&FeeScheduleStorageKey::Active, &p);
+                env.storage()
+                    .instance()
+                    .set(&FeeScheduleStorageKey::Previous, &previous);
+                env.storage()
+                    .instance()
+                    .remove(&FeeScheduleStorageKey::Pending);
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Returns the active fee schedule for the current ledger, computing any
+    /// not-yet-promoted boundary activation on the fly.
+    pub fn get_active_fee_schedule(env: Env) -> Option<FeeSchedule> {
+        let active: Option<FeeSchedule> = env
+            .storage()
+            .instance()
+            .get(&FeeScheduleStorageKey::Active);
+        let pending: Option<FeeSchedule> = env
+            .storage()
+            .instance()
+            .get(&FeeScheduleStorageKey::Pending);
+        match pending {
+            Some(p) if p.activation_ledger <= env.ledger().sequence() => Some(p),
+            _ => active,
+        }
+    }
+
+    /// Returns the pending fee schedule that will activate at a future ledger.
+    pub fn get_pending_fee_schedule(env: Env) -> Option<FeeSchedule> {
+        let pending: Option<FeeSchedule> = env
+            .storage()
+            .instance()
+            .get(&FeeScheduleStorageKey::Pending);
+        match pending {
+            Some(p) if p.activation_ledger > env.ledger().sequence() => Some(p),
+            _ => None,
+        }
+    }
+
+    /// Returns the previously active fee schedule after a boundary activation.
+    pub fn get_previous_fee_schedule(env: Env) -> Option<FeeSchedule> {
+        let active: Option<FeeSchedule> = env
+            .storage()
+            .instance()
+            .get(&FeeScheduleStorageKey::Active);
+        let pending: Option<FeeSchedule> = env
+            .storage()
+            .instance()
+            .get(&FeeScheduleStorageKey::Pending);
+        if let Some(p) = pending {
+            if p.activation_ledger <= env.ledger().sequence() {
+                return active;
+            }
+        }
+        env.storage()
+            .instance()
+            .get(&FeeScheduleStorageKey::Previous)
+    }
     fn legal_hold_active(env: &Env) -> bool {
         env.storage()
             .instance()
@@ -2531,6 +2910,13 @@ impl LiquifactEscrow {
     pub fn rebind_registry_ref(env: Env, registry: Option<Address>) {
         let escrow = Self::load_escrow_require_admin(&env);
 
+        // Prevent changing off-chain reference data after any principal has been recorded.
+        ensure(
+            &env,
+            escrow.funded_amount == 0,
+            EscrowError::RegistryImmutableAfterFunding,
+        );
+
         match registry.clone() {
             Some(_) => {
                 env.storage()
@@ -2736,11 +3122,11 @@ impl LiquifactEscrow {
 
         let mut escrow = Self::get_escrow(env.clone());
 
-        // Only permitted in pre-settlement states (open or funded).
+        // Only permitted before any funding has been recorded for the escrow.
         ensure(
             &env,
-            is_pre_settlement_status(escrow.status),
-            EscrowError::RotationNotOpen,
+            escrow.funded_amount == 0,
+            EscrowError::BeneficiaryImmutableAfterFunding,
         );
 
         // Reject a no-op rotation to the current beneficiary.
@@ -6786,6 +7172,61 @@ impl LiquifactEscrow {
         cancelled
     }
 
+    /// Recover from an abandoned admin-transfer proposal after its timelock has elapsed.
+    ///
+    /// The current [`InvoiceEscrow::admin`] may clear a pending successor proposal once
+    /// [`DataKey::PendingAdminExpiry`] is in the past. This is the bounded recovery path
+    /// for the case where the proposed administrator becomes unreachable and cannot
+    /// call [`LiquifactEscrow::accept_admin`].
+    ///
+    /// # Authorization
+    ///
+    /// **Admin only.** Requires the current [`InvoiceEscrow::admin`] to sign (via
+    /// [`LiquifactEscrow::load_escrow_require_admin`]).
+    ///
+    /// # Arguments
+    /// - `reason`: explicit human-readable reason for the recovery, emitted in
+    ///   [`AdminRecoveredEvent`] for auditability. It is not stored.
+    ///
+    /// # Errors
+    /// - [`EscrowError::NoPendingAdmin`] if no proposal is pending (including a repeated
+    ///   recovery after a successful recovery).
+    /// - [`EscrowError::AdminRecoveryNotExpired`] if the proposal timelock has not elapsed.
+    ///
+    /// # Events
+    /// Emits [`AdminRecoveredEvent`] (topic: `adm_rec`).
+    pub fn recover_admin(env: Env, reason: String) -> Address {
+        let escrow = Self::load_escrow_require_admin(&env);
+
+        let pending: Option<Address> = env.storage().instance().get(&DataKey::PendingAdmin);
+        ensure(&env, pending.is_some(), EscrowError::NoPendingAdmin);
+        let pending = pending.unwrap();
+
+        let expiry: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::PendingAdminExpiry)
+            .unwrap_or_else(|| fail(&env, EscrowError::AdminRecoveryNotExpired));
+        let now = env.ledger().timestamp();
+        ensure(&env, now > expiry, EscrowError::AdminRecoveryNotExpired);
+
+        env.storage().instance().remove(&DataKey::PendingAdmin);
+        env.storage()
+            .instance()
+            .remove(&DataKey::PendingAdminExpiry);
+
+        AdminRecoveredEvent {
+            name: symbol_short!("adm_rec"),
+            invoice_id: escrow.invoice_id.clone(),
+            current_admin: escrow.admin,
+            abandoned_pending: pending.clone(),
+            reason,
+        }
+        .publish(&env);
+
+        pending
+    }
+
     /// Transition an **open** escrow (status 0) to **cancelled** (status 4).
     ///
     /// Only the [`InvoiceEscrow::admin`] may call this. Blocked while a legal hold is active.
@@ -7121,6 +7562,174 @@ impl LiquifactEscrow {
             surplus,
         }
     }
+
+    /// Register a pending cross-contract callback with an authorized origin contract and expected phase.
+    ///
+    /// Allocates the next monotonic invocation nonce, stores the [`CallbackContext`] in instance
+    /// storage, and emits [`CallbackRegisteredEvent`].
+    ///
+    /// # Authorization
+    /// Requires the signature of the current [`InvoiceEscrow::admin`].
+    ///
+    /// # Errors
+    /// - [`EscrowError::EscrowNotInitialized`] if escrow storage is missing.
+    /// - [`EscrowError::CallbackAfterCancellation`] if the escrow status is 4 (cancelled).
+    ///
+    /// # Returns
+    /// The allocated unique invocation nonce (`u64`).
+    pub fn register_callback(env: Env, origin: Address, phase: u32) -> u64 {
+        let escrow = Self::load_escrow_require_admin(&env);
+
+        ensure(
+            &env,
+            escrow.status != 4,
+            EscrowError::CallbackAfterCancellation,
+        );
+
+        let current_nonce: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::CallbackNonce)
+            .unwrap_or(0);
+        let next_nonce = current_nonce
+            .checked_add(1)
+            .unwrap_or_else(|| fail(&env, EscrowError::FundedAmountOverflow));
+
+        env.storage()
+            .instance()
+            .set(&DataKey::CallbackNonce, &next_nonce);
+
+        let now = env.ledger().timestamp();
+        let context = CallbackContext {
+            origin: origin.clone(),
+            nonce: next_nonce,
+            phase,
+            created_at: now,
+            consumed: false,
+        };
+
+        env.storage()
+            .instance()
+            .set(&DataKey::CallbackContext(next_nonce), &context);
+
+        CallbackRegisteredEvent {
+            name: symbol_short!("cb_reg"),
+            invoice_id: escrow.invoice_id,
+            origin,
+            nonce: next_nonce,
+            phase,
+        }
+        .publish(&env);
+
+        next_nonce
+    }
+
+    /// Execute and consume a registered cross-contract callback.
+    ///
+    /// Validates that:
+    /// 1. The escrow is not in cancelled status (`status != 4`).
+    /// 2. The caller authorized as `origin` matches the registered origin address.
+    /// 3. The callback context exists for `nonce`.
+    /// 4. The callback has not already been consumed (replay protection).
+    /// 5. The registered `nonce` matches the supplied `nonce`.
+    /// 6. The registered `phase` matches the supplied `phase`.
+    ///
+    /// State mutation: marks `consumed = true` on the context and updates storage atomically
+    /// before emitting [`CallbackExecutedEvent`].
+    ///
+    /// # Authorization
+    /// Requires authorization from `origin` (`origin.require_auth()`).
+    ///
+    /// # Errors
+    /// - [`EscrowError::CallbackAfterCancellation`] if escrow is cancelled (status 4).
+    /// - [`EscrowError::CallbackNotFound`] if no context exists for `nonce`.
+    /// - [`EscrowError::CallbackReplayed`] if the callback has already been consumed.
+    /// - [`EscrowError::CallbackWrongOrigin`] if caller `origin` does not match the registered origin.
+    /// - [`EscrowError::CallbackWrongNonce`] if `nonce` does not match the stored context nonce.
+    /// - [`EscrowError::CallbackWrongPhase`] if `phase` does not match the expected phase.
+    ///
+    /// # Returns
+    /// The updated [`CallbackContext`] snapshot with `consumed == true`.
+    pub fn execute_callback(env: Env, nonce: u64, origin: Address, phase: u32) -> CallbackContext {
+        let escrow = Self::get_escrow(env.clone());
+
+        ensure(
+            &env,
+            escrow.status != 4,
+            EscrowError::CallbackAfterCancellation,
+        );
+
+        origin.require_auth();
+
+        let mut context: CallbackContext = env
+            .storage()
+            .instance()
+            .get(&DataKey::CallbackContext(nonce))
+            .unwrap_or_else(|| fail(&env, EscrowError::CallbackNotFound));
+
+        ensure(&env, !context.consumed, EscrowError::CallbackReplayed);
+
+        ensure(
+            &env,
+            context.origin == origin,
+            EscrowError::CallbackWrongOrigin,
+        );
+
+        ensure(
+            &env,
+            context.nonce == nonce,
+            EscrowError::CallbackWrongNonce,
+        );
+
+        ensure(
+            &env,
+            context.phase == phase,
+            EscrowError::CallbackWrongPhase,
+        );
+
+        context.consumed = true;
+        env.storage()
+            .instance()
+            .set(&DataKey::CallbackContext(nonce), &context);
+
+        CallbackExecutedEvent {
+            name: symbol_short!("cb_exec"),
+            invoice_id: escrow.invoice_id,
+            origin,
+            nonce,
+            phase,
+        }
+        .publish(&env);
+
+        context
+    }
+
+    /// Read-only view returning the registered callback context for a given invocation `nonce`.
+    /// Returns `None` if no callback was registered with this nonce.
+    pub fn get_callback(env: Env, nonce: u64) -> Option<CallbackContext> {
+        env.storage()
+            .instance()
+            .get(&DataKey::CallbackContext(nonce))
+    }
+
+    /// Read-only view returning the current callback invocation nonce counter.
+    /// Returns `0` if no callbacks have been registered.
+    pub fn get_callback_nonce(env: Env) -> u64 {
+        env.storage()
+            .instance()
+            .get(&DataKey::CallbackNonce)
+            .unwrap_or(0)
+    }
+
+    /// Read-only view returning whether the callback for `nonce` has been consumed.
+    /// Returns `false` if the callback is unconsumed or does not exist.
+    pub fn is_callback_consumed(env: Env, nonce: u64) -> bool {
+        let context: Option<CallbackContext> = env
+            .storage()
+            .instance()
+            .get(&DataKey::CallbackContext(nonce));
+        context.map(|c| c.consumed).unwrap_or(false)
+    }
 }
 
 /// Read-only reconciliation snapshot returned by
@@ -7154,7 +7763,102 @@ pub struct ReconciliationView {
 // mod tests;
 
 #[cfg(test)]
+mod init_reentry_guard_tests {
+    use super::*;
+    use soroban_sdk::testutils::Address as _;
+
+    fn sample_escrow(env: &Env) -> InvoiceEscrow {
+        InvoiceEscrow {
+            invoice_id: symbol_short!("inv"),
+            admin: Address::generate(env),
+            sme_address: Address::generate(env),
+            amount: 1_000,
+            funding_target: 1_000,
+            funded_amount: 0,
+            yield_bps: 0,
+            maturity: 0,
+            status: 0,
+        }
+    }
+
+    fn with_contract<R>(env: &Env, f: impl FnOnce() -> R) -> R {
+        let contract_id = env.register_contract(None, LiquifactEscrow);
+        env.as_contract(&contract_id, f)
+    }
+
+    #[test]
+    fn first_initialization_is_allowed() {
+        let env = Env::default();
+        with_contract(&env, || ensure_not_initialized(&env));
+    }
+
+    #[test]
+    fn same_parameters_again_rejected() {
+        let env = Env::default();
+        with_contract(&env, || {
+            env.storage()
+                .instance()
+                .set(&DataKey::Escrow, &sample_escrow(&env));
+            env.storage()
+                .instance()
+                .set(&DataKey::Version, &SCHEMA_VERSION);
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                ensure_not_initialized(&env);
+            }));
+            assert!(result.is_err());
+            assert!(env.storage().instance().has(&DataKey::Escrow));
+            assert!(env.storage().instance().has(&DataKey::Version));
+        });
+    }
+
+    #[test]
+    fn different_admin_rejected() {
+        let env = Env::default();
+        with_contract(&env, || {
+            env.storage()
+                .instance()
+                .set(&DataKey::Escrow, &sample_escrow(&env));
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                ensure_not_initialized(&env);
+            }));
+            assert!(result.is_err());
+        });
+    }
+
+    #[test]
+    fn different_token_rejected() {
+        let env = Env::default();
+        with_contract(&env, || {
+            env.storage()
+                .instance()
+                .set(&DataKey::Version, &SCHEMA_VERSION);
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                ensure_not_initialized(&env);
+            }));
+            assert!(result.is_err());
+        });
+    }
+
+    #[test]
+    fn initialization_during_another_call_rejected() {
+        let env = Env::default();
+        with_contract(&env, || {
+            env.storage()
+                .instance()
+                .set(&DataKey::Version, &SCHEMA_VERSION);
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                ensure_not_initialized(&env);
+            }));
+            assert!(result.is_err());
+        });
+    }
+}
+
+#[cfg(test)]
 mod settlement_guard_tests;
+
+#[cfg(test)]
+mod callback_binding_tests;
 
 /// Default starting balance assigned to any address that has never been seen by the
 /// [`DefaultMockToken`] contract.

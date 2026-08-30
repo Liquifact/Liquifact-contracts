@@ -407,6 +407,80 @@ fn test_transfer_admin_same_address_panics() {
 }
 
 #[test]
+fn test_recover_admin_proposal_active_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    let new_admin = Address::generate(&env);
+    client.propose_admin(&new_admin, &None);
+    let reason = soroban_sdk::String::from_str(&env, "lost");
+    assert!(client.try_recover_admin(&reason).is_err());
+    assert_eq!(client.get_pending_admin(), Some(new_admin));
+}
+
+#[test]
+fn test_recover_admin_timelock_not_elapsed_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    let new_admin = Address::generate(&env);
+    client.propose_admin(&new_admin, &None);
+    let now = env.ledger().timestamp();
+    env.ledger().set_timestamp(now + 100);
+    let reason = soroban_sdk::String::from_str(&env, "too_soon");
+    assert!(client.try_recover_admin(&reason).is_err());
+}
+
+#[test]
+fn test_recover_admin_expired_proposal_succeeds() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    let new_admin = Address::generate(&env);
+    client.propose_admin(&new_admin, &None);
+    let now = env.ledger().timestamp();
+    env.ledger().set_timestamp(now + 1_000_000);
+    let reason = soroban_sdk::String::from_str(&env, "unreachable");
+    client.recover_admin(&reason);
+    assert_eq!(client.get_pending_admin(), None);
+    assert_eq!(client.get_escrow().admin, admin);
+}
+
+#[test]
+fn test_recover_admin_repeated_fails() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    let new_admin = Address::generate(&env);
+    client.propose_admin(&new_admin, &None);
+    let now = env.ledger().timestamp();
+    env.ledger().set_timestamp(now + 1_000_000);
+    let reason = soroban_sdk::String::from_str(&env, "unreachable");
+    client.recover_admin(&reason);
+    assert!(client.try_recover_admin(&reason).is_err());
+}
+
+#[test]
+#[should_panic]
+fn test_recover_admin_non_admin_panics() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    let new_admin = Address::generate(&env);
+    client.propose_admin(&new_admin, &None);
+    let now = env.ledger().timestamp();
+    env.ledger().set_timestamp(now + 1_000_000);
+    let reason = soroban_sdk::String::from_str(&env, "unreachable");
+    env.mock_auths(&[]);
+    client.recover_admin(&reason);
+}
+
+#[test]
 fn test_rotate_beneficiary_success() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
@@ -2245,7 +2319,8 @@ fn test_rotate_beneficiary_with_legal_hold_fails() {
 }
 
 #[test]
-fn test_rotate_beneficiary_in_funded_state_success() {
+#[should_panic]
+fn test_rotate_beneficiary_in_funded_state_panics() {
     let env = Env::default();
     env.mock_all_auths();
     let (client, admin, sme) = setup(&env);
@@ -2253,8 +2328,7 @@ fn test_rotate_beneficiary_in_funded_state_success() {
     let investor = Address::generate(&env);
     default_init(&client, &env, &admin, &sme);
     client.fund(&investor, &TARGET); // status 1
-    let updated = client.rotate_beneficiary(&new_sme);
-    assert_eq!(updated.sme_address, new_sme);
+    client.rotate_beneficiary(&new_sme);
 }
 
 #[test]
@@ -2301,6 +2375,60 @@ fn test_rotate_beneficiary_then_withdraw_goes_to_new_sme() {
     client.rotate_beneficiary(&new_sme);
     client.withdraw();
     assert_eq!(token.stellar.balance(&new_sme), TARGET);
+}
+
+#[test]
+#[should_panic]
+fn test_rotate_beneficiary_partial_funding_panics() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let new_sme = Address::generate(&env);
+    let investor = Address::generate(&env);
+    // Set a larger target so a partial fund leaves funded_amount > 0 but below target.
+    let invoice_id = soroban_sdk::String::from_str(&env, "ROT_PARTIAL");
+    client.init(
+        &admin,
+        &invoice_id,
+        &sme,
+        &(TARGET * 10),
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+    client.fund(&investor, &TARGET); // partial funding
+    client.rotate_beneficiary(&new_sme);
+}
+
+#[test]
+fn test_rebind_registry_ref_before_and_after_funding() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let registry = Address::generate(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    // Before funding, admin may rebind the registry.
+    client.rebind_registry_ref(&Some(registry.clone()));
+    assert_eq!(client.get_registry_ref(), Some(registry.clone()));
+
+    // After funding, rebind should be rejected.
+    let investor = Address::generate(&env);
+    client.fund(&investor, &TARGET);
+    let new_registry = Address::generate(&env);
+    let res = std::panic::catch_unwind(|| client.rebind_registry_ref(&Some(new_registry)));
+    assert!(res.is_err());
 }
 
 // ── cancel_pending_admin ──────────────────────────────────────────────────────

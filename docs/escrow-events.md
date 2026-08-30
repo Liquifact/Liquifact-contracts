@@ -288,6 +288,30 @@ Use `coll_clr` to remove or mark retired the active collateral commitment for th
 invoice. This event is metadata-only and does not prove custody, asset movement,
 or enforceable collateral.
 
+### `CallbackRegisteredEvent`
+Emitted by `register_callback` when a cross-contract callback is registered with an authorized origin contract and expected phase.
+
+**Topics:**
+1. `cb_reg` (Symbol)
+2. `invoice_id` (Symbol)
+3. `origin` (Address)
+
+**Data Payload:**
+- `nonce` (u64): invocation nonce assigned to the callback.
+- `phase` (u32): expected lifecycle phase for the callback.
+
+### `CallbackExecutedEvent`
+Emitted by `execute_callback` when a registered cross-contract callback is successfully verified and consumed.
+
+**Topics:**
+1. `cb_exec` (Symbol)
+2. `invoice_id` (Symbol)
+3. `origin` (Address)
+
+**Data Payload:**
+- `nonce` (u64): invocation nonce consumed by the callback.
+- `phase` (u32): lifecycle phase executed by the callback.
+
 ---
 
 ## 🛠️ Indexing Recommendations

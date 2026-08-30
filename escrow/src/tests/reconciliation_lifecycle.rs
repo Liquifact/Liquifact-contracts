@@ -26,7 +26,9 @@
 //! invariant assertion; deficits are surfaced as negative `surplus`.
 
 use super::*;
-use soroban_sdk::{testutils::Address as _, token::StellarAssetClient, Address, Env, String};
+use soroban_sdk::{
+    testutils::Address as _, token::StellarAssetClient, Address, Env, String, Symbol, Val,
+};
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -401,4 +403,140 @@ fn reconciliation_deficit_display() {
     assert!(view.surplus < 0, "surplus must be negative in deficit");
     assert_eq!(view.surplus, -1000i128);
     assert_invariant(&client, &token);
+}
+
+// ── Versioned lifecycle event topics ─────────────────────────────────────────
+
+/// Schema version appended as the final topic of every lifecycle event.
+const EVENT_VERSION: u32 = 1;
+
+/// Parse the schema version from an event topic list.
+///
+/// The version is deliberately the last topic.  Old consumers that only know
+/// the required prefix can ignore it; consumers that care can reject unknown
+/// versions.
+fn event_schema_version(topics: &[Val]) -> Result<u32, ()> {
+    let version = topics.last().ok_or(())?;
+    if !version.is_u32() {
+        return Err(());
+    }
+    let version = version.get_u32();
+    if version == EVENT_VERSION {
+        Ok(version)
+    } else {
+        Err(())
+    }
+}
+
+/// Return the topics of all lifecycle events emitted by the escrow contract.
+fn escrow_event_topics(env: &Env, client: &LiquifactEscrowClient<'_>) -> Vec<Vec<Val>> {
+    env.events()
+        .all()
+        .into_iter()
+        .filter(|event| event.contract_id == client.address)
+        .map(|event| event.topics)
+        .collect()
+}
+
+/// Assert that an event topic list carries the supported schema version.
+fn assert_versioned_schema(topics: &[Val]) -> u32 {
+    let version = event_schema_version(topics)
+        .expect("lifecycle event must carry a supported schema version as final topic");
+    assert_eq!(version, EVENT_VERSION, "unexpected event schema version");
+    version
+}
+
+#[test]
+fn lifecycle_events_are_versioned() {
+    let env = Env::default();
+    let (client, token, _sme) = setup_escrow(&env, 1000, "EVENT01");
+    let inv = Address::generate(&env);
+
+    mint_and_fund(&client, &token, &inv, 1000);
+    let yield_coupon = 80i128;
+    token.stellar.mint(&client.address, &yield_coupon);
+    client.settle();
+    client.claim_investor_payout(&inv);
+
+    let events = escrow_event_topics(&env, &client);
+    assert!(!events.is_empty(), "expected escrow lifecycle events");
+    for topics in &events {
+        assert_versioned_schema(topics);
+    }
+}
+
+#[test]
+fn old_consumer_reads_new_event_topics() {
+    let env = Env::default();
+    let (client, token, _sme) = setup_escrow(&env, 1000, "OLDREAD01");
+    let inv = Address::generate(&env);
+    mint_and_fund(&client, &token, &inv, 1000);
+
+    let topics = escrow_event_topics(&env, &client).pop().unwrap();
+    assert_versioned_schema(&topics);
+
+    // The version is appended after the required fields, so an old consumer
+    // that ignores the final topic can still read the stable prefix.
+    let required_prefix = &topics[..topics.len() - 1];
+    assert!(!required_prefix.is_empty(), "required topics must remain stable");
+}
+
+#[test]
+fn unknown_event_version_is_rejected() {
+    let env = Env::default();
+    let topics: Vec<Val> = vec![
+        Symbol::new(&env, "fund").into(),
+        999u32.into(),
+    ];
+    assert!(event_schema_version(&topics).is_err());
+}
+
+#[test]
+fn optional_field_absent_does_not_affect_schema_version() {
+    let env = Env::default();
+    let (client, token, _sme) = setup_escrow(&env, 1000, "OPTIONAL01");
+    let inv = Address::generate(&env);
+    mint_and_fund(&client, &token, &inv, 1000);
+
+    let topics = escrow_event_topics(&env, &client).pop().unwrap();
+    assert_versioned_schema(&topics);
+
+    // Required fields stay in the prefix even when no optional field is
+    // present; the version remains the last topic.
+    let required_prefix = &topics[..topics.len() - 1];
+    assert!(!required_prefix.is_empty());
+}
+
+#[test]
+fn noop_does_not_emit_lifecycle_event() {
+    let env = Env::default();
+    let (client, token, _sme) = setup_escrow(&env, 1000, "NOOP01");
+    let inv = Address::generate(&env);
+    mint_and_fund(&client, &token, &inv, 1000);
+
+    let before = escrow_event_topics(&env, &client).len();
+    assert!(client.try_sweep_terminal_dust(&0i128).is_ok());
+    let after = escrow_event_topics(&env, &client).len();
+    assert_eq!(after, before, "no-op must not emit a lifecycle event");
+}
+
+#[test]
+fn multiple_lifecycle_events_are_all_versioned() {
+    let env = Env::default();
+    let (client, token, _sme) = setup_escrow(&env, 1000, "MULTI01");
+    let inv_a = Address::generate(&env);
+    let inv_b = Address::generate(&env);
+
+    mint_and_fund(&client, &token, &inv_a, 400);
+    mint_and_fund(&client, &token, &inv_b, 600);
+    let yield_coupon = 80i128;
+    token.stellar.mint(&client.address, &yield_coupon);
+    client.settle();
+    client.claim_investor_payout(&inv_a);
+
+    let events = escrow_event_topics(&env, &client);
+    assert!(events.len() >= 2, "expected multiple lifecycle events");
+    for topics in &events {
+        assert_versioned_schema(topics);
+    }
 }

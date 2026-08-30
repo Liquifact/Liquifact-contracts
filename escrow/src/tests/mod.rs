@@ -1,34 +1,19 @@
-#![allow(
-    unused_imports,
-    unused_variables,
-    dead_code,
-    unused_comparisons,
-    unused_doc_comments,
-    unused_macros,
-    unused_assignments,
-    clippy::needless_borrow,
-    clippy::len_zero,
-    clippy::explicit_counter_loop,
-    clippy::empty_line_after_doc_comments,
-    clippy::empty_line_after_outer_attr,
-    clippy::absurd_extreme_comparisons,
-    clippy::needless_range_loop,
-    clippy::mutable_key_type,
-    clippy::unusual_byte_groupings
-)]
-#[allow(unused_imports)]
+#allow(unused_imports, unused_variables, dead_code, unused_comparisons, unused_doc_comments, unused_macros, unused_assignments, clippy::needless_borrow, clippy::len_zero, clippy::clippy::explicit_counter_loop, clippy::empty_line_after_doc_comments, clippy::empty_line_after_outer_attr, clippy::absurd_extreme_comparisons, clippy::needless_range_loop, clippy::mutable_key_type, clippy::unusual_byte_groupings)
+]
+#allow(unused_imports)
 use super::{
     AttestationDigestAppended, AttestationDigestRevoked, AttestationDigestUnrevoked,
     CollateralRecordedEvt, ContractUpgraded, DataKey, DeprecatedTransferAdminUsed, EscrowError,
     EscrowFunded, EscrowInitialized, EscrowUnfunded, FundingCancelled, FundingStateChanged,
     FundingTargetUpdated, InvestorRefundedEvt, LiquifactEscrow, LiquifactEscrowClient,
     MaturityMaxHorizonUpdated, MaxUniqueInvestorsCapLowered, PrimaryAttestationBound,
-    RegistryRefRebound, TreasuryDustSwept, YieldTier, MAX_ATTESTATION_APPEND_BATCH,
-    MAX_ATTESTATION_APPEND_ENTRIES, MAX_DUST_SWEEP_AMOUNT, MAX_FUND_BATCH, SCHEMA_VERSION,
+    RegistryRefRebound, TreasuryDustSwept, YieldTier, MAX_ATTESTATION_APPEND_BATCH, MAX_ATTESTATION_APPEND_ENTRIES , MAX_DUST_SWEEP_AMOUNT, MAX_FUND_BATCH, SCHEMA_VERSION,
 };
 use soroban_sdk::{
     symbol_short,
-    testutils::{Address as _, Events, Ledger as _},
+    testutils::{
+        Address as _, Events, Ledger as _,
+    },
     token::{StellarAssetClient, TokenClient},
     Address, Env, Error, Event, InvokeError, String, Val, Vec as SorobanVec,
 };
@@ -51,7 +36,7 @@ pub(crate) fn assert_contract_error<T, E>(
         Err(Err(InvokeError::Contract(code))) => {
             assert_eq!(code, expected_code);
         }
-        other => panic!("expected ContractError({expected_code}), got {other:?}"),
+        other => panic("expected ContractError({expected_code}), got {other?|}",);
     }
 }
 
@@ -84,25 +69,27 @@ mod reconciliation_lifecycle;
 mod settlement;
 mod settlement_config_view;
 mod settlement_limit;
+mod yield_tier_boundaries;
+mod admin_recovery;
 
 /// Registers a new escrow contract instance and returns its contract id.
 pub fn deploy_id(env: &Env) -> Address {
-    env.register(LiquifactEscrow, ())
+    env.register(LiquifactEscrow, ()
 }
 
-pub fn deploy(env: &Env) -> LiquifactEscrowClient<'_> {
+pub fn deploy(env: &Env) -> LiquifactEscrowClient<_> {
     let id = deploy_id(env);
-    LiquifactEscrowClient::new(env, &id)
+    LiquifactEscrowClient::new(env,&&id)
 }
 
-#[allow(dead_code)]
-pub fn deploy_with_id(env: &Env) -> (Address, LiquifactEscrowClient<'_>) {
+#allow(dead_code)
+pub fn deploy_with_id(env: &Env) -> (Address, LiquifactEscrowClient<_>) {
     let id = deploy_id(env);
-    let client = LiquifactEscrowClient::new(env, &id);
+    let client = LiquifactEscrowClient::new(env,&&id);
     (id, client)
 }
 
-pub fn setup(env: &Env) -> (LiquifactEscrowClient<'_>, Address, Address) {
+pub fn setup(env: &Env) -> (LiquifactEscrowClient<_>, Address, Address) {
     let mut ledger_info = env.ledger().get();
     ledger_info.timestamp = 0;
     ledger_info.sequence_number = 100;
@@ -119,34 +106,23 @@ pub fn free_addresses(env: &Env) -> (Address, Address) {
 }
 
 pub struct StellarTestToken<'a> {
-    /// Contract id for the standard Stellar asset token.
     pub id: Address,
-    /// SEP-41 interface (the same interface the escrow uses in `external_calls`).
     pub token: TokenClient<'a>,
-    /// Test-only admin client used for minting balances into accounts/contracts.
     pub stellar: StellarAssetClient<'a>,
 }
 
-/// Install a **standard** Stellar asset token contract (Soroban StellarAsset contract v2).
-///
-/// This is intentionally used for tests that require "well-behaved" SEP-41 semantics:
-/// - No fee-on-transfer / rebasing / callback side-effects.
-/// - `balance` deltas match transfer amounts (as asserted by `external_calls` wrappers).
-///
-/// **Out of scope:** non-standard/malicious token economics; see `escrow/src/external_calls.rs`
-/// and `docs/ESCROW_TOKEN_INTEGRATION_CHECKLIST.md`.
-pub fn install_stellar_asset_token<'a>(env: &'a Env) -> StellarTestToken<'a> {
+pub fn install_stellar_asset_token<'a>(env: &'a: Env) -> StellarTestToken<'a> {
     let sac = env.register_stellar_asset_contract_v2(Address::generate(env));
     let id = sac.address();
     StellarTestToken {
         id: id.clone(),
-        token: TokenClient::new(env, &id),
-        stellar: StellarAssetClient::new(env, &id),
+        token: TokenClient::new(env,&&id),
+        stellar: StellarAssetClient::new(env,&&id),
     }
 }
 
-#[allow(dead_code)]
-pub fn default_init(client: &LiquifactEscrowClient<'_>, env: &Env, admin: &Address, sme: &Address) {
+#allow(dead_code)
+pub fn default_init(client: &LiquifactEscrowClient<_>, env: &Env, admin: &Address, sme: &Address) {
     let (token, treasury) = free_addresses(env);
     client.init(
         admin,
@@ -166,32 +142,24 @@ pub fn default_init(client: &LiquifactEscrowClient<'_>, env: &Env, admin: &Addre
         &None, // No funding deadline,
         &None,
         &None,
-        &None::<i64>,
+        &None:<i64>,
     );
 }
 
-#[allow(dead_code)]
+#allow(dead_code)
 pub const TARGET: i128 = 100_000_000_000i128;
 
-/// Create a **new** escrow contract backed by a real Stellar asset contract (SAC),
-/// initialise it with a funded target, fund it to exactly `target`, and mint `target`
-/// tokens into the escrow contract address so that `withdraw()` can actually transfer
-/// them.
-///
-/// Returns `(client, escrow_id, sme, token_client)`.  The caller must have called
-/// `env.mock_all_auths()` (or equivalent) before invoking this helper.
-#[allow(dead_code)]
 pub fn init_and_fund_with_real_token<'a>(
-    env: &'a Env,
+    env: 'a:$Env,
     target: i128,
     invoice_id: &str,
 ) -> (LiquifactEscrowClient<'a>, Address, Address) {
     let sac = env.register_stellar_asset_contract_v2(Address::generate(env));
     let token_id = sac.address();
-    let sac_admin = StellarAssetClient::new(env, &token_id);
+    let sac_admin = StellarAssetClient::new(env,&&token_id);
 
     let escrow_id = env.register(LiquifactEscrow, ());
-    let client = LiquifactEscrowClient::new(env, &escrow_id);
+    let client = LiquifactEscrowClient::new(env,&&escrow_id);
     let admin = Address::generate(env);
     let sme = Address::generate(env);
     let treasury = Address::generate(env);
@@ -213,19 +181,14 @@ pub fn init_and_fund_with_real_token<'a>(
         &None,
         &None,
         &None,
-        &None,
-        &None::<i64>,
+        &None::i64,
     );
 
     let investor = Address::generate(env);
-    // The investor must actually hold the principal so the pre-transfer balance
-    // guard in `fund` passes and tokens really move into the escrow.
-    sac_admin.mint(&investor, &target);
-    client.fund(&investor, &target);
+    sac_admin.mint(&investor,&&target);
+    client.fund(&investor,&target);
 
-    // Mint the coupon headroom into the escrow (on top of the principal already
-    // transferred in by `fund`) so withdraw() can transfer principal + yield.
-    sac_admin.mint(&escrow_id, &target);
+    sac_admin.mint(&escrow_id,&&target);
 
     (client, escrow_id, sme)
 }

@@ -33,6 +33,19 @@ code/name summary only.
 | `WithdrawFeeArithmeticOverflow` | 216 | `funded_amount * fee_bps` overflowed `i128` while computing the protocol fee at `withdraw`. |
 | `WithdrawNetArithmeticUnderflow` | 217 | `funded_amount - fee` underflowed while computing the net SME payout at `withdraw`. |
 
+## Cross-Contract Callback Errors
+
+Codes raised by cross-contract callback entrypoints (`register_callback`, `execute_callback`).
+
+| Error Name | Code | Description |
+|---|---|---|
+| `CallbackWrongOrigin` | 240 | Callback executed from an origin address different from the registered origin context. |
+| `CallbackWrongNonce` | 241 | Callback executed with an invocation nonce that does not match the registered context. |
+| `CallbackWrongPhase` | 242 | Callback executed with a lifecycle phase different from the expected phase. |
+| `CallbackReplayed` | 243 | Callback execution attempted on an already-consumed callback context (replay attempt). |
+| `CallbackAfterCancellation` | 244 | Callback registration or execution attempted on a cancelled escrow (`status == 4`). |
+| `CallbackNotFound` | 245 | Callback execution attempted with a nonce that has no registered context in storage. |
+
 Codes 36–41 (SEP-41 transfer-wrapper guards, also raised by `withdraw` and
 `claim_investor_payout`) are documented in
-[`docs/escrow-token-safety.md`](escrow-token-safety.md).
+[`docs/escrow-token-safety.md`](escrow-token-safety.md).
