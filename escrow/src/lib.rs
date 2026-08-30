@@ -230,10 +230,10 @@ pub struct CloseMetadata {
 /// Event emitted when an escrow is closed.
 #[contractevent]
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum CloseFinalizedEvt {
-    CloseFinalized {
-        metadata: CloseMetadata,
-    },
+pub struct CloseFinalizedEvt {
+    #[topic]
+    pub name: Symbol,
+    pub metadata: CloseMetadata,
 }
 
 /// Storage key that marks the escrow as closed (one-shot flag).
@@ -273,7 +273,7 @@ impl LiquifactEscrow {
             panic_with_error!(&env, CloseError::ActiveBalance);
         }
 
-        if escrow.dispute_active {
+        if env.storage().instance().get(&DataKey::Dispute).unwrap_or(false) {
             panic_with_error!(&env, CloseError::ActiveDispute);
         }
 
@@ -286,9 +286,11 @@ impl LiquifactEscrow {
         env.storage().instance().set(&Symbol::new(&env, CLOSED_KEY), &true);
         env.storage().instance().set(&Symbol::new(&env, CLOSE_METADATA_KEY), &metadata);
 
-        env.events().publish(CloseFinalizedEvt::CloseFinalized {
+        CloseFinalizedEvt {
+            name: symbol_short!("close"),
             metadata: metadata.clone(),
-        });
+        }
+        .publish(&env);
     }
 
     /// Returns the close metadata if the escrow has been closed.
@@ -868,6 +870,17 @@ pub enum EscrowError {
     CallbackAfterCancellation = 244,
     /// [`LiquifactEscrow::execute_callback`] called with a nonce that has no registered callback context.
     CallbackNotFound = 245,
+    /// [`LiquifactEscrow::rebind_registry`] called when escrow status is no longer open
+    /// (status != 0). The registry hint becomes immutable once funding/settlement begins.
+    RegistryImmutableAfterFunding = 246,
+    /// [`LiquifactEscrow::rotate_beneficiary`] called when escrow status is no longer
+    /// pre-settlement (status must be 0 = open or 1 = funded). Beneficiary is immutable after
+    /// funding closes.
+    BeneficiaryImmutableAfterFunding = 247,
+    /// [`LiquifactEscrow::execute_admin_recovery`] called before the pending admin proposal
+    /// timelock (`DataKey::PendingAdminExpiry`) has elapsed. Recovery is only available
+    /// after the abandoned-transfer expiry window passes.
+    AdminRecoveryNotExpired = 248,
 }
 
 #[inline(always)]
@@ -1042,6 +1055,10 @@ pub(crate) fn is_terminal_status(status: u32) -> bool {
 /// This is a **predicate**, not a guard. Callers that need to *enforce* the pre-settlement
 /// precondition must wrap it in
 /// `ensure(&env, is_pre_settlement_status(status), error)`.
+///
+/// Used by the (currently disabled) `tests` integration tree; kept on the release path even
+/// though no active caller references it yet, so the predicate stays in sync with status enum.
+#[allow(dead_code)]
 #[inline(always)]
 pub(crate) fn is_pre_settlement_status(status: u32) -> bool {
     matches!(status, 0 | 1)
@@ -1240,6 +1257,11 @@ pub enum DataKey {
     /// Stored cross-contract callback context ([`CallbackContext`]) keyed by invocation nonce.
     /// Binds expected origin address, invocation nonce, and lifecycle phase.
     CallbackContext(u64),
+    /// When true, the escrow has an active dispute that blocks close finalization.
+    /// Absent ⇒ `false` (no dispute). **Additive key (ADR-007):** absent on legacy instances
+    /// reads as `false`. Written by the dispute lifecycle (admin/off-chain) and checked by
+    /// [`LiquifactEscrow::close_escrow`].
+    Dispute,
 }
 
 // --- Data types ---
