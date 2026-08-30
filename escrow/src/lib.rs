@@ -692,6 +692,28 @@ pub enum EscrowError {
     /// effect, so a re-entrant or replayed call is rejected here with a dedicated, stable
     /// typed code rather than a misleading `SettlementNotFunded`.
     EscrowAlreadySettled = 236,
+    /// A dispute is active and blocks value release from the escrow.
+    DisputeBlocksWithdrawal = 237,
+    /// Settlement is blocked while a dispute remains active.
+    DisputeBlocksSettlement = 238,
+    /// Investor claims are blocked while a dispute remains active.
+    DisputeBlocksInvestorClaims = 239,
+    /// Partial-settlement is blocked while a dispute remains active.
+    DisputeBlocksPartialSettle = 240,
+    /// Refund processing is blocked while a dispute remains active.
+    DisputeBlocksRefund = 241,
+    /// Unfunding is blocked while a dispute remains active.
+    DisputeBlocksUnfund = 242,
+    /// Terminal dust sweep is blocked while a dispute remains active.
+    DisputeBlocksSweep = 243,
+    /// The caller is not authorized to open or close a dispute for this escrow.
+    DisputeOpenUnauthorized = 244,
+    /// The caller is not authorized to close the active dispute.
+    DisputeCloseUnauthorized = 245,
+    /// A dispute has already been opened and is still active.
+    DisputeAlreadyOpen = 246,
+    /// No dispute is active for this escrow.
+    DisputeNotOpen = 247,
 }
 
 #[inline(always)]
@@ -804,6 +826,16 @@ pub(crate) fn guard_not_legal_hold(env: &Env, error: EscrowError) {
     ensure(env, !LiquifactEscrow::legal_hold_active(env), error);
 }
 
+/// Shared guard: assert that no dispute is currently active.
+///
+/// Disputes are a freeze on value release: while an active dispute remains in storage,
+/// any release path that would transfer principal out of the contract must fail before
+/// a transfer or state transition is applied.
+#[inline(always)]
+pub(crate) fn guard_not_disputed(env: &Env, error: EscrowError) {
+    ensure(env, !LiquifactEscrow::is_dispute_active(env.clone()), error);
+}
+
 /// Predicate: `true` when `status` is one of the **terminal** escrow states
 /// (`2` = settled, `3` = withdrawn, `4` = cancelled).
 ///
@@ -907,6 +939,12 @@ pub enum DataKey {
     /// When true, compliance/legal hold blocks payouts and settlement finalization.
     /// Absent ⇒ `false` (no hold). Toggled by admin via [`LiquifactEscrow::set_legal_hold`].
     LegalHold,
+    /// Active dispute freeze: no value release is permitted while a dispute remains open.
+    /// Absent ⇒ `false` (no active dispute).
+    DisputeActive,
+    /// Persisted dispute record; kept after resolution to preserve the incident timeline.
+    /// Absent ⇒ no dispute has been opened.
+    DisputeRecord,
     /// Optional minimum ledger timestamp when `LegalHold` may be cleared after a
     /// [`LiquifactEscrow::request_clear_legal_hold`] call.
     /// Absent ⇒ no clear request is pending.
@@ -1191,6 +1229,26 @@ pub enum EscrowCloseSnapshot {
 pub enum CollateralCommitmentSnapshot {
     None,
     Some(SmeCollateralCommitment),
+}
+
+/// Lifecycle state for a recorded dispute.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DisputeState {
+    Open,
+    Resolved,
+}
+
+/// Immutable audit record for a dispute. The record is retained after resolution so
+/// off-chain reviewers can reconstruct the dispute timeline without replaying events.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DisputeRecord {
+    pub opened_at: u64,
+    pub opened_by: Address,
+    pub state: DisputeState,
+    pub resolved_at: Option<u64>,
+    pub resolved_by: Option<Address>,
 }
 
 /// Comprehensive summary of the escrow contract state.
@@ -2581,6 +2639,7 @@ impl LiquifactEscrow {
     /// transfer invariant failures.
     pub fn sweep_terminal_dust(env: Env, amount: i128) -> i128 {
         guard_not_legal_hold(&env, EscrowError::LegalHoldBlocksTreasuryDustSweep);
+        guard_not_disputed(&env, EscrowError::DisputeBlocksSweep);
         ensure(&env, amount > 0, EscrowError::SweepAmountNotPositive);
         ensure(
             &env,
@@ -2836,6 +2895,89 @@ impl LiquifactEscrow {
     /// switch toggled by [`LiquifactEscrow::set_paused`], not the compliance hold.
     pub fn is_paused(env: Env) -> bool {
         Self::paused_active(&env)
+    }
+
+    /// Returns whether an active dispute is currently freeze-blocking release paths.
+    pub fn is_dispute_active(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get::<DataKey, bool>(&DataKey::DisputeActive)
+            .unwrap_or(false)
+    }
+
+    /// Returns the persisted dispute record, if any has ever been opened.
+    pub fn get_dispute_record(env: Env) -> Option<DisputeRecord> {
+        env.storage().instance().get(&DataKey::DisputeRecord)
+    }
+
+    /// Admin-only dispute freeze: record an active dispute while evidence is pending.
+    ///
+    /// This is intentionally a minimal, append-only lifecycle: the dispute record is preserved
+    /// even after resolution so audits can reconstruct the timeline without replaying off-chain
+    /// events. The contract does not expose a "release while disputed" shortcut. Any value-moving
+    /// entrypoint must check `DataKey::DisputeActive` before transferring tokens or changing state.
+    pub fn open_dispute(env: Env, caller: Address) {
+        let escrow = Self::load_escrow_require_admin(&env);
+        caller.require_auth();
+        ensure(
+            &env,
+            caller == escrow.admin,
+            EscrowError::DisputeOpenUnauthorized,
+        );
+        ensure(
+            &env,
+            !Self::is_dispute_active(env.clone()),
+            EscrowError::DisputeAlreadyOpen,
+        );
+
+        let record = DisputeRecord {
+            opened_at: env.ledger().timestamp(),
+            opened_by: caller.clone(),
+            state: DisputeState::Open,
+            resolved_at: None,
+            resolved_by: None,
+        };
+        env.storage().instance().set(&DataKey::DisputeActive, &true);
+        env.storage()
+            .instance()
+            .set(&DataKey::DisputeRecord, &record);
+    }
+
+    /// Admin-only dispute resolution: close the dispute while preserving the original record.
+    pub fn close_dispute(env: Env, caller: Address, resolved: bool) {
+        let escrow = Self::load_escrow_require_admin(&env);
+        caller.require_auth();
+        ensure(
+            &env,
+            caller == escrow.admin,
+            EscrowError::DisputeCloseUnauthorized,
+        );
+        ensure(
+            &env,
+            Self::is_dispute_active(env.clone()),
+            EscrowError::DisputeNotOpen,
+        );
+
+        let mut record: DisputeRecord = env
+            .storage()
+            .instance()
+            .get(&DataKey::DisputeRecord)
+            .unwrap_or_else(|| fail(&env, EscrowError::DisputeNotOpen));
+
+        if resolved {
+            record.state = DisputeState::Resolved;
+            record.resolved_at = Some(env.ledger().timestamp());
+            record.resolved_by = Some(caller.clone());
+            env.storage()
+                .instance()
+                .set(&DataKey::DisputeRecord, &record);
+            env.storage()
+                .instance()
+                .set(&DataKey::DisputeActive, &false);
+        } else {
+            // leave dispute active if the admin chooses to keep it open; the freeze stays in force.
+            return;
+        }
     }
 
     /// Configured minimum delay between [`LiquifactEscrow::request_clear_legal_hold`]
@@ -5364,6 +5506,7 @@ impl LiquifactEscrow {
         caller.require_auth();
 
         guard_not_legal_hold(&env, EscrowError::LegalHoldBlocksPartialSettle);
+        guard_not_disputed(&env, EscrowError::DisputeBlocksPartialSettle);
 
         let mut escrow = Self::get_escrow(env.clone());
 
@@ -5422,6 +5565,7 @@ impl LiquifactEscrow {
         // Operational pause gate (read-only), before require_auth and orthogonal to legal hold.
         guard_not_paused(&env, EscrowError::PausedBlocksSettlement);
         guard_not_legal_hold(&env, EscrowError::LegalHoldBlocksSettlement);
+        guard_not_disputed(&env, EscrowError::DisputeBlocksSettlement);
 
         // env.clone(): env is used again after this call for ledger timestamp, storage set, and publish.
         let mut escrow = Self::load_escrow_require_sme(&env);
@@ -5567,6 +5711,7 @@ impl LiquifactEscrow {
         // Operational pause gate (read-only), before require_auth and orthogonal to legal hold.
         guard_not_paused(&env, EscrowError::PausedBlocksWithdrawal);
         guard_not_legal_hold(&env, EscrowError::LegalHoldBlocksWithdrawal);
+        guard_not_disputed(&env, EscrowError::DisputeBlocksWithdrawal);
 
         let mut escrow = Self::load_escrow_require_sme(&env);
 
@@ -5695,6 +5840,7 @@ impl LiquifactEscrow {
         // Operational pause gate (read-only), before require_auth and orthogonal to legal hold.
         guard_not_paused(&env, EscrowError::PausedBlocksInvestorClaims);
         guard_not_legal_hold(&env, EscrowError::LegalHoldBlocksInvestorClaims);
+        guard_not_disputed(&env, EscrowError::DisputeBlocksInvestorClaims);
 
         investor.require_auth();
 
@@ -6684,6 +6830,7 @@ impl LiquifactEscrow {
     /// refundable contribution, initialized token data is missing, or the refund transfer fails
     /// token-balance invariants.
     pub fn refund(env: Env, investor: Address) {
+        guard_not_disputed(&env, EscrowError::DisputeBlocksRefund);
         Self::refund_impl(&env, investor, false);
     }
 
@@ -6829,6 +6976,7 @@ impl LiquifactEscrow {
             !Self::legal_hold_active(&env),
             EscrowError::UnfundLegalHoldActive,
         );
+        guard_not_disputed(&env, EscrowError::DisputeBlocksUnfund);
 
         // 3. Investor auth.
         investor.require_auth();
