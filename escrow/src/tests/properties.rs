@@ -1525,9 +1525,19 @@ fn cancelled_escrow<'a>(
     client.init(
         &admin,
         &soroban_sdk::String::from_str(env, invoice_id),
-        &sme, &total, &800i64, &0u64,
-        &token, &None, &treasury, &None,
-        &None, &None, &None, &None, &None,
+        &sme,
+        &total,
+        &800i64,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
     );
     for (investor, amount) in contributions {
         client.fund(investor, amount);
@@ -1559,7 +1569,9 @@ fn dust_sweep_after_full_refund_allows_sweep_to_zero() {
 #[test]
 fn fuzz_dust_sweep_liability_floor() {
     let cases: usize = std::env::var("ESCROW_FUZZ_CASES")
-        .ok().and_then(|v| v.parse().ok()).unwrap_or(32);
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(32);
     let base_seed = read_fuzz_seed_u64();
     for case_idx in 0..cases {
         let case_seed = base_seed ^ (case_idx as u64).wrapping_mul(0xD0575W33P0001u64);

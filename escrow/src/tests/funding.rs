@@ -3549,7 +3549,11 @@ fn test_fund_batch_preserves_event_semantics() {
 
     // Verify events emitted
     let events = env.events().all();
-    assert_eq!(events.events().len(), 2, "should emit 2 EscrowFunded events");
+    assert_eq!(
+        events.events().len(),
+        2,
+        "should emit 2 EscrowFunded events"
+    );
 
     // Each event corresponds to a fund operation
     // (Detailed event field verification depends on EscrowFunded structure)

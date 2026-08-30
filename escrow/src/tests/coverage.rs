@@ -14,6 +14,13 @@ use soroban_sdk::{
 const AMOUNT: i128 = 10_000_0000000;
 const PLEDGE: i128 = 5_000_0000000;
 
+#[test]
+fn typed_error_codes_cover_init_fund_settle_withdraw_and_claim() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    let (funding_token, treasury) = free_addresses(&env);
+
     assert_contract_error(
         client.try_init(
             &admin,
@@ -1712,6 +1719,7 @@ fn test_settle_too_early() {
 
     assert!(!client.is_allowlist_active());
     assert!(!client.is_investor_allowlisted(&investor));
+}
 
 #[test]
 fn test_update_funding_target_happy_path() {
@@ -3084,7 +3092,11 @@ fn test_collateral_replacement_overwrites_stored_value_and_emits_prior_amount() 
 
     // Check the replacement event immediately (before any further reads reset the event scope).
     let events = env.events().all().filter_by_contract(&contract_id);
-    assert_eq!(events.events().len(), 1, "replacement call must emit exactly one event");
+    assert_eq!(
+        events.events().len(),
+        1,
+        "replacement call must emit exactly one event"
+    );
     assert_eq!(
         events.events()[0],
         crate::CollateralRecordedEvt {
@@ -3218,10 +3230,7 @@ fn test_collateral_record_does_not_change_token_balances() {
     let escrow_addr = client.address.clone();
     let balance_before = sat.token.balance(&escrow_addr);
 
-    client.record_sme_collateral_commitment(
-        &soroban_sdk::Symbol::new(&env, "USDC"),
-        &9_999i128,
-    );
+    client.record_sme_collateral_commitment(&soroban_sdk::Symbol::new(&env, "USDC"), &9_999i128);
 
     assert_eq!(
         sat.token.balance(&escrow_addr),

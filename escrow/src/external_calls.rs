@@ -173,7 +173,11 @@ pub fn transfer_funding_token_inbound_with_balance_checks(
     to: &Address,
     amount: i128,
 ) {
-    ensure(env, amount > 0, EscrowError::InboundTransferAmountNotPositive);
+    ensure(
+        env,
+        amount > 0,
+        EscrowError::InboundTransferAmountNotPositive,
+    );
     let token = TokenClient::new(env, token_addr);
     let investor_before = token.balance(investor);
     let contract_before = token.balance(to);
@@ -206,4 +210,3 @@ pub fn transfer_funding_token_inbound_with_balance_checks(
         EscrowError::InboundRecipientBalanceDeltaMismatch,
     );
 }
-

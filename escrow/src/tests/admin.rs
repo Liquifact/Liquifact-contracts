@@ -2399,7 +2399,9 @@ fn test_rotate_beneficiary_then_withdraw_goes_to_new_sme() {
         &None,
     );
     token.stellar.mint(&investor, &TARGET);
-    token.stellar.approve(&investor, &escrow_id, &TARGET, &9999u32);
+    token
+        .stellar
+        .approve(&investor, &escrow_id, &TARGET, &9999u32);
     client.fund(&investor, &TARGET);
     // Mint funded_amount into the escrow contract so withdraw() can transfer it.
     token.stellar.mint(&escrow_id, &TARGET);
