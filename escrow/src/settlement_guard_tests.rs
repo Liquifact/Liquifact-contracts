@@ -64,6 +64,7 @@ fn deploy_funded_with_id<'a>(
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
     let investor = Address::generate(env);
     client.fund(&investor, &1_000i128);
@@ -221,6 +222,7 @@ fn dispute_freezes_funds_until_resolved() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let investor = Address::generate(&env);
@@ -268,6 +270,7 @@ fn dispute_freezes_funds_until_resolved() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
     let investor2 = Address::generate(&env2);
     client2.fund(&investor2, &1_000i128);
@@ -322,6 +325,7 @@ fn dispute_close_requires_admin_authority() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
     let investor = Address::generate(&env);
     client.fund(&investor, &1_000i128);

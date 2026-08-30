@@ -24,6 +24,7 @@ fn funded_client() -> (Env, LiquifactEscrowClient<'static>, Address, Address) {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
     let investor = Address::generate(&env);
     client.fund(&investor, &900i128);

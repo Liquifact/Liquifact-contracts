@@ -527,6 +527,7 @@ fn init_gate(env: &Env, client: &LiquifactEscrowClient) -> (Address, Address) {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
     (admin, sme)
 }

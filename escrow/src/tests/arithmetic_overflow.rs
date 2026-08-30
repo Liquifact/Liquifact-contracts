@@ -401,6 +401,7 @@ fn compute_payout_max_invoice_amount_max_yield_does_not_overflow() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let investor = Address::generate(&env);
@@ -453,6 +454,7 @@ fn compute_payout_max_invoice_amount_zero_yield() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let investor = Address::generate(&env);
@@ -499,6 +501,7 @@ fn compute_payout_two_investors_at_max_principal_max_yield() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let investor_a = Address::generate(&env);
@@ -777,6 +780,7 @@ fn unfund_exact_contribution_succeeds() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let investor = Address::generate(&env);
@@ -842,6 +846,7 @@ fn distributed_principal_saturating_add_never_wraps_on_refund() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let investors: std::vec::Vec<Address> = (0..3)
@@ -898,6 +903,7 @@ fn distributed_principal_saturating_add_on_withdraw_at_max() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let investor = Address::generate(&env);
@@ -1044,6 +1050,7 @@ fn validate_maturity_bounds_saturating_add_does_not_wrap() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let escrow = client.get_escrow();
@@ -1089,6 +1096,7 @@ fn validate_maturity_above_max_horizon_rejected() {
             &None,
             &None,
             &None::<i64>,
+        &None::<u32>,
         ),
         EscrowError::MaturityExceedsMaxHorizon,
     );
@@ -1139,6 +1147,7 @@ fn init_rejects_above_max_invoice_amount() {
             &None,
             &None,
             &None::<i64>,
+        &None::<u32>,
         ),
         EscrowError::AmountExceedsMax,
     );
@@ -1175,6 +1184,7 @@ fn init_rejects_i128_max_amount() {
             &None,
             &None,
             &None::<i64>,
+        &None::<u32>,
         ),
         EscrowError::AmountExceedsMax,
     );
@@ -1212,6 +1222,7 @@ fn init_rejects_zero_and_negative_amount() {
                 &None,
                 &None,
                 &None::<i64>,
+        &None::<u32>,
             ),
             EscrowError::AmountMustBePositive,
         );

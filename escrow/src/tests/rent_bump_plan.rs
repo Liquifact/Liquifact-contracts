@@ -55,6 +55,7 @@ fn init_and_fund_n(
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let mut investors = soroban_sdk::Vec::new(env);
@@ -104,6 +105,7 @@ fn rent_bump_plan_no_entries_returns_empty() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     // No investors have funded → InvestorIndex is absent.
@@ -247,6 +249,7 @@ fn rent_bump_plan_expired_entry_classification() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     // Fund one investor so InvestorIndex is created.

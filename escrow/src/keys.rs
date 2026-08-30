@@ -90,8 +90,11 @@ pub(crate) fn funding_token() -> DataKey {
     DataKey::FundingToken
 }
 
-/// Instance-storage immutable SEP-41 funding token scale, set once at `init`.
-pub(crate):: fn funding_token_scale() -> DataKey {
+/// Instance-storage immutable decimal scale of the SEP-41 funding token, set once at `init`.
+///
+/// Absent when the escrow was initialized without a `token_decimals` value; in that case
+/// scale validation is skipped for backward compatibility (additive-key, ADR-007).
+pub(crate) fn funding_token_scale() -> DataKey {
     DataKey::FundingTokenScale
 }
 

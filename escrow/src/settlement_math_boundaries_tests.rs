@@ -520,23 +520,23 @@ proptest! {
         let bad_i64 = (delta % 1_000_000) as i64;
         match scenario {
             0 => assert_contract_error(
-                client.try_init(&admin, &String::from_str(&env, "BADOOB"), &sme, &0i128, &0i64, &0u64, &token, &None, &treasury, &None, &None, &None, &None, &None, &None, &None, &None, &None::<i64>),
+                client.try_init(&admin, &String::from_str(&env, "BADOOB"), &sme, &0i128, &0i64, &0u64, &token, &None, &treasury, &None, &None, &None, &None, &None, &None, &None, &None, &None::<i64>, &None::<u32>),
                 EscrowError::AmountMustBePositive,
             ),
             1 => assert_contract_error(
-                client.try_init(&admin, &String::from_str(&env, "BADOOB"), &sme, &-(delta + 1), &0i64, &0u64, &token, &None, &treasury, &None, &None, &None, &None, &None, &None, &None, &None, &None::<i64>),
+                client.try_init(&admin, &String::from_str(&env, "BADOOB"), &sme, &-(delta + 1), &0i64, &0u64, &token, &None, &treasury, &None, &None, &None, &None, &None, &None, &None, &None, &None::<i64>, &None::<u32>),
                 EscrowError::AmountMustBePositive,
             ),
             2 => assert_contract_error(
-                client.try_init(&admin, &String::from_str(&env, "BADOOB"), &sme, &(MAX_INVOICE_AMOUNT + 1 + delta), &0i64, &0u64, &token, &None, &treasury, &None, &None, &None, &None, &None, &None, &None, &None, &None::<i64>),
+                client.try_init(&admin, &String::from_str(&env, "BADOOB"), &sme, &(MAX_INVOICE_AMOUNT + 1 + delta), &0i64, &0u64, &token, &None, &treasury, &None, &None, &None, &None, &None, &None, &None, &None, &None::<i64>, &None::<u32>),
                 EscrowError::AmountExceedsMax,
             ),
             3 => assert_contract_error(
-                client.try_init(&admin, &String::from_str(&env, "BADOOB"), &sme, &1_000i128, &(10_001 + bad_i64), &0u64, &token, &None, &treasury, &None, &None, &None, &None, &None, &None, &None, &None, &None::<i64>),
+                client.try_init(&admin, &String::from_str(&env, "BADOOB"), &sme, &1_000i128, &(10_001 + bad_i64), &0u64, &token, &None, &treasury, &None, &None, &None, &None, &None, &None, &None, &None, &None::<i64>, &None::<u32>),
                 EscrowError::YieldBpsOutOfRange,
             ),
             4 => assert_contract_error(
-                client.try_init(&admin, &String::from_str(&env, "BADOOB"), &sme, &1_000i128, &(-1 - bad_i64), &0u64, &token, &None, &treasury, &None, &None, &None, &None, &None, &None, &None, &None, &None::<i64>),
+                client.try_init(&admin, &String::from_str(&env, "BADOOB"), &sme, &1_000i128, &(-1 - bad_i64), &0u64, &token, &None, &treasury, &None, &None, &None, &None, &None, &None, &None, &None, &None::<i64>, &None::<u32>),
                 EscrowError::YieldBpsOutOfRange,
             ),
             5 => assert_contract_error(
@@ -548,7 +548,7 @@ proptest! {
                 EscrowError::ProtocolFeeBpsOutOfRange,
             ),
             7 => {
-                client.init(&admin, &String::from_str(&env, "BADOOB"), &sme, &1_000i128, &0i64, &0u64, &token, &None, &treasury, &None, &None, &None, &None, &None, &None, &None, &None, &None::<i64>);
+                client.init(&admin, &String::from_str(&env, "BADOOB"), &sme, &1_000i128, &0i64, &0u64, &token, &None, &treasury, &None, &None, &None, &None, &None, &None, &None, &None, &None::<i64>, &None::<u32>);
                 let investor = Address::generate(&env);
                 assert_contract_error(
                     client.try_fund(&investor, &0i128),
@@ -556,7 +556,7 @@ proptest! {
                 );
             }
             _ => {
-                client.init(&admin, &String::from_str(&env, "BADOOB"), &sme, &1_000i128, &0i64, &0u64, &token, &None, &treasury, &None, &None, &None, &None, &None, &None, &None, &None, &None::<i64>);
+                client.init(&admin, &String::from_str(&env, "BADOOB"), &sme, &1_000i128, &0i64, &0u64, &token, &None, &treasury, &None, &None, &None, &None, &None, &None, &None, &None, &None::<i64>, &None::<u32>);
                 let investor = Address::generate(&env);
                 assert_contract_error(
                     client.try_fund(&investor, &-(delta + 1)),
@@ -605,6 +605,7 @@ fn edge_zero_values_in_settlement_math() {
                 &None,
                 &None,
                 &None::<i64>,
+        &None::<u32>,
             ),
             EscrowError::AmountMustBePositive,
         );
