@@ -229,11 +229,12 @@ pub struct CloseMetadata {
 
 /// Event emitted when an escrow is closed.
 #[contractevent]
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum CloseFinalizedEvt {
-    CloseFinalized {
-        metadata: CloseMetadata,
-    },
+pub struct CloseFinalizedEvt {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    pub metadata: CloseMetadata,
 }
 
 /// Storage key that marks the escrow as closed (one-shot flag).
@@ -256,7 +257,10 @@ impl LiquifactEscrow {
     /// - Stores [`CloseMetadata`].
     /// - Emits a [`CloseFinalizedEvt`].
     pub fn close_escrow(env: Env) {
-        let escrow: InvoiceEscrow = env.storage().instance().get(&DataKey::Escrow)
+        let escrow: InvoiceEscrow = env
+            .storage()
+            .instance()
+            .get(&DataKey::Escrow)
             .unwrap_or_else(|| panic_with_error!(&env, CloseError::NotInitialized));
         let admin = escrow.admin;
         admin.require_auth();
@@ -265,7 +269,10 @@ impl LiquifactEscrow {
             panic_with_error!(&env, CloseError::AlreadyClosed);
         }
 
-        let funding_token: Address = env.storage().instance().get(&DataKey::FundingToken)
+        let funding_token: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::FundingToken)
             .unwrap_or_else(|| panic_with_error!(&env, CloseError::NotInitialized));
         let token = TokenClient::new(&env, &funding_token);
         let balance = token.balance(&env.current_contract_address());
@@ -273,7 +280,7 @@ impl LiquifactEscrow {
             panic_with_error!(&env, CloseError::ActiveBalance);
         }
 
-        if escrow.dispute_active {
+        if Self::legal_hold_active(&env) {
             panic_with_error!(&env, CloseError::ActiveDispute);
         }
 
@@ -283,20 +290,28 @@ impl LiquifactEscrow {
             sequence: env.ledger().sequence(),
         };
 
-        env.storage().instance().set(&Symbol::new(&env, CLOSED_KEY), &true);
-        env.storage().instance().set(&Symbol::new(&env, CLOSE_METADATA_KEY), &metadata);
+        env.storage()
+            .instance()
+            .set(&Symbol::new(&env, CLOSED_KEY), &true);
+        env.storage()
+            .instance()
+            .set(&Symbol::new(&env, CLOSE_METADATA_KEY), &metadata);
 
-        env.events().publish(CloseFinalizedEvt::CloseFinalized {
-            metadata: metadata.clone(),
-        });
+        CloseFinalizedEvt {
+            name: symbol_short!("esc_cls"),
+            invoice_id: escrow.invoice_id.clone(),
+            metadata,
+        }
+        .publish(&env);
     }
 
     /// Returns the close metadata if the escrow has been closed.
     pub fn get_closure_metadata(env: Env) -> Option<CloseMetadata> {
-        env.storage().instance().get(&Symbol::new(&env, CLOSE_METADATA_KEY))
+        env.storage()
+            .instance()
+            .get(&Symbol::new(&env, CLOSE_METADATA_KEY))
     }
 }
-
 
 /// Default maximum maturity horizon in seconds (~5 years) when no explicit horizon is configured.
 pub const DEFAULT_MATURITY_MAX_HORIZON_SECS: u64 = 157_680_000; // ~5 years (365.25 * 24 * 3600 * 5)
@@ -868,6 +883,18 @@ pub enum EscrowError {
     CallbackAfterCancellation = 244,
     /// [`LiquifactEscrow::execute_callback`] called with a nonce that has no registered callback context.
     CallbackNotFound = 245,
+
+    /// [`LiquifactEscrow::rebind_registry_ref`] rejected because principal has already been
+    /// recorded for this escrow (`funded_amount != 0`). The off-chain registry hint may only
+    /// be rebound before any investor has committed funds.
+    RegistryImmutableAfterFunding = 246,
+    /// [`LiquifactEscrow::rotate_beneficiary`] rejected because principal has already been
+    /// recorded for this escrow (`funded_amount != 0`). The payout destination may only be
+    /// rotated before any investor has committed funds, preserving auditability.
+    BeneficiaryImmutableAfterFunding = 247,
+    /// [`LiquifactEscrow::recover_admin`] rejected because [`DataKey::PendingAdminExpiry`]
+    /// has not yet elapsed (or is unexpectedly absent while a proposal is pending).
+    AdminRecoveryNotExpired = 248,
 }
 
 #[inline(always)]
@@ -1042,7 +1069,10 @@ pub(crate) fn is_terminal_status(status: u32) -> bool {
 /// This is a **predicate**, not a guard. Callers that need to *enforce* the pre-settlement
 /// precondition must wrap it in
 /// `ensure(&env, is_pre_settlement_status(status), error)`.
+// Not yet wired to a call site (see doc comment above); kept as the documented, centralised
+// predicate for the day a caller needs it rather than re-deriving `matches!(status, 0 | 1)`.
 #[inline(always)]
+#[allow(dead_code)]
 pub(crate) fn is_pre_settlement_status(status: u32) -> bool {
     matches!(status, 0 | 1)
 }
@@ -2282,10 +2312,8 @@ impl LiquifactEscrow {
             .get(&FeeScheduleStorageKey::Pending);
         if let Some(p) = pending {
             if p.activation_ledger <= current_ledger {
-                let previous: Option<FeeSchedule> = env
-                    .storage()
-                    .instance()
-                    .get(&FeeScheduleStorageKey::Active);
+                let previous: Option<FeeSchedule> =
+                    env.storage().instance().get(&FeeScheduleStorageKey::Active);
                 env.storage()
                     .instance()
                     .set(&FeeScheduleStorageKey::Active, &p);
@@ -2304,10 +2332,8 @@ impl LiquifactEscrow {
     /// Returns the active fee schedule for the current ledger, computing any
     /// not-yet-promoted boundary activation on the fly.
     pub fn get_active_fee_schedule(env: Env) -> Option<FeeSchedule> {
-        let active: Option<FeeSchedule> = env
-            .storage()
-            .instance()
-            .get(&FeeScheduleStorageKey::Active);
+        let active: Option<FeeSchedule> =
+            env.storage().instance().get(&FeeScheduleStorageKey::Active);
         let pending: Option<FeeSchedule> = env
             .storage()
             .instance()
@@ -2332,10 +2358,8 @@ impl LiquifactEscrow {
 
     /// Returns the previously active fee schedule after a boundary activation.
     pub fn get_previous_fee_schedule(env: Env) -> Option<FeeSchedule> {
-        let active: Option<FeeSchedule> = env
-            .storage()
-            .instance()
-            .get(&FeeScheduleStorageKey::Active);
+        let active: Option<FeeSchedule> =
+            env.storage().instance().get(&FeeScheduleStorageKey::Active);
         let pending: Option<FeeSchedule> = env
             .storage()
             .instance()
@@ -7634,7 +7658,7 @@ mod init_reentry_guard_tests {
     }
 
     fn with_contract<R>(env: &Env, f: impl FnOnce() -> R) -> R {
-        let contract_id = env.register_contract(None, LiquifactEscrow);
+        let contract_id = env.register(LiquifactEscrow, ());
         env.as_contract(&contract_id, f)
     }
 
@@ -7711,6 +7735,9 @@ mod settlement_guard_tests;
 
 #[cfg(test)]
 mod callback_binding_tests;
+
+#[cfg(test)]
+mod invariant_harness_tests;
 
 /// Default starting balance assigned to any address that has never been seen by the
 /// [`DefaultMockToken`] contract.
