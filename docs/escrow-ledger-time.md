@@ -259,9 +259,10 @@ committed funds.
 
 ## `update_funding_deadline` — Open State Only
 
-The optional funding deadline can be set, extended, or cleared while the escrow is **Open** (status == 0):
+An existing funding deadline can be moved forward while the escrow is **Open** (status == 0)
+and the current deadline has not elapsed:
 
-| Status | `update_funding_deadline` result |
+| Status | `extend_funding_deadline` result |
 |--------|----------------------------------|
 | 0 — Open | ✅ Allowed |
 | 1 — Funded | ❌ Panics: "Funding deadline can only be updated in Open state" |
@@ -270,12 +271,14 @@ The optional funding deadline can be set, extended, or cleared while the escrow 
 | 4 — Cancelled | ❌ Panics: "Funding deadline can only be updated in Open state" |
 
 **Validation:**
-- `Some(d)`: `d` must be strictly greater than `env.ledger().timestamp()` (same rule as `init`).
-- `None`: removes `DataKey::FundingDeadline`; `is_funding_expired()` returns `false`.
+- A deadline must already exist.
+- `new_deadline` must be strictly greater than the stored deadline.
+- If `maturity > 0`, `new_deadline` must be strictly before maturity.
+- If no deadline exists, `is_funding_expired()` returns `false`.
 
-**Event:** `FundingDeadlineUpdated` carries `invoice_id`, `prior_deadline`, and `new_deadline`.
+**Event:** `FundingDeadlineExtended` carries `invoice_id`, `old_deadline`, and `new_deadline`.
 
-Indexers should listen for this event to track deadline changes per invoice.
+Indexers should listen for this event to track extended countdowns per invoice.
 
 ---
 

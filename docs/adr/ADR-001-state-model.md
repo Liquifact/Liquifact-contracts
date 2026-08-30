@@ -12,7 +12,7 @@ The escrow needs a clear, auditable lifecycle so that state-changing entrypoints
 
 ## Decision
 
-Use a single `u32` status field on `InvoiceEscrow` with four values:
+Use a single `u32` status field on `InvoiceEscrow` with five values:
 
 | Value | Name | Meaning |
 |-------|------|---------|
@@ -20,14 +20,17 @@ Use a single `u32` status field on `InvoiceEscrow` with four values:
 | `1` | funded | `funded_amount >= funding_target`; SME may withdraw or settle |
 | `2` | settled | SME called `settle`; investors may claim payout |
 | `3` | withdrawn | SME called `withdraw`; terminal, no settlement possible |
+| `4` | cancelled | Admin called `cancel_funding`; terminal, investors may refund |
 
-Transitions are strictly forward (`0 → 1 → 2` or `0 → 1 → 3`). No entrypoint moves status backward. The full escrow snapshot is stored under `DataKey::Escrow` and rewritten atomically on every state change.
+Transitions are strictly forward (`0 → 1 → 2`, `0 → 1 → 3`, or `0 → 4`). No entrypoint moves status backward. The full escrow snapshot is stored under `DataKey::Escrow` and rewritten atomically on every state change.
 
 ## Consequences
 
 - Any entrypoint that reads `status` gets a consistent view within a single host function call (Soroban single-writer model).
 - `settle` and `withdraw` both require `status == 1`, so they are mutually exclusive terminal paths.
 - `fund` is blocked once `status != 0`, preventing post-funded contributions.
+- `cancel_funding` is blocked once `status != 0`, preventing cancellation of funded escrows.
+- `refund` is only permitted when `status == 4`, allowing principal recovery for cancelled escrows.
 - Property test `prop_status_only_increases` enforces the monotonicity invariant across arbitrary fund amounts.
 
 ## Rejected alternatives
