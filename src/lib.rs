@@ -1,4 +1,4 @@
-use soroban_sdk::{contracterror, contractimpl, symbol_short, Address, BytesN, Env, Symbol};
+use soroban_sdk::{contract, contracterror, contractimpl, symbol_short, Address, BytesN, Env, Symbol};
 
 const YIELD_TIER_KEY: Symbol = symbol_short!("YLD_TIER");
 const ADMIN_KEY: Symbol = symbol_short!("ADMIN");
@@ -19,6 +19,7 @@ pub enum YieldTierState {
     Tier3,
 }
 
+#[contract]
 pub struct YieldTierContract;
 
 #[contractimpl]
@@ -34,8 +35,10 @@ impl YieldTierContract {
         let admin: Address = env.storage().instance().get(&ADMIN_KEY).unwrap();
         admin.require_auth();
 
-        env.deployer().update_current_contract_wasm(new_wasm_hash);
-        env.events().publish((symbol_short!("upgrade"),), (new_wasm_hash.clone(),));
+        env.deployer()
+            .update_current_contract_wasm(new_wasm_hash.clone());
+        env.events()
+            .publish((symbol_short!("upgrade"),), (new_wasm_hash.clone(),));
 
         Ok(())
     }
@@ -50,11 +53,24 @@ impl YieldTierContract {
     }
 
     /// Sets the yield-tier state (admin-only).
+    ///
+    /// Repeated writes of the same canonical value are intentionally treated as a no-op:
+    /// they still require admin auth, but they do not rewrite storage or re-emit the
+    /// mutation event for a value that is already active.
     pub fn set_yield_tier(env: Env, tier: YieldTierState) -> Result<(), Error> {
         let admin: Address = env.storage().instance().get(&ADMIN_KEY).unwrap();
         admin.require_auth();
+
+        let current: Option<YieldTierState> = env.storage().instance().get(&YIELD_TIER_KEY);
+        if current == Some(tier.clone()) {
+            return Ok(());
+        }
+
         env.storage().instance().set(&YIELD_TIER_KEY, &tier);
         env.events().publish((symbol_short!("tier_set"),), (tier.clone(),));
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod test;

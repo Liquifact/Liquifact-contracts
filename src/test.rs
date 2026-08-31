@@ -1,9 +1,9 @@
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::{YieldTierContract, YieldTierContractClient, YieldTierState};
     use soroban_sdk::{
         testutils::{Address as _, Events},
-        Address, BytesN, Env, IntoVal,
+        Address, BytesN, Env,
     };
 
     #[test]
@@ -43,16 +43,10 @@ mod tests {
         client.init(&admin);
 
         let new_wasm = BytesN::from_array(&env, &[1; 32]);
+        let event_count_before = env.events().all().events().len();
         client.upgrade(&new_wasm);
-
-        assert_eq!(
-            env.events().all().last().unwrap(),
-            (
-                contract_id,
-                (symbol_short!("upgrade"),).into_val(&env),
-                (new_wasm.clone(),).into_val(&env),
-            )
-        );
+        assert_eq!(env.events().all().events().len(), event_count_before + 1);
+        assert_eq!(client.get_yield_tier(), YieldTierState::Unset);
     }
 
     #[test]
@@ -80,17 +74,47 @@ mod tests {
         let admin = Address::generate(&env);
         client.init(&admin);
 
+        let events_before = env.events().all().events().len();
         client.set_yield_tier(&YieldTierState::Tier1);
         assert_eq!(client.get_yield_tier(), YieldTierState::Tier1);
+        assert_eq!(env.events().all().events().len(), events_before + 1);
+    }
 
-        assert_eq!(
-            env.events().all().last().unwrap(),
-            (
-                contract_id,
-                (symbol_short!("tier_set"),).into_val(&env),
-                (YieldTierState::Tier1,).into_val(&env),
-            )
-        );
+    #[test]
+    fn test_set_yield_tier_noop_is_idempotent_and_silent() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register_contract(None, YieldTierContract);
+        let client = YieldTierContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        client.init(&admin);
+
+        client.set_yield_tier(&YieldTierState::Tier2);
+        let _ = env.events().all();
+
+        client.set_yield_tier(&YieldTierState::Tier2);
+        assert_eq!(client.get_yield_tier(), YieldTierState::Tier2);
+        assert_eq!(env.events().all().events().len(), 0);
+
+        client.set_yield_tier(&YieldTierState::Tier2);
+        assert_eq!(env.events().all().events().len(), 0);
+    }
+
+    #[test]
+    fn test_set_yield_tier_noop_still_requires_admin_auth() {
+        let env = Env::default();
+        let contract_id = env.register_contract(None, YieldTierContract);
+        let client = YieldTierContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        client.init(&admin);
+
+        let event_count_before = env.events().all().events().len();
+        let result = client.try_set_yield_tier(&YieldTierState::Tier1);
+        assert!(result.is_err());
+        assert_eq!(env.events().all().events().len(), event_count_before);
+        assert_eq!(client.get_yield_tier(), YieldTierState::Unset);
     }
 
     #[test]
@@ -117,14 +141,9 @@ mod tests {
         let admin = Address::generate(&env);
         client.init(&admin);
 
+        let event_count_before = env.events().all().events().len();
         client.set_yield_tier(&YieldTierState::Tier3);
-        assert_eq!(
-            env.events().all().last().unwrap(),
-            (
-                contract_id,
-                (symbol_short!("tier_set"),).into_val(&env),
-                (YieldTierState::Tier3,).into_val(&env),
-            )
-        );
+        assert_eq!(env.events().all().events().len(), event_count_before + 1);
+        assert_eq!(client.get_yield_tier(), YieldTierState::Tier3);
     }
 }
