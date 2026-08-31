@@ -1,6 +1,17 @@
+[package]
+name = "yield_tier_contract"
+version = "0.1.0"
+edition = "2021"
+
 [workspace]
 members = ["escrow"]
-resolver = "2" 
+resolver = "2"
+
+[dependencies]
+soroban-sdk = "25.3.2"
+
+[dev-dependencies]
+soroban-sdk = { version = "25.3.2", features = ["testutils"] }
 
 [workspace.metadata.cargo-llvm-cov]
 # Exclude test scaffolding from coverage measurement — only production code is gated.
