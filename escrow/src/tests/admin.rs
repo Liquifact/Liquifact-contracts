@@ -1241,21 +1241,21 @@ fn test_migrate_all_historical_versions_raise_no_path() {
 
 /// An uninitialized contract has `DataKey::Version` absent from storage,
 /// which `.get(...).unwrap_or(0)` maps to `0`. Calling `migrate(0)` must
-/// raise `NoMigrationPath`, not panic or silently succeed.
+/// raise `EscrowNotInitialized`, not panic or silently succeed.
 #[test]
 fn test_migrate_from_zero_uninitialized_raises_no_path() {
     let env = Env::default();
     env.mock_all_auths();
     let client = deploy(&env);
 
-    assert_contract_error(client.try_migrate(&0u32, &0u32), EscrowError::NoMigrationPath);
+    assert_contract_error(client.try_migrate(&0u32, &0u32), EscrowError::EscrowNotInitialized);
 
     let stored_after: u32 = env.as_contract(&client.address, || {
         env.storage().instance().get(&DataKey::Version).unwrap_or(0)
     });
     assert_eq!(
         stored_after, 0,
-        "DataKey::Version must remain 0 (absent) on NoMigrationPath"
+        "DataKey::Version must remain 0 (absent) on EscrowNotInitialized"
     );
 }
 
