@@ -15,6 +15,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: stable
           components: rustfmt, clippy, llvm-tools-preview
           targets: wasm32-unknown-unknown
 
@@ -31,7 +32,9 @@ jobs:
         run: cargo build
 
       - name: Run tests
-        run: cargo test
+        run: |
+          export RUST_BACKTRACE=1
+          cargo test -p liquifact_escrow -- --nocapture
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
