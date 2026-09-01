@@ -16,7 +16,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy, llvm-tools-preview
-          targets: wasm32v1-none
+          targets: wasm32-unknown-unknown
 
       - name: Cache cargo registry and build
         uses: Swatinem/rust-cache@v2
@@ -37,9 +37,9 @@ jobs:
         uses: taiki-e/install-action@cargo-llvm-cov
 
       - name: Add WASM target
-        run: rustup target add wasm32v1-none
+        run: rustup target add wasm32-unknown-unknown
       - name: Build WASM
-        run: cargo build --target wasm32v1-none --release -p liquifact_escrow
+        run: cargo build --target wasm32-unknown-unknown --release -p liquifact_escrow
 
       - name: Workspace Clippy (all targets)
         # Latent clippy denies in tests; keep signal without hard-failing CI.
