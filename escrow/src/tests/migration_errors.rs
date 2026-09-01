@@ -6,6 +6,7 @@
 // and auth-first ordering) lives in the anchoring suite in tests/admin.rs.
 
 use super::*;
+use crate::LEGACY_VERSION;
 
 /// Calling migrate(stored_version - 1) with the correct stored version
 /// must raise MigrationVersionMismatch (stored != from_version).
