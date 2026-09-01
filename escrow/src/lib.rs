@@ -3790,9 +3790,9 @@ impl LiquifactEscrow {
             current == expected_nonce,
             EscrowError::AdminNonceMismatch,
         );
-        let next = current.checked_add(1).unwrap_or_else(|| {
-            fail(env, EscrowError::AdminNonceMismatch)
-        });
+        let next = current
+            .checked_add(1)
+            .unwrap_or_else(|| fail(env, EscrowError::AdminNonceMismatch));
         env.storage().instance().set(&DataKey::AdminNonce, &next);
     }
 

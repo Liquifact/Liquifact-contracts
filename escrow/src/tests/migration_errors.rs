@@ -289,7 +289,6 @@ fn test_migration_repeated() {
         client.try_migrate(&LEGACY_VERSION),
         EscrowError::MigrationVersionMismatch,
     );
-    
     // Repeated migration with from_version = SCHEMA_VERSION should fail with AlreadyCurrentSchemaVersion
     assert_contract_error(
         client.try_migrate(&SCHEMA_VERSION),
