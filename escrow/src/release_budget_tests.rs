@@ -26,7 +26,7 @@
 //! Note: native (non-WASM) metering **underestimates** WASM cost, so the ceilings are loose,
 //! conservative documentation gates rather than tight WASM budgets — see the constant docs.
 
-use soroban_sdk::{testutils::Address as _, Address, Env, String, Symbol, Vec};
+use soroban_sdk::{Address, Env, String, Symbol, Vec, testutils::Address as _};
 
 use super::{
     keys, LiquifactEscrow, LiquifactEscrowClient, MAX_INVESTOR_READ_BATCH,

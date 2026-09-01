@@ -3785,7 +3785,11 @@ impl LiquifactEscrow {
             .instance()
             .get(&DataKey::AdminNonce)
             .unwrap_or(0);
-        ensure(env, current == expected_nonce, EscrowError::AdminNonceMismatch);
+        ensure(
+            env,
+            current == expected_nonce,
+            EscrowError::AdminNonceMismatch,
+        );
         let next = current.checked_add(1).unwrap_or_else(|| {
             fail(env, EscrowError::AdminNonceMismatch)
         });
@@ -6239,7 +6243,9 @@ impl LiquifactEscrow {
         if from_version >= SCHEMA_VERSION {
             fail(&env, EscrowError::AlreadyCurrentSchemaVersion)
         } else if from_version == LEGACY_VERSION {
-            env.storage().instance().set(&DataKey::Version, &SCHEMA_VERSION);
+            env.storage()
+                .instance()
+                .set(&DataKey::Version, &SCHEMA_VERSION);
             SCHEMA_VERSION
         } else {
             fail(&env, EscrowError::NoMigrationPath)
