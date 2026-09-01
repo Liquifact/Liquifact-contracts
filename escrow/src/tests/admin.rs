@@ -1203,7 +1203,7 @@ fn test_migrate_below_schema_version_matching_stored_raises_no_path() {
     let (client, admin, sme) = setup(&env);
     default_init(&client, &env, &admin, &sme);
 
-    let older = SCHEMA_VERSION - 1;
+    let older = 4u32;
     env.as_contract(&client.address, || {
         env.storage().instance().set(&DataKey::Version, &older);
     });
@@ -1216,15 +1216,15 @@ fn test_migrate_below_schema_version_matching_stored_raises_no_path() {
     );
 }
 
-/// Every `from_version` in `[1, SCHEMA_VERSION - 1]` with a matching stored
+/// Every `from_version` in `[1, LEGACY_VERSION - 1]` with a matching stored
 /// version must raise `NoMigrationPath` — exhaustive coverage of the
-/// "no implemented path" branch for all known historical versions.
+/// "no implemented path" branch for all known unmigrated historical versions.
 #[test]
 fn test_migrate_all_historical_versions_raise_no_path() {
     let env = Env::default();
     env.mock_all_auths();
 
-    for &historical in &[1u32, 2, 3, 4, 5] {
+    for &historical in &[1u32, 2, 3, 4] {
         let (client, admin, sme) = setup(&env);
         default_init(&client, &env, &admin, &sme);
         env.as_contract(&client.address, || {
@@ -1270,8 +1270,8 @@ fn test_migrate_version_immutable_across_all_error_branches() {
         (6, 5, EscrowError::MigrationVersionMismatch),
         (6, 6, EscrowError::AlreadyCurrentSchemaVersion),
         (6, 7, EscrowError::AlreadyCurrentSchemaVersion),
-        (5, 5, EscrowError::NoMigrationPath),
-        (0, 0, EscrowError::NoMigrationPath),
+        (4, 4, EscrowError::NoMigrationPath),
+        (0, 0, EscrowError::EscrowNotInitialized),
     ];
 
     for &(stored, claimed, expected) in cases {

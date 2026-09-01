@@ -41,7 +41,7 @@ fn test_migration_version_mismatch() {
 
     // stored = SCHEMA_VERSION (6), from_version = 5 → mismatch
     assert_contract_error(
-        client.try_migrate(&(SCHEMA_VERSION - 1)),
+        client.try_migrate(&(SCHEMA_VERSION - 1), &0u32),
         EscrowError::MigrationVersionMismatch,
     );
 }
@@ -79,7 +79,7 @@ fn test_already_current_schema_version() {
     );
 
     assert_contract_error(
-        client.try_migrate(&SCHEMA_VERSION),
+        client.try_migrate(&SCHEMA_VERSION, &0u32),
         EscrowError::AlreadyCurrentSchemaVersion,
     );
 }
@@ -121,7 +121,7 @@ fn test_no_migration_path() {
         env.storage().instance().set(&DataKey::Version, &1u32);
     });
 
-    assert_contract_error(client.try_migrate(&1u32), EscrowError::NoMigrationPath);
+    assert_contract_error(client.try_migrate(&1u32, &0u32), EscrowError::NoMigrationPath);
 }
 
 #[test]
@@ -159,7 +159,7 @@ fn test_known_legacy_layout_migration() {
         env.storage().instance().remove(&DataKey::Version);
     });
 
-    let new_version = client.migrate(&LEGACY_VERSION);
+    let new_version = client.migrate(&LEGACY_VERSION, &0u32);
     assert_eq!(new_version, SCHEMA_VERSION);
     assert_eq!(client.get_version(), SCHEMA_VERSION);
 }
@@ -201,7 +201,7 @@ fn test_ambiguous_legacy_storage_missing_marker() {
     });
 
     assert_contract_error(
-        client.try_migrate(&LEGACY_VERSION),
+        client.try_migrate(&LEGACY_VERSION, &0u32),
         EscrowError::AmbiguousLegacyStorage,
     );
 }
@@ -243,7 +243,7 @@ fn test_unknown_marker() {
 
     // Caller guesses LEGACY_VERSION
     assert_contract_error(
-        client.try_migrate(&LEGACY_VERSION),
+        client.try_migrate(&LEGACY_VERSION, &0u32),
         EscrowError::MigrationVersionMismatch,
     );
 }
@@ -282,16 +282,16 @@ fn test_migration_repeated() {
         env.storage().instance().remove(&DataKey::Version);
     });
 
-    client.migrate(&LEGACY_VERSION);
+    client.migrate(&LEGACY_VERSION, &0u32);
 
     // Repeated migration with from_version = LEGACY_VERSION should fail
     assert_contract_error(
-        client.try_migrate(&LEGACY_VERSION),
+        client.try_migrate(&LEGACY_VERSION, &1u32),
         EscrowError::MigrationVersionMismatch,
     );
     // Repeated migration with from_version = SCHEMA_VERSION should fail with AlreadyCurrentSchemaVersion
     assert_contract_error(
-        client.try_migrate(&SCHEMA_VERSION),
+        client.try_migrate(&SCHEMA_VERSION, &2u32),
         EscrowError::AlreadyCurrentSchemaVersion,
     );
 }
@@ -334,7 +334,7 @@ fn test_partial_migration() {
     });
 
     assert_contract_error(
-        client.try_migrate(&LEGACY_VERSION),
+        client.try_migrate(&LEGACY_VERSION, &0u32),
         EscrowError::AmbiguousLegacyStorage,
     );
 }
