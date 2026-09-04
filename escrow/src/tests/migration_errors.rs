@@ -122,7 +122,10 @@ fn test_no_migration_path() {
         env.storage().instance().set(&DataKey::Version, &1u32);
     });
 
-    assert_contract_error(client.try_migrate(&1u32, &0u32), EscrowError::NoMigrationPath);
+    assert_contract_error(
+        client.try_migrate(&1u32, &0u32),
+        EscrowError::NoMigrationPath,
+    );
 }
 
 #[test]
@@ -292,7 +295,7 @@ fn test_migration_repeated() {
     );
     // Repeated migration with from_version = SCHEMA_VERSION should fail with AlreadyCurrentSchemaVersion
     assert_contract_error(
-        client.try_migrate(&SCHEMA_VERSION, &1u32),
+        client.try_migrate(&SCHEMA_VERSION, &2u32),
         EscrowError::AlreadyCurrentSchemaVersion,
     );
 }

@@ -1208,7 +1208,10 @@ fn test_migrate_below_schema_version_matching_stored_raises_no_path() {
         env.storage().instance().set(&DataKey::Version, &older);
     });
 
-    assert_contract_error(client.try_migrate(&older, &0u32), EscrowError::NoMigrationPath);
+    assert_contract_error(
+        client.try_migrate(&older, &0u32),
+        EscrowError::NoMigrationPath,
+    );
     assert_eq!(
         client.get_version(),
         older,
@@ -1248,7 +1251,10 @@ fn test_migrate_from_zero_uninitialized_raises_no_path() {
     env.mock_all_auths();
     let client = deploy(&env);
 
-    assert_contract_error(client.try_migrate(&0u32, &0u32), EscrowError::EscrowNotInitialized);
+    assert_contract_error(
+        client.try_migrate(&0u32, &0u32),
+        EscrowError::EscrowNotInitialized,
+    );
 
     let stored_after: u32 = env.as_contract(&client.address, || {
         env.storage().instance().get(&DataKey::Version).unwrap_or(0)
@@ -1269,7 +1275,7 @@ fn test_migrate_version_immutable_across_all_error_branches() {
     let cases: &[(u32, u32, EscrowError)] = &[
         (6, 5, EscrowError::MigrationVersionMismatch),
         (6, 6, EscrowError::AlreadyCurrentSchemaVersion),
-        (6, 7, EscrowError::MigrationVersionMismatch),
+        (7, 7, EscrowError::AlreadyCurrentSchemaVersion),
         (4, 4, EscrowError::NoMigrationPath),
         (0, 0, EscrowError::EscrowNotInitialized),
     ];
