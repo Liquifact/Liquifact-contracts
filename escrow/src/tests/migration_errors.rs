@@ -295,7 +295,7 @@ fn test_migration_repeated() {
     );
     // Repeated migration with from_version = SCHEMA_VERSION should fail with AlreadyCurrentSchemaVersion
     assert_contract_error(
-        client.try_migrate(&SCHEMA_VERSION, &2u32),
+        client.try_migrate(&SCHEMA_VERSION, &1u32),
         EscrowError::AlreadyCurrentSchemaVersion,
     );
 }

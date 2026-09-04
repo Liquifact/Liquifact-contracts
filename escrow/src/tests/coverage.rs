@@ -483,13 +483,13 @@ fn typed_error_codes_cover_range_boundaries() {
             EscrowError::MigrationVersionMismatch,
     );
     assert_contract_error(
-        migrate_client.try_migrate(&SCHEMA_VERSION, &1u32),
+        migrate_client.try_migrate(&SCHEMA_VERSION, &0u32),
             EscrowError::AlreadyCurrentSchemaVersion,
     );
     env.as_contract(&migrate_client.address, || {
         env.storage().instance().set(&DataKey::Version, &0u32);
     });
-    assert_contract_error(migrate_client.try_migrate(&0, &2u32), EscrowError::NoMigrationPath);
+    assert_contract_error(migrate_client.try_migrate(&0, &0u32), EscrowError::NoMigrationPath);
 
     // Funding group: 100 (skip legacy 108)
     let fund_client = super::deploy(&env);
