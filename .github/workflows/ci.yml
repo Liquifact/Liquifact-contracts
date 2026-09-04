@@ -26,7 +26,8 @@ jobs:
         run: cargo fmt -p liquifact_escrow -- --check
 
       - name: Clippy
-        run: cargo clippy -p liquifact_escrow -- -D warnings
+        run: |
+          cargo clippy -p liquifact_escrow -- -D warnings 2>&1 | tee -a $GITHUB_STEP_SUMMARY
 
       - name: Build
         run: cargo build
@@ -34,7 +35,7 @@ jobs:
       - name: Run tests
         run: |
           export RUST_BACKTRACE=1
-          cargo test -p liquifact_escrow -- --nocapture
+          cargo test -p liquifact_escrow -- --nocapture 2>&1 | tee -a $GITHUB_STEP_SUMMARY
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
