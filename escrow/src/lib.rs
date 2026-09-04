@@ -6248,8 +6248,8 @@ impl LiquifactEscrow {
         Self::load_escrow_require_admin(&env);
         Self::consume_admin_nonce(&env, expected_nonce);
 
-        let stored: u32 = if env.storage().instance().has(&DataKey::Version) {
-            env.storage().instance().get(&DataKey::Version).unwrap()
+        let stored: u32 = if let Some(version) = env.storage().instance().get(&DataKey::Version) {
+            version
         } else {
             let has_token = env.storage().instance().has(&DataKey::FundingToken);
             let has_treasury = env.storage().instance().has(&DataKey::Treasury);
