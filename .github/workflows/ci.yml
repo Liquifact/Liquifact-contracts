@@ -30,7 +30,8 @@ jobs:
           cargo clippy -p liquifact_escrow -- -D warnings 2>&1 | tee -a $GITHUB_STEP_SUMMARY
 
       - name: Build
-        run: cargo build
+        run: |
+          cargo build 2>&1 | tee -a $GITHUB_STEP_SUMMARY
 
       - name: Run tests
         run: |
