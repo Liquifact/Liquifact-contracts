@@ -6248,17 +6248,19 @@ impl LiquifactEscrow {
         Self::load_escrow_require_admin(&env);
         Self::consume_admin_nonce(&env, expected_nonce);
 
-        let stored: u32 = if let Some(version) = env.storage().instance().get(&DataKey::Version) {
-            version
-        } else {
-            let has_token = env.storage().instance().has(&DataKey::FundingToken);
-            let has_treasury = env.storage().instance().has(&DataKey::Treasury);
-            if has_token && has_treasury {
-                LEGACY_VERSION
-            } else {
-                fail(&env, EscrowError::AmbiguousLegacyStorage)
-            }
-        };
+        let stored: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::Version)
+            .unwrap_or_else(|| {
+                let has_token = env.storage().instance().has(&DataKey::FundingToken);
+                let has_treasury = env.storage().instance().has(&DataKey::Treasury);
+                if has_token && has_treasury {
+                    LEGACY_VERSION
+                } else {
+                    fail(&env, EscrowError::AmbiguousLegacyStorage)
+                }
+            });
 
         ensure(
             &env,
@@ -6267,15 +6269,17 @@ impl LiquifactEscrow {
         );
 
         if from_version >= SCHEMA_VERSION {
-            fail(&env, EscrowError::AlreadyCurrentSchemaVersion)
-        } else if from_version == LEGACY_VERSION {
+            fail(&env, EscrowError::AlreadyCurrentSchemaVersion);
+        }
+
+        if from_version == LEGACY_VERSION {
             env.storage()
                 .instance()
                 .set(&DataKey::Version, &SCHEMA_VERSION);
-            SCHEMA_VERSION
-        } else {
-            fail(&env, EscrowError::NoMigrationPath)
+            return SCHEMA_VERSION;
         }
+
+        fail(&env, EscrowError::NoMigrationPath)
     }
 
     /// Replaces the deployed WASM bytecode for this contract instance while preserving all
