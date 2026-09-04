@@ -1269,7 +1269,7 @@ fn test_migrate_version_immutable_across_all_error_branches() {
     let cases: &[(u32, u32, EscrowError)] = &[
         (6, 5, EscrowError::MigrationVersionMismatch),
         (6, 6, EscrowError::AlreadyCurrentSchemaVersion),
-        (6, 7, EscrowError::AlreadyCurrentSchemaVersion),
+        (6, 7, EscrowError::MigrationVersionMismatch),
         (4, 4, EscrowError::NoMigrationPath),
         (0, 0, EscrowError::EscrowNotInitialized),
     ];
