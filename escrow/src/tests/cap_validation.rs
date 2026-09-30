@@ -1203,7 +1203,7 @@ fn test_get_remaining_investor_slots_post_lower_cap() {
 
     assert_eq!(client.get_remaining_investor_slots(), Some(2));
 
-    client.lower_max_unique_investors(&3u32);
+    client.lower_max_unique_investors(&3u32, &0u32);
 
     assert_eq!(client.get_remaining_investor_slots(), Some(0));
 }
@@ -1960,7 +1960,7 @@ fn test_lower_cap_at_funder_count_succeeds_zero_remaining_slots() {
     assert_eq!(n, 3);
 
     // lower cap to exactly N (3) — must succeed, this is the floor boundary.
-    let new_cap = client.lower_max_unique_investors(&3u32);
+    let new_cap = client.lower_max_unique_investors(&3u32, &0u32);
     assert_eq!(new_cap, 3);
     assert_eq!(client.get_max_unique_investors_cap(), Some(3));
 
@@ -2010,7 +2010,7 @@ fn test_lower_cap_one_below_funder_count_rejected() {
     assert_eq!(client.get_unique_funder_count(), 3);
 
     // lower to N-1 = 2 — must panic NewCapBelowCurrentFunderCount.
-    client.lower_max_unique_investors(&2u32);
+    client.lower_max_unique_investors(&2u32, &0u32);
 }
 
 /// Attempting to use lower_max_unique_investors to raise the cap must be
@@ -2047,7 +2047,7 @@ fn test_lower_max_unique_investors_raise_attempt_rejected() {
     );
 
     // Attempt to raise cap from 3 to 5 via the lower entrypoint — must panic.
-    client.lower_max_unique_investors(&5u32);
+    client.lower_max_unique_investors(&5u32, &0u32);
 }
 
 /// Admin auth is required for lower_max_unique_investors.
@@ -2088,7 +2088,7 @@ fn test_lower_cap_floor_boundary_non_admin_rejected() {
 
     // Strip all auth — call must be rejected.
     env.mock_auths(&[]);
-    client.lower_max_unique_investors(&2u32);
+    client.lower_max_unique_investors(&2u32, &0u32);
 }
 
 /// Verify admin auth is recorded when lower_max_unique_investors is called
@@ -2128,7 +2128,7 @@ fn test_lower_cap_floor_boundary_admin_auth_recorded() {
     assert_eq!(client.get_unique_funder_count(), 2);
 
     // Lower cap to exactly the current funder count.
-    let new_cap = client.lower_max_unique_investors(&2u32);
+    let new_cap = client.lower_max_unique_investors(&2u32, &0u32);
     assert_eq!(new_cap, 2);
 
     assert!(
@@ -2180,17 +2180,17 @@ fn test_lower_cap_remaining_slots_consistent_after_each_lowering() {
     assert_eq!(client.get_remaining_investor_slots(), Some(6));
 
     // Lower to 8: remaining = 8 - 4 = 4.
-    client.lower_max_unique_investors(&8u32);
+    client.lower_max_unique_investors(&8u32, &0u32);
     assert_eq!(client.get_max_unique_investors_cap(), Some(8));
     assert_eq!(client.get_remaining_investor_slots(), Some(4));
 
     // Lower to 6: remaining = 6 - 4 = 2.
-    client.lower_max_unique_investors(&6u32);
+    client.lower_max_unique_investors(&6u32, &1u32);
     assert_eq!(client.get_max_unique_investors_cap(), Some(6));
     assert_eq!(client.get_remaining_investor_slots(), Some(2));
 
     // Lower to exactly the funder count (4): remaining = 4 - 4 = 0.
-    client.lower_max_unique_investors(&4u32);
+    client.lower_max_unique_investors(&4u32, &2u32);
     assert_eq!(client.get_max_unique_investors_cap(), Some(4));
     assert_eq!(client.get_remaining_investor_slots(), Some(0));
 }

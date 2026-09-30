@@ -12,7 +12,7 @@ use crate::{
 use soroban_sdk::{
     symbol_short,
     testutils::{Address as _, Events as _, Ledger},
-    Address, BytesN, Env, Error, InvokeError, Vec as SorobanVec,
+    Address, BytesN, Env, Error, Event, InvokeError, Vec as SorobanVec,
 };
 
 const AMOUNT: i128 = 100_000_000_000;
@@ -30,6 +30,7 @@ fn typed_error_codes_cover_basic_escrow_guards() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
     let (funding_token, treasury) = free_addresses(&env);
+}
 
 #[test]
 fn typed_error_codes_cover_init_fund_settle_withdraw_and_claim() {
@@ -285,6 +286,8 @@ fn typed_error_codes_cover_range_boundaries() {
         &None,
         &None,
         &None,
+    
+    &None,&None,&None,
     );
     treasury_client.cancel_funding(&0u32);
     env.as_contract(&treasury_client.address, || {
@@ -314,6 +317,8 @@ fn typed_error_codes_cover_range_boundaries() {
         &None,
         &None,
         &None,
+    
+    &None,&None,&None,
     );
     hold_sweep_client.set_legal_hold(&true, &0u32);
     assert_contract_error(
@@ -537,6 +542,8 @@ fn typed_error_codes_cover_range_boundaries() {
         &None,
         &None,
         &None,
+    
+    &None,&None,&None,
     );
     settle_client.set_legal_hold(&true, &0u32);
     assert_contract_error(
@@ -568,6 +575,8 @@ fn typed_error_codes_cover_range_boundaries() {
         &None,
         &None,
         &None,
+    
+    &None,&None,&None,
     );
     refund_client.set_legal_hold(&true, &0u32);
     assert_contract_error(
@@ -600,6 +609,8 @@ fn typed_error_codes_cover_range_boundaries() {
         &Some(10u64),
         &None,
         &None,
+    
+    &None,&None,&None,
     );
     lh_client.set_legal_hold(&true, &0u32);
     assert_contract_error(
@@ -631,6 +642,8 @@ fn typed_error_codes_cover_range_boundaries() {
         &None,
         &None,
         &None,
+    
+    &None,&None,&None,
     );
     rot_client.set_legal_hold(&true, &0u32);
     let new_sme = Address::generate(&env);
@@ -699,6 +712,8 @@ fn typed_error_codes_cover_legal_hold_clear_delay_overflow() {
         &Some(10u64),
         &None,
         &None,
+    
+    &None,&None,&None,
     );
     client.set_legal_hold(&true, &0u32);
     assert_contract_error(
@@ -838,11 +853,11 @@ fn test_admin_handover_and_maturity_updates() {
     &None::<i64>,
         &None::<u32>,);
 
-    let updated = client.update_maturity(&200, &0u32);
+    let updated = client.update_maturity(&200);
     assert_eq!(updated.maturity, 200);
 
     let new_admin = Address::generate(&env);
-    let pending = client.propose_admin(&new_admin, &1u32);
+    let pending = client.propose_admin(&new_admin, &0u32);
     assert_eq!(pending, new_admin);
     assert_eq!(client.get_escrow().admin, admin);
     assert_eq!(client.get_pending_admin(), Some(new_admin.clone()));
@@ -915,7 +930,7 @@ fn test_transfer_admin_same_admin() {
     &None::<i64>,
         &None::<u32>,);
 
-    client.propose_admin(&admin, &None);
+    client.propose_admin(&admin,&0u32);
 }
 
 #[test]
@@ -947,7 +962,7 @@ fn test_fund_during_legal_hold() {
     &None::<i64>,
         &None::<u32>,);
 
-    client.set_legal_hold(&true);
+    client.set_legal_hold(&true, &0u32);
     let investor = Address::generate(&env);
     client.fund(&investor, &10);
 }
@@ -1633,6 +1648,8 @@ fn test_bump_ttl_covers_persistent_investor_keys() {
         &None,
         &None,
         &None,
+    
+    &None,&None,&None,
     );
     client.set_investor_allowlisted(&investor, &true, &0u32);
     client.fund(&investor, &100);
@@ -1772,15 +1789,17 @@ fn test_settle_too_early() {
     let env = Env::default();
     env.mock_all_auths();
     let (client, admin, sme) = setup(&env);
-    let (token, treasury) = free_addresses(&env);
+    let token = install_stellar_asset_token(&env);
+    let treasury = Address::generate(&env);
+    let investor = Address::generate(&env);
     client.init(
         &admin,
         &soroban_sdk::String::from_str(&env, "T"),
         &sme,
         &100,
         &10,
-        &20000,
-        &token,
+        &20000, // maturity far ahead of the ledger clock
+        &token.id,
         &None,
         &treasury,
         &None,
@@ -1790,10 +1809,16 @@ fn test_settle_too_early() {
         &None,
         &None,
         &None,
+        &None,
+        &None,
+        &None,
     );
 
-    assert!(!client.is_allowlist_active());
-    assert!(!client.is_investor_allowlisted(&investor));
+    token.stellar.mint(&investor, &100i128);
+    client.fund(&investor, &100i128);
+
+    // Maturity is not reached yet, so settling must panic (MaturityNotReached).
+    client.settle();
 }
 
 #[test]
@@ -2614,6 +2639,7 @@ fn test_get_escrow_summary_after_state_changes() {
     env.mock_all_auths();
     let (client, admin, sme) = setup(&env);
     let (funding_token, treasury) = free_addresses(&env);
+    let investor = Address::generate(&env);
 
     client.init(
         &admin,
@@ -2757,6 +2783,8 @@ fn test_get_escrow_summary_tracks_pause_and_protocol_fee() {
         &None,
         &None,
         &Some(fee_bps),
+    
+    &None,
     );
 
     // Fee mirrors the init-time value and the standalone getter from the start.
@@ -3003,7 +3031,7 @@ fn test_is_settleable_blocked_by_legal_hold() {
     let (client, admin, sme) = setup(&env);
     init_settleable_test(&env, &client, &admin, &sme, 0);
     fund_to_target_stl(&env, &client);
-    client.set_legal_hold(&true);
+    client.set_legal_hold(&true, &0u32);
     assert!(!client.is_settleable());
 }
 
@@ -3050,7 +3078,7 @@ fn test_is_settleable_funded_maturity_zero_hold_active_returns_false() {
     let (client, admin, sme) = setup(&env);
     init_settleable_test(&env, &client, &admin, &sme, 0);
     fund_to_target_stl(&env, &client);
-    client.set_legal_hold(&true);
+    client.set_legal_hold(&true, &0u32);
     assert!(
         !client.is_settleable(),
         "hold must block settleability even when maturity is 0"
@@ -3692,7 +3720,7 @@ fn test_state_machine_illegal_transitions_rejected() {
     );
     // - try_cancel_funding() should fail with CancelFundingNotOpen
     assert_contract_error(
-        client.try_cancel_funding(),
+        client.try_cancel_funding(&0u32),
         EscrowError::CancelFundingNotOpen,
     );
 
@@ -3720,7 +3748,7 @@ fn test_state_machine_illegal_transitions_rejected() {
         &None::<u32>,);
 
     // 3. Cancel client2 to reach Status 4 (Cancelled)
-    client2.cancel_funding();
+    client2.cancel_funding(&0u32);
     assert_eq!(client2.get_escrow().status, 4);
 
     // In Status 4 (Cancelled):
@@ -3728,9 +3756,12 @@ fn test_state_machine_illegal_transitions_rejected() {
     assert_contract_error(client2.try_settle(), EscrowError::SettlementNotFunded);
     // - try_withdraw() should fail with WithdrawalNotFunded
     assert_contract_error(client2.try_withdraw(), EscrowError::WithdrawalNotFunded);
-    // - try_cancel_funding() should fail with CancelFundingNotOpen
+    // - try_cancel_funding() should fail with CancelFundingNotOpen.
+    // The accepted `cancel_funding` above consumed admin nonce 0, so the replay must
+    // present the *next* expected nonce; a stale 0 is rejected as `AdminNonceMismatch`
+    // before the status guard is ever reached.
     assert_contract_error(
-        client2.try_cancel_funding(),
+        client2.try_cancel_funding(&1u32),
         EscrowError::CancelFundingNotOpen,
     );
     // - try_fund() should fail with EscrowNotOpenForFunding
@@ -3748,9 +3779,11 @@ fn test_state_machine_illegal_transitions_rejected() {
     assert_contract_error(client.try_settle(), EscrowError::EscrowAlreadySettled);
     // - try_withdraw() should fail with WithdrawalNotFunded
     assert_contract_error(client.try_withdraw(), EscrowError::WithdrawalNotFunded);
-    // - try_cancel_funding() should fail with CancelFundingNotOpen
+    // - try_cancel_funding() should fail with CancelFundingNotOpen.
+    // The earlier `try_cancel_funding` reverted at the status guard, and a reverted Soroban
+    // invocation rolls back the nonce write too, so `client`'s expected nonce is still 0 here.
     assert_contract_error(
-        client.try_cancel_funding(),
+        client.try_cancel_funding(&0u32),
         EscrowError::CancelFundingNotOpen,
     );
     // - try_refund() should fail with RefundNotCancelled
@@ -3797,7 +3830,7 @@ fn test_state_machine_illegal_transitions_rejected() {
     assert_contract_error(client3.try_withdraw(), EscrowError::WithdrawalNotFunded);
     // - try_cancel_funding() should fail with CancelFundingNotOpen
     assert_contract_error(
-        client3.try_cancel_funding(),
+        client3.try_cancel_funding(&0u32),
         EscrowError::CancelFundingNotOpen,
     );
     // - try_refund() should fail with RefundNotCancelled
@@ -3866,6 +3899,8 @@ fn init_open<'a>(
         &None,
         &None,
         &None,
+    
+    &None,
     );
     (client, admin, sme)
 }
@@ -3916,7 +3951,7 @@ fn refactor_gate_helpers_hold_active_emits_per_entrypoint_variant() {
 
     // --- sweep_terminal_dust
     let (sweep, _a, _s) = init_open(&env, "LH_SWP");
-    sweep.set_legal_hold(&true);
+    sweep.set_legal_hold(&true, &0u32);
     assert_contract_error(
         sweep.try_sweep_terminal_dust(&1i128),
         EscrowError::LegalHoldBlocksTreasuryDustSweep,
@@ -3924,17 +3959,17 @@ fn refactor_gate_helpers_hold_active_emits_per_entrypoint_variant() {
 
     // --- rotate_beneficiary
     let (rot, _a, _sme) = init_open(&env, "LH_ROT");
-    rot.set_legal_hold(&true);
+    rot.set_legal_hold(&true, &0u32);
     let new_sme = Address::generate(&env);
     assert_contract_error(
-        rot.try_rotate_beneficiary(&new_sme),
+        rot.try_rotate_beneficiary(&new_sme, &0u32),
         EscrowError::LegalHoldBlocksBeneficiaryRotation,
     );
 
     // --- fund
     let (fund_c, _a, _s) = init_open(&env, "LH_FND");
     let _investor = Address::generate(&env);
-    fund_c.set_legal_hold(&true);
+    fund_c.set_legal_hold(&true, &0u32);
     assert_contract_error(
         fund_c.try_fund(&_investor, &10i128),
         EscrowError::LegalHoldBlocksFunding,
@@ -3942,7 +3977,7 @@ fn refactor_gate_helpers_hold_active_emits_per_entrypoint_variant() {
 
     // --- partial_settle (admin authority)
     let (ps_c, ps_admin, _ps_sme) = init_open(&env, "LH_PS");
-    ps_c.set_legal_hold(&true);
+    ps_c.set_legal_hold(&true, &0u32);
     assert_contract_error(
         ps_c.try_partial_settle(&ps_admin),
         EscrowError::LegalHoldBlocksPartialSettle,
@@ -3976,10 +4011,12 @@ fn refactor_gate_helpers_hold_active_emits_per_entrypoint_variant() {
         &None,
         &None,
         &None,
+    
+    &None,
     );
     token.stellar.mint(&funder, &100i128);
     funded.fund(&funder, &100i128);
-    funded.set_legal_hold(&true);
+    funded.set_legal_hold(&true, &0u32);
     assert_contract_error(funded.try_settle(), EscrowError::LegalHoldBlocksSettlement);
     assert_contract_error(
         funded.try_withdraw(),
@@ -3992,9 +4029,9 @@ fn refactor_gate_helpers_hold_active_emits_per_entrypoint_variant() {
 
     // --- cancel_funding
     let (cancel_c, _ca, _cs) = init_open(&env, "LH_CAN");
-    cancel_c.set_legal_hold(&true);
+    cancel_c.set_legal_hold(&true, &0u32);
     assert_contract_error(
-        cancel_c.try_cancel_funding(),
+        cancel_c.try_cancel_funding(&0u32),
         EscrowError::LegalHoldBlocksCancelFunding,
     );
 
@@ -4036,6 +4073,8 @@ fn refactor_gate_helpers_open_funding_window_preserved() {
         &None,
         &None,
         &None,
+    
+    &None,
     );
     token.stellar.mint(&investor, &100i128);
     client.fund(&investor, &100i128);
@@ -4103,12 +4142,14 @@ fn refactor_gate_helpers_rotate_blocked_post_settlement() {
         &None,
         &None,
         &None,
+    
+    &None,
     );
     token.stellar.mint(&funder, &100i128);
     client.fund(&funder, &100i128);
     client.settle();
     assert_contract_error(
-        client.try_rotate_beneficiary(&new_sme),
+        client.try_rotate_beneficiary(&new_sme, &0u32),
         EscrowError::RotationNotOpen,
     );
 }
@@ -4189,6 +4230,8 @@ fn settlement_validation_helper_preserves_settle_error_variants() {
         &None,
         &None,
         &None,
+    
+    &None,
     );
     let investor = Address::generate(&env);
     client.fund(&investor, &super::TARGET);
@@ -4232,6 +4275,8 @@ fn settlement_validation_readiness_maturity_reached_matches_predicate() {
         &None,
         &None,
         &None,
+    
+    &None,
     );
     let investor = Address::generate(&env);
     client.fund(&investor, &super::TARGET);

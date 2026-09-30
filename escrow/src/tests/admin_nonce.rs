@@ -32,6 +32,10 @@ fn setup_with_nonce(env: &Env) -> (LiquifactEscrowClient<'_>, Address, Address) 
         &None,
         &None,
         &None,
+        &None,
+        &None,
+        &None,
+        &None,
     );
     (client, admin, sme)
 }
@@ -68,7 +72,7 @@ fn sequential_nonces_succeed() {
     client.set_allowlist_active(&false, &1u32);
     assert_eq!(client.get_admin_nonce(), 2u32);
 
-    client.update_maturity(&2000u64, &2u32);
+    client.set_allowlist_active(&true, &2u32);
     assert_eq!(client.get_admin_nonce(), 3u32);
 }
 
@@ -98,7 +102,7 @@ fn old_nonce_after_multiple_actions_rejected() {
 
     client.set_allowlist_active(&true, &0u32);
     client.set_allowlist_active(&false, &1u32);
-    client.update_maturity(&2000u64, &2u32);
+    client.set_allowlist_active(&true, &2u32);
     // Nonce is now 3. Attempting nonce 0 or 1 should fail.
     assert_contract_error(
         client.try_set_allowlist_active(&true, &0u32),
@@ -171,7 +175,7 @@ fn two_identical_nonces_different_entrypoints() {
 
     // Attempting a different admin entrypoint with the same nonce should also fail.
     assert_contract_error(
-        client.try_update_maturity(&2000u64, &0u32),
+        client.try_propose_admin(&Address::generate(&env), &0u32),
         EscrowError::AdminNonceMismatch,
     );
 
@@ -189,9 +193,11 @@ fn nonce_at_max_minus_one_succeeds() {
     let (client, _admin, _sme) = setup_with_nonce(&env);
 
     // Set nonce to u32::MAX - 1.
-    env.storage()
-        .instance()
-        .set(&DataKey::AdminNonce, &(u32::MAX - 1));
+    env.as_contract(&client.address, || {
+        env.storage()
+            .instance()
+            .set(&DataKey::AdminNonce, &(u32::MAX - 1));
+    });
     assert_eq!(client.get_admin_nonce(), u32::MAX - 1);
 
     // Action with nonce u32::MAX - 1 should succeed and increment to MAX.
@@ -205,9 +211,11 @@ fn nonce_at_max_overflow_rejected() {
     let (client, _admin, _sme) = setup_with_nonce(&env);
 
     // Set nonce to u32::MAX.
-    env.storage()
-        .instance()
-        .set(&DataKey::AdminNonce, &u32::MAX);
+    env.as_contract(&client.address, || {
+        env.storage()
+            .instance()
+            .set(&DataKey::AdminNonce, &u32::MAX);
+    });
     assert_eq!(client.get_admin_nonce(), u32::MAX);
 
     // Action with nonce u32::MAX should fail because increment would overflow.
@@ -233,8 +241,8 @@ fn nonce_shared_across_entrypoints() {
     client.set_allowlist_active(&true, &0u32);
     assert_eq!(client.get_admin_nonce(), 1u32);
 
-    // Use nonce 1 on update_maturity.
-    client.update_maturity(&5000u64, &1u32);
+    // Use nonce 1 on propose_admin (a different entrypoint from set_allowlist_active).
+    client.propose_admin(&Address::generate(&env), &1u32);
     assert_eq!(client.get_admin_nonce(), 2u32);
 
     // Use nonce 2 on update_funding_target.
@@ -343,18 +351,14 @@ fn migrate_uses_nonce() {
     let env = Env::default();
     let (client, _admin, _sme) = setup_with_nonce(&env);
 
-    // migrate with wrong version will fail with MigrationVersionMismatch,
-    // but the nonce should still be consumed first.
-    let result = client.try_migrate(&0u32, &0u32);
+    // `migrate` consumes the shared admin nonce before it validates the
+    // version, so a stale nonce is reported as a nonce mismatch rather than a
+    // version error.
+    assert_contract_error(
+        client.try_migrate(&0u32, &5u32),
+        EscrowError::AdminNonceMismatch,
+    );
 
-    // Nonce should have been consumed (incremented to 1) before the
-    // version check failed. But actually, nonce is consumed AFTER admin auth
-    // and BEFORE version check. Let me check:
-    // In the code: load_escrow_require_admin + consume_admin_nonce happen first,
-    // then version check. So nonce IS consumed even though migrate fails.
-    //
-    // Actually, wait - consume_admin_nonce is called, then the version check.
-    // If nonce is 0 and we pass 0, nonce is consumed to 1.
-    // Then version check fails. The nonce is still incremented.
-    assert_eq!(client.get_admin_nonce(), 1u32);
+    // Failed calls roll their storage writes back, so the sequence is untouched.
+    assert_eq!(client.get_admin_nonce(), 0u32);
 }

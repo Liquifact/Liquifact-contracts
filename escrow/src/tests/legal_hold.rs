@@ -474,11 +474,11 @@ fn cancel_clear_legal_hold_with_pending_request_succeeds() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
     init_open(&client, &env, &admin, &sme, "LHB001");
-    client.set_legal_hold(&true);
+    client.set_legal_hold(&true, &0u32);
     assert!(client.get_legal_hold());
-    client.request_clear_legal_hold();
+    client.request_clear_legal_hold(&1u32);
     assert!(client.get_legal_hold_clearable_at().is_some());
-    client.cancel_clear_legal_hold();
+    client.cancel_clear_legal_hold(&2u32);
     assert!(client.get_legal_hold());
     assert!(client.get_legal_hold_clearable_at().is_none());
     // event emitted -> captured by env.auths()
@@ -491,8 +491,8 @@ fn cancel_clear_legal_hold_without_pending_request_panics() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
     init_open(&client, &env, &admin, &sme, "LHB002");
-    client.set_legal_hold(&true);
-    client.cancel_clear_legal_hold();
+    client.set_legal_hold(&true, &0u32);
+    client.cancel_clear_legal_hold(&1u32);
 }
 
 #[test]
@@ -501,10 +501,10 @@ fn cancel_clear_legal_hold_by_non_admin_panics() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
     init_open(&client, &env, &admin, &sme, "LHB003");
-    client.set_legal_hold(&true);
-    client.request_clear_legal_hold();
+    client.set_legal_hold(&true, &0u32);
+    client.request_clear_legal_hold(&1u32);
     env.mock_auths(&[]);
-    client.cancel_clear_legal_hold();
+    client.cancel_clear_legal_hold(&2u32);
 }
 
 #[test]
@@ -513,11 +513,11 @@ fn cancel_clear_legal_hold_allows_new_request_after_cancellation() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
     init_open(&client, &env, &admin, &sme, "LHB004");
-    client.set_legal_hold(&true);
-    client.request_clear_legal_hold();
+    client.set_legal_hold(&true, &0u32);
+    client.request_clear_legal_hold(&1u32);
     // Cancel and re-request still yields a valid clearable_at.
-    client.cancel_clear_legal_hold();
-    client.request_clear_legal_hold();
+    client.cancel_clear_legal_hold(&2u32);
+    client.request_clear_legal_hold(&3u32);
     let after_request = client.get_legal_hold_clearable_at();
     assert!(
         after_request.is_some(),
@@ -725,12 +725,12 @@ fn non_risk_operations_not_blocked_by_hold() {
     assert!(client.get_legal_hold());
 
     // `update_maturity` must not be blocked.
-    let updated = client.update_maturity(&9999u64, &1u32);
+    let updated = client.update_maturity(&9999u64);
     assert_eq!(updated.maturity, 9999u64);
 
     // Two-step admin handover must not be blocked.
     let new_admin = Address::generate(&env);
-    client.propose_admin(&new_admin, &2u32);
+    client.propose_admin(&new_admin, &1u32);
     assert_eq!(client.get_pending_admin(), Some(new_admin.clone()));
     client.accept_admin();
     let escrow = client.get_escrow();
@@ -838,7 +838,7 @@ fn clear_without_request_emits_clear_request_missing() {
 
     // No request_clear_legal_hold call — direct clear must fail with the typed error.
     assert_contract_error(
-        client.try_set_legal_hold(&false, &0u32),
+        client.try_set_legal_hold(&false, &1u32),
         EscrowError::LegalHoldClearRequestMissing,
     );
     // Hold must still be active: no partial state mutation.
@@ -865,7 +865,7 @@ fn clear_one_ledger_before_clearable_at_emits_clear_not_ready() {
     env.ledger().set_timestamp(clearable_at - 1);
 
     assert_contract_error(
-        client.try_set_legal_hold(&false, &0u32),
+        client.try_set_legal_hold(&false, &2u32),
         EscrowError::LegalHoldClearNotReady,
     );
     // Hold is still active.
@@ -1023,15 +1023,15 @@ fn test_clear_legal_hold_after_delay_succeeds() {
     let (client, admin, sme) = setup(&env);
     let delay: u64 = 100;
     init_open_with_clear_delay(&client, &env, &admin, &sme, "LHD001", Some(delay));
-    client.set_legal_hold(&true);
-    client.request_clear_legal_hold();
+    client.set_legal_hold(&true, &0u32);
+    client.request_clear_legal_hold(&1u32);
 
     let clearable_at = client
         .get_legal_hold_clearable_at()
         .expect("clearable_at set");
     env.ledger().set_timestamp(clearable_at);
 
-    client.clear_legal_hold_after_delay();
+    client.clear_legal_hold_after_delay(&2u32);
     assert!(!client.get_legal_hold());
     assert!(client.get_legal_hold_clearable_at().is_none());
 }
@@ -1042,10 +1042,10 @@ fn test_clear_legal_hold_after_delay_no_request_panics() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
     init_open_with_clear_delay(&client, &env, &admin, &sme, "LHD002", Some(100));
-    client.set_legal_hold(&true);
+    client.set_legal_hold(&true, &0u32);
 
     assert_contract_error(
-        client.try_clear_legal_hold_after_delay(),
+        client.try_clear_legal_hold_after_delay(&1u32),
         EscrowError::LegalHoldClearRequestMissing,
     );
 }
@@ -1056,11 +1056,11 @@ fn test_clear_legal_hold_after_delay_before_clearable_at_panics() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
     init_open_with_clear_delay(&client, &env, &admin, &sme, "LHD003", Some(100));
-    client.set_legal_hold(&true);
-    client.request_clear_legal_hold();
+    client.set_legal_hold(&true, &0u32);
+    client.request_clear_legal_hold(&1u32);
 
     assert_contract_error(
-        client.try_clear_legal_hold_after_delay(),
+        client.try_clear_legal_hold_after_delay(&2u32),
         EscrowError::LegalHoldClearNotReady,
     );
 }

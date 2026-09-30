@@ -5,3 +5,5 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc ded0b4062b57a40991755bcbd727ccc8cb5e2f60c7f8eae5782b0a8b7d084191 # shrinks to investor_count = 2, seq_len = 3, funding_target = 50000, max_each = 1, caps_present = false, per_inv_cap = 1, uniq_cap = 1, investor_ixs = [5, 5], amounts = [1, 1], use_commitments = [false, true], lock_secs = [0, 0]
+cc fa6ac0d6f3ad29ef38314acd5bb9c26a44e97e46147b980f87274b3ccf422a9c # shrinks to initial_cap = 2, n_investors = 2, seq_len = 1, op_tags = [1], investor_ixs = [0], amounts = [1], batch_sizes = [2], seed = 0
+cc cf74290332a5b8777e4b157aeab21f372ed07385b505f1e545319b1666c0a612 # shrinks to initial_cap = 4, n_investors = 4, seq_len = 3, op_tags = [2, 2], investor_ixs = [0, 0], amounts = [1], batch_sizes = [1, 1], seed = 5277504089846883388

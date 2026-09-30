@@ -144,6 +144,32 @@ pub fn transfer_funding_token_with_balance_checks(
     );
 }
 
+/// Inbound leg of the escrow's external-call boundary: move `amount` of the configured
+/// funding token from `investor` into `to` (the escrow contract).
+///
+/// This is a thin, explicitly-named alias for
+/// [`transfer_funding_token_inbound_with_balance_checks`] so that the mocked-token
+/// regression suite exercises exactly the same code path as production. It performs the
+/// same strict pre/post balance-delta verification, which it delegates to that function:
+/// 1. Non-positive `amount` is rejected up front.
+/// 2. The investor's pre-transfer balance must cover `amount`.
+/// 3. After the transfer, sender spent and recipient received must each equal `amount`
+///    exactly (fee-on-transfer, rebasing, and hook tokens fail here).
+///
+/// # Errors
+///
+/// Emits the typed `EscrowError::Inbound*` codes when the balance-delta invariants do
+/// not hold.
+pub fn transfer_into_escrow_with_balance_checks(
+    env: &Env,
+    token_addr: &Address,
+    investor: &Address,
+    to: &Address,
+    amount: i128,
+) {
+    transfer_funding_token_inbound_with_balance_checks(env, token_addr, investor, to, amount);
+}
+
 /// Transfer `amount` of `token_addr` from `investor` to `to` (typically this escrow contract),
 /// then verify SEP-41-style conservation: sender decreases and recipient increases by exactly
 /// `amount`.

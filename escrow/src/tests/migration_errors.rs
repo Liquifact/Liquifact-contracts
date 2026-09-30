@@ -41,7 +41,7 @@ fn test_migration_version_mismatch() {
 
     // stored = SCHEMA_VERSION (6), from_version = 5 → mismatch
     assert_contract_error(
-        client.try_migrate(&(SCHEMA_VERSION - 1)),
+        client.try_migrate(&(SCHEMA_VERSION - 1), &0u32),
         EscrowError::MigrationVersionMismatch,
     );
 }
@@ -79,7 +79,7 @@ fn test_already_current_schema_version() {
     );
 
     assert_contract_error(
-        client.try_migrate(&SCHEMA_VERSION),
+        client.try_migrate(&SCHEMA_VERSION, &0u32),
         EscrowError::AlreadyCurrentSchemaVersion,
     );
 }
@@ -121,5 +121,8 @@ fn test_no_migration_path() {
         env.storage().instance().set(&DataKey::Version, &1u32);
     });
 
-    assert_contract_error(client.try_migrate(&1u32), EscrowError::NoMigrationPath);
+    assert_contract_error(
+        client.try_migrate(&1u32, &0u32),
+        EscrowError::NoMigrationPath,
+    );
 }

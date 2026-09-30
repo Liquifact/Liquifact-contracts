@@ -57,7 +57,7 @@ fn setup_open(
 
 /// Move the escrow to cancelled status (status == 4).
 fn cancel(client: &LiquifactEscrowClient<'_>, _admin: &Address) {
-    client.cancel_funding();
+    client.cancel_funding(&0u32);
 }
 
 // ---------------------------------------------------------------------------
@@ -108,7 +108,7 @@ fn test_update_funding_target_rejects_when_cancelled() {
     let env = make_env();
     let (client, admin, _sme, _tok, _tre) = setup_open(&env);
     cancel(&client, &admin);
-    let result = client.try_update_funding_target(&5_000i128);
+    let result = client.try_update_funding_target(&5_000i128, &1u32);
     assert_contract_error(result, EscrowError::TargetUpdateNotOpen);
 }
 
@@ -144,7 +144,7 @@ fn test_lower_max_unique_investors_rejects_when_cancelled() {
         &None::<u32>,
     );
     cancel(&client, &admin);
-    let result = client.try_lower_max_unique_investors(&5u32);
+    let result = client.try_lower_max_unique_investors(&5u32, &1u32);
     assert_contract_error(result, EscrowError::CapLowerNotOpen);
 }
 
@@ -194,7 +194,7 @@ fn test_cancel_funding_rejects_when_already_cancelled() {
     let env = make_env();
     let (client, admin, _sme, _tok, _tre) = setup_open(&env);
     cancel(&client, &admin);
-    let result = client.try_cancel_funding();
+    let result = client.try_cancel_funding(&1u32);
     assert_contract_error(result, EscrowError::CancelFundingNotOpen);
 }
 
@@ -218,7 +218,7 @@ fn test_update_funding_target_succeeds_when_open() {
     let env = make_env();
     let (client, _admin, _sme, _tok, _tre) = setup_open(&env);
     // Should not panic; target remains valid (> 0 and >= funded_amount == 0).
-    client.update_funding_target(&8_000i128);
+    client.update_funding_target(&8_000i128, &0u32);
 }
 
 /// `lower_max_unique_investors` succeeds when escrow is open and cap is configured.
@@ -252,5 +252,5 @@ fn test_lower_max_unique_investors_succeeds_when_open() {
         &None::<u32>,
     );
     // Lowering from 10 to 5 should succeed while open.
-    client.lower_max_unique_investors(&5u32);
+    client.lower_max_unique_investors(&5u32, &0u32);
 }

@@ -204,7 +204,7 @@ fn reconciliation_lifecycle_cancel_path() {
     assert_invariant(&client, &token);
 
     // ── Step 2: Cancel → status 4, no refunds yet ────────────────────────────
-    client.cancel_funding();
+    client.cancel_funding(&0u32);
     let view = client.get_reconciliation();
     assert_eq!(view.token_balance, 1500);
     assert_eq!(view.outstanding_liability, 1500);
@@ -349,7 +349,7 @@ fn reconciliation_cancelled_full_refund_dust() {
     let dust = 7i128;
     token.stellar.mint(&client.address, &dust);
 
-    client.cancel_funding();
+    client.cancel_funding(&0u32);
     assert_eq!(client.get_distributed_principal(), 0);
 
     let view = client.get_reconciliation();

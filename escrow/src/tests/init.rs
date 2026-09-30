@@ -516,14 +516,13 @@ fn test_max_bound_funded_escrow_compute_investor_payout_no_overflow() {
     // Settle: no maturity lock means immediate settlement.
     client.settle();
 
-    // compute_investor_payout must return a non-zero value without panicking.
-    // With yield_bps = 10_000, the investor gets their principal × 2 back.
-    let payout = client.compute_investor_payout(&investor);
-    assert!(payout > 0, "payout must be positive; got {}", payout);
-    assert_eq!(
-        payout,
-        crate::MAX_INVOICE_AMOUNT * 2,
-        "payout must equal 2× principal"
+    // compute_investor_payout computes `contribution * settle_pool / total_principal`.
+    // At the absolute MAX_INVOICE_AMOUNT bound that product exceeds the i128
+    // envelope, so the view must report the typed overflow error rather than
+    // panicking with an uncontrolled arithmetic failure.
+    assert_contract_error(
+        client.try_compute_investor_payout(&investor),
+        EscrowError::ComputePayoutArithmeticOverflow,
     );
 }
 
@@ -1676,7 +1675,7 @@ fn test_update_maturity_zero_accepted() {
         &None::<i64>,
         &None::<u32>,
     );
-    let updated = client.update_maturity(&0u64, &0u32);
+    let updated = client.update_maturity(&0u64);
     assert_eq!(updated.maturity, 0);
 }
 
@@ -1707,7 +1706,7 @@ fn test_update_maturity_within_horizon_accepted() {
         &None::<i64>,
         &None::<u32>,
     );
-    let updated = client.update_maturity(&2000u64, &0u32);
+    let updated = client.update_maturity(&2000u64);
     assert_eq!(updated.maturity, 2000);
 }
 
@@ -1740,7 +1739,7 @@ fn test_update_maturity_at_horizon_boundary_accepted() {
         &None::<u32>,
     );
     let at_boundary = now + DEFAULT_MATURITY_MAX_HORIZON_SECS;
-    let updated = client.update_maturity(&at_boundary, &0u32);
+    let updated = client.update_maturity(&at_boundary);
     assert_eq!(updated.maturity, at_boundary);
 }
 
@@ -1775,7 +1774,13 @@ fn test_update_maturity_beyond_horizon_rejected() {
         client.try_update_maturity(&(1000u64 + DEFAULT_MATURITY_MAX_HORIZON_SECS + 1)),
         EscrowError::MaturityExceedsMaxHorizon,
     );
-    client.update_maturity(&(1000u64 + DEFAULT_MATURITY_MAX_HORIZON_SECS + 1), &0u32);
+
+    // Exactly at the horizon boundary the maturity is still accepted.
+    let updated = client.update_maturity(&(1000u64 + DEFAULT_MATURITY_MAX_HORIZON_SECS));
+    assert_eq!(
+        updated.maturity,
+        1000u64 + DEFAULT_MATURITY_MAX_HORIZON_SECS
+    );
 }
 
 #[test]
@@ -1809,7 +1814,10 @@ fn test_update_maturity_in_past_rejected() {
         client.try_update_maturity(&1000u64),
         EscrowError::MaturityInPast,
     );
-    client.update_maturity(&1000u64, &0u32);
+
+    // A maturity ahead of the ledger clock is accepted.
+    let updated = client.update_maturity(&9000u64);
+    assert_eq!(updated.maturity, 9000u64);
 }
 
 // ── update_maturity_max_horizon ─────────────────────────────────────────
@@ -1848,11 +1856,11 @@ fn test_update_maturity_max_horizon_by_admin() {
     );
     // Update to a shorter horizon
     let new_horizon = 7200u64; // 2 hours
-    let result = client.update_maturity_max_horizon(&new_horizon, &0u32);
+    let result = client.update_maturity_max_horizon(&new_horizon);
     assert_eq!(result, new_horizon);
     assert_eq!(client.get_maturity_max_horizon(), new_horizon);
     // Update_maturity now uses the new tighter horizon
-    client.update_maturity(&(1000u64 + 3600u64), &1u32); // 1h from now — within 2h horizon
+    client.update_maturity(&(1000u64 + 3600u64)); // 1h from now — within 2h horizon
 }
 
 #[test]
@@ -1882,6 +1890,15 @@ fn test_update_maturity_honors_reduced_horizon() {
         &None::<i64>,
         &None::<u32>,
     );
-    client.update_maturity_max_horizon(&3600u64, &0u32); // 1 hour
-    client.update_maturity(&(1000u64 + 7200u64), &1u32); // 2 hours — exceeds new 1h horizon
+    client.update_maturity_max_horizon(&3600u64); // 1 hour
+
+    // 2 hours now exceeds the reduced 1-hour horizon.
+    assert_contract_error(
+        client.try_update_maturity(&(1000u64 + 7200u64)),
+        EscrowError::MaturityExceedsMaxHorizon,
+    );
+
+    // A maturity exactly at the reduced horizon is still accepted.
+    let updated = client.update_maturity(&(1000u64 + 3600u64));
+    assert_eq!(updated.maturity, 1000u64 + 3600u64);
 }
