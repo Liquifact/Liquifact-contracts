@@ -64,7 +64,8 @@ pub(crate) fn assert_contract_error<T, E>(
 // `clear_legal_hold_after_delay`, `InvestorAllowlistBatchApplied`) that the
 // contract no longer exposes, so they do not compile. They are commented out
 // rather than deleted so the assertions survive for a follow-up migration to the
-// current API. `collateral_limit_setter` is the active module for this change.
+// current API. `collateral_limit_setter` and `collateral_state_view` are the
+// active modules for the collateral work.
 mod attestations;
 // mod admin;              // drifted: stale `init` arity + admin-nonce arity
 // mod auth_matrix;        // drifted: stale admin-nonce arity
@@ -72,6 +73,7 @@ mod attestations;
 // mod collateral_boundary_tests; // file not present in this tree
 // mod collateral_config_view;    // file not present in this tree
 mod collateral_limit_setter;
+mod collateral_state_view;
 // mod dispute_release;    // drifted: returns `Env` borrowed from a local
 #[rustfmt::skip]
 // mod coverage;           // drifted: stale `init` arity + admin-nonce arity
