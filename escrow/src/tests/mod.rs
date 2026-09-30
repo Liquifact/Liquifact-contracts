@@ -70,7 +70,7 @@ mod attestations;
 // mod admin;              // drifted: stale `init` arity + admin-nonce arity
 // mod auth_matrix;        // drifted: stale admin-nonce arity
 // mod cap_validation;     // drifted: stale `init` arity
-// mod collateral_boundary_tests; // file not present in this tree
+mod collateral_boundary_tests;
 // mod collateral_config_view;    // file not present in this tree
 mod collateral_limit_setter;
 mod collateral_state_view;
