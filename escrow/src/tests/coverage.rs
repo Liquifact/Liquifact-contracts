@@ -26,12 +26,6 @@ fn typed_error_codes_cover_init_and_state_guards() {
 }
 
 #[test]
-fn typed_error_codes_cover_basic_escrow_guards() {
-    let env = Env::default();
-    let (client, admin, sme) = setup(&env);
-    let (funding_token, treasury) = free_addresses(&env);
-
-#[test]
 fn typed_error_codes_cover_init_fund_settle_withdraw_and_claim() {
     let env = Env::default();
     env.mock_all_auths();
@@ -53,12 +47,8 @@ fn typed_error_codes_cover_init_fund_settle_withdraw_and_claim() {
             &None,
             &None,
             &None,
-            &None,
-            &None,
-            &None,
-            &None,
             &None::<i64>,
-        &None::<u32>,
+            &None::<u32>,
         ),
         EscrowError::AmountMustBePositive,
     );
@@ -81,8 +71,9 @@ fn typed_error_codes_cover_init_fund_settle_withdraw_and_claim() {
         &None,
         &None,
         &None,
-    &None::<i64>,
-        &None::<u32>,);
+        &None::<i64>,
+        &None::<u32>,
+    );
 
     let investor = Address::generate(&env);
     assert_contract_error(
