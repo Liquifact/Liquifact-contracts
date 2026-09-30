@@ -58,20 +58,20 @@ pub(crate) fn assert_contract_error<T, E>(
 // Focused test tree for escrow behavior. Shared helpers live here so feature
 // modules stay assertion-focused and each test still owns a fresh Env.
 //
-// The modules disabled below are pre-existing drift:
+// The modules disabled below are pre-existing drift, not collateral-limit work:
 // they were written against earlier contract signatures and event models (e.g.
 // `init` arity, admin-nonce arguments, `set_allowlist_limit`,
 // `clear_legal_hold_after_delay`, `InvestorAllowlistBatchApplied`) that the
 // contract no longer exposes, so they do not compile. They are commented out
 // rather than deleted so the assertions survive for a follow-up migration to the
-// current API.
+// current API. `collateral_limit_setter` is the active module for this change.
 mod attestations;
 // mod admin;              // drifted: stale `init` arity + admin-nonce arity
 // mod auth_matrix;        // drifted: stale admin-nonce arity
 // mod cap_validation;     // drifted: stale `init` arity
 // mod collateral_boundary_tests; // file not present in this tree
 // mod collateral_config_view;    // file not present in this tree
-// mod collateral_limit_setter; // re-enabled in the collateral-limit commit
+mod collateral_limit_setter;
 // mod dispute_release;    // drifted: returns `Env` borrowed from a local
 #[rustfmt::skip]
 // mod coverage;           // drifted: stale `init` arity + admin-nonce arity
