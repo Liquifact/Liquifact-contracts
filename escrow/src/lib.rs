@@ -1813,6 +1813,14 @@ pub struct EscrowSummary {
     pub schema_version: u32,
     /// SME collateral commitment metadata (None when never recorded).
     pub sme_collateral_commitment: CollateralCommitmentSnapshot,
+    /// Collateral ceiling enforced on new collateral commitments; mirrors
+    /// [`LiquifactEscrow::get_collateral_limit`] (`MAX_INVOICE_AMOUNT` when unset).
+    ///
+    /// Read in the same host invocation as `sme_collateral_commitment` so a consumer
+    /// diagnosing a `CollateralLimitExceeded` rejection sees the ceiling and the record that
+    /// were in force *at the same ledger state*, instead of stitching two separate reads that
+    /// a concurrent admin update can invalidate between them (a torn read).
+    pub collateral_limit: i128,
     /// Whether a primary attestation hash has been bound.
     pub has_primary_attestation: bool,
     /// Number of entries in the attestation append log.
@@ -4223,6 +4231,12 @@ impl LiquifactEscrow {
 
     /// Bundles multiple read-only values to return a comprehensive summary of the escrow state
     /// in a single host invocation.
+    ///
+    /// The SME collateral record ([`EscrowSummary::sme_collateral_commitment`]) and the ceiling
+    /// that gates it ([`EscrowSummary::collateral_limit`]) are read in this one invocation, so the
+    /// pair cannot come from two different ledger states. That is what makes a rejected write
+    /// diagnosable off-chain: the snapshot an indexer pulls *after* a `CollateralLimitExceeded`
+    /// rejection shows the ceiling that was actually in force.
     pub fn get_escrow_summary(env: Env) -> EscrowSummary {
         let escrow = Self::get_escrow(env.clone());
         let legal_hold = Self::get_legal_hold(env.clone());
@@ -4253,6 +4267,7 @@ impl LiquifactEscrow {
             is_allowlist_active,
             schema_version,
             sme_collateral_commitment,
+            collateral_limit: Self::get_collateral_limit(env.clone()),
             has_primary_attestation: primary_attestation_hash.is_some(),
             attestation_log_length: attestation_append_log.len(),
             paused: Self::is_paused(env.clone()),
