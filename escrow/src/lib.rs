@@ -6015,11 +6015,6 @@ impl LiquifactEscrow {
             .instance()
             .get(&DataKey::AllowlistIndex)
             .unwrap_or_else(|| Vec::new(&env));
-        let was_allowlisted: bool = env
-            .storage()
-            .persistent()
-            .get(&DataKey::InvestorAllowlisted(investor.clone()))
-            .unwrap_or(false);
 
         if allowed && !was_allowlisted {
             index.push_back(investor.clone());
@@ -6078,6 +6073,7 @@ impl LiquifactEscrow {
             n <= MAX_INVESTOR_ALLOWLIST_BATCH,
             EscrowError::InvestorBatchTooLarge,
         );
+        Self::consume_admin_nonce(&env, expected_nonce);
 
         // Load index once for the entire batch
         let mut index: Vec<Address> = env
@@ -6118,6 +6114,10 @@ impl LiquifactEscrow {
             }
             .publish(&env);
         }
+
+        env.storage()
+            .instance()
+            .set(&DataKey::AllowlistIndex, &index);
     }
 
     pub fn is_investor_allowlisted(env: Env, investor: Address) -> bool {
