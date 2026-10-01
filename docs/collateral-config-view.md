@@ -150,16 +150,16 @@ else:
 ### Rust test helper
 
 ```rust
-fn assert_no_commitment(client: &LiquifactEscrowClient<'_>) {
+fn assert_no_commitment(client: &LiquifactEscrowClient<_>) {
     let cfg = client.get_collateral_config();
     assert_eq!(cfg.sme_commitment, CollateralCommitmentSnapshot::None);
 }
 
-fn assert_commitment_amount(client: &LiquifactEscrowClient<'_>, expected: i128) {
+fn assert_commitment_amount(client: &LiquifactEscrowClient<_>, expected: i128) {
     let cfg = client.get_collateral_config();
     match cfg.sme_commitment {
         CollateralCommitmentSnapshot::Some(c) => assert_eq!(c.amount, expected),
-        CollateralCommitmentSnapshot::None => panic!("no commitment"),
+        CollateralCommitmentSnapshot::None => panic("no commitment"),
     }
 }
 ```
@@ -187,6 +187,30 @@ fn assert_commitment_amount(client: &LiquifactEscrowClient<'_>, expected: i128) 
 | Boundary — `i128::MAX` limit | `escrow/src/tests/collateral_config_view.rs` |
 | `Some`/`None` transitions | `escrow/src/tests/collateral_struct_ret.rs` |
 | Multiple limit updates | `escrow/src/tests/collateral_boundary_tests.rs` |
+
+---
+
+## Failure Recovery and Determinism
+
+The config view is a pure read path, so failure recovery is defined by what the caller observes when a read cannot complete. The following invariants make recovery deterministic and reviewable:
+
+1. **No partial snapshots.** `collateral_limit` and `sme_commitment` are read from the same ledger snapshot inside a single host call. A caller never observes a limit from one ledger state paired with a commitment from another.
+2. **No mutation on read.** `get_collateral_config()` never writes storage, emits events, or advances state. A failed or retried call therefore cannot corrupt persisted state or leave a half-applied transition.
+3. **Idempotent retries.** Because the entrypoint is side-effect free, retrying after a transient host or transport failure is always safe and converges to the same result for the same ledger state.
+4. **Deterministic defaults.** Before `init`, and after `clear_sme_collateral_commitment()`, the function returns the documented defaults rather than panicking. Recovery from a missing or cleared commitment is therefore a normal, observable `None` value, not an error path.
+5. **Typed, non-sensitive errors.** If the host rejects the call (for example, a malformed invocation or an unsupported ledger state), the failure surfaces as a standard contract error. No internal storage keys, signer identities, or other sensitive data are included in the error payload.
+
+### Recovery Guidance for Callers
+
+- Treat `get_collateral_config()` as a read-only probe: on failure, retry with backoff; do not attempt to "repair" state from the client side.
+- If a retry succeeds, the returned struct is authoritative for the ledger state at the time of that call. Re-read rather than caching across a mutation.
+- If the call fails repeatedly, surface the typed error to the user and stop; do not fall back to reading `get_collateral_limit()` and `get_sme_collateral_commitment()` separately, as that reintroduces the cross-read inconsistency this entrypoint exists to prevent.
+
+### Observability
+
+- The entrypoint emits no events by design, so failures are observed through the host's standard error channel and the caller's own logging/metrics.
+- Callers should log the typed error code and the ledger sequence number of the failed attempt, but must not log raw storage contents or signer material.
+- Because the function is deterministic, a failure observed at a given ledger sequence is reproducible for that sequence, which makes incident triage and regression testing straightforward.
 
 ---
 
