@@ -58,7 +58,7 @@ pubc(crate) fn assert_contract_error<T, E>(
 // Focused test tree for escrow behavior. Shared helpers live here so feature
 // modules stay assertion-focused and each test still owns a fresh Env.
 mod admin;
-mod attestation_config_view;
+mod attestation_parameters;
 mod attestations;
 mod auth_matrix;
 mod cap_validation;
