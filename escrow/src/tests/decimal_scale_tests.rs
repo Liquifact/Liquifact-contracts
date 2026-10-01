@@ -38,7 +38,7 @@ fn deploy_with_scale<'a>(
 
     client.init(
         &admin,
-        &soroban_sdk::String::from_str(env, "INV-DS"),
+        &soroban_sdk::String::from_str(env, "INV_DS"),
         &sme,
         &target,
         &800i64,
@@ -334,7 +334,7 @@ fn decimal_scale_no_token_decimals_skips_validation() {
     // Init without token_decimals (None)
     client.init(
         &admin,
-        &soroban_sdk::String::from_str(&env, "INV-NOSCALE"),
+        &soroban_sdk::String::from_str(&env, "INV_NOSCALE"),
         &sme,
         &10_000_000,
         &800i64,

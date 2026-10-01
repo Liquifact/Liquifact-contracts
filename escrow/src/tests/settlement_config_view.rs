@@ -50,6 +50,7 @@ fn init_escrow(
         &None,
         &None,
         &protocol_fee_bps,
+        &None::<u32>,
     );
 }
 
