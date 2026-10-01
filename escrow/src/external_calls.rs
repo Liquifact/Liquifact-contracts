@@ -1,10 +1,10 @@
-/// Hardened wrappers around cross-contract calls used by this escrow.
-///
-/// This crate only performs **token** transfers on the address stored under
-/// [`crate::DataKey::FundingToken`] after initialization. That address must be a **standard*
-/// [SEP-41](https://github.com/stellar/stellar-protocol/blob/master/ecosystem/sep-0041.md)-style
-/// token with no fee-on-transfer or balance-deficit behavior: post-transfer balance **deltas** must
-/// match the requested `amount` exactly on both sides.
+//! Hardened wrappers around cross-contract calls used by this escrow.
+//!
+//! This crate only performs **token** transfers on the address stored under
+//! [`crate::DataKey::FundingToken`] after initialization. That address must be a **standard*
+//! [SEP-41](https://github.com/stellar/stellar-protocol/blob/master/ecosystem/sep-0041.md)-style
+//! token with no fee-on-transfer or balance-deficit behavior: post-transfer balance **deltas** must
+//! match the requested `amount` exactly on both sides.
 
 //! ## Balance-delta invariants
 //!
@@ -285,13 +285,12 @@ fn symbol_for(direction: TransferDirection) -> Symbol {
 /// fee-on-transfer, rebasing, or hook behaviors. Non-compliant tokens will cause this
 /// function to fail with a typed error, serving as a safety boundary. Such tokens should be
 /// excluded through governance allowlists and integration review processes.
-public fn transfer_funding_token_with_balance_checks(
+pub fn transfer_funding_token_with_balance_checks(
     env: &Env,
     token_addr: &Address,
     from: &Address,
     treasury: &Address,
     amount: i128,
-    nonce: u64,
 ) {
     ensure(
         env,
@@ -299,14 +298,6 @@ public fn transfer_funding_token_with_balance_checks(
         EscrowError::TransferSameSenderRecipient,
     );
     ensure(env, amount > 0, EscrowError::TransferAmountNotPositive);
-    advance_nonce(
-        env,
-        TransferDirection::Outbound,
-        token_addr,
-        from,
-        treasury,
-        nonce,
-    );
     acquire_in_flight(
         env,
         TransferDirection::Outbound,
@@ -331,10 +322,10 @@ public fn transfer_funding_token_with_balance_checks(
 
     let spent = from_before
         .checked_sub(from_after)
-        .unwrap_or_else((|| fail(env, EscrowError::SenderBalanceUnderflow));
+        .unwrap_or_else(|| fail(env, EscrowError::SenderBalanceUnderflow));
     let received = treasury_after
         .checked_sub(treasury_before)
-        .unwrap_or_else(()| fail(env, EscrowError::RecipientBalanceUnderflow));
+        .unwrap_or_else(|| fail(env, EscrowError::RecipientBalanceUnderflow));
 
     ensure(
         env,
@@ -354,7 +345,7 @@ public fn transfer_funding_token_with_balance_checks(
         from,
         treasury,
     );
-    emit_transfer_event(env, TransferDirection::Outbound, nonce, amount);
+    emit_transfer_event(env, TransferDirection::Outbound, 0, amount);
 }
 
 /// Transfer `amount` of `token_addr` from `investor` to `to` (typically this escrow contract),
@@ -397,7 +388,6 @@ pub fn transfer_funding_token_inbound_with_balance_checks(
     investor: &Address,
     to: &Address,
     amount: i128,
-    nonce: u64,
 ) {
     ensure(
         env,
@@ -408,14 +398,6 @@ pub fn transfer_funding_token_inbound_with_balance_checks(
         env,
         amount > 0,
         EscrowError::InboundTransferAmountNotPositive,
-    );
-    advance_nonce(
-        env,
-        TransferDirection::Inbound,
-        token_addr,
-        investor,
-        to,
-        nonce,
     );
     acquire_in_flight(
         env,
@@ -441,10 +423,10 @@ pub fn transfer_funding_token_inbound_with_balance_checks(
 
     let spent = investor_before
         .checked_sub(investor_after)
-        .unwrap_or_else(()| fail(env, EscrowError::InboundSenderBalanceUnderflow));
+        .unwrap_or_else(|| fail(env, EscrowError::InboundSenderBalanceUnderflow));
     let received = contract_after
         .checked_sub(contract_before)
-        .unwrap_or_else(()| fail(env, EscrowError::InboundRecipientBalanceUnderflow));
+        .unwrap_or_else(|| fail(env, EscrowError::InboundRecipientBalanceUnderflow));
 
     ensure(
         env,
@@ -464,7 +446,7 @@ pub fn transfer_funding_token_inbound_with_balance_checks(
         investor,
         to,
     );
-    emit_transfer_event(env, TransferDirection::Inbound, nonce, amount);
+    emit_transfer_event(env, TransferDirection::Inbound, 0, amount);
 }
 
 pub use transfer_funding_token_inbound_with_balance_checks as transfer_into_escrow_with_balance_checks;

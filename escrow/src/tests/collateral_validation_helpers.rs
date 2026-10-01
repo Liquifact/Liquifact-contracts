@@ -1182,3 +1182,21 @@ fn test_max_collateral_batch_constant_pinned() {
     // silent decrease would break their batches.
     assert_eq!(crate::MAX_COLLATERAL_BATCH, 50);
 }
+
+#[test]
+fn invalid_boundary_retry_preserves_the_last_valid_commitment() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    init_escrow(&env, &client, &admin, &sme);
+    let asset = Symbol::new(&env, "USDC");
+    let original = client.record_sme_collateral_commitment(&asset, &1_000i128);
+
+    assert_contract_error(
+        client.try_record_sme_collateral_commitment(&asset, &0i128),
+        EscrowError::CollateralAmountNotPositive,
+    );
+    assert_eq!(client.get_sme_collateral_commitment(), Some(original.clone()));
+
+    client.record_sme_collateral_commitment(&asset, &2_000i128);
+    assert_eq!(client.get_sme_collateral_commitment().unwrap().amount, 2_000);
+}
