@@ -1,4 +1,5 @@
 //! Invariant test harness for escrow balance conservation (issue #1227).
+//! Invariant test harness for escrow balance conservation (issue #1227).
 //!
 //! Individual tests already assert on isolated calls (a `fund` increments `funded_amount`,
 //! a `settle` flips `status`, ...), but nothing previously proved that a full lifecycle keeps
