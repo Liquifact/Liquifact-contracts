@@ -11,7 +11,8 @@
 
 use super::super::collateral_storage::CollateralStorageKey;
 use super::super::{
-    EscrowError, LiquifactEscrow, LiquifactEscrowClient, MAX_INVOICE_AMOUNT, SCHEMA_VERSION,
+    DataKey, EscrowError, LiquifactEscrow, LiquifactEscrowClient, MAX_INVOICE_AMOUNT,
+    SCHEMA_VERSION,
 };
 use super::assert_contract_error;
 use soroban_sdk::{
@@ -67,6 +68,9 @@ fn test_get_collateral_version_default_before_init() {
     let client = deploy(&env);
 
     assert_eq!(client.get_collateral_version(), 0);
+    env.as_contract(&client.address, || {
+        assert!(!env.storage().instance().has(&DataKey::Version));
+    });
 }
 
 /// After `init`, `get_collateral_version` must return `SCHEMA_VERSION`.
@@ -125,9 +129,7 @@ fn test_get_collateral_version_after_init_requires_no_auth() {
     env.mock_all_auths();
     let (client, _admin, _sme) = deploy_and_init(&env);
 
-    // Disable the auth mock after init to confirm the read is still auth-free.
-    // (mock_all_auths disables itself after the `env` block; re-creating env is cleaner,
-    // but confirming the read explicitly covers the no-auth requirement.)
+    env.mock_auths(&[]);
     assert_eq!(client.get_collateral_version(), SCHEMA_VERSION);
 }
 
