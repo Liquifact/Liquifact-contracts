@@ -44,14 +44,14 @@ stateDiagram-v2
 
 | Entrypoint | Source State(s) | Target State | Authorised Role | Precondition Guards | Error on Violation |
 |---|---|---|---|---|---|
-| `record_sme_collateral_commitment` (line 3795) | NoPledge, Pledged | Pledged | SME (`require_auth`) | `amount > 0` | `CollateralAmountNotPositive` (60) |
+| `record_sme_collateral_commitment` (line 5288) | NoPledge, Pledged | Pledged | SME (`require_auth`) | `amount > 0` | `CollateralAmountNotPositive` (60) |
 | | | | | `asset != ""` | `CollateralAssetEmpty` (61) |
-| | | | | `amount <= get_collateral_limit()` | `CollateralLimitExceeded` (64) |
+| | | | | `amount <= get_collateral_limit()` | `CollateralLimitExceeded` (66) |
 | | | | | if replacing: `recorded_at >= prior.recorded_at` | `CollateralTimestampBackwards` (62) |
 | | | | | escrow must exist | `EscrowNotInitialized` (20) |
 | `clear_sme_collateral_commitment` (line 3457) | Pledged | NoPledge | SME (`require_auth`) | `collateral_pledge_get` must return `Some` | `NoCollateralToClear` (169) |
-| `set_collateral_limit` (line 3396) | — (orthogonal) | — (updates config) | Admin (`require_auth`) | `new_limit > 0` | `CollateralLimitNotPositive` (63) |
-| | | | | `new_limit <= MAX_INVOICE_AMOUNT` | `CollateralLimitExceedsMax` (65) |
+| `set_collateral_limit` (line 5239) | — (orthogonal) | — (updates config) | Admin (`require_auth`) | `new_limit > 0` | `CollateralLimitNotPositive` (65) |
+| | | | | `new_limit <= MAX_INVOICE_AMOUNT` | `CollateralLimitExceedsMax` (67) |
 
 All read-only entrypoints (`get_sme_collateral_commitment` line 3351, `get_collateral_limit` line 3360, `get_collateral_config` line 3370, `get_collateral_records` line 3425) have no state transition effect and require no authorisation.
 
@@ -61,7 +61,7 @@ All read-only entrypoints (`get_sme_collateral_commitment` line 3351, `get_colla
 
 Within each mutating entrypoint, guards are evaluated in a fixed sequence so that cheaper / broader checks fail before expensive or context-dependent ones.
 
-### `record_sme_collateral_commitment` guard order (line 3795)
+### `record_sme_collateral_commitment` guard order (line 5288)
 
 1. `amount > 0` — integer check, no I/O
 2. `asset != ""` — symbol comparison, no I/O
@@ -74,7 +74,7 @@ Within each mutating entrypoint, guards are evaluated in a fixed sequence so tha
 1. `collateral_pledge_get` returns `Some` — one storage read, fails early with `NoCollateralToClear` (169)
 2. `load_escrow_require_sme` — one storage read + `require_auth` (SME)
 
-### `set_collateral_limit` guard order (line 3396)
+### `set_collateral_limit` guard order (line 5239)
 
 1. `load_escrow_require_admin` — one storage read + `require_auth` (Admin)
 2. `new_limit > 0`
