@@ -1,3 +1,4 @@
+//! Deterministic failure-recovery coverage for [`get_reconciliation`].
 //! Lifecycle-spanning tests for [`get_reconciliation`] across every state the
 //! escrow can occupy, asserting the liability invariant at each step.
 //!
@@ -24,6 +25,9 @@
 //!
 //! All arithmetic uses saturating ops so these tests never panic on the
 //! invariant assertion; deficits are surfaced as negative `surplus`.
+//!
+//! Failure-recovery tests below additionally pin retry, partial-completion,
+//! and rejection behavior so adverse paths cannot silently corrupt state.
 
 use super::*;
 use soroban_sdk::{testutils::Address as _, token::StellarAssetClient, Address, Env, String};
@@ -80,7 +84,6 @@ fn setup_escrow<'a>(
         &None,
         &None,
         &None::<i64>,
-        &None::<u32>,
     );
 
     (client, token, sme)
@@ -401,5 +404,188 @@ fn reconciliation_deficit_display() {
     assert_eq!(view.outstanding_liability, 1000);
     assert!(view.surplus < 0, "surplus must be negative in deficit");
     assert_eq!(view.surplus, -1000i128);
+    assert_invariant(&client, &token);
+}
+
+// ── Failure-recovery: deterministic rejection and retry behavior ─────────────
+
+/// A rejected `fund` (below minimum / zero) must not mutate state and must
+/// leave the reconciliation view byte-for-byte identical so retries are safe.
+#[test]
+fn reconciliation_fund_rejection_is_atomic() {
+    let env = Env::default();
+    let (client, token, _sme) = setup_escrow(&env, 1000, "REJ_FUND01");
+
+    let investor = Address::generate(&env);
+    token.stellar.mint(&investor, &500i128);
+
+    let before = client.get_reconciliation();
+    let before_escrow = client.get_escrow();
+    let before_dp = client.get_distributed_principal();
+
+    // Zero-amount funding must be rejected.
+    assert!(
+        client.try_fund(&investor, &0i128).is_err(),
+        "zero-amount fund must be rejected",
+    );
+
+    let after = client.get_reconciliation();
+    assert_eq!(after.token_balance, before.token_balance);
+    assert_eq!(after.outstanding_liability, before.outstanding_liability);
+    assert_eq!(after.surplus, before.surplus);
+    assert_eq!(client.get_escrow().status, before_escrow.status);
+    assert_eq!(client.get_escrow().funded_amount, before_escrow.funded_amount);
+    assert_eq!(client.get_distributed_principal(), before_dp);
+    assert_invariant(&client, &token);
+
+    // A subsequent valid fund must succeed deterministically.
+    client.fund(&investor, &500i128);
+    let view = client.get_reconciliation();
+    assert_eq!(view.token_balance, 500);
+    assert_eq!(view.outstanding_liability, 500);
+    assert_eq!(view.surplus, 0);
+    assert_invariant(&client, &token);
+}
+
+/// Duplicate `refund` calls must be idempotent: the second call must be a
+/// no-op (or rejected) and must not double-count `distributed_principal`.
+#[test]
+fn reconciliation_refund_is_idempotent() {
+    let env = Env::default();
+    let (client, token, _sme) = setup_escrow(&env, 2000, "IDEM_REF01");
+
+    let investor = Address::generate(&env);
+    mint_and_fund(&client, &token, &investor, 1000);
+    client.cancel_funding();
+
+    client.refund(&investor);
+    assert_eq!(client.get_distributed_principal(), 1000);
+
+    let snapshot = client.get_reconciliation();
+    let balance_after_first = token.token.balance(&client.address);
+
+    // Retry: either rejected or a no-op, but never a double payout.
+    let _ = client.try_refund(&investor);
+
+    assert_eq!(
+        client.get_distributed_principal(),
+        1000,
+        "duplicate refund must not double-count distributed principal",
+    );
+    assert_eq!(
+        token.token.balance(&client.address),
+        balance_after_first,
+        "duplicate refund must not move tokens",
+    );
+    let after = client.get_reconciliation();
+    assert_eq!(after.token_balance, snapshot.token_balance);
+    assert_eq!(after.outstanding_liability, snapshot.outstanding_liability);
+    assert_eq!(after.surplus, snapshot.surplus);
+    assert_invariant(&client, &token);
+}
+
+/// Duplicate `claim_investor_payout` calls must be idempotent: the second call
+/// must not pay twice and must not corrupt the liability invariant.
+#[test]
+fn reconciliation_claim_is_idempotent() {
+    let env = Env::default();
+    let (client, token, _sme) = setup_escrow(&env, 1000, "IDEM_CLM01");
+
+    let investor = Address::generate(&env);
+    mint_and_fund(&client, &token, &investor, 1000);
+
+    let yield_coupon = 80i128;
+    token.stellar.mint(&client.address, &yield_coupon);
+    client.settle();
+
+    client.claim_investor_payout(&investor);
+    let balance_after_first = token.token.balance(&client.address);
+    let snapshot = client.get_reconciliation();
+
+    // Retry: must not pay out again.
+    let _ = client.try_claim_investor_payout(&investor);
+
+    assert_eq!(
+        token.token.balance(&client.address),
+        balance_after_first,
+        "duplicate claim must not move tokens",
+    );
+    let after = client.get_reconciliation();
+    assert_eq!(after.token_balance, snapshot.token_balance);
+    assert_eq!(after.outstanding_liability, snapshot.outstanding_liability);
+    assert_eq!(after.surplus, snapshot.surplus);
+    assert_invariant(&client, &token);
+}
+
+/// Partial completion: sweeping dust then refunding must leave the invariant
+/// intact, and a retry of the sweep after full refund must be rejected.
+#[test]
+fn reconciliation_partial_completion_then_retry() {
+    let env = Env::default();
+    let (client, token, _sme) = setup_escrow(&env, 2000, "PARTIAL01");
+
+    let inv_a = Address::generate(&env);
+    let inv_b = Address::generate(&env);
+    mint_and_fund(&client, &token, &inv_a, 600);
+    mint_and_fund(&client, &token, &inv_b, 400);
+    client.cancel_funding();
+
+    // Partial completion: refund only investor A.
+    client.refund(&inv_a);
+    assert_eq!(client.get_distributed_principal(), 600);
+    let view = client.get_reconciliation();
+    assert_eq!(view.token_balance, 400);
+    assert_eq!(view.outstanding_liability, 400);
+    assert_eq!(view.surplus, 0);
+    assert_invariant(&client, &token);
+
+    // Retry sweep with no surplus must be rejected deterministically.
+    assert!(
+        client.try_sweep_terminal_dust(&1i128).is_err(),
+        "sweep with no surplus must be rejected",
+    );
+    assert_invariant(&client, &token);
+
+    // Complete the recovery: refund investor B.
+    client.refund(&inv_b);
+    assert_eq!(client.get_distributed_principal(), 1000);
+    let view = client.get_reconciliation();
+    assert_eq!(view.token_balance, 0);
+    assert_eq!(view.outstanding_liability, 0);
+    assert_eq!(view.surplus, 0);
+    assert_invariant(&client, &token);
+}
+
+/// Boundary: sweeping exactly the surplus must succeed, sweeping surplus + 1
+/// must be rejected, and the invariant must hold on both sides.
+#[test]
+fn reconciliation_sweep_boundary() {
+    let env = Env::default();
+    let (client, token, _sme) = setup_escrow(&env, 1000, "SWEEP_BND");
+
+    let investor = Address::generate(&env);
+    mint_and_fund(&client, &token, &investor, 500);
+    client.cancel_funding();
+
+    let dust = 25i128;
+    token.stellar.mint(&client.address, &dust);
+
+    let view = client.get_reconciliation();
+    assert_eq!(view.surplus, dust);
+
+    // Oversweep by one unit must be rejected.
+    assert!(
+        client.try_sweep_terminal_dust(&(dust + 1)).is_err(),
+        "oversweep by one unit must be rejected",
+    );
+    assert_invariant(&client, &token);
+
+    // Exact sweep must succeed and zero out surplus.
+    let swept = client.sweep_terminal_dust(&dust);
+    assert_eq!(swept, dust);
+    let view = client.get_reconciliation();
+    assert_eq!(view.surplus, 0);
+    assert_eq!(view.token_balance, 500);
+    assert_eq!(view.outstanding_liability, 500);
     assert_invariant(&client, &token);
 }

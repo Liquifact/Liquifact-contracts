@@ -32,7 +32,6 @@ fn init_open(
         &None,
         &None,
         &None::<i64>,
-        &None::<u32>,
     );
     (token, treasury)
 }
@@ -82,7 +81,6 @@ fn init_funded_with_real_token<'a>(
         &None,
         &None,
         &None::<i64>,
-        &None::<u32>,
     );
     sac_admin.mint(investor, &TARGET);
     client.fund(investor, &TARGET);
@@ -120,7 +118,6 @@ fn init_settled<'a>(
         &None,
         &None,
         &None::<i64>,
-        &None::<u32>,
     );
     let sac_admin = StellarAssetClient::new(env, &token);
     sac_admin.mint(investor, &TARGET);
