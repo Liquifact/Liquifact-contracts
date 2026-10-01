@@ -33,9 +33,8 @@
 //! - Interleaving `set_collateral_limit` writes with `get_collateral_state` reads
 //!   never reveals an intermediate `limit` field that disagrees with the
 //!   bundled ceiling.
-//! - `clear_sme_collateral_commitment` → the flat view flips all fields back to
-//!   their documented `is_set=false` defaults in a single snapshot (no partial
-//!   clear).
+//! - `clear_sme_collateral_commitment` flips all fields back to their documented
+//!   `is_set=false` defaults in a single snapshot (no partial clear).
 //! - Two concurrent "racing" commitments submitted in the same ledger timestamp
 //!   (same `recorded_at`) produce deterministic results: the second call
 //!   succeeds (equality is allowed, as it is the replay case) but no backwards
@@ -102,18 +101,17 @@ fn assert_atomic_snapshot_invariant(s: &CollateralState) {
             s.collateral_limit,
         );
     }
-    // Default shape when not set:
+    // Default shape when not set: amount and recorded_at must be zero.
     if !s.is_set {
-        let empty_sym = Symbol::new(&Env::default(), "");
-        // Compare string-repr because Symbols from different envs may not `eq`
-        // via `PartialEq` on some SDK versions; compare by debug format instead.
-        assert_eq!(s.amount, 0);
-        assert_eq!(s.recorded_at, 0);
+        assert_eq!(s.amount, 0, "is_set=false but amount={}", s.amount);
+        assert_eq!(s.recorded_at, 0, "is_set=false but recorded_at={}", s.recorded_at);
     }
 }
 
 // ── 1. Defaults (pre-init / post-init) ───────────────────────────────────────
 
+/// Before `init`: the flat view returns documented defaults — `is_set=false`,
+/// `amount=0`, `recorded_at=0`, and `collateral_limit=MAX_INVOICE_AMOUNT`.
 #[test]
 fn defaults_before_init_flat_view() {
     let env = Env::default();
@@ -126,6 +124,8 @@ fn defaults_before_init_flat_view() {
     assert_eq!(s.collateral_limit, MAX_INVOICE_AMOUNT);
 }
 
+/// After `init` with no collateral calls: defaults persist — no silent
+/// init-time overwrite of the collateral ceiling or commitment.
 #[test]
 fn defaults_after_init_flat_view_persist() {
     let env = Env::default();
@@ -188,7 +188,7 @@ fn idempotent_replay_of_same_record_call_same_timestamp() {
     assert_atomic_snapshot_invariant(&sa);
     assert_atomic_snapshot_invariant(&sb);
     assert_atomic_snapshot_invariant(&sc);
-    // outcomes equal (timestamp monotonicity allows equal, so no backward error)
+    // All three calls are idempotent: same amount, asset, and recorded_at.
     assert_eq!(a.amount, b.amount);
     assert_eq!(b.amount, c.amount);
     assert_eq!(a.asset, b.asset);
@@ -219,8 +219,10 @@ fn idempotent_replay_of_set_limit() {
     assert_eq!(b, c);
 }
 
-/// Idempotent `clear_sme_collateral_commitment`: called twice, both produce the
-/// same flat-view defaults.
+/// `clear_sme_collateral_commitment` on a set commitment succeeds, and the
+/// subsequent flat view shows the `is_set=false` defaults. A second clear on
+/// the now-empty state must return `NoCollateralToClear` and not alter the
+/// flat view.
 #[test]
 fn idempotent_double_clear() {
     let env = Env::default();
@@ -232,18 +234,24 @@ fn idempotent_double_clear() {
     let before = client.get_collateral_state();
     assert!(before.is_set);
 
+    // First clear: succeeds.
     client.clear_sme_collateral_commitment();
     let a = client.get_collateral_state();
-    client.clear_sme_collateral_commitment();
-    let b = client.get_collateral_state();
-
     assert_atomic_snapshot_invariant(&a);
-    assert_atomic_snapshot_invariant(&b);
     assert!(!a.is_set);
     assert_eq!(a.amount, 0);
     assert_eq!(a.recorded_at, 0);
-    assert_eq!(a.collateral_limit, 7_000); // limit NOT cleared by clear-collateral
-    assert_eq!(a, b);
+    assert_eq!(a.collateral_limit, 7_000); // limit is NOT cleared by clear-commitment
+
+    // Second clear: rejected because nothing remains to clear.
+    // The error must be NoCollateralToClear and the view must be unchanged.
+    assert_contract_error(
+        client.try_clear_sme_collateral_commitment(),
+        EscrowError::NoCollateralToClear,
+    );
+    let b = client.get_collateral_state();
+    assert_atomic_snapshot_invariant(&b);
+    assert_eq!(a, b, "a rejected second clear must not alter the flat view");
 }
 
 // ── 3. Atomic snapshot invariant (no torn reads) ─────────────────────────────
@@ -284,10 +292,10 @@ fn interleave_writes_reads_always_self_consistent() {
     let asset = Symbol::new(&env, "STEP");
 
     let steps = [
-        (3_000i128, 1_000i128, 1u64),   // limit=3000, amount=1000, ts=1
-        (5_000i128, 2_500i128, 2u64),   // limit=5000, amount=2500, ts=2
-        (10_000i128, 10_000i128, 3u64), // limit=10000, amount=10000, ts=3
-        (2_000i128, 2_000i128, 4u64),   // limit=2000, amount=2000, ts=4
+        (3_000i128, 1_000i128, 1u64),
+        (5_000i128, 2_500i128, 2u64),
+        (10_000i128, 10_000i128, 3u64),
+        (2_000i128, 2_000i128, 4u64),
     ];
 
     for (lim, amt, ts) in steps.iter() {
@@ -306,7 +314,7 @@ fn interleave_writes_reads_always_self_consistent() {
         assert_eq!(s.amount, *amt);
         assert_eq!(s.recorded_at, *ts);
         assert_eq!(s.is_set, true);
-        // And match individual getters:
+        // Match individual getters.
         assert_eq!(s.collateral_limit, client.get_collateral_limit());
         let stored = client.get_sme_collateral_commitment().unwrap();
         assert_eq!(stored.amount, s.amount);
@@ -317,6 +325,9 @@ fn interleave_writes_reads_always_self_consistent() {
 
 // ── 4. Clear is atomic (no partial clear observable) ─────────────────────────
 
+/// After `clear_sme_collateral_commitment` a single bundled read shows ALL
+/// `is_set=false` fields reset simultaneously — no partial "asset cleared but
+/// amount still populated" state is visible.
 #[test]
 fn clear_flips_all_fields_simultaneously() {
     let env = Env::default();
@@ -336,22 +347,21 @@ fn clear_flips_all_fields_simultaneously() {
 
     client.clear_sme_collateral_commitment();
 
-    // A single bundled read after clear shows every `is_set=false` default in
-    // the same snapshot — no partial "asset cleared but amount still 1234".
     let s = client.get_collateral_state();
     assert_atomic_snapshot_invariant(&s);
     assert!(!s.is_set);
     assert_eq!(s.amount, 0);
     assert_eq!(s.recorded_at, 0);
-    assert_eq!(s.collateral_limit, 4_000); // collateral_limit preserved; only commitment cleared
+    // collateral_limit is preserved — only the commitment is cleared.
+    assert_eq!(s.collateral_limit, 4_000);
 }
 
 // ── 5. Timing boundaries (monotonicity vs racing writes) ─────────────────────
 
 /// Two back-to-back writes within the **same** ledger timestamp (simulated
-/// racing submission that gets sequenced into the same ledger): the equality
-/// branch of the `now >= prior.recorded_at` guard must accept it.  Final state
-/// equals whichever call ran last.
+/// racing submission sequenced into the same ledger): the equality branch of
+/// the `now >= prior.recorded_at` guard must accept it. Final state equals
+/// whichever call ran last.
 #[test]
 fn racing_writes_same_timestamp_both_succeed_and_state_matches_last() {
     let env = Env::default();
@@ -366,9 +376,9 @@ fn racing_writes_same_timestamp_both_succeed_and_state_matches_last() {
     let c1 = client.record_sme_collateral_commitment(&a1, &1_000i128);
     let c2 = client.record_sme_collateral_commitment(&a2, &2_000i128); // same ts
 
-    // both recorded_at values equal
+    // Both recorded_at values must be equal.
     assert_eq!(c1.recorded_at, c2.recorded_at);
-    // final stored view matches the later call
+    // Final stored view matches the second call (last-writer wins).
     let s = client.get_collateral_state();
     assert_atomic_snapshot_invariant(&s);
     assert_eq!(s.asset, a2);
@@ -377,9 +387,8 @@ fn racing_writes_same_timestamp_both_succeed_and_state_matches_last() {
 }
 
 /// Stale replay at a timestamp *earlier* than the stored commitment must fail
-/// (CollateralTimestampBackwards).  Simulates: client submits a write → it
-/// lands → a concurrent duplicate (from an earlier mempool snapshot) is also
-/// sequenced, with a *lagging* timestamp — must be rejected.
+/// with `CollateralTimestampBackwards`. The final state must equal the prior
+/// successful write — no partial mutation from the failing attempt.
 #[test]
 fn stale_racing_write_with_earlier_timestamp_rejected() {
     let env = Env::default();
@@ -393,17 +402,18 @@ fn stale_racing_write_with_earlier_timestamp_rejected() {
     let prior = client.record_sme_collateral_commitment(&asset, &500i128);
     assert_eq!(prior.recorded_at, 1_000);
 
-    // roll ledger back, simulate stale racing submission
+    // Roll ledger back to simulate a stale racing submission.
     let mut li2 = env.ledger().get();
     li2.timestamp = 999;
     env.ledger().set(li2);
+
+    // NOTE: `try_` methods already return the nested Result — no extra Ok() wrapping.
     assert_contract_error(
-        Ok(client.try_record_sme_collateral_commitment(&asset, &600i128)),
+        client.try_record_sme_collateral_commitment(&asset, &600i128),
         EscrowError::CollateralTimestampBackwards,
     );
 
-    // final state must still equal the prior successful write — no partial
-    // mutation was applied by the failing attempt.
+    // Final state must still equal the prior successful write.
     let s = client.get_collateral_state();
     assert_atomic_snapshot_invariant(&s);
     assert_eq!(s.amount, 500);
@@ -413,8 +423,9 @@ fn stale_racing_write_with_earlier_timestamp_rejected() {
 
 // ── 6. Struct shape pin for the flat view ────────────────────────────────────
 
-/// Compile-time pin: `CollateralState` exposes exactly these 5 named fields in
-/// this order.  Adding/renaming a field breaks this test.
+/// Compile-time pin: `CollateralState` exposes exactly these 5 named fields.
+/// Adding or renaming a field breaks this destructuring and produces a compile
+/// error, catching schema drift early.
 #[test]
 fn flat_view_struct_shape_pin_destructured() {
     let env = Env::default();
@@ -444,9 +455,8 @@ fn flat_view_struct_shape_pin_destructured() {
 
 // ── 7. No stale ceiling after limit write ────────────────────────────────────
 
-/// Writing a *lower* ceiling then reading the flat view MUST return the new
-/// (lower) ceiling — never the old one.  This defends against a future bug
-/// where the view reads a stale copy.
+/// Writing a new ceiling (lower or higher) then reading the flat view MUST
+/// return the updated ceiling immediately — never a stale copy.
 #[test]
 fn limit_write_visible_in_next_flat_view_call_no_stale() {
     let env = Env::default();
@@ -463,15 +473,15 @@ fn limit_write_visible_in_next_flat_view_call_no_stale() {
     assert_eq!(client.get_collateral_state().collateral_limit, 5_000);
 }
 
-// ── 8. No-auth / pure view (caller addr absent still succeeds) ───────────────
+// ── 8. Pure view requires no auth ────────────────────────────────────────────
 
-/// `get_collateral_state` must be callable without any auth mock and without a
-/// source account — pure views never trigger `require_auth`.
+/// `get_collateral_state` is callable without any auth mock — pure views must
+/// never trigger `require_auth`.
 #[test]
 fn pure_view_no_auth_needed_pre_init() {
     let env = Env::default();
     let client = deploy(&env);
-    // explicitly: no `env.mock_all_auths()`, no `set_source_account`
+    // No `env.mock_all_auths()` or source account.
     let s = client.get_collateral_state();
     assert_atomic_snapshot_invariant(&s);
     assert!(!s.is_set);
@@ -481,14 +491,148 @@ fn pure_view_no_auth_needed_pre_init() {
 #[test]
 fn pure_view_no_auth_needed_after_init() {
     let env = Env::default();
-    // Only init needs auth; subsequent views must not.
     env.mock_all_auths();
     let (client, _, _) = deploy_and_init(&env);
-    // drop auth mock by re-creating Env and re-binding to same contract id? Instead,
-    // just verify that a second read returns OK (auth mock remains in place but
-    // the entrypoint never reaches require_auth).  Both default + post-init
-    // tests above exercise the no-auth path pre-init; this test confirms the
-    // call still returns deterministically.
+    // Auth mock remains from init, but the view entrypoint must not call
+    // require_auth — the call must always succeed.
     let s = client.get_collateral_state();
     assert_atomic_snapshot_invariant(&s);
+    assert!(!s.is_set);
+    assert_eq!(s.collateral_limit, MAX_INVOICE_AMOUNT);
+}
+
+// ── 9. Backward-compatibility: uninitialized contract returns stable defaults ─
+
+/// An uninitialized contract (no `init` call) must return stable, documented
+/// default values for both `collateral_limit` and all `is_set=false` fields.
+/// No caller-visible error must be raised; the view must be safe for existing
+/// callers that probe state before escrow setup.
+#[test]
+fn uninitialized_flat_view_returns_documented_defaults_deterministically() {
+    let env = Env::default();
+    let client = deploy(&env);
+
+    // Call five times — all must return the same documented defaults.
+    for _ in 0..5 {
+        let s = client.get_collateral_state();
+        assert_atomic_snapshot_invariant(&s);
+        assert!(!s.is_set, "is_set must be false on uninitialized contract");
+        assert_eq!(s.amount, 0);
+        assert_eq!(s.recorded_at, 0);
+        assert_eq!(
+            s.collateral_limit, MAX_INVOICE_AMOUNT,
+            "default ceiling must equal MAX_INVOICE_AMOUNT"
+        );
+    }
+}
+
+// ── 10. Error codes are stable (typed-error compatibility contract) ───────────
+
+/// `CollateralTimestampBackwards`, `NoCollateralToClear`, and
+/// `CollateralAmountNotPositive` must each produce their documented typed
+/// error codes. This pins the public error surface so client SDKs can branch
+/// on numeric codes without re-parsing error strings.
+#[test]
+fn error_codes_are_stable_typed_contract() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _, _) = deploy_and_init(&env);
+
+    // CollateralAmountNotPositive (amount = 0)
+    assert_contract_error(
+        client.try_record_sme_collateral_commitment(&Symbol::new(&env, "USDC"), &0i128),
+        EscrowError::CollateralAmountNotPositive,
+    );
+
+    // CollateralAmountNotPositive (negative amount)
+    assert_contract_error(
+        client.try_record_sme_collateral_commitment(&Symbol::new(&env, "USDC"), &-1i128),
+        EscrowError::CollateralAmountNotPositive,
+    );
+
+    // NoCollateralToClear — nothing to clear yet.
+    assert_contract_error(
+        client.try_clear_sme_collateral_commitment(),
+        EscrowError::NoCollateralToClear,
+    );
+
+    // CollateralTimestampBackwards — record at ts=500, then attempt at ts=499.
+    let mut li = env.ledger().get();
+    li.timestamp = 500;
+    env.ledger().set(li);
+    client.record_sme_collateral_commitment(&Symbol::new(&env, "XLM"), &100i128);
+
+    let mut li2 = env.ledger().get();
+    li2.timestamp = 499;
+    env.ledger().set(li2);
+    assert_contract_error(
+        client.try_record_sme_collateral_commitment(&Symbol::new(&env, "XLM"), &200i128),
+        EscrowError::CollateralTimestampBackwards,
+    );
+
+    // State is unchanged: the failed calls must not mutate storage.
+    let s = client.get_collateral_state();
+    assert_atomic_snapshot_invariant(&s);
+    assert_eq!(s.amount, 100);
+    assert_eq!(s.recorded_at, 500);
+}
+
+// ── 11. Malformed query parameters: empty asset symbol ───────────────────────
+
+/// An empty asset symbol is rejected with `CollateralAssetEmpty`. The flat
+/// view must not change and the error must be the correct typed code.
+#[test]
+fn empty_asset_symbol_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _, _) = deploy_and_init(&env);
+
+    assert_contract_error(
+        client.try_record_sme_collateral_commitment(&Symbol::new(&env, ""), &500i128),
+        EscrowError::CollateralAssetEmpty,
+    );
+
+    // Flat view shows no commitment was stored.
+    let s = client.get_collateral_state();
+    assert_atomic_snapshot_invariant(&s);
+    assert!(!s.is_set);
+}
+
+// ── 12. Limit ceiling enforced in the flat-view path ─────────────────────────
+
+/// Recording an amount that exceeds the configured ceiling must be rejected
+/// with `CollateralLimitExceeded`, and the flat view must remain unchanged.
+#[test]
+fn amount_above_configured_limit_rejected_flat_view_unchanged() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _, _) = deploy_and_init(&env);
+    client.set_collateral_limit(&1_000i128);
+
+    assert_contract_error(
+        client.try_record_sme_collateral_commitment(&Symbol::new(&env, "USDC"), &1_001i128),
+        EscrowError::CollateralLimitExceeded,
+    );
+
+    let s = client.get_collateral_state();
+    assert_atomic_snapshot_invariant(&s);
+    assert!(!s.is_set, "flat view must show no commitment after rejected record");
+    assert_eq!(s.collateral_limit, 1_000);
+}
+
+/// Recording exactly at the ceiling succeeds and the flat view reflects it.
+#[test]
+fn amount_exactly_at_limit_accepted() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _, _) = deploy_and_init(&env);
+    client.set_collateral_limit(&2_500i128);
+
+    client.record_sme_collateral_commitment(&Symbol::new(&env, "BTC"), &2_500i128);
+
+    let s = client.get_collateral_state();
+    assert_atomic_snapshot_invariant(&s);
+    assert!(s.is_set);
+    assert_eq!(s.amount, 2_500);
+    assert_eq!(s.collateral_limit, 2_500);
 }

@@ -611,10 +611,9 @@ pub const MIN_PAUSE_TOGGLE_WINDOW_SECS: u64 = 60; // 1 minute
 /// Maximum rate-limit window (seconds) accepted by [`LiquifactEscrow::set_pause_rate_limit`].
 pub const MAX_PAUSE_TOGGLE_WINDOW_SECS: u64 = 7_776_000; // 90 days
 
-// Canonical EscrowError enum is defined in crate::errors and re-exported.
+// Canonical EscrowError enum is defined in crate::errors and re-exported here via `pub use`.
 
-    /// Escrow storage is missing; entrypoint requires prior [`LiquifactEscrow::init`].
-    EscrowNotInitialized = 20,
+
     /// [`DataKey::FundingToken`] is unset (escrow not fully initialized).
     FundingTokenNotSet = 21,
     /// [`DataKey::Treasury`] is unset (escrow not fully initialized).

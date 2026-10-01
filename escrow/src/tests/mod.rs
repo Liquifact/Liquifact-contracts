@@ -81,7 +81,7 @@ mod collateral_validation_helpers;
 // mod integration;
 // mod integration_status_guards;
 // mod legal_hold;
-mod auth_matrix;
+mod fees;
 mod migration_errors;
 // mod paginated_views;
 // mod pause;
