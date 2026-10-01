@@ -280,6 +280,34 @@ fn fund_with_commitment_funded_amount_overflow_rejected() {
     );
 }
 
+/// A rejected overflow must not poison the escrow: the same investor can
+/// retry with the exact remaining capacity and reach the funded state.
+#[test]
+fn fund_with_commitment_overflow_recovery_is_deterministic() {
+    let env = Env::default();
+    let (client, _id, _sme) = setup_no_token(
+        &env,
+        "OVF110R",
+        MAX_INVOICE_AMOUNT,
+        0i64,
+        0u64,
+        None,
+    );
+    let first = Address::generate(&env);
+    let second = Address::generate(&env);
+
+    client.fund(&first, &(MAX_INVOICE_AMOUNT - 1));
+    assert_contract_error(
+        client.try_fund_with_commitment(&second, &2i128, &0u64),
+        EscrowError::FundedAmountOverflow,
+    );
+
+    let recovered = client.fund_with_commitment(&second, &1i128, &0u64);
+    assert_eq!(recovered.funded_amount, MAX_INVOICE_AMOUNT);
+    assert_eq!(recovered.status, 1);
+    assert_eq!(client.get_contribution(&second), 1);
+}
+
 // ===========================================================================
 // Section 2 — fund_with_commitment: InvestorClaimTimeOverflow (109)
 // ===========================================================================
