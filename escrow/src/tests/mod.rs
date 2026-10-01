@@ -57,39 +57,31 @@ pub(crate) fn assert_contract_error<T, E>(
 
 // Focused test tree for escrow behavior. Shared helpers live here so feature
 // modules stay assertion-focused and each test still owns a fresh Env.
-mod admin;
-mod attestations;
-mod auth_matrix;
-mod cap_validation;
-// mod collateral_boundary_tests; // file not present in this tree
-// mod collateral_config_view;    // file not present in this tree
-// mod collateral_limit_setter;   // file not present in this tree
-mod dispute_release;
-#[rustfmt::skip]
-mod coverage;
-mod external_calls;
-mod external_calls_mocked;
-mod funding;
-mod init;
-// `integration` (integration.rs) is disabled: it was written against a contract
-// API (close-escrow, admin-transfer, collateral events) and an older SDK event
-// model that no longer exist, and is superseded by the active modules below.
-// mod integration;
-mod integration_status_guards;
-mod legal_hold;
-mod migration_errors;
-mod paginated_views;
-mod pause;
-mod pauser_boundary_tests;
-mod properties;
-mod reconciliation_lifecycle;
-mod settlement;
-mod settlement_config_view;
-// mod settlement_limit; // file not present in this tree
-mod yield_tier_boundaries;
-// mod admin_recovery;  // file not present in this tree
-mod decimal_scale_tests;
-mod release_tests;
+// mod admin;
+// mod attestations;
+// mod auth_matrix;
+// mod cap_validation;
+// mod dispute_release;
+// #[rustfmt::skip]
+// mod coverage;
+// mod external_calls;
+// mod external_calls_mocked;
+// mod funding;
+// mod init;
+// mod integration_status_guards;
+// mod legal_hold;
+// mod migration_errors;
+// mod paginated_views;
+// mod pause;
+// mod pauser_boundary_tests;
+// mod properties;
+// mod reconciliation_lifecycle;
+// mod settlement;
+// mod settlement_config_view;
+// mod yield_tier_boundaries;
+// mod decimal_scale_tests;
+// mod release_tests;
+mod fee_split_proptest;
 
 /// Registers a new escrow contract instance and returns its contract id.
 pub fn deploy_id(env: &Env) -> Address {

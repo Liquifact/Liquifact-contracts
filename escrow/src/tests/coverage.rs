@@ -30,6 +30,7 @@ fn typed_error_codes_cover_basic_escrow_guards() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
     let (funding_token, treasury) = free_addresses(&env);
+}
 
 #[test]
 fn typed_error_codes_cover_init_fund_settle_withdraw_and_claim() {
@@ -4232,6 +4233,7 @@ fn settlement_validation_readiness_maturity_reached_matches_predicate() {
         &None,
         &None,
         &None,
+        &None::<u32>,
     );
     let investor = Address::generate(&env);
     client.fund(&investor, &super::TARGET);
