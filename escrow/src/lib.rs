@@ -201,6 +201,25 @@ pub const MAX_ATTESTATION_APPEND_BATCH: u32 = 32;
 /// Maximum number of indices that can be revoked in a single batch call.
 pub const MAX_ATTESTATION_REVOKE_BATCH: u32 = 32;
 
+/// Maximum number of digests that can be appended in a single
+/// [`LiquifactEscrow::append_attestation_digests`] batch call.
+pub const MAX_ATTESTATION_APPEND_BATCH: u32 = 32;
+
+/// Default per-escrow attestation append-log limit applied when no explicit
+/// limit has been configured via [`LiquifactEscrow::set_attestation_limit`].
+///
+/// Matches [`MAX_ATTESTATION_APPEND_ENTRIES`] so the hard storage cap
+/// and the configurable soft cap behave identically on a fresh deployment.
+pub const DEFAULT_ATTESTATION_LIMIT: u32 = 32;
+
+/// Minimum value accepted by [`LiquifactEscrow::set_attestation_limit`].
+/// At least one entry must always be allowed.
+pub const MIN_ATTESTATION_LIMIT: u32 = 1;
+
+/// Maximum value accepted by [`LiquifactEscrow::set_attestation_limit`].
+/// Cannot exceed the hard storage cap [`MAX_ATTESTATION_APPEND_ENTRIES`].
+pub const MAX_ATTESTATION_LIMIT: u32 = MAX_ATTESTATION_APPEND_ENTRIES;
+
 /// Upper bound on [`LiquifactEscrow::batch_bump_ttl`] entries per call.
 ///
 /// Mirrors [`MAX_INVESTOR_ALLOWLIST_BATCH`] — both operations iterate over a
@@ -667,6 +686,17 @@ pub const MAX_PAUSE_TOGGLE_WINDOW_SECS: u64 = 7_776_000; // 90 days
     /// [`LiquifactEscrow::get_revoked_attestation_digests`] exceeded
     /// [`MAX_ATTESTATION_READ_PAGE`].
     AttestationReadLimitTooLarge = 58,
+
+    /// [`LiquifactEscrow::set_attestation_limit`] received a value outside
+    /// `MIN_ATTESTATION_LIMIT..=MAX_ATTESTATION_LIMIT`.
+    AttestationLimitOutOfRange = 59,
+
+    /// [`LiquifactEscrow::append_attestation_digests`] received an empty digests list.
+    AttestationAppendBatchEmpty = 64,
+
+    /// [`LiquifactEscrow::append_attestation_digests`] exceeded
+    /// [`MAX_ATTESTATION_APPEND_BATCH`].
+    AttestationAppendBatchTooLarge = 65,
 
     /// [`LiquifactEscrow::record_sme_collateral_commitment`] received a non-positive amount.
     CollateralAmountNotPositive = 60,
@@ -1378,12 +1408,10 @@ pub enum DataKey {
     /// Absent ⇒ not revoked. Written as `true` by [`LiquifactEscrow::revoke_attestation_digest`].
     /// Preserves the original digest for auditability while signalling supersession.
     AttestationRevoked(u32),
-
-    /// Configured cap on the attestation append log, set by
-    /// [`LiquifactEscrow::set_attestation_limit`].
-    /// Absent → [`DEFAULT_ATTESTATION_LIMIT`].
+    /// Admin-configurable soft cap on the number of entries allowed in the
+    /// attestation append log.  Absent ΓçÆ [`DEFAULT_ATTESTATION_LIMIT`].
+    /// Updated by [`LiquifactEscrow::set_attestation_limit`].
     AttestationLimit,
-
     /// When true, only allowlisted addresses may call [`LiquifactEscrow::fund`] or [`LiquifactEscrow::fund_with_commitment`].
     AllowlistActive,
     /// Whether a specific address is permitted to fund when [`DataKey::AllowlistActive`] is true.
@@ -2665,6 +2693,43 @@ pub struct AttestationDigestInfo {
     pub digest: BytesN<32>,
     /// `true` if the entry has been revoked via `revoke_attestation_digest`.
     pub revoked: bool,
+}
+
+/// Emitted by [`LiquifactEscrow::set_attestation_limit`] when the per-escrow
+/// append-log cap is changed.
+#[contractevent]
+pub struct AttestationLimitUpdated {
+    #[topic]
+    pub name: Symbol,
+    pub invoice_id: Symbol,
+    /// Previous limit (before the update).  Uses [`DEFAULT_ATTESTATION_LIMIT`] when
+    /// no explicit limit was stored.
+    pub old_limit: u32,
+    /// New limit written to storage.
+    pub new_limit: u32,
+}
+
+/// Read-only snapshot of the attestation subsystem configuration.
+///
+/// Returned by [`LiquifactEscrow::get_attestation_config`] to let integrators
+/// discover the effective limits and current log state in a single call rather
+/// than issuing separate queries for each field.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AttestationConfig {
+    /// Hard storage cap — the absolute ceiling; never exceeds
+    /// [`MAX_ATTESTATION_APPEND_ENTRIES`].
+    pub max_append_entries: u32,
+    /// Maximum indices per [`LiquifactEscrow::revoke_attestation_digests`] call.
+    pub max_revoke_batch: u32,
+    /// Maximum digests per [`LiquifactEscrow::append_attestation_digests`] call.
+    pub max_append_batch: u32,
+    /// Maximum entries returned by a single paginated read.
+    pub max_read_page: u32,
+    /// `true` once a primary attestation hash has been bound.
+    pub primary_bound: bool,
+    /// Current number of entries in the append log.
+    pub append_log_length: u32,
 }
 
 #[contractevent]
@@ -4391,9 +4456,17 @@ impl LiquifactEscrow {
         let escrow = Self::load_escrow_require_admin(&env);
 
         let mut log: Vec<BytesN<32>> = Self::load_attestation_log(&env);
+        // Respect the admin-configurable soft cap (defaults to DEFAULT_ATTESTATION_LIMIT
+        // when not explicitly set), bounded above by MAX_ATTESTATION_APPEND_ENTRIES.
+        let effective_limit: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::AttestationLimit)
+            .unwrap_or(DEFAULT_ATTESTATION_LIMIT)
+            .min(MAX_ATTESTATION_APPEND_ENTRIES);
         ensure(
             &env,
-            log.len() < MAX_ATTESTATION_APPEND_ENTRIES,
+            log.len() < effective_limit,
             EscrowError::AttestationAppendLogCapacityReached,
         );
         let idx = log.len();
@@ -4409,6 +4482,160 @@ impl LiquifactEscrow {
             digest,
         }
         .publish(&env);
+    }
+
+    /// Atomically append multiple 32-byte digests to the attestation log in a single call.
+    ///
+    /// All entries are appended contiguously starting from the current log length.
+    /// If **any** per-entry guard fails the whole batch is rolled back (all-or-nothing).
+    ///
+    /// # Authorization
+    /// Requires `InvoiceEscrow::admin` auth.
+    ///
+    /// # Batch bounds
+    /// - `digests` must be non-empty (fails with [`EscrowError::AttestationAppendBatchEmpty`]).
+    /// - `digests.len()` must not exceed [`MAX_ATTESTATION_APPEND_BATCH`] (fails with
+    ///   [`EscrowError::AttestationAppendBatchTooLarge`]).
+    ///
+    /// # Capacity guard
+    /// If adding the batch would exceed the effective limit (configured via
+    /// [`LiquifactEscrow::set_attestation_limit`], defaulting to
+    /// [`DEFAULT_ATTESTATION_LIMIT`]) the whole batch fails atomically with
+    /// [`EscrowError::AttestationAppendLogCapacityReached`].
+    ///
+    /// # Indices
+    /// Indices are assigned contiguously from `log.len()` at call time.  Index
+    /// assignment is deterministic and cannot be racing if the call is the only
+    /// writer (Soroban single-writer-per-transaction model).
+    ///
+    /// # Events
+    /// One [`AttestationDigestAppended`] event per appended digest, identical in
+    /// shape to the single-entry entrypoint.
+    pub fn append_attestation_digests(env: Env, digests: Vec<BytesN<32>>) {
+        let n = digests.len();
+
+        ensure(&env, n > 0, EscrowError::AttestationAppendBatchEmpty);
+        ensure(
+            &env,
+            n <= MAX_ATTESTATION_APPEND_BATCH,
+            EscrowError::AttestationAppendBatchTooLarge,
+        );
+
+        let escrow = Self::load_escrow_require_admin(&env);
+
+        let mut log: Vec<BytesN<32>> = Self::load_attestation_log(&env);
+
+        // Effective capacity: admin-configured limit clamped to the hard cap.
+        let effective_limit: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::AttestationLimit)
+            .unwrap_or(DEFAULT_ATTESTATION_LIMIT)
+            .min(MAX_ATTESTATION_APPEND_ENTRIES);
+
+        // Capacity guard: reject the whole batch before any mutation.
+        // `log.len() + n <= effective_limit` checked without overflow risk
+        // because both values fit in u32 and effective_limit <= 32.
+        ensure(
+            &env,
+            log.len().saturating_add(n) <= effective_limit,
+            EscrowError::AttestationAppendLogCapacityReached,
+        );
+
+        let base_idx = log.len();
+        for i in 0..n {
+            let digest = digests.get(i).unwrap();
+            let idx = base_idx + i;
+            log.push_back(digest.clone());
+
+            AttestationDigestAppended {
+                name: symbol_short!("att_app"),
+                invoice_id: escrow.invoice_id.clone(),
+                index: idx,
+                digest,
+            }
+            .publish(&env);
+        }
+
+        // Write the updated log once after all entries have been validated.
+        env.storage()
+            .instance()
+            .set(&DataKey::AttestationAppendLog, &log);
+    }
+
+    /// Set the per-escrow attestation append-log limit.
+    ///
+    /// Restricts how many entries [`LiquifactEscrow::append_attestation_digest`] and
+    /// [`LiquifactEscrow::append_attestation_digests`] may write to the log for this
+    /// escrow instance.  The limit is a **soft cap** — it may be raised back up by the
+    /// admin at any time, allowing additional entries up to [`MAX_ATTESTATION_APPEND_ENTRIES`].
+    ///
+    /// # Authorization
+    /// Requires `InvoiceEscrow::admin` auth.
+    ///
+    /// # Errors
+    /// - [`EscrowError::AttestationLimitOutOfRange`] if `new_limit < MIN_ATTESTATION_LIMIT`
+    ///   or `new_limit > MAX_ATTESTATION_LIMIT`.
+    ///
+    /// # Events
+    /// Emits [`AttestationLimitUpdated`] carrying the previous and new limit values.
+    pub fn set_attestation_limit(env: Env, new_limit: u32) {
+        let escrow = Self::load_escrow_require_admin(&env);
+
+        ensure(
+            &env,
+            new_limit >= MIN_ATTESTATION_LIMIT && new_limit <= MAX_ATTESTATION_LIMIT,
+            EscrowError::AttestationLimitOutOfRange,
+        );
+
+        let old_limit: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::AttestationLimit)
+            .unwrap_or(DEFAULT_ATTESTATION_LIMIT);
+
+        env.storage()
+            .instance()
+            .set(&DataKey::AttestationLimit, &new_limit);
+
+        AttestationLimitUpdated {
+            name: symbol_short!("att_lim"),
+            invoice_id: escrow.invoice_id.clone(),
+            old_limit,
+            new_limit,
+        }
+        .publish(&env);
+    }
+
+    /// Return the currently configured attestation append-log limit.
+    ///
+    /// Returns [`DEFAULT_ATTESTATION_LIMIT`] when no explicit limit has been set.
+    pub fn get_attestation_limit(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::AttestationLimit)
+            .unwrap_or(DEFAULT_ATTESTATION_LIMIT)
+    }
+
+    /// Read-only bundled view of the attestation subsystem configuration.
+    ///
+    /// Returns all capacity constants and live-state fields in a single call so
+    /// integrators do not need to issue multiple separate queries.
+    pub fn get_attestation_config(env: Env) -> AttestationConfig {
+        let primary_bound = env
+            .storage()
+            .instance()
+            .has(&DataKey::PrimaryAttestationHash);
+        let append_log_length = Self::load_attestation_log(&env).len();
+
+        AttestationConfig {
+            max_append_entries: MAX_ATTESTATION_APPEND_ENTRIES,
+            max_revoke_batch: MAX_ATTESTATION_REVOKE_BATCH,
+            max_append_batch: MAX_ATTESTATION_APPEND_BATCH,
+            max_read_page: MAX_ATTESTATION_READ_PAGE,
+            primary_bound,
+            append_log_length,
+        }
     }
 
     pub fn get_attestation_append_log(env: Env) -> Vec<BytesN<32>> {
