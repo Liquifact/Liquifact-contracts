@@ -726,10 +726,10 @@ pub const MAX_PAUSE_TOGGLE_WINDOW_SECS: u64 = 7_776_000; // 90 days
     /// [`LiquifactEscrow::propose_admin`] repeated the already-pending admin address.
     PendingAdminUnchanged = 177,
     /// [`LiquifactEscrow::update_maturity`] set maturity to the same value as current.
-    MaturityUnchanged = 81,
+    MaturityUnchanged = 86,
     /// [`LiquifactEscrow::accept_admin`] called after the proposal expiry recorded at
     /// [`DataKey::PendingAdminExpiry`]. Re-propose to nominate a fresh successor.
-    AdminProposalExpired = 85,
+    AdminProposalExpired = 87,
 
     /// [`LiquifactEscrow::migrate`] `from_version` does not match stored version.
     MigrationVersionMismatch = 90,
@@ -3306,7 +3306,7 @@ impl LiquifactEscrow {
                 ensure(
                     &env,
                     deadline < maturity,
-                    EscrowError::FundingDeadlineBeyondMaturity,
+                    EscrowError::FundingDeadlineAtOrAfterMaturity,
                 );
             }
             env.storage()
@@ -4571,6 +4571,31 @@ impl LiquifactEscrow {
             result.push_back(Self::get_persistent_investor_contribution(&env, investor));
         }
         result
+    }
+
+    /// Compute a safe `(start, end)` window for paginated reads over a collection of length `len`.
+    ///
+    /// Returns `None` when the window is empty (len == 0, start >= len, or clamped limit == 0).
+    /// Returns `Some((start, end))` where `end = min(start + effective_limit, len)`.
+    ///
+    /// `effective_limit = min(limit, ceiling)` — callers supply a per-call maximum and an
+    /// absolute upper-bound constant so that any single call is bounded even if `limit`
+    /// is set to `u32::MAX` by the caller.
+    pub(crate) fn paginate_window(
+        start: u32,
+        limit: u32,
+        ceiling: u32,
+        len: u32,
+    ) -> Option<(u32, u32)> {
+        if len == 0 || start >= len || limit == 0 {
+            return None;
+        }
+        let effective = limit.min(ceiling);
+        if effective == 0 {
+            return None;
+        }
+        let end = start.saturating_add(effective).min(len);
+        Some((start, end))
     }
 
     /// Returns a paginated list of investor addresses who have contributed to this escrow.
@@ -7014,6 +7039,7 @@ impl LiquifactEscrow {
                 let _ = Self::get_persistent_investor_effective_yield(&env, investor.clone())
                     .unwrap_or(escrow.yield_bps);
             }
+            // Returning investor (prev > 0): yield was set on first deposit; preserve it.
         } else {
             Self::set_persistent_investor_effective_yield(
                 &env,
