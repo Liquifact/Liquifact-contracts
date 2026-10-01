@@ -404,3 +404,89 @@ fn test_batch_record_over_ceiling_atomic_reject() {
     assert_eq!(stored.amount, prior.amount);
     assert_eq!(stored.asset, prior.asset);
 }
+
+// ── Concurrency / Timing / Idempotency Hardening ──────────────────────────────
+
+/// Simulates duplicate/idempotent retries of `set_collateral_limit`.
+/// It should be deterministic and idempotent.
+#[test]
+fn test_concurrent_set_limit_idempotent() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin, _sme) = deploy_and_init(&env);
+
+    client.set_collateral_limit(&4_000i128);
+    assert_eq!(client.get_collateral_limit(), 4_000i128);
+
+    // Duplicate retry
+    client.set_collateral_limit(&4_000i128);
+    assert_eq!(client.get_collateral_limit(), 4_000i128);
+
+    // Another retry
+    client.set_collateral_limit(&4_000i128);
+    assert_eq!(client.get_collateral_limit(), 4_000i128);
+}
+
+/// Simulates duplicate/idempotent retries of `record_sme_collateral_commitment`.
+#[test]
+fn test_duplicate_record_commitment_idempotent() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin, _sme) = deploy_and_init(&env);
+    client.set_collateral_limit(&8_000i128);
+    
+    let asset = Symbol::new(&env, "USDC");
+    let c1 = client.record_sme_collateral_commitment(&asset, &5_000i128);
+    let c2 = client.record_sme_collateral_commitment(&asset, &5_000i128);
+    
+    assert_eq!(c1.amount, c2.amount);
+    assert_eq!(c1.asset, c2.asset);
+    
+    let cfg = client.get_collateral_config();
+    match cfg.sme_commitment {
+        CollateralCommitmentSnapshot::Some(c) => {
+            assert_eq!(c.amount, 5_000i128);
+        }
+        _ => panic!("expected Some"),
+    }
+}
+
+/// Simulates timing boundaries and racing requests.
+#[test]
+fn test_racing_set_and_record() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin, _sme) = deploy_and_init(&env);
+
+    // Initial limit
+    client.set_collateral_limit(&3_000i128);
+    
+    let asset = Symbol::new(&env, "BTC");
+    
+    // Racing request 1: attempt to record 4_000 (fails)
+    assert_contract_error(
+        Ok(client.try_record_sme_collateral_commitment(&asset, &4_000i128)),
+        EscrowError::CollateralLimitExceeded,
+    );
+    
+    // Racing request 2: admin bumps limit to 5_000
+    client.set_collateral_limit(&5_000i128);
+    
+    // Racing request 3: now recording 4_000 succeeds
+    let c = client.record_sme_collateral_commitment(&asset, &4_000i128);
+    assert_eq!(c.amount, 4_000i128);
+    
+    // Racing request 4: limit drops back to 2_000
+    client.set_collateral_limit(&2_000i128);
+    
+    // Existing commitment remains, but new ones over 2_000 will fail
+    assert_contract_error(
+        Ok(client.try_record_sme_collateral_commitment(&asset, &2_500i128)),
+        EscrowError::CollateralLimitExceeded,
+    );
+    
+    // But within new limit succeeds (overwrites)
+    let c2 = client.record_sme_collateral_commitment(&asset, &1_500i128);
+    assert_eq!(c2.amount, 1_500i128);
+}
+
