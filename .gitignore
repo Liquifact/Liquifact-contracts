@@ -20,7 +20,6 @@ node_modules/
 
 # IDE
 .idea/
-.vscode/
 *.swp
 *.swo
 
@@ -30,3 +29,7 @@ pr.mdescrow/proptest-regressions/
 
 escrow/proptest-regressions/
 PR_BODY_1314.md
+branch_structure.json
+temp_auto_push.bat
+temp_interactive_push.bat
+.gitignore
