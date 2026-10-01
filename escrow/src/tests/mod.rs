@@ -17,14 +17,16 @@
     clippy::unusual_byte_groupings
 )]
 use super::{
-    AttestationDigestAppended, AttestationDigestRevoked, AttestationDigestUnrevoked,
-    CollateralRecordedEvt, ContractUpgraded, DataKey, DeprecatedTransferAdminUsed, EscrowError,
-    EscrowFunded, EscrowInitialized, EscrowUnfunded, FundingCancelled, FundingStateChanged,
-    FundingTargetUpdated, InvestorRefundedEvt, LiquifactEscrow, LiquifactEscrowClient,
-    MaturityMaxHorizonUpdated, MaxUniqueInvestorsCapLowered, MaxUniqueInvestorsCapRaised,
-    PrimaryAttestationBound, RegistryRefRebound, RentStatus, TreasuryDustSwept, YieldTier,
-    MAX_ATTESTATION_APPEND_BATCH, MAX_ATTESTATION_APPEND_ENTRIES, MAX_DUST_SWEEP_AMOUNT,
-    MAX_FUND_BATCH, RENT_WARN_LEDGERS, SCHEMA_VERSION,
+    AttestationConfig, AttestationDigestAppended, AttestationDigestRevoked,
+    AttestationDigestUnrevoked, AttestationLimitUpdated, CollateralRecordedEvt, ContractUpgraded,
+    DataKey, DEFAULT_ATTESTATION_LIMIT, DeprecatedTransferAdminUsed, EscrowError, EscrowFunded,
+    EscrowInitialized, EscrowUnfunded, FundingCancelled, FundingStateChanged, FundingTargetUpdated,
+    InvestorRefundedEvt, LiquifactEscrow, LiquifactEscrowClient, MaturityMaxHorizonUpdated,
+    MAX_ATTESTATION_APPEND_BATCH, MAX_ATTESTATION_APPEND_ENTRIES, MAX_ATTESTATION_LIMIT,
+    MAX_ATTESTATION_REVOKE_BATCH, MAX_ATTESTATION_READ_PAGE, MAX_DUST_SWEEP_AMOUNT,
+    MAX_FUND_BATCH, MaxUniqueInvestorsCapLowered, MIN_ATTESTATION_LIMIT, PrimaryAttestationBound,
+    RegistryRefRebound, RentStatus, TreasuryDustSwept, YieldTier, RENT_WARN_LEDGERS,
+    SCHEMA_VERSION,
 };
 use soroban_sdk::{
     symbol_short,
@@ -59,6 +61,8 @@ pubc(crate) fn assert_contract_error<T, E>(
 // modules stay assertion-focused and each test still owns a fresh Env.
 mod admin;
 mod attestation_config_view;
+mod attestation_limit;
+mod attestation_parameters;
 mod attestations;
 mod auth_matrix;
 mod cap_validation;
