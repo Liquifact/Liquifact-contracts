@@ -1,5 +1,9 @@
 # Escrow Attestations: KYC/KYB Operational Flows
 
+> **Validation boundaries:** This document defines the accepted, rejected, duplicate, and
+> boundary-case inputs for every attestation entrypoint. See the "Validation boundaries"
+> section below for the authoritative matrix.
+
 This document describes how the attestation entrypoints on the LiquiFact escrow contract
 are used in KYC (Know Your Customer) and KYB (Know Your Business) compliance workflows.
 
@@ -19,6 +23,139 @@ confirm that a specific document set existed at a specific ledger sequence.
 
 The on-chain record is a hash. Off-chain verifiers must retrieve the referenced document
 independently and recompute the hash to confirm the anchor matches.
+
+---
+
+## Validation boundaries
+
+This section is the single source of truth for what each attestation entrypoint accepts,
+rejects, and how it behaves at the edges. All checks are deterministic: the same input
+against the same state always produces the same result, and no validation path mutates
+state or emits events before it has fully passed.
+
+### `bind_primary_attestation_hash(digest: BytesN<32>)`
+
+| Input class | Behavior |
+|---|---|
+| Valid: first call, any 32-byte digest, admin auth | Stores digest, emits `PrimaryAttestationBound` |
+| Invalid: caller is not `InvoiceEscrow::admin` | Auth failure; no state change |
+| Duplicate: second call with same digest | Rejected with `PrimaryAttestationAlreadyBound` (50) |
+| Duplicate: second call with different digest | Rejected with `PrimaryAttestationAlreadyBound` (50) |
+| Boundary: `digest == [0u8; 32]` | Accepted — the contract does not interpret digest content |
+| Boundary: `digest == [0xff; 32]` | Accepted — same reasoning |
+
+The digest is an opaque 32-byte anchor. There is no "zero digest" sentinel; a zero-filled
+digest is a valid anchor and must not be special-cased by callers or indexers.
+
+### `append_attestation_digest(digest: BytesN<32>)`
+
+| Input class | Behavior |
+|---|---|
+| Valid: `log.len() < MAX_ATTESTATION_APPEND_ENTRIES`, admin auth | Appends at index `log.len()`, emits `AttestationDigestAppended` |
+| Invalid: caller is not admin | Auth failure; no state change |
+| Invalid: `log.len() == MAX_ATTESTATION_APPEND_ENTRIES` | Rejected with `AttestationAppendLogCapacityReached` (51) |
+| Duplicate: same digest already present | Accepted — the log is an ordered audit trail, not a set |
+| Boundary: append at index `MAX - 1` (32nd entry) | Accepted; log becomes full |
+| Boundary: append at index `MAX` (33rd entry) | Rejected with `AttestationAppendLogCapacityReached` (51) |
+
+### `append_attestation_digests(digests: Vec<BytesN<32>>)`
+
+| Input class | Behavior |
+|---|---|
+| Valid: `1 <= len <= MAX_ATTESTATION_APPEND_BATCH` and `log.len() + len <= MAX_ATTESTATION_APPEND_ENTRIES` | Appends all entries atomically, one event per entry |
+| Invalid: `len == 0` | Rejected with `AttestationAppendBatchEmpty` (57) |
+| Invalid: `len > MAX_ATTESTATION_APPEND_BATCH` | Rejected with `AttestationAppendBatchTooLarge` (58) |
+| Invalid: `log.len() + len > MAX_ATTESTATION_APPEND_ENTRIES` | Rejected with `AttestationAppendLogCapacityReached` (51); no partial write |
+| Invalid: caller is not admin | Auth failure; no state change |
+| Duplicate: repeated digests within the batch | Accepted — same policy as single append |
+| Boundary: `len == 1` | Accepted (minimum valid batch) |
+| Boundary: `len == MAX_ATTESTATION_APPEND_BATCH` | Accepted (maximum valid batch) |
+| Boundary: batch fills log exactly to `MAX_ATTESTATION_APPEND_ENTRIES` | Accepted; next append fails with (51) |
+
+The capacity check is a pre-flight: it runs before any mutation. A batch that would only
+partially fit is rejected in full, so callers never observe a partial append.
+
+### `revoke_attestation_digest(index: u32)`
+
+| Input class | Behavior |
+|---|---|
+| Valid: `index < log.len()` and not already revoked, admin auth | Writes revocation marker, emits `AttestationDigestRevoked` |
+| Invalid: `index >= log.len()` | Rejected with `AttestationIndexOutOfRange` (52) |
+| Invalid: index already revoked | Rejected with `AttestationAlreadyRevoked` (53) |
+| Invalid: caller is not admin | Auth failure; no state change |
+| Duplicate: second revoke of same index | Rejected with `AttestationAlreadyRevoked` (53) |
+| Boundary: `index == 0` on non-empty log | Accepted |
+| Boundary: `index == log.len() - 1` | Accepted |
+| Boundary: `index == log.len()` | Rejected with `AttestationIndexOutOfRange` (52) |
+| Boundary: `index == u32::MAX` | Rejected with `AttestationIndexOutOfRange` (52) |
+
+### `revoke_attestation_digests(indices: Vec<u32>)`
+
+| Input class | Behavior |
+|---|---|
+| Valid: `1 <= len <= MAX_ATTESTATION_REVOKE_BATCH`, all indices in range and not revoked | Revokes all indices atomically, one event per index |
+| Invalid: `len == 0` | Rejected with `AttestationBatchEmpty` (54) |
+| Invalid: `len > MAX_ATTESTATION_REVOKE_BATCH` | Rejected with `AttestationBatchTooLarge` (55) |
+| Invalid: any `index >= log.len()` | Rejected with `AttestationIndexOutOfRange` (52); full rollback |
+| Invalid: any index already revoked | Rejected with `AttestationAlreadyRevoked` (53); full rollback |
+| Invalid: caller is not admin | Auth failure; no state change |
+| Duplicate: same index appears twice in the batch | Rejected with `AttestationAlreadyRevoked` (53) on the second occurrence; full rollback |
+| Boundary: `len == 1` | Accepted |
+| Boundary: `len == MAX_ATTESTATION_REVOKE_BATCH` | Accepted |
+
+The batch is **not** pre-deduplicated. A duplicate index is treated as a second revocation
+attempt and fails, rolling back the entire batch. Callers must deduplicate before submitting.
+
+### `unrevoke_attestation_digest(index: u32)`
+
+| Input class | Behavior |
+|---|---|
+| Valid: `index < log.len()` and currently revoked, admin auth | Clears revocation marker, emits `AttestationDigestUnrevoked` |
+| Invalid: `index >= log.len()` | Rejected with `AttestationIndexOutOfRange` (52) |
+| Invalid: index not currently revoked | Rejected with `AttestationNotRevoked` (56) |
+| Invalid: caller is not admin | Auth failure; no state change |
+| Duplicate: second unrevoke of same index | Rejected with `AttestationNotRevoked` (56) |
+| Boundary: `index == 0` on non-empty log | Accepted if revoked |
+| Boundary: `index == log.len() - 1` | Accepted if revoked |
+| Boundary: `index == log.len()` | Rejected with `AttestationIndexOutOfRange` (52) |
+
+### `get_revoked_attestation_digests(start: u32, limit: u32)`
+
+| Input class | Behavior |
+|---|---|
+| Valid: `1 <= limit <= MAX_ATTESTATION_READ_PAGE` | Returns up to `limit` entries starting at `start` |
+| Invalid: `limit == 0` | Rejected with `AttestationReadLimitZero` (57) |
+| Invalid: `limit > MAX_ATTESTATION_READ_PAGE` | Rejected with `AttestationReadLimitTooLarge` (58) |
+| Boundary: `start == log.len()` | Returns empty page (not an error) |
+| Boundary: `start > log.len()` | Returns empty page (not an error) |
+| Boundary: `start == u32::MAX` | Returns empty page (not an error) |
+| Boundary: `limit == 1` | Accepted (minimum valid page) |
+| Boundary: `limit == MAX_ATTESTATION_READ_PAGE` | Accepted (maximum valid page) |
+
+Valid limits are applied exactly and are never silently clamped. A caller that requests
+`limit == MAX_ATTESTATION_READ_PAGE` receives up to that many entries; a caller that
+requests `limit == MAX_ATTESTATION_READ_PAGE + 1` receives an error, not a truncated page.
+
+### `get_attestation_log_stats() -> (u32, u32)`
+
+Pure read view. No validation boundaries beyond the implicit invariant
+`used + remaining == MAX_ATTESTATION_APPEND_ENTRIES`. `remaining` is `0` when the log is
+full; the next append will fail with `AttestationAppendLogCapacityReached` (51).
+
+### Cross-cutting invariants
+
+- **No partial writes.** Every entrypoint either fully applies its effect or leaves state
+  and events untouched. Batches roll back on any per-element failure.
+- **Auth is enforced after range/state checks** (ADR-002) so typed errors are surfaced
+  deterministically even to unauthenticated callers.
+- **Digest content is opaque.** No entrypoint inspects, normalizes, or rejects a digest
+  based on its bytes. Zero-filled and all-ones digests are valid.
+- **Duplicates are a policy choice, not a bug.** Append paths accept duplicates; revoke
+  paths reject them. This asymmetry is intentional and documented above.
+- **Concurrency.** All entrypoints are single-transaction; the Soroban host serializes
+  execution per contract instance, so concurrent submissions cannot interleave state
+  transitions. The first transaction to land determines the outcome; later ones observe
+  the updated state and fail with the appropriate typed error.
 
 ---
 
@@ -55,6 +192,9 @@ cycles, updated KYB documents, AML screening refreshes, or legal hold evidence b
 
 The log is an ordered sequence, not a set — duplicate digests are allowed (e.g. re-confirming
 an unchanged document at a new ledger timestamp via the event).
+
+Duplicate digests are accepted by design: the log is an audit trail, and re-confirming an
+unchanged document at a new ledger sequence is a legitimate operational event.
 
 The 33rd append panics with `"attestation append log capacity reached"`. If more than 32
 incremental anchors are needed, deploy a new escrow instance or extend the log off-chain using
@@ -113,6 +253,9 @@ try {
 }
 ```
 
+See the [Validation boundaries](#validation-boundaries) section for the full accepted /
+rejected / duplicate / boundary matrix, including the `u32::MAX` and zero-digest cases.
+
 #### Why panic strings were removed
 
 Prior to this change, `revoke_attestation_digest` used `assert!` with human-readable strings.
@@ -166,6 +309,9 @@ await contract.append_attestation_digests({
 | Duplicate policy | **Not pre-deduplicated** — second occurrence of the same index fails with `AttestationAlreadyRevoked` (53) |
 | Storage key | `DataKey::AttestationRevoked(u32)` per index |
 | Event | One `AttestationDigestRevoked { invoice_id, index }` per newly revoked index |
+
+Callers must deduplicate `indices` before submission. A duplicate index is treated as a
+second revocation attempt and rolls back the entire batch with `AttestationAlreadyRevoked` (53).
 
 Atomically revoke multiple attestation-digest indices in a single transaction. Each index
 undergoes the same validation as the single-index `revoke_attestation_digest`:
@@ -406,6 +552,10 @@ storage key; the digest at index N is unchanged.
 - **Append log is not a set:** duplicate digests are accepted. Off-chain consumers should
   deduplicate by digest value if uniqueness matters for their use case.
 
+- **Zero and all-ones digests are valid anchors:** the contract treats the 32-byte digest as
+  opaque. There is no sentinel value; callers must not assume `[0u8; 32]` means "unset".
+  Use `get_primary_attestation_hash() -> Option<BytesN<32>>` to distinguish unset from set.
+
 - **Capacity:** `MAX_ATTESTATION_APPEND_ENTRIES = 32`. This is a storage-growth guardrail,
   not a compliance limit. If 32 entries are insufficient, the operational playbook should
   define a rotation policy (e.g. new escrow instance per compliance period).
@@ -415,12 +565,17 @@ storage key; the digest at index N is unchanged.
   audit trail remains complete even after a correction.
 
 - **Double-revocation guard:** each index may be revoked at most once. A second call for the
-  same index panics with `"attestation already revoked at index"`. Off-chain indexers can
-  safely assume that once `AttestationDigestRevoked` is observed, it is final unless an
+  same index returns `AttestationAlreadyRevoked` (53). Off-chain indexers can safely assume
+  that once `AttestationDigestRevoked` is observed, it is final unless an
   `AttestationDigestUnrevoked` event follows.
 
-- **Out-of-range rejection:** revoking a non-existent index panics with `"attestation index
-  out of range"`. The admin must read `get_attestation_append_log` to determine valid indices.
+- **Out-of-range rejection:** revoking a non-existent index returns
+  `AttestationIndexOutOfRange` (52). The admin must read `get_attestation_append_log` to
+  determine valid indices. `index == log.len()` and `index == u32::MAX` are both out of range.
+
+- **Deterministic errors, not panic strings:** all attestation entrypoints return typed
+  `EscrowError` codes. SDKs and indexers must branch on `ContractError(code)`, never on
+  message text. Codes are append-only and stable across contract versions.
 
 - **Unrevoke is admin-only:** `unrevoke_attestation_digest` is gated by `require_auth` on
   `InvoiceEscrow::admin`. ADR-002 guard ordering is preserved: range and state checks run
@@ -454,6 +609,7 @@ Attestation behavior is covered in [`escrow/src/tests/attestations.rs`](../escro
 | `test_bind_primary_hash_non_admin_panics` | Non-admin bind is rejected |
 | `test_bind_primary_hash_typed_error` | `try_bind_primary_attestation_hash` returns typed error code 50 (`PrimaryAttestationAlreadyBound`) on second call |
 | `test_bind_primary_hash_emits_event` | Emits `PrimaryAttestationBound` with correct `invoice_id` and `digest` |
+| `test_bind_primary_hash_zero_digest_accepted` | Boundary: `[0u8; 32]` is accepted as a valid anchor |
 
 ### Bounded append log (`append_attestation_digest`)
 
@@ -468,6 +624,8 @@ Attestation behavior is covered in [`escrow/src/tests/attestations.rs`](../escro
 | `test_append_duplicate_digest_allowed` | Duplicate digests accepted (log is audit trail, not a set) |
 | `test_append_non_admin_panics` | Non-admin append is rejected |
 | `test_append_emits_event_with_correct_index` | Emits `AttestationDigestAppended` with correct `index` (0-based) and `digest` for each call |
+| `test_append_zero_digest_accepted` | Boundary: `[0u8; 32]` is accepted and stored verbatim |
+| `test_append_at_capacity_typed_error` | Boundary: append when `log.len() == MAX` returns (51) without mutating state |
 
 ### Independence
 
@@ -499,6 +657,8 @@ Attestation behavior is covered in [`escrow/src/tests/attestations.rs`](../escro
 | `test_unrevoke_non_admin_panics` | Non-admin unrevoke is rejected |
 | `test_revoke_unrevoke_revoke_round_trip` | Round-trip revoke → unrevoke → revoke succeeds |
 | `test_unrevoke_does_not_affect_other_indices` | Unrevoke of index 0 leaves index 1 revoked |
+| `test_revoke_index_u32_max_typed_error` | Boundary: `index == u32::MAX` returns (52) |
+| `test_unrevoke_index_u32_max_typed_error` | Boundary: `index == u32::MAX` returns (52) |
 
 ### Batch append (`append_attestation_digests`)
 
@@ -519,6 +679,8 @@ Attestation behavior is covered in [`escrow/src/tests/attestations.rs`](../escro
 | `test_batch_append_interleaved_with_single_appends` | Mixing single and batch appends preserves full ordered audit trail |
 | `test_batch_append_entries_are_revocable` | Batch-appended entries are independently revocable after insertion |
 | `test_batch_append_failed_call_leaves_log_unchanged` | Failed batch (over-limit or over-capacity) leaves log in its prior state |
+| `test_batch_append_exact_fit_boundary` | Boundary: batch that exactly fills the log succeeds; next append fails with (51) |
+| `test_batch_append_duplicate_digests_within_batch` | Duplicate digests inside one batch are accepted |
 
 ### Batch revocation (`revoke_attestation_digests`)
 
@@ -536,3 +698,35 @@ Attestation behavior is covered in [`escrow/src/tests/attestations.rs`](../escro
 | `test_batch_revoke_preserves_log_entries` | Append log contents unchanged after batch revocation |
 | `test_batch_revoke_emits_events` | Exactly one `att_rev` event per revoked index |
 | `test_batch_revoke_atomic_rollback` | Mid-batch failure rolls back all prior revocations |
+| `test_batch_revoke_duplicate_index_rolls_back` | Duplicate index in batch returns (53) and rolls back all prior revocations |
+| `test_batch_revoke_u32_max_typed_error` | Boundary: `u32::MAX` in batch returns (52) and rolls back |
+
+### Read view boundaries (`get_revoked_attestation_digests`)
+
+| Test | What it proves |
+|---|---|
+| `test_read_limit_zero_typed_error` | `limit == 0` returns `AttestationReadLimitZero` (57) |
+| `test_read_limit_too_large_typed_error` | `limit > MAX_ATTESTATION_READ_PAGE` returns `AttestationReadLimitTooLarge` (58) |
+| `test_read_limit_exact_max_accepted` | Boundary: `limit == MAX_ATTESTATION_READ_PAGE` is applied exactly |
+| `test_read_start_at_log_len_returns_empty` | Boundary: `start == log.len()` returns empty page |
+| `test_read_start_beyond_log_len_returns_empty` | Boundary: `start > log.len()` returns empty page |
+| `test_read_start_u32_max_returns_empty` | Boundary: `start == u32::MAX` returns empty page |
+
+### Stats view (`get_attestation_log_stats`)
+
+| Test | What it proves |
+|---|---|
+| `test_stats_empty_log` | `(0, MAX)` on a fresh instance |
+| `test_stats_partial_log` | `(used, MAX - used)` after partial fill |
+| `test_stats_full_log` | `(MAX, 0)` when the log is full |
+| `test_stats_invariant_used_plus_remaining` | `used + remaining == MAX_ATTESTATION_APPEND_ENTRIES` at every fill level |
+
+### Cross-cutting regression tests
+
+| Test | What it proves |
+|---|---|
+| `test_no_partial_write_on_batch_append_failure` | Failed batch append leaves log length and contents unchanged |
+| `test_no_partial_write_on_batch_revoke_failure` | Failed batch revoke leaves all revocation markers unchanged |
+| `test_typed_errors_are_stable_codes` | Every documented error path returns the documented numeric code |
+| `test_auth_checked_after_range_and_state` | Range/state errors are surfaced before auth failure (ADR-002) |
+| `test_duplicate_append_allowed_duplicate_revoke_rejected` | Documents the intentional asymmetry between append and revoke duplicate policies |
