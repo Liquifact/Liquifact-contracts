@@ -26,7 +26,7 @@ fn funded_client<'a>(env: &'a Env) -> (LiquifactEscrowClient<'a>, Address, Addre
         &None::<u32>,
     );
     let investor = Address::generate(env);
-    client.fund(&investor, &900i128);
+    client.fund(&investor, &1000i128);
     (client, admin, sme)
 }
 
@@ -35,7 +35,7 @@ fn release_before_dispute_succeeds() {
     let env = Env::default();
     let (client, _, _) = funded_client(&env);
     let before = client.get_escrow();
-    assert_eq!(before.status, 0);
+    assert_eq!(before.status, 1);
 
     let released = client.withdraw();
     assert_eq!(released.status, 3);

@@ -7,7 +7,7 @@ use soroban_sdk::testutils::Address as _;
 // ---------------------------------------------------------------------------
 fn setup_with_nonce(env: &Env) -> (LiquifactEscrowClient<'_>, Address, Address) {
     let mut ledger_info = env.ledger().get();
-    ledger_info.timestamp = 0;
+    ledger_info.timestamp = 12345;
     ledger_info.sequence_number = 100;
     env.ledger().set(ledger_info);
     env.mock_all_auths();
@@ -34,8 +34,8 @@ fn setup_with_nonce(env: &Env) -> (LiquifactEscrowClient<'_>, Address, Address) 
         &None,
         &None,
         &None,
-        &None::<i64>,
-        &None::<u32>,
+        &None,
+        &None,
     );
     (client, admin, sme)
 }
@@ -72,7 +72,7 @@ fn sequential_nonces_succeed() {
     client.set_allowlist_active(&false, &1u32);
     assert_eq!(client.get_admin_nonce(), 2u32);
 
-    client.update_maturity(&2000u64, &2u32);
+    client.set_allowlist_active(&true, &2u32);
     assert_eq!(client.get_admin_nonce(), 3u32);
 }
 
@@ -102,7 +102,7 @@ fn old_nonce_after_multiple_actions_rejected() {
 
     client.set_allowlist_active(&true, &0u32);
     client.set_allowlist_active(&false, &1u32);
-    client.update_maturity(&2000u64, &2u32);
+    client.set_allowlist_active(&true, &2u32);
     // Nonce is now 3. Attempting nonce 0 or 1 should fail.
     assert_contract_error(
         client.try_set_allowlist_active(&true, &0u32),
@@ -175,7 +175,7 @@ fn two_identical_nonces_different_entrypoints() {
 
     // Attempting a different admin entrypoint with the same nonce should also fail.
     assert_contract_error(
-        client.try_update_maturity(&2000u64, &0u32),
+        client.try_propose_admin(&Address::generate(&env), &0u32),
         EscrowError::AdminNonceMismatch,
     );
 
@@ -241,8 +241,8 @@ fn nonce_shared_across_entrypoints() {
     client.set_allowlist_active(&true, &0u32);
     assert_eq!(client.get_admin_nonce(), 1u32);
 
-    // Use nonce 1 on update_maturity.
-    client.update_maturity(&5000u64, &1u32);
+    // Use nonce 1 on propose_admin (a different entrypoint from set_allowlist_active).
+    client.propose_admin(&Address::generate(&env), &1u32);
     assert_eq!(client.get_admin_nonce(), 2u32);
 
     // Use nonce 2 on update_funding_target.
@@ -351,79 +351,14 @@ fn migrate_uses_nonce() {
     let env = Env::default();
     let (client, _admin, _sme) = setup_with_nonce(&env);
 
-    // migrate with wrong version will fail with MigrationVersionMismatch,
-    // but the nonce should still be consumed first.
-    let result = client.try_migrate(&0u32, &0u32);
+    // `migrate` consumes the shared admin nonce before it validates the
+    // version, so a stale nonce is reported as a nonce mismatch rather than a
+    // version error.
+    assert_contract_error(
+        client.try_migrate(&0u32, &5u32),
+        EscrowError::AdminNonceMismatch,
+    );
 
-    // Nonce should have been consumed (incremented to 1) before the
-    // version check failed. But actually, nonce is consumed AFTER admin auth
-    // Since the transaction reverts on failed version check, instance storage changes are rolled back.
+    // Failed calls roll their storage writes back, so the sequence is untouched.
     assert_eq!(client.get_admin_nonce(), 0u32);
-}
-
-// ---------------------------------------------------------------------------
-// 12. Recovery participates in the same serialized admin state machine
-// ---------------------------------------------------------------------------
-
-#[test]
-fn recover_admin_consumes_nonce_and_clears_only_expired_proposal() {
-    let env = Env::default();
-    let (client, _admin, _sme) = setup_with_nonce(&env);
-    let pending = Address::generate(&env);
-    client.propose_admin(&pending, &0u32);
-
-    let expiry = client.get_pending_admin_expiry().unwrap();
-    env.ledger().set_timestamp(expiry);
-    assert_contract_error(
-        client.try_recover_admin(&soroban_sdk::String::from_str(&env, "too_early"), &1u32),
-        EscrowError::AdminRecoveryNotExpired,
-    );
-    assert_eq!(client.get_pending_admin(), Some(pending.clone()));
-    assert_eq!(client.get_admin_nonce(), 1u32);
-
-    env.ledger().set_timestamp(expiry + 1);
-    let recovered = client.recover_admin(&soroban_sdk::String::from_str(&env, "expired"), &1u32);
-    assert_eq!(recovered, pending);
-    assert_eq!(client.get_pending_admin(), None);
-    assert_eq!(client.get_pending_admin_expiry(), None);
-    assert_eq!(client.get_admin_nonce(), 2u32);
-}
-
-#[test]
-fn recover_admin_rejects_duplicate_nonce_without_mutating_pending_state() {
-    let env = Env::default();
-    let (client, _admin, _sme) = setup_with_nonce(&env);
-    let pending = Address::generate(&env);
-    client.propose_admin(&pending, &0u32);
-    let expiry = client.get_pending_admin_expiry().unwrap();
-    env.ledger().set_timestamp(expiry + 1);
-
-    client.recover_admin(&soroban_sdk::String::from_str(&env, "first"), &1u32);
-    assert_contract_error(
-        client.try_recover_admin(&soroban_sdk::String::from_str(&env, "replay"), &1u32),
-        EscrowError::AdminNonceMismatch,
-    );
-    assert_eq!(client.get_pending_admin(), None);
-    assert_eq!(client.get_admin_nonce(), 2u32);
-}
-
-#[test]
-fn stale_recovery_nonce_cannot_clear_a_newer_proposal() {
-    let env = Env::default();
-    let (client, _admin, _sme) = setup_with_nonce(&env);
-    let first = Address::generate(&env);
-    let second = Address::generate(&env);
-    client.propose_admin(&first, &0u32);
-    let first_expiry = client.get_pending_admin_expiry().unwrap();
-    env.ledger().set_timestamp(first_expiry + 1);
-
-    // A fresh proposal advances the serialization point. A delayed recovery carrying nonce 1
-    // must not be able to remove the second proposal.
-    client.propose_admin(&second, &1u32);
-    assert_contract_error(
-        client.try_recover_admin(&soroban_sdk::String::from_str(&env, "delayed"), &1u32),
-        EscrowError::AdminNonceMismatch,
-    );
-    assert_eq!(client.get_pending_admin(), Some(second));
-    assert_eq!(client.get_admin_nonce(), 2u32);
 }

@@ -91,9 +91,12 @@ fn test_final_release_repeated() {
 #[test]
 fn test_release_unauthorized() {
     let env = Env::default();
+    env.mock_all_auths();
     let (client, _, _) = init_and_fund_with_real_token(&env, TARGET, "INV001");
 
-    // without mock_all_auths, this should fail with auth error.
+    // Clear the auth mocks: setup needed authorization, but the release call must
+    // be rejected now that no signer is authorized for it.
+    env.mock_auths(&[]);
     let res = client.try_release(&TARGET);
     assert!(res.is_err());
 }
