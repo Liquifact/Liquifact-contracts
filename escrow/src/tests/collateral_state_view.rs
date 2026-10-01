@@ -492,3 +492,22 @@ fn pure_view_no_auth_needed_after_init() {
     let s = client.get_collateral_state();
     assert_atomic_snapshot_invariant(&s);
 }
+
+/// A rejected boundary update must leave the previous view intact, and the
+/// same contract must accept a valid retry afterwards.
+#[test]
+fn invalid_limit_does_not_poison_state_or_block_retry() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _, _) = deploy_and_init(&env);
+    client.set_collateral_limit(&5_000i128);
+
+    assert_contract_error(
+        client.try_set_collateral_limit(&0i128),
+        EscrowError::CollateralLimitNotPositive,
+    );
+    assert_eq!(client.get_collateral_state().collateral_limit, 5_000);
+
+    client.set_collateral_limit(&7_500i128);
+    assert_eq!(client.get_collateral_state().collateral_limit, 7_500);
+}
