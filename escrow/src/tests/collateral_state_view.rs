@@ -492,3 +492,22 @@ fn pure_view_no_auth_needed_after_init() {
     let s = client.get_collateral_state();
     assert_atomic_snapshot_invariant(&s);
 }
+
+/// Failed writes must roll back completely so a caller can safely retry with
+/// a valid boundary value.
+#[test]
+fn failed_limit_update_is_recoverable() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _, _) = deploy_and_init(&env);
+    client.set_collateral_limit(&4_000i128);
+
+    assert_contract_error(
+        client.try_set_collateral_limit(&MAX_INVOICE_AMOUNT + 1),
+        EscrowError::CollateralLimitExceedsMax,
+    );
+    assert_eq!(client.get_collateral_state().collateral_limit, 4_000);
+
+    client.set_collateral_limit(&6_000i128);
+    assert_eq!(client.get_collateral_state().collateral_limit, 6_000);
+}
