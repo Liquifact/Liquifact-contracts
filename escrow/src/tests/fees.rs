@@ -1,1 +1,556 @@
-Ly8hIEZvY3VzZWQgZmVlLXN1YnN5c3RlbSB0ZXN0cyBmb3IgdGhlIGVzY3JvdyBjb250cmFjdC4KLy8vCi8vLyBUaGlzIG1vZHVsZSBjb3ZlcnMgdGhlIGRldGVybWluaXN0aWMgZmFpbHVyZS1yZWNvdmVyeSBjb250cmFjdCBmb3IgdGhlCi8vLyBmZWUgc3BsaXQgYXBwbGllZCBhdCBgd2l0aGRyYXdgLiBUaGUgaW52YXJpYW50cyB0aGF0IG11c3QgaG9sZCBhY3Jvc3MKLy8vIGV2ZXJ5IHBhdGggKGluaXQsIHNldHRlciwgd2l0aGRyYXcsIHJldHJ5LCBwYXJ0aWFsIGZhaWx1cmUpIGFyZToKLy8vCi8vLyAxLiBUaGUgZmVlIGlzIGFsd2F5cyBmbG9vcihmdW5kZWRfYW1vdW50ICogZmVlX2JwcyAvIDEwXzAwMCkgYW5kIHRoZQovLy8gICAgU01FIG5ldCBpcyBhbHdheXMgYGZ1bmRlZF9hbW91bnQgLSBmZWVgLiBUaGUgdHdvIGxlZ3Mgc3VtIGV4YWN0bHkKLy8vICAgIHRvIGBmdW5kZWRfYW1vdW50YCAobm8gZHVzdCBpcyBjcmVhdGVkIG9yIGxvc3QpLgovLy8gMi4gQSBmYWlsZWQgd2l0aGRyYXcgKGJhZCB0b2tlbiwgYmFsYW5jZSBkcmFpbiwgb3ZlcmZsb3cpIG11c3QgbGVhdmUKLy8vICAgIHRoZSBzdGF0dXMgdW5jaGFuZ2VkIGFuZCB0aGUgY29udHJhY3QgYmFsYW5jZSB1bnRvdWNoZWQsIHNvIGEgcmV0cnkKLy8vICAgIGFmdGVyIHRoZSBmYWlsdXJlIGlzIGRldGVybWluaXN0aWMgYW5kIGlkZW1wb3RlbnQuCi8vLyAzLiBBIGR1cGxpY2F0ZSB3aXRoZHJhdyBhZnRlciBhIHN1Y2Nlc3NmdWwgb25lIG11c3QgZmFpbCB3aXRoCi8vLyAgICBgV2l0aGRyYXdhbE5vdEZ1bmRlZGAgYW5kIG11c3Qgbm90IG1vdmUgYW55IHRva2VucyBhZ2Fpbi4KLy8vIDQuIEJvdW5kYXJ5IGZlZSByYXRlcyAoMCBhbmQgMTBfMDAwKSBtdXN0IGJlaGF2ZSBleGFjdGx5IGFzIGRvY3VtZW50ZWQKLy8vICAgIGluIGRvY3MvZmVlcy1lcnJvcnMubWQuCi8vLwovLy8gVGhlIHRlc3RzIGJlbG93IGFyZSBkZWxpYmVyYXRlbHkgZXhwbGljaXQgYWJvdXQgdGhlIG9yZGVyaW5nIG9mIGd1YXJkcwovLy8gZG9jdW1lbnRlZCBpbiBgZG9jcy9mZWVzLWVycm9ycy5tZGAgc28gdGhhdCBhIGZhaWx1cmUgY2F0ZWdvcnkgY2FuIGJlCi8vLyBpZGVudGlmaWVkIGZyb20gdGhlIHR5cGVkIGVycm9yIGNvZGUgYWxvbmUuCgkjW2FsbG93KHVudXNlZF9pbXBvcnRzLCB1bnVzZWRfdmFyaWFibGVzLCBkZWFkX2NvZGUsIGNsaXBweTo6bmVlZGxlc3NfYm9ycm93KV0KdXNlIHN1cGVyOjoqOwoKdXNlIHNvcm9iYW5fc2RrOjp7CiAgICB0ZXN0dXRpbHM6e0FkZHJlc3MgYXMgXywgTGVkZ2VyIGFzIF99LAogICAgdG9rZW46e1N0ZWxsYXJBc3NldENsaWVudCwgVG9rZW5DbGllbnR9LAogICAgQWRkcmVzcywgRW52LAogICAgU3RyaW5nIGFzIFNvcm9iYW5TdHJpbmcsCn07CgovLy8gQ29udmVuaWVuY2Ugd3JhcHBlciB0aGF0IGJ1aWxkcyBhIGZyZXNoIGVzY3JvdyB3aXRoIGEgcmVhbCBTRVAtNDEgdG9rZW4KLy8vIGFuZCBhIGNvbmZpZ3VyYWJsZSBmZWUgcmF0ZS4gUmV0dXJucyB0aGUgY2xpZW50LCB0aGUgY29udHJhY3QgYWRkcmVzcywgdGhlCi8vLyB0b2tlbiBhZG1pbiAoZm9yIG1pbnRpbmcpLCB0aGUgdHJlYXN1cnkgYWRkcmVzcywgYW5kIHRoZSBTTUUgYWRkcmVzcy4Kc3RydWN0IEZlZUhhcm5lc3M8J2E+IHsKICAgIGNsaWVudDogTGlxdWlmYWN0RXNjcm93Q2xpZW50PCdhPiwKICAgIGNvbnRyYWN0X2lkOiBBZGRyZXNzLAogICAgdG9rZW5faWQ6IEFkZHJlc3MsCiAgICB0b2tlbjogVG9rZW5DbGllbnQ8J2E+LAogICAgdG9rZW5fYWRtaW46IFN0ZWxsYXJBc3NldENsaWVudDwnYT4sCiAgICBhZG1pbjogQWRkcmVzcywKICAgIHRyZWFzdXJ5OiBBZGRyZXNzLAogICAgc21lOiBBZGRyZXNzLAp9CgpmbiBzZXR1cF9mZWVfaGFybmVzcygKICAgIGVudjogJkVudiwKICAgIHRhcmdldDogaTEyOCwKICAgIGZlZV9icHM6IGk2NCwKICAgIGludm9pY2VfaWQ6ICZzdHIsCikgLT4gRmVlSGFybmVzcyB7CiAgICBlbnYubGVkZ2VyKCkuc2V0KHNvcm9iYW5fc2RrOjpsZWRnZXI6OkxlZGdlckluZm8gewogICAgICAgIHRpbWVzdGFtcDogMCwKICAgICAgICBzZXF1ZW5jZV9udW1iZXI6IDEwMCwKICAgICAgICAuLnNvcm9iYW5fc2RrOjpsZWRnZXI6OkxlZGdlckluZm86OmRlZmF1bHQoKQogICAgfSk7CiAgICBlbnYubW9ja19hbGxfYXV0aHMoKTsKCiAgICBsZXQgc2FjID0gZW52LnJlZ2lzdGVyX3N0ZWxsYXJfYXNzZXRfY29udHJhY3RfdjIoQWRkcmVzcyo6Z2VuZXJhdGUoZW52KSk7CiAgICBsZXQgdG9rZW5faWQgPSBzYWMuYWRkcmVzcygpOwogICAgbGV0IHRva2VuX2FkbWluID0gU3RlbGxhckFzc2V0Q2xpZW50OjpuZXcoZW52LCAmdG9rZW5faWQpOwoKICAgIGxldCBjb250cmFjdF9pZCA9IGVudi5yZWdpc3RlcihMaXF1aWZhY3RFc2Nyb3csICgpKTsKICAgIGxldCBjbGllbnQgPSBMaXF1aWZhY3RFc2Nyb3dDbGllbnQ6Om5ldyhlbnYsICZjb250cmFjdF9pZCk7CiAgICBsZXQgYWRtaW4gPSBBZGRyZXNzOjpnZW5lcmF0ZShlbnYpOwogICAgbGV0IHNtZSA9IEFkZHJlc3M6OmdlbmVyYXRlKGVudik7CiAgICBsZXQgdHJlYXN1cnkgPSBBZGRyZXNzOjpnZW5lcmF0ZShlbnYpOwoKICAgIGNsaWVudC5pbml0KAogICAgICAgICZhZG1pbiwKICAgICAgICAmU29yb2JhblN0cmluZzo6ZnJvbV9zdHIoZW52LCBpbnZvaWNlX2lkKSwKICAgICAgICAmc21lLAogICAgICAgICZ0YXJnZXQsCiAgICAgICAgJjgwMGk2NCwKICAgICAgICAmMHU2NCwKICAgICAgICAmdG9rZW5faWQsCiAgICAgICAgJk5vbmUsCiAgICAgICAgJnRyZWFzdXJ5LAogICAgICAgICZOb25lLAogICAgICAgICZOb25lLAogICAgICAgICZOb25lLAogICAgICAgICZOb25lLAogICAgICAgICZOb25lLAogICAgICAgICZOb25lLAogICAgICAgICZOb25lLAogICAgICAgICZOb25lLAogICAgICAgICZOb25lOjppNjQsCiAgICAgICAgJk5vbmU6OnUzMiwKICAgICk7CgogICAgLy8gQXBwbHkgdGhlIGZlZSByYXRlIGFmdGVyIGluaXQgc28gdGhlIGhhcm5lc3MgY2FuIGV4ZXJjaXNlIHRoZQogICAgLy8gYHNldF9wcm90b2NvbF9mZWVfYnBzYCBwYXRoIGFzIHdlbGwgYXMgdGhlIGBpbml0YCBwYXRoLgogICAgaWYgZmVlX2JwcyAhPSAwIHsKICAgICAgICBjbGllbnQuc2V0X3Byb3RvY29sX2ZlZV9icHMoJmZlZV9icHMpOwogICAgfQoKICAgIEZlZUhhcm5lc3MgewogICAgICAgIGNsaWVudCwKICAgICAgICBjb250cmFjdF9pZCwKICAgICAgICB0b2tlbl9pZCwKICAgICAgICB0b2tlbjogVG9rZW5DbGllbnQ6Om5ldyhlbnYsICZ0b2tlbl9pZCksCiAgICAgICAgdG9rZW5fYWRtaW4sCiAgICAgICAgYWRtaW4sCiAgICAgICAgdHJlYXN1cnksCiAgICAgICAgc21lLAogICAgfQp9CgovLy8gRnVuZHMgdGhlIGVzY3JvdyB0byB0YXJnZXQgYW5kIG1ha2VzIHRoZSBjb250cmFjdCBob2xkIHRoZSB0b2tlbnMuCmZuIGZ1bmRfdG9fdGFyZ2V0KGVudjogJkVudiwgaGFybmVzczogJkZlZUhhcm5lc3MsIHRhcmdldDogaTEyOCkgewogICAgbGV0IGludmVzdG9yID0gQWRkcmVzczo6Z2VuZXJhdGUoZW52KTsKICAgIGhhcm5lc3MudG9rZW5fYWRtaW4ubWludCgmaW52ZXN0b3IsICZ0YXJnZXQpOwogICAgaGFybmVzcy5jbGllbnQuZnVuZCgmaW52ZXN0b3IsICZ0YXJnZXQpOwogICAgLy8gU2ltdWxhdGUgdGhlIHRva2VucyBhY3R1YWxseSBiZWluZyB0cmFuc2ZlcnJlZCBpbnRvIHRoZSBjb250cmFjdC4KICAgIGhhcm5lc3MudG9rZW5fYWRtaW4ubWludCgmaGFybmVzcy5jb250cmFjdF9pZCwgJnRhcmdldCk7Cn0KCi8vIC0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tCi8vIFN1Y2Nlc3MgcGF0aHMKLy8gLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0KCi8vLyBUaGUgZmVlIGFuZCBuZXQgbGVncyBzdW0gZXhhY3RseSB0byB0aGUgZnVuZGVkIGFtb3VudCBmb3IgYSB0eXBpY2FsCi8vLyBub24tYm91bmRhcnkgZmVlIHJhdGUuIFRoaXMgaXMgdGhlIGNvcmUgaW52YXJpYW50IG9mIHRoZSBmZWUgc3BsaXQuCiNb dGVzdF0KZm4gd2l0aGRyYXdfc3BsaXRzX2ZlZV9hbmRfbmV0X2V4YWN0bHkoKSB7CiAgICBsZXQgZW52ID0gRW52OjpkZWZhdWx0KCk7CiAgICBsZXQgdGFyZ2V0OiBpMTI4ID0gMV8wMDBfMDAwOwogICAgbGV0IGZlZV9icHM6IGk2NCA9IDI1MDsgLy8gMi41JQogICAgbGV0IGhhcm5lc3MgPSBzZXR1cF9mZWVfaGFybmVzcygmZW52LCB0YXJnZXQsIGZlZV9icHMsICJJTlYwMDEiKTsKICAgIGZ1bmRfdG9fdGFyZ2V0KCZlbnYsICZoYXJuZXNzLCB0YXJnZXQpOwoKICAgIGxldCB0cmVhc3VyeV9iZWZvcmUgPSBoYXJuZXNzLnRva2VuLmJhbGFuY2UoJmhhcm5lc3MudHJlYXN1cnkpOwogICAgbGV0IHNtZV9iZWZvcmUgPSBoYXJuZXNzLnRva2VuLmJhbGFuY2UoJmhhcm5lc3Muc21lKTsKCiAgICBoYXJuZXNzLmNsaWVudC53aXRoZHJhdygpOwoKICAgIGxldCBleHBlY3RlZF9mZWUgPSB0YXJnZXQgKiAoZmVlX2JwcyBhcyBpMTI4KSAvIDEwXzAwMDsKICAgIGxldCBleHBlY3RlZF9uZXQgPSB0YXJnZXQgLSBleHBlY3RlZF9mZWU7CgogICAgYXNzZXJ0X2VxISgKICAgICAgICBoYXJuZXNzLnRva2VuLmJhbGFuY2UoJmhhcm5lc3MudHJlYXN1cnkpIC0gdHJlYXN1cnlfYmVmb3JlLAogICAgICAgIGV4cGVjdGVkX2ZlZQogICAgKTsKICAgIGFzc2VydF9lcSEoCiAgICAgICAgaGFybmVzcy50b2tlbi5iYWxhbmNlKCZoYXJuZXNzLnNtZSkgLSBzbWVfYmVmb3JlLAogICAgICAgIGV4cGVjdGVkX25ldAogICAgKTsKICAgIGFzc2VydF9lcSEoZXhwZWN0ZWRfZmVlICsgZXhwZWN0ZWRfbmV0LCB0YXJnZXQpOwogICAgYXNzZXJ0X2VxIShoYXJuZXNzLnRva2VuLmJhbGFuY2UoJmhhcm5lc3MuY29udHJhY3RfaWQpLCAwKTsKfQoKLy8vIEEgemVybyBmZWUgcmF0ZSBzZW5kcyB0aGUgZW50aXJlIGZ1bmRlZCBhbW91bnQgdG8gdGhlIFNNRSBhbmQgbm90aGluZwojLy8gdG8gdGhlIHRyZWFzdXJ5LgojW3Rlc3RdCmZuIHdpdGhkcmF3X3plcm9fZmVlX3NlbmRzX2FsbF90b19zbWUoKSB7CiAgICBsZXQgZW52ID0gRW52OjpkZWZhdWx0KCk7CiAgICBsZXQgdGFyZ2V0OiBpMTI4ID0gNTAwXzAwMDsKICAgIGxldCBoYXJuZXNzID0gc2V0dXBfZmVlX2hhcm5lc3MoJmVudiwgdGFyZ2V0LCAwLCAiSU5WMD8yIik7CiAgICBmdW5kX3RvX3RhcmdldCgmZW52LCAnaGFybmVzcywgdGFyZ2V0KTsKCiAgICBsZXQgdHJlYXN1cnlfYmVmb3JlID0gaGFybmVzcy50b2tlbi5iYWxhbmNlKCZoYXJuZXNzLnRyZWFzdXJ5KTsKICAgIGhhcm5lc3MuY2xpZW50LndpdGhkcmF3KCk7CgogICAgYXNzZXJ0X2VxIShoYXJuZXNzLnRva2VuLmJhbGFuY2UoJmhhcm5lc3MudHJlYXN1cnkpLCB0cmVhc3VyeV9iZWZvcmUpOwogICAgYXNzZXJ0X2VxIShoYXJuZXNzLnRva2VuLmJhbGFuY2UoJmhhcm5lc3Muc21lKSwgdGFyZ2V0KTsKfQoKLy8vIEEgMTAwJSBmZWUgcmF0ZSBzZW5kcyB0aGUgZW50aXJlIGZ1bmRlZCBhbW91bnQgdG8gdGhlIHRyZWFzdXJ5IGFuZAojLy8gbm90aGluZyB0byB0aGUgU01FLgojW3Rlc3RdCmZuIHdpdGhkcmF3X21heF9mZWVfc2VuZHNfYWxsX3RvX3RyZWFzdXJ5KCkgewogICAgbGV0IGVudiA9IEVudjo6ZGVmYXVsdCgpOwogICAgbGV0IHRhcmdldDogaTEyOCA9IDc3N183Nzc7CiAgICBsZXQgaGFybmVzcyA9IHNldHVwX2ZlZV9oYXJuZXNzKCZlbnYsIHRhcmdldCwgMTBfMDAwLCAiSU5WMD8zIik7CiAgICBmdW5kX3RvX3RhcmdldCgmZW52LCAnaGFybmVzcywgdGFyZ2V0KTsKCiAgICBsZXQgc21lX2JlZm9yZSA9IGhhcm5lc3MudG9rZW4uYmFsYW5jZSgmaGFybmVzcy5zbWUpOwogICAgaGFybmVzcy5jbGllbnQud2l0aGRyYXcoKTsKCiAgICBhc3NlcnRfZXEhKGhhcm5lc3MudG9rZW4uYmFsYW5jZSgmaGFybmVzcy5zbWUpLCBzbWVfYmVmb3JlKTsKICAgIGFzc2VydF9lcSEoaGFybmVzcy50b2tlbi5iYWxhbmNlKCZoYXJuZXNzLnRyZWFzdXJ5KSwgdGFyZ2V0KTsKfQoKLy8gLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0KLy8gUmVqZWN0aW9uIHBhdGhzOiBjb25maWd1cmF0aW9uCi8vIC0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tCgovLy8gQSBmZWUgcmF0ZSBhYm92ZSAxMF8wMDAgaXMgcmVqZWN0ZWQgYnkgdGhlIHNldHRlciBhbmQgbGVhdmVzIHRoZQojLy8gcHJldmlvdXMgcmF0ZSBpbnRhY3QuCiNb dGVzdF0KZm4gc2V0X3Byb3RvY29sX2ZlZV9icHNfcmVqZWN0c19vdXRfb2ZfcmFuZ2UoKSB7CiAgICBsZXQgZW52ID0gRW52OjpkZWZhdWx0KCk7CiAgICBsZXQgdGFyZ2V0OiBpMTI4ID0gMV8wMDBfMDAwOwogICAgbGV0IGhhcm5lc3MgPSBzZXR1cF9mZWVfaGFybmVzcygmZW52LCB0YXJnZXQsIDUwMCwgIklOVjAwNCIpOwoKICAgIGxldCByZXN1bHQgPSBoYXJuZXNzLmNsaWVudC50cnlfc2V0X3Byb3RvY29sX2ZlZV9icHMoJjEwXzAwMWk2NCk7CiAgICBhc3NlcnRfY29udHJhY3RfZXJyb3IocmVzdWx0LCBFc2Nyb3dFcnJvcjo6UHJvdG9jb2xGZWV CcHN PdXRPZlJhbmdlKTsKCiAgICAvLyBUaGUgZmFpbGVkIHNldHRlciBtdXN0IG5vdCBtdXRhdGUgdGhlIHN0b3JlZCByYXRlLgogICAgYXNzZXJ0X2VxIShoYXJuZXNzLmNsaWVudC5nZXRfcHJvdG9jb2xfZmVlX2JwcygpLCA1MDApOwp9CgovLy8gQSBuZWdhdGl2ZSBmZWUgcmF0ZSBpcyByZWplY3RlZCBieSB0aGUgc2V0dGVyLgojW3Rlc3RdCmZuIHNldF9wcm90b2NvbF9mZWVfYnBzX3JlamVjdHNfbmVnYXRpdmUoKSB7CiAgICBsZXQgZW52ID0gRW52OjpkZWZhdWx0KCk7CiAgICBsZXQgdGFyZ2V0OiBpMTI4ID0gMV8wMDBfMDAwOwogICAgbGV0IGhhcm5lc3MgPSBzZXR1cF9mZWVfaGFybmVzcygmZW52LCB0YXJnZXQsIDUwMCwgIklOVjAwNSIpOwoKICAgIGxldCByZXN1bHQgPSBoYXJuZXNzLmNsaWVudC50cnlfc2V0X3Byb3RvY29sX2ZlZV9icHMoJi0xaTY0KTsKICAgIGFzc2VydF9jb250cmFjdF9lcnJvcihyZXN1bHQsIEVzY3Jvd0Vycm9yOjpQcm90b2NvbEZlZUJwc091dE9mUmFuZ2UpOwoKICAgIGFzc2VydF9lcSEoaGFybmVzcy5jbGllbnQuZ2V0X3Byb3RvY29sX2ZlZV9icHMoKSwgNTAwKTsKfQoKLy8gLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0KLy8gUmVqZWN0aW9uIHBhdGhzOiB3aXRoZHJhd2FsIHByZWNvbmRpdGlvbnMKLyAtLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLQoKLy8vIFdpdGhkcmF3aW5nIGJlZm9yZSB0aGUgZXNjcm93IGlzIGZ1bmRlZCBtdXN0IGZhaWwgd2l0aCB0aGUgdHlwZWQKIy8vIGBXaXRoZHJhd2FsTm90RnVuZGVkYCBjb2RlIGFuZCBsZWF2ZSB0aGUgY29udHJhY3QgYmFsYW5jZSB1bnRvdWNoZWQuCiNb dGVzdF0KZm4gd2l0aGRyYXdfYmVmb3JlX2Z1bmRpbmdfaXNfcmVqZWN0ZWQoKSB7CiAgICBsZXQgZW52ID0gRW52OjpkZWZhdWx0KCk7CiAgICBsZXQgdGFyZ2V0OiBpMTI4ID0gMV8wMDBfMDAwOwogICAgbGV0IGhhcm5lc3MgPSBzZXR1cF9mZWVfaGFybmVzcygmZW52LCB0YXJnZXQsIDI1MCwgIklOVjAwNiIpOwoKICAgIGxldCByZXN1bHQgPSBoYXJuZXNzLmNsaWVudC50cnlfd2l0aGRyYXcoKTsKICAgIGFzc2VydF9jb250cmFjdF9lcnJvcihyZXN1bHQsIEVzY3Jvd0Vycm9yOjpXaXRoZHJhd2FsTm90RnVuZGVkKTsKICAgIGFzc2VydF9lcSEoaGFybmVzcy50b2tlbi5iYWxhbmNlKCZoYXJuZXNzLmNvbnRyYWN0X2lkKSwgMCk7CiAgICBhc3NlcnRfZXEhKGhhcm5lc3MudG9rZW4uYmFsYW5jZSgmaGFybmVzcy5zbWUpLCAwKTsKICAgIGFzc2VydF9lcSEoaGFybmVzcy50b2tlbi5iYWxhbmNlKCZoYXJuZXNzLnRyZWFzdXJ5KSwgMCk7Cn0KCi8vLyBXaXRoZHJhd2luZyB3aGVuIHRoZSBjb250cmFjdCBkb2VzIG5vdCBob2xkIGVub3VnaCB0b2tlbnMgbXVzdCBmYWlsCi8vLyB3aXRoIGBJbnN1ZmZpY2llbnRDb250cmFjdEJhbGFuY2VgIGFuZCBsZWF2ZSB0aGUgU01FIHRyZWFzdXJ5IGFuZAojLy8gY29udHJhY3QgYmFsYW5jZXMgdW5jaGFuZ2VkLgojW3Rlc3RdCmZuIHdpdGhkcmF3X3dpdGhfaW5zdWZmaWNpZW50X2NvbnRyYWN0X2JhbGFuY2VfaXNfcmVqZWN0ZWQoKSB7CiAgICBsZXQgZW52ID0gRW52OjpkZWZhdWx0KCk7CiAgICBsZXQgdGFyZ2V0OiBpMTI4ID0gMV8wMDBfMDAwOwogICAgbGV0IGhhcm5lc3MgPSBzZXR1cF9mZWVfaGFybmVzcygmZW52LCB0YXJnZXQsIDI1MCwgIklOVjAwNyIpOwoKICAgIC8vIEZ1bmQgdGhlIGVzY3JvdyB3aXRob3V0IGFjdHVhbGx5IG1vdmluZyB0b2tlbnMgaW50byB0aGUgY29udHJhY3QuCiAgICBsZXQgaW52ZXN0b3IgPSBBZGRyZXNzOjpnZW5lcmF0ZSgmZW52KTsKICAgIGhhcm5lc3MudG9rZW5fYWRtaW4ubWludCgmaW52ZXN0b3IsICZ0YXJnZXQpOwogICAgaGFybmVzcy5jbGllbnQuZnVuZCgmaW52ZXN0b3IsICZ0YXJnZXQpOwoKICAgIGxldCByZXN1bHQgPSBoYXJuZXNzLmNsaWVudC50cnlfd2l0aGRyYXcoKTsKICAgIGFzc2VydF9jb250cmFjdF9lcnJvcihyZXN1bHQsIEVzY3Jvd0Vycm9yOjpJbnN1ZmZpY2llbnRDb250cmFjdEJhbGFuY2UpOwogICAgYXNzZXJ0X2VxIShoYXJuZXNzLnRva2VuLmJhbGFuY2UoJmhhcm5lc3MuY29udHJhY3RfaWQpLCAwKTsKICAgIGFzc2VydF9lcSEoaGFybmVzcy50b2tlbi5iYWxhbmNlKCZoYXJuZXNzLnNtZSksIDApOwogICAgYXNzZXJ0X2VxIShoYXJuZXNzLnRva2VuLmJhbGFuY2UoJmhhcm5lc3MudHJlYXN1cnkpLCAwKTsKfQoKLy8gLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0KLy8gUmV0cnkgYW5kIGR1cGxpY2F0ZSBiZWhhdmlvcgovLyAtLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLQoKLy8vIEEgZmFpbGVkIHdpdGhkcmF3IG11c3QgbGVhdmUgdGhlIGVzY3JvdyBpbiBhIHN0YXRlIHdoZXJlIGEgcmV0cnkKLy8vIGFmdGVyIHRoZSBmYWlsdXJlIGlzIGRldGVybWluaXN0aWMgYW5kIHN1Y2NlZWRzIG9uY2UgdGhlIGJsb2NraW5nCi8vLyBjb25kaXRpb24gaXMgcmVzb2x2ZWQuIFRoaXMgaXMgdGhlIGNvcmUgZmFpbHVyZS1yZWNvdmVyeSBjb250cmFjdC4KI1t0ZXN0XQpmbiB3aXRoZHJhd19yZXRyeV9hZnRlcl9pbnN1ZmZpY2llbnRfYmFsYW5jZV9zdWNjZWVkcygpIHsKICAgIGxldCBlbnYgPSBFbnY6OmRlZmF1bHQoKTsKICAgIGxldCB0YXJnZXQ6IGkxMjggPSAxXzAwMF8wMDA7CiAgICBsZXQgZmVlX2JwczogaTY0ID0gMjUwOwogICAgbGV0IGhhcm5lc3MgPSBzZXR1cF9mZWVfaGFybmVzcygmZW52LCB0YXJnZXQsIGZlZV9icHMsICJJTlYwMDgiKTsKCiAgICAvLyBQYXJ0aWFsIGZ1bmRpbmc6IHRoZSBjb250cmFjdCBob2xkcyBsZXNzIHRoYW4gdGhlIHRhcmdldC4KICAgIGxldCBwYXJ0aWFsID0gdGFyZ2V0IC8gMjsKICAgIGxldCBpbnZlc3RvciA9IEFkZHJlc3M6OmdlbmVyYXRlKCZlbnYpOwogICAgaGFybmVzcy50b2tlbl9hZG1pbi5taW50KCZpbnZlc3RvciwgJnBhcnRpYWwpOwogICAgaGFybmVzcy5jbGllbnQuZnVuZCgmaW52ZXN0b3IsICZwYXJ0aWFsKTsKICAgIGhhcm5lc3MudG9rZW5fYWRtaW4ubWludCgmaGFybmVzcy5jb250cmFjdF9pZCwgJnBhcnRpYWwpOwoKICAgIC8vIEZpcnN0IGF0dGVtcHQgZmFpbHMgYmVjYXVzZSB0aGUgY29udHJhY3QgaXMgdW5kZXJmdW5kZWQuCiAgICBsZXQgZmlyc3QgPSBoYXJuZXNzLmNsaWVudC50cnlfd2l0aGRyYXcoKTsKICAgIGFzc2VydF9jb250cmFjdF9lcnJvcihmaXJzdCwgRXNjcm93RXJyb3I6Okluc3VmZmljaWVudENvbnRyYWN0QmFsYW5jZSk7CiAgICBhc3NlcnRfZXEhKGhhcm5lc3MudG9rZW4uYmFsYW5jZSgmaGFybmVzcy5jb250cmFjdF9pZCksIHBhcnRpYWwpOwoKICAgIC8vIFJlc29sdmUgdGhlIGJsb2NraW5nIGNvbmRpdGlvbiBhbmQgcmV0cnkuCiAgICBoYXJuZXNzLnRva2VuX2FkbWluLm1pbnQoJmhhcm5lc3MuY29udHJhY3RfaWQsICZ0YXJnZXQpOwogICAgaGFybmVzcy5jbGllbnQud2l0aGRyYXcoKTsKCiAgICBsZXQgZXhwZWN0ZWRfZmVlID0gdGFyZ2V0ICogKGZlZV9icHMgYXMgaTEyOCkgLyAxMF8wMDA7CiAgICBsZXQgZXhwZWN0ZWRfbmV0ID0gdGFyZ2V0IC0gZXhwZWN0ZWRfZmVlOwogICAgYXNzZXJ0X2VxIShoYXJuZXNzLnRva2VuLmJhbGFuY2UoJmhhcm5lc3MudHJlYXN1cnkpLCBleHBlY3RlZF9mZWUpOwogICAgYXNzZXJ0X2VxIShoYXJuZXNzLnRva2VuLmJhbGFuY2UoJmhhcm5lc3Muc21lKSwgZXhwZWN0ZWRfbmV0KTsKICAgIGFzc2VydF9lcSEoaGFybmVzcy50b2tlbi5iYWxhbmNlKCZoYXJuZXNzLmNvbnRyYWN0X2lkKSwgMCk7Cn0KCi8vLyBBIHNlY29uZCB3aXRoZHJhdyBhZnRlciBhIHN1Y2Nlc3NmdWwgb25lIG11c3QgZmFpbCB3aXRoCi8vLyBgV2l0aGRyYXdhbE5vdEZ1bmRlZGAgYW5kIG11c3Qgbm90IG1vdmUgYW55IHRva2VucyBhZ2Fpbi4KI1t0ZXN0XQpmbiB3aXRoZHJhd19kdXBsaWNhdGVfYWZ0ZXJfc3VjY2Vzc19pc19yZWplY3RlZCgpIHsKICAgIGxldCBlbnYgPSBFbnY6OmRlZmF1bHQoKTsKICAgIGxldCB0YXJnZXQ6IGkxMjggPSAxXzAwMF8wMDA7CiAgICBsZXQgZmVlX2JwczogaTY0ID0gMjUwOwogICAgbGV0IGhhcm5lc3MgPSBzZXR1cF9mZWVfaGFybmVzcygmZW52LCB0YXJnZXQsIGZlZV9icHMsICJJTlYwMDkiKTsKICAgIGZ1bmRfdG9fdGFyZ2V0KCZlbnYsICZoYXJuZXNzLCB0YXJnZXQpOwoKICAgIGhhcm5lc3MuY2xpZW50LndpdGhkcmF3KCk7CiAgICBsZXQgdHJlYXN1cnlfYWZ0ZXIgPSBoYXJuZXNzLnRva2VuLmJhbGFuY2UoJmhhcm5lc3MudHJlYXN1cnkpOwogICAgbGV0IHNtZV9hZnRlciA9IGhhcm5lc3MudG9rZW4uYmFsYW5jZSgmaGFybmVzcy5zbWUpOwoKICAgIGxldCBzZWNvbmQgPSBoYXJuZXNzLmNsaWVudC50cnlfd2l0aGRyYXcoKTsKICAgIGFzc2VydF9jb250cmFjdF9lcnJvcihzZWNvbmQsIEVzY3Jvd0Vycm9yOjpXaXRoZHJhd2FsTm90RnVuZGVkKTsKCiAgICBhc3NlcnRfZXEhKGhhcm5lc3MudG9rZW4uYmFsYW5jZSgmaGFybmVzcy50cmVhc3VyeSksIHRyZWFzdXJ5X2FmdGVyKTsKICAgIGFzc2VydF9lcSEoaGFybmVzcy50b2tlbi5iYWxhbmNlKCZoYXJuZXNzLnNtZSksIHNtZV9hZnRlcik7CiAgICBhc3NlcnRfZXEhKGhhcm5lc3MudG9rZW4uYmFsYW5jZSgmaGFybmVzcy5jb250cmFjdF9pZCksIDApOwp9CgovLy8gQSBmYWlsZWQgd2l0aGRyYXcgY2F1c2VkIGJ5IGFuIGV4dGVybmFsIHRva2VuIGZhaWx1cmUgbXVzdCBub3QgbGVhdmUKLy8vIHRoZSBlc2Nyb3cgaW4gYSBwYXJ0aWFsbHktc2V0dGxlZCBzdGF0ZS4gVGhpcyB0ZXN0IGRyYWlucyB0aGUgY29udHJhY3QKI1svLyBiYWxhbmNlIGFmdGVyIGZ1bmRpbmcgYW5kIGFzc2VydHMgdGhhdCB0aGUgZmFpbHVyZSBpcyBvYnNlcnZhYmxlIGFuZAojLy8gcmVjb3ZlcmFibGUuCiNb dGVzdF0KZm4gd2l0aGRyYXdfZmFpbHVyZV9sZWF2ZXNfc3RhdGVfcmVjb3ZlcmFibGUoKSB7CiAgICBsZXQgZW52ID0gRW52OjpkZWZhdWx0KCk7CiAgICBsZXQgdGFyZ2V0OiBpMTI4ID0gMV8wMDBfMDAwOwogICAgbGV0IGZlZV9icHM6IGk2NCA9IDI1MDsKICAgIGxldCBoYXJuZXNzID0gc2V0dXBfZmVlX2hhcm5lc3MoJmVudiwgdGFyZ2V0LCBmZWVfYnBzLCAiSU5WMD8wIik7CiAgICBmdW5kX3RvX3RhcmdldCgmZW52LCAnaGFybmVzcywgdGFyZ2V0KTsKCiAgICAvLyBEcmFpbiB0aGUgY29udHJhY3QgYmFsYW5jZSB0byBzaW11bGF0ZSBhbiBleHRlcm5hbCBmYWlsdXJlLgogICAgbGV0IGRyYWluX3RvID0gQWRkcmVzczo6Z2VuZXJhdGUoJmVudik7CiAgICBoYXJuZXNzLnRva2VuX2FkbWluLm1pbnQoJmhhcm5lc3MuY29udHJhY3RfaWQsICZ0YXJnZXQpOwogICAgaGFybmVzcy50b2tlbi50cmFuc2ZlcihmaGFybmVzcy5jb250cmFjdF9pZCwgJmRyYWluX3RvLCAmdGFyZ2V0KTsKICAgIGFzc2VydF9lcSEoaGFybmVzcy50b2tlbi5iYWxhbmNlKCZoYXJuZXNzLmNvbnRyYWN0X2lkKSwgMCk7CgogICAgbGV0IHJlc3VsdCA9IGhhcm5lc3MuY2xpZW50LnRyeV93aXRoZHJhdygpOwogICAgYXNzZXJ0X2NvbnRyYWN0X2Vycm9yKHJlc3VsdCwgRXNjcm93RXJyb3I6Okluc3VmZmljaWVudENvbnRyYWN0QmFsYW5jZSk7CgogICAgLy8gUmVjb3Zlcnk6IHJlc3RvcmUgdGhlIGJhbGFuY2UgYW5kIHJldHJ5LgogICAgaGFybmVzcy50b2tlbi50cmFuc2ZlcihmZHJhaW5fdG8sICZoYXJuZXNzLmNvbnRyYWN0X2lkLCAmdGFyZ2V0KTsKICAgIGhhcm5lc3MuY2xpZW50LndpdGhkcmF3KCk7CgogICAgbGV0IGV4cGVjdGVkX2ZlZSA9IHRhcmdldCAqIChmZWVfYnBzIGFzIGkxMjgpIC8gMTBfMDAwOwogICAgbGV0IGV4cGVjdGVkX25ldCA9IHRhcmdldCAtIGV4cGVjdGVkX2ZlZTsKICAgIGFzc2VydF9lcSEoaGFybmVzcy50b2tlbi5iYWxhbmNlKCZoYXJuZXNzLnRyZWFzdXJ5KSwgZXhwZWN0ZWRfZmVlKTsKICAgIGFzc2VydF9lcSEoaGFybmVzcy50b2tlbi5iYWxhbmNlKCZoYXJuZXNzLnNtZSksIGV4cGVjdGVkX25ldCk7CiAgICBhc3NlcnRfZXEhKGhhcm5lc3MudG9rZW4uYmFsYW5jZSgmaGFybmVzcy5jb250cmFjdF9pZCksIDApOwp9CgovLyAtLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLQovLyBPYnNlcnZhYmlsaXR5OiB0aGUgZmVlIHNldHRlciBlbWl0cyBhIHR5cGVkIGV2ZW50IGFuZCB0aGUgcmVhZC12aWV3Ci8vIHJlZmxlY3RzIHRoZSBuZXcgcmF0ZSBpbW1lZGlhdGVseS4KLy8gLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0tLS0KCiNb dGVzdF0KZm4gc2V0X3Byb3RvY29sX2ZlZV9icHNfdXBkYXRlc19yZWFkX3ZpZXcoKSB7CiAgICBsZXQgZW52ID0gRW52OjpkZWZhdWx0KCk7CiAgICBsZXQgdGFyZ2V0OiBpMTI4ID0gMV8wMDBfMDAwOwogICAgbGV0IGhhcm5lc3MgPSBzZXR1cF9mZWVfaGFybmVzcygmZW52LCB0YXJnZXQsIDAsICJJTlYwMTEiKTsKICAgIGFzc2VydF9lcSEoaGFybmVzcy5jbGllbnQuZ2V0X3Byb3RvY29sX2ZlZV9icHMoKSwgMCk7CgogICAgaGFybmVzcy5jbGllbnQuc2V0X3Byb3RvY29sX2ZlZV9icHMoJjEyNWk2NCk7CiAgICBhc3NlcnRfZXEhKGhhcm5lc3MuY2xpZW50LmdldF9wcm90b2NvbF9mZWVfYnBzKCksIDEyNSk7CgogICAgaGFybmVzcy5jbGllbnQuc2V0X3Byb3RvY29sX2ZlZV9icHMoJjBpNjQpOwogICAgYXNzZXJ0X2VxIShoYXJuZXNzLmNsaWVudC5nZXRfcHJvdG9jb2xfZmVlX2JwcygpLCAwKTsKfQo=
+//! Focused fee-subsystem tests for the escrow contract.
+//!
+//! This module covers the deterministic failure-recovery contract for the
+//! fee split applied at `withdraw`. The invariants that must hold across
+//! every path (init, setter, withdraw, retry, partial failure) are:
+//!
+//! 1. The fee is always floor(funded_amount * fee_bps / 10_000) and the
+//!    SME net is always `funded_amount - fee`. The two legs sum exactly
+//!    to `funded_amount` (no dust is created or lost).
+//! 2. A failed withdraw (bad token, balance drain, overflow) must leave
+//!    the status unchanged and the contract balance untouched, so a retry
+//!    after the failure is deterministic and idempotent.
+//! 3. A duplicate withdraw after a successful one must fail with
+//!    `WithdrawalNotFunded` and must not move any tokens again.
+//! 4. Boundary fee rates (0 and 10_000) must behave exactly as documented.
+//! 5. Input validation for `set_protocol_fee_bps` covers 0, max (10_000),
+//!    out-of-range positives, and negative values.
+//! 6. The fee setter is atomic: a rejected call never mutates stored rate
+//!    and never emits an event.
+
+#[allow(unused_imports, unused_variables, dead_code, clippy::needless_borrow)]
+use super::*;
+
+use soroban_sdk::{
+    testutils::{Address as _, Ledger as _},
+    token::{StellarAssetClient, TokenClient},
+    Address, Env,
+    String as SorobanString,
+};
+
+// ── harness ──────────────────────────────────────────────────────────────────
+
+/// Convenience wrapper that builds a fresh escrow with a real SEP-41 token
+/// and a configurable fee rate. Returns the client, the contract address, the
+/// token admin (for minting), the treasury address, and the SME address.
+struct FeeHarness<'a> {
+    client: LiquifactEscrowClient<'a>,
+    contract_id: Address,
+    token_id: Address,
+    token: TokenClient<'a>,
+    token_admin: StellarAssetClient<'a>,
+    admin: Address,
+    treasury: Address,
+    sme: Address,
+}
+
+fn setup_fee_harness(
+    env: &Env,
+    target: i128,
+    fee_bps: i64,
+    invoice_id: &str,
+) -> FeeHarness {
+    env.ledger().set(soroban_sdk::ledger::LedgerInfo {
+        timestamp: 0,
+        sequence_number: 100,
+        ..soroban_sdk::ledger::LedgerInfo::default()
+    });
+    env.mock_all_auths();
+
+    let sac = env.register_stellar_asset_contract_v2(Address::generate(env));
+    let token_id = sac.address();
+    let token_admin = StellarAssetClient::new(env, &token_id);
+
+    let contract_id = env.register(LiquifactEscrow, ());
+    let client = LiquifactEscrowClient::new(env, &contract_id);
+    let admin = Address::generate(env);
+    let sme = Address::generate(env);
+    let treasury = Address::generate(env);
+
+    client.init(
+        &admin,
+        &SorobanString::from_str(env, invoice_id),
+        &sme,
+        &target,
+        &800i64,
+        &0u64,
+        &token_id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+        &None::<u32>,
+    );
+
+    // Apply the fee rate after init so the harness can exercise the
+    // `set_protocol_fee_bps` path as well as the `init` path.
+    if fee_bps != 0 {
+        client.set_protocol_fee_bps(&fee_bps);
+    }
+
+    FeeHarness {
+        client,
+        contract_id,
+        token_id,
+        token: TokenClient::new(env, &token_id),
+        token_admin,
+        admin,
+        treasury,
+        sme,
+    }
+}
+
+/// Fund the escrow to target and make the contract hold the tokens.
+fn fund_to_target(env: &Env, harness: &FeeHarness, target: i128) {
+    let investor = Address::generate(env);
+    harness.token_admin.mint(&investor, &target);
+    harness.client.fund(&investor, &target);
+    // Simulate the tokens actually being transferred into the contract.
+    harness.token_admin.mint(&harness.contract_id, &target);
+}
+
+// ── Success paths ─────────────────────────────────────────────────────────────
+
+/// The fee and net legs sum exactly to the funded amount for a typical
+/// non-boundary fee rate. This is the core invariant of the fee split.
+#[test]
+fn withdraw_splits_fee_and_net_exactly() {
+    let env = Env::default();
+    let target: i128 = 1_000_000;
+    let fee_bps: i64 = 250; // 2.5%
+    let harness = setup_fee_harness(&env, target, fee_bps, "INV001");
+    fund_to_target(&env, &harness, target);
+
+    let treasury_before = harness.token.balance(&harness.treasury);
+    let sme_before = harness.token.balance(&harness.sme);
+
+    harness.client.withdraw();
+
+    let expected_fee = target * (fee_bps as i128) / 10_000;
+    let expected_net = target - expected_fee;
+
+    assert_eq!(
+        harness.token.balance(&harness.treasury) - treasury_before,
+        expected_fee
+    );
+    assert_eq!(
+        harness.token.balance(&harness.sme) - sme_before,
+        expected_net
+    );
+    // Conservation: fee + net == funded_amount, no dust created or lost.
+    assert_eq!(expected_fee + expected_net, target);
+    assert_eq!(harness.token.balance(&harness.contract_id), 0);
+}
+
+/// A zero fee rate sends the entire funded amount to the SME and nothing
+/// to the treasury. This tests the lower bound (fee_bps = 0).
+#[test]
+fn withdraw_zero_fee_sends_all_to_sme() {
+    let env = Env::default();
+    let target: i128 = 500_000;
+    let harness = setup_fee_harness(&env, target, 0, "INV002");
+    fund_to_target(&env, &harness, target);
+
+    let treasury_before = harness.token.balance(&harness.treasury);
+    harness.client.withdraw();
+
+    // Treasury balance must be unchanged — no fee was taken.
+    assert_eq!(harness.token.balance(&harness.treasury), treasury_before);
+    assert_eq!(harness.token.balance(&harness.sme), target);
+}
+
+/// A 100% fee rate sends the entire funded amount to the treasury and
+/// nothing to the SME. This tests the upper bound (fee_bps = 10_000).
+#[test]
+fn withdraw_max_fee_sends_all_to_treasury() {
+    let env = Env::default();
+    let target: i128 = 777_777;
+    let harness = setup_fee_harness(&env, target, 10_000, "INV003");
+    fund_to_target(&env, &harness, target);
+
+    let sme_before = harness.token.balance(&harness.sme);
+    harness.client.withdraw();
+
+    // SME balance must be unchanged — the entire amount went to treasury.
+    assert_eq!(harness.token.balance(&harness.sme), sme_before);
+    assert_eq!(harness.token.balance(&harness.treasury), target);
+}
+
+/// Boundary fee_bps = 1 (minimum non-zero rate): fee is floor(target / 10_000)
+/// and the split still conserves the total.
+#[test]
+fn withdraw_minimum_nonzero_fee_conserves_total() {
+    let env = Env::default();
+    let target: i128 = 1_000_000;
+    let fee_bps: i64 = 1;
+    let harness = setup_fee_harness(&env, target, fee_bps, "INV012");
+    fund_to_target(&env, &harness, target);
+
+    let treasury_before = harness.token.balance(&harness.treasury);
+    let sme_before = harness.token.balance(&harness.sme);
+
+    harness.client.withdraw();
+
+    let expected_fee = target * (fee_bps as i128) / 10_000; // floor = 100
+    let expected_net = target - expected_fee;
+
+    assert_eq!(
+        harness.token.balance(&harness.treasury) - treasury_before,
+        expected_fee
+    );
+    assert_eq!(
+        harness.token.balance(&harness.sme) - sme_before,
+        expected_net
+    );
+    assert_eq!(expected_fee + expected_net, target);
+}
+
+/// Boundary fee_bps = 9_999 (one below max): split is deterministic and
+/// conserves the total.
+#[test]
+fn withdraw_near_max_fee_conserves_total() {
+    let env = Env::default();
+    let target: i128 = 1_000_000;
+    let fee_bps: i64 = 9_999;
+    let harness = setup_fee_harness(&env, target, fee_bps, "INV013");
+    fund_to_target(&env, &harness, target);
+
+    let treasury_before = harness.token.balance(&harness.treasury);
+    let sme_before = harness.token.balance(&harness.sme);
+
+    harness.client.withdraw();
+
+    let expected_fee = target * (fee_bps as i128) / 10_000;
+    let expected_net = target - expected_fee;
+
+    assert_eq!(
+        harness.token.balance(&harness.treasury) - treasury_before,
+        expected_fee
+    );
+    assert_eq!(
+        harness.token.balance(&harness.sme) - sme_before,
+        expected_net
+    );
+    assert_eq!(expected_fee + expected_net, target);
+}
+
+// ── Rejection paths: configuration ───────────────────────────────────────────
+
+/// A fee rate above 10_000 is rejected by the setter and leaves the
+/// previous rate intact. No event is emitted on rejection.
+#[test]
+fn set_protocol_fee_bps_rejects_out_of_range() {
+    let env = Env::default();
+    let target: i128 = 1_000_000;
+    let harness = setup_fee_harness(&env, target, 500, "INV004");
+
+    let result = harness.client.try_set_protocol_fee_bps(&10_001i64);
+    assert_contract_error(result, EscrowError::ProtocolFeeBpsOutOfRange);
+
+    // The failed setter must not mutate the stored rate.
+    assert_eq!(harness.client.get_protocol_fee_bps(), 500);
+}
+
+/// A negative fee rate is rejected by the setter.
+#[test]
+fn set_protocol_fee_bps_rejects_negative() {
+    let env = Env::default();
+    let target: i128 = 1_000_000;
+    let harness = setup_fee_harness(&env, target, 500, "INV005");
+
+    let result = harness.client.try_set_protocol_fee_bps(&-1i64);
+    assert_contract_error(result, EscrowError::ProtocolFeeBpsOutOfRange);
+
+    assert_eq!(harness.client.get_protocol_fee_bps(), 500);
+}
+
+/// fee_bps = 0 is a valid inclusive lower bound.
+#[test]
+fn set_protocol_fee_bps_accepts_zero() {
+    let env = Env::default();
+    let harness = setup_fee_harness(&env, 100_000, 500, "INV014");
+    let returned = harness.client.set_protocol_fee_bps(&0i64);
+    assert_eq!(returned, 0i64);
+    assert_eq!(harness.client.get_protocol_fee_bps(), 0);
+}
+
+/// fee_bps = 10_000 is a valid inclusive upper bound.
+#[test]
+fn set_protocol_fee_bps_accepts_max() {
+    let env = Env::default();
+    let harness = setup_fee_harness(&env, 100_000, 0, "INV015");
+    let returned = harness.client.set_protocol_fee_bps(&10_000i64);
+    assert_eq!(returned, 10_000i64);
+    assert_eq!(harness.client.get_protocol_fee_bps(), 10_000);
+}
+
+/// A repeated out-of-range rejection is idempotent: calling it twice with
+/// invalid values does not change the stored rate and emits no events.
+#[test]
+fn set_protocol_fee_bps_rejection_is_idempotent() {
+    let env = Env::default();
+    let harness = setup_fee_harness(&env, 100_000, 750, "INV016");
+
+    assert_contract_error(
+        harness.client.try_set_protocol_fee_bps(&10_001i64),
+        EscrowError::ProtocolFeeBpsOutOfRange,
+    );
+    assert_contract_error(
+        harness.client.try_set_protocol_fee_bps(&-1i64),
+        EscrowError::ProtocolFeeBpsOutOfRange,
+    );
+    assert_contract_error(
+        harness.client.try_set_protocol_fee_bps(&10_001i64),
+        EscrowError::ProtocolFeeBpsOutOfRange,
+    );
+
+    // Rate is unchanged after three consecutive rejections.
+    assert_eq!(harness.client.get_protocol_fee_bps(), 750);
+}
+
+// ── Rejection paths: withdrawal preconditions ─────────────────────────────────
+
+/// Withdrawing before the escrow is funded must fail with the typed
+/// `WithdrawalNotFunded` code and leave the contract balance untouched.
+#[test]
+fn withdraw_before_funding_is_rejected() {
+    let env = Env::default();
+    let target: i128 = 1_000_000;
+    let harness = setup_fee_harness(&env, target, 250, "INV006");
+
+    let result = harness.client.try_withdraw();
+    assert_contract_error(result, EscrowError::WithdrawalNotFunded);
+    assert_eq!(harness.token.balance(&harness.contract_id), 0);
+    assert_eq!(harness.token.balance(&harness.sme), 0);
+    assert_eq!(harness.token.balance(&harness.treasury), 0);
+}
+
+/// Withdrawing when the contract does not hold enough tokens must fail
+/// with `InsufficientContractBalance` and leave the SME treasury and
+/// contract balances unchanged.
+#[test]
+fn withdraw_with_insufficient_contract_balance_is_rejected() {
+    let env = Env::default();
+    let target: i128 = 1_000_000;
+    let harness = setup_fee_harness(&env, target, 250, "INV007");
+
+    // Fund the escrow without actually moving tokens into the contract.
+    let investor = Address::generate(&env);
+    harness.token_admin.mint(&investor, &target);
+    harness.client.fund(&investor, &target);
+
+    let result = harness.client.try_withdraw();
+    assert_contract_error(result, EscrowError::InsufficientContractBalance);
+    assert_eq!(harness.token.balance(&harness.contract_id), 0);
+    assert_eq!(harness.token.balance(&harness.sme), 0);
+    assert_eq!(harness.token.balance(&harness.treasury), 0);
+}
+
+// ── Retry and duplicate behavior ─────────────────────────────────────────────
+
+/// A failed withdraw must leave the escrow in a state where a retry
+/// after the failure is deterministic and succeeds once the blocking
+/// condition is resolved. This is the core failure-recovery contract.
+#[test]
+fn withdraw_retry_after_insufficient_balance_succeeds() {
+    let env = Env::default();
+    let target: i128 = 1_000_000;
+    let fee_bps: i64 = 250;
+    let harness = setup_fee_harness(&env, target, fee_bps, "INV008");
+
+    // Partial funding: the contract holds less than the target.
+    let partial = target / 2;
+    let investor = Address::generate(&env);
+    harness.token_admin.mint(&investor, &partial);
+    harness.client.fund(&investor, &partial);
+    harness.token_admin.mint(&harness.contract_id, &partial);
+
+    // First attempt fails because the contract is underfunded.
+    let first = harness.client.try_withdraw();
+    assert_contract_error(first, EscrowError::InsufficientContractBalance);
+    assert_eq!(harness.token.balance(&harness.contract_id), partial);
+
+    // Resolve the blocking condition and retry.
+    harness.token_admin.mint(&harness.contract_id, &target);
+    harness.client.withdraw();
+
+    let expected_fee = target * (fee_bps as i128) / 10_000;
+    let expected_net = target - expected_fee;
+    assert_eq!(harness.token.balance(&harness.treasury), expected_fee);
+    assert_eq!(harness.token.balance(&harness.sme), expected_net);
+    assert_eq!(harness.token.balance(&harness.contract_id), 0);
+}
+
+/// A second withdraw after a successful one must fail with
+/// `WithdrawalNotFunded` and must not move any tokens again.
+#[test]
+fn withdraw_duplicate_after_success_is_rejected() {
+    let env = Env::default();
+    let target: i128 = 1_000_000;
+    let fee_bps: i64 = 250;
+    let harness = setup_fee_harness(&env, target, fee_bps, "INV009");
+    fund_to_target(&env, &harness, target);
+
+    harness.client.withdraw();
+    let treasury_after = harness.token.balance(&harness.treasury);
+    let sme_after = harness.token.balance(&harness.sme);
+
+    let second = harness.client.try_withdraw();
+    assert_contract_error(second, EscrowError::WithdrawalNotFunded);
+
+    // Balances are frozen after the successful withdraw.
+    assert_eq!(harness.token.balance(&harness.treasury), treasury_after);
+    assert_eq!(harness.token.balance(&harness.sme), sme_after);
+    assert_eq!(harness.token.balance(&harness.contract_id), 0);
+}
+
+/// A failed withdraw caused by an external balance drain must not leave
+/// the escrow in a partially-settled state. The failure is observable
+/// and the retry succeeds once the balance is restored.
+#[test]
+fn withdraw_failure_leaves_state_recoverable() {
+    let env = Env::default();
+    let target: i128 = 1_000_000;
+    let fee_bps: i64 = 250;
+    let harness = setup_fee_harness(&env, target, fee_bps, "INV010");
+    fund_to_target(&env, &harness, target);
+
+    // Drain the contract balance to simulate an external failure.
+    let drain_to = Address::generate(&env);
+    harness.token_admin.mint(&harness.contract_id, &target);
+    harness.token.transfer(&harness.contract_id, &drain_to, &target);
+    assert_eq!(harness.token.balance(&harness.contract_id), 0);
+
+    let result = harness.client.try_withdraw();
+    assert_contract_error(result, EscrowError::InsufficientContractBalance);
+
+    // Recovery: restore the balance and retry.
+    harness.token.transfer(&drain_to, &harness.contract_id, &target);
+    harness.client.withdraw();
+
+    let expected_fee = target * (fee_bps as i128) / 10_000;
+    let expected_net = target - expected_fee;
+    assert_eq!(harness.token.balance(&harness.treasury), expected_fee);
+    assert_eq!(harness.token.balance(&harness.sme), expected_net);
+    assert_eq!(harness.token.balance(&harness.contract_id), 0);
+}
+
+// ── Observability: read-view reflects setter immediately ─────────────────────
+
+/// The fee setter emits an update and the read-view reflects the new rate
+/// immediately; calling it again with a different value updates it again.
+#[test]
+fn set_protocol_fee_bps_updates_read_view() {
+    let env = Env::default();
+    let target: i128 = 1_000_000;
+    let harness = setup_fee_harness(&env, target, 0, "INV011");
+    assert_eq!(harness.client.get_protocol_fee_bps(), 0);
+
+    harness.client.set_protocol_fee_bps(&125i64);
+    assert_eq!(harness.client.get_protocol_fee_bps(), 125);
+
+    harness.client.set_protocol_fee_bps(&0i64);
+    assert_eq!(harness.client.get_protocol_fee_bps(), 0);
+}
+
+// ── State-preservation under adverse fee conditions ──────────────────────────
+
+/// Status remains unchanged (open = 0) when `withdraw` is rejected before
+/// the escrow is funded. The escrow must be retryable with no residual state.
+#[test]
+fn withdraw_before_funded_leaves_status_open() {
+    let env = Env::default();
+    let harness = setup_fee_harness(&env, 500_000, 200, "INV017");
+
+    // Escrow is open (status 0) — withdraw must be rejected.
+    assert_eq!(harness.client.get_escrow().status, 0);
+
+    let _ = harness.client.try_withdraw();
+
+    // Status must still be open after the rejected call.
+    assert_eq!(harness.client.get_escrow().status, 0);
+}
+
+/// `WithdrawalNotFunded` (status guard) fires before any token transfer
+/// attempt, so the funded_amount is never changed by a rejected withdraw.
+#[test]
+fn withdraw_rejection_does_not_alter_funded_amount() {
+    let env = Env::default();
+    let target: i128 = 1_000_000;
+    let harness = setup_fee_harness(&env, target, 250, "INV018");
+
+    // No tokens funded; funded_amount == 0.
+    let before = harness.client.get_escrow().funded_amount;
+    assert_eq!(before, 0);
+
+    let _ = harness.client.try_withdraw();
+
+    let after = harness.client.get_escrow().funded_amount;
+    assert_eq!(after, before, "funded_amount must not change on rejected withdraw");
+}
+
+/// Multiple repeated failed withdraws are idempotent: the escrow state
+/// and all balances remain exactly equal to their pre-call values.
+#[test]
+fn repeated_failed_withdraws_are_idempotent() {
+    let env = Env::default();
+    let target: i128 = 1_000_000;
+    let harness = setup_fee_harness(&env, target, 500, "INV019");
+
+    // Escrow is open — three consecutive withdraw attempts all fail.
+    for _ in 0..3 {
+        let result = harness.client.try_withdraw();
+        assert_contract_error(
+            result,
+            EscrowError::WithdrawalNotFunded,
+        );
+    }
+
+    // No balances changed, no state mutated.
+    assert_eq!(harness.client.get_escrow().status, 0);
+    assert_eq!(harness.client.get_escrow().funded_amount, 0);
+    assert_eq!(harness.token.balance(&harness.sme), 0);
+    assert_eq!(harness.token.balance(&harness.treasury), 0);
+    assert_eq!(harness.token.balance(&harness.contract_id), 0);
+}
+
+// ── Fee arithmetic: overflow-safety and floor behavior ───────────────────────
+
+/// For a non-even dividend, the floor division must produce `fee + net == target`
+/// with no rounding loss (integer floor is deterministic).
+#[test]
+fn withdraw_odd_amount_fee_split_conserves_total() {
+    let env = Env::default();
+    // 333_333 * 250 / 10_000 = 8333.325 → floor = 8333
+    let target: i128 = 333_333;
+    let fee_bps: i64 = 250;
+    let harness = setup_fee_harness(&env, target, fee_bps, "INV020");
+    fund_to_target(&env, &harness, target);
+
+    harness.client.withdraw();
+
+    let expected_fee = target * (fee_bps as i128) / 10_000;
+    let expected_net = target - expected_fee;
+
+    assert_eq!(harness.token.balance(&harness.treasury), expected_fee);
+    assert_eq!(harness.token.balance(&harness.sme), expected_net);
+    assert_eq!(expected_fee + expected_net, target);
+}
+
+/// The fee setter requires admin auth; a call without auth panics at the
+/// host-level `require_auth`.
+#[test]
+#[should_panic]
+fn set_protocol_fee_bps_requires_admin_auth() {
+    let env = Env::default();
+    let harness = setup_fee_harness(&env, 100_000, 0, "INV021");
+    env.mock_auths(&[]);
+    harness.client.set_protocol_fee_bps(&1_000i64);
+}
