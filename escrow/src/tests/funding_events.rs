@@ -51,7 +51,6 @@ fn init_for_funding(
         &None,
         &None,
         &None::<i64>,
-        &None::<u32>,
     );
     admin
 }
