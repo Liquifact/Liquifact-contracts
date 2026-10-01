@@ -111,6 +111,7 @@ fn test_fund_batch_too_large_rejected() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
     let mut entries: SorobanVec<(Address, i128)> = SorobanVec::new(&env);
     for _ in 0..(crate::MAX_FUND_BATCH + 1) {
@@ -176,6 +177,7 @@ fn test_fund_batch_entry_below_floor_rejected() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
     let inv = Address::generate(&env);
     let mut entries: SorobanVec<(Address, i128)> = SorobanVec::new(&env);
@@ -213,6 +215,7 @@ fn test_unfund_zero_amount_rejected() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
     client.fund(&investor, &10_000i128);
     assert_contract_error(
@@ -246,6 +249,7 @@ fn test_unfund_negative_amount_rejected() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
     client.fund(&investor, &10_000i128);
     assert_contract_error(
@@ -307,6 +311,7 @@ fn test_init_negative_amount_rejected() {
             &None,
             &None,
             &None::<i64>,
+        &None::<u32>,
         ),
         EscrowError::AmountMustBePositive,
     );
@@ -336,6 +341,7 @@ fn test_init_zero_amount_rejected() {
             &None,
             &None,
             &None::<i64>,
+        &None::<u32>,
         ),
         EscrowError::AmountMustBePositive,
     );
@@ -365,6 +371,7 @@ fn test_init_exact_max_invoice_amount_accepted() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 }
 
@@ -392,6 +399,7 @@ fn test_init_above_max_invoice_amount_rejected() {
             &None,
             &None,
             &None::<i64>,
+        &None::<u32>,
         ),
         EscrowError::AmountExceedsMax,
     );

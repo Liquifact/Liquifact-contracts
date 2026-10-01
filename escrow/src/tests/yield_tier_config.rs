@@ -54,6 +54,7 @@ fn test_yield_tier_config_after_init() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let cfg = client.get_yield_tier_config();

@@ -1,5 +1,5 @@
 use super::*;
-use crate::{EscrowError, PauseReason, PauseScope, PausedChanged};
+use crate::{EscrowError, PausedChanged};
 use soroban_sdk::{testutils::Events, token::StellarAssetClient, Event};
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -32,6 +32,7 @@ fn init_open(
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
     (token, treasury)
 }
@@ -81,6 +82,7 @@ fn init_funded_with_real_token<'a>(
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
     sac_admin.mint(investor, &TARGET);
     client.fund(investor, &TARGET);
@@ -118,6 +120,7 @@ fn init_settled<'a>(
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
     let sac_admin = StellarAssetClient::new(env, &token);
     sac_admin.mint(investor, &TARGET);
@@ -459,7 +462,7 @@ fn pause_orthogonal_to_legal_hold() {
     assert!(!client.get_legal_hold());
 
     // Legal hold doesn't affect pause
-    client.set_legal_hold(&true, &0u32);
+    client.set_legal_hold(&true);
     assert!(client.is_paused());
     assert!(client.get_legal_hold());
 
@@ -469,7 +472,7 @@ fn pause_orthogonal_to_legal_hold() {
     assert!(client.get_legal_hold());
 
     // Clearing legal hold leaves pause intact
-    client.clear_legal_hold(&1u32);
+    client.clear_legal_hold();
     assert!(!client.is_paused());
     assert!(!client.get_legal_hold());
 }
@@ -496,7 +499,7 @@ fn pause_gate_fires_before_legal_hold_fund() {
     let investor = Address::generate(&env);
     init_open(&client, &env, &admin, &sme, "PAU022");
     client.set_paused(&true, &PauseScope::All, &PauseReason::Incident);
-    client.set_legal_hold(&true, &0u32);
+    client.set_legal_hold(&true);
     // Should panic with PausedBlocksFunding, not LegalHoldBlocksFunding
     client.fund(&investor, &TARGET);
 }
@@ -509,7 +512,7 @@ fn pause_gate_fires_before_legal_hold_settle() {
     let investor = Address::generate(&env);
     init_funded(&client, &env, &admin, &sme, &investor, "PAU023");
     client.set_paused(&true, &PauseScope::All, &PauseReason::Incident);
-    client.set_legal_hold(&true, &0u32);
+    client.set_legal_hold(&true);
     // Should panic with PausedBlocksSettlement, not LegalHoldBlocksSettlement
     client.settle();
 }
@@ -524,7 +527,7 @@ fn pause_gate_fires_before_legal_hold_withdraw() {
     let investor = Address::generate(&env);
     let (client, _escrow_id) = init_funded_with_real_token(&env, &admin, &sme, &investor, "PAU024");
     client.set_paused(&true, &PauseScope::All, &PauseReason::Incident);
-    client.set_legal_hold(&true, &0u32);
+    client.set_legal_hold(&true);
     // Should panic with PausedBlocksWithdrawal, not LegalHoldBlocksWithdrawal
     client.withdraw();
 }
@@ -538,7 +541,7 @@ fn pause_gate_fires_before_legal_hold_claim() {
     init_funded(&client, &env, &admin, &sme, &investor, "PAU025");
     client.settle();
     client.set_paused(&true, &PauseScope::All, &PauseReason::Incident);
-    client.set_legal_hold(&true, &0u32);
+    client.set_legal_hold(&true);
     // Should panic with PausedBlocksInvestorClaims, not LegalHoldBlocksInvestorClaims
     client.claim_investor_payout(&investor);
 }

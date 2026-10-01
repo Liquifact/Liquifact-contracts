@@ -1,5 +1,4 @@
 //! Storage arithmetic safety tests — overflow and underflow at extreme values.
-//! Storage arithmetic safety tests — overflow and underflow at extreme values.
 //!
 //! Every arithmetic path in the escrow contract that touches stored values uses
 //! `checked_*` or `saturating_*` ops.  This module verifies that:
@@ -24,7 +23,7 @@
 // Bring in the shared test helpers (setup, free_addresses, install_stellar_asset_token,
 // assert_contract_error, StellarTestToken, deploy, etc.) plus all re-exported types.
 use super::*;
-use crate::{LiquifactEscrow, MAX_INVOICE_AMOUNT, MIN_PAUSE_MAX_DURATION_SECS, PauseReason, PauseScope};
+use crate::{LiquifactEscrow, MAX_INVOICE_AMOUNT, MIN_PAUSE_MAX_DURATION_SECS};
 use soroban_sdk::{
     testutils::{Address as _, Ledger as _},
     Address, Env, InvokeError, String,
@@ -68,7 +67,6 @@ fn setup_with_token(
         &None,
         &None,
         &protocol_fee_bps,
-        &None::<u32>, // token_decimals
     );
     (client, id, sme, sac)
 }
@@ -110,7 +108,6 @@ fn setup_no_token(
         &None,
         &None,
         &protocol_fee_bps,
-        &None::<u32>, // token_decimals
     );
     (client, id, sme)
 }
@@ -404,6 +401,7 @@ fn compute_payout_max_invoice_amount_max_yield_does_not_overflow() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let investor = Address::generate(&env);
@@ -456,6 +454,7 @@ fn compute_payout_max_invoice_amount_zero_yield() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let investor = Address::generate(&env);
@@ -502,6 +501,7 @@ fn compute_payout_two_investors_at_max_principal_max_yield() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let investor_a = Address::generate(&env);
@@ -780,6 +780,7 @@ fn unfund_exact_contribution_succeeds() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let investor = Address::generate(&env);
@@ -845,6 +846,7 @@ fn distributed_principal_saturating_add_never_wraps_on_refund() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let investors: std::vec::Vec<Address> = (0..3)
@@ -901,6 +903,7 @@ fn distributed_principal_saturating_add_on_withdraw_at_max() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let investor = Address::generate(&env);
@@ -1047,6 +1050,7 @@ fn validate_maturity_bounds_saturating_add_does_not_wrap() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let escrow = client.get_escrow();
@@ -1092,6 +1096,7 @@ fn validate_maturity_above_max_horizon_rejected() {
             &None,
             &None,
             &None::<i64>,
+        &None::<u32>,
         ),
         EscrowError::MaturityExceedsMaxHorizon,
     );
@@ -1142,6 +1147,7 @@ fn init_rejects_above_max_invoice_amount() {
             &None,
             &None,
             &None::<i64>,
+        &None::<u32>,
         ),
         EscrowError::AmountExceedsMax,
     );
@@ -1178,6 +1184,7 @@ fn init_rejects_i128_max_amount() {
             &None,
             &None,
             &None::<i64>,
+        &None::<u32>,
         ),
         EscrowError::AmountExceedsMax,
     );
@@ -1215,6 +1222,7 @@ fn init_rejects_zero_and_negative_amount() {
                 &None,
                 &None,
                 &None::<i64>,
+        &None::<u32>,
             ),
             EscrowError::AmountMustBePositive,
         );

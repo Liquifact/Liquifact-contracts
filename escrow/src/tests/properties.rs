@@ -35,8 +35,7 @@ proptest! {
             &None,
         &None,
         &None,
-        &None::<i64>,
-        &None::<u32>);
+        &None::<i64>);
 
         let before = client.get_escrow().funded_amount;
         client.fund(&investor1, &amount1);
@@ -80,8 +79,7 @@ proptest! {
             &None,
         &None,
         &None,
-        &None::<i64>,
-        &None::<u32>);
+        &None::<i64>);
         prop_assert_eq!(escrow.status, 0);
 
         let after_fund = client.fund(&investor, &amount);
@@ -168,8 +166,7 @@ proptest! {
             &None,
         &None,
         &None,
-        &None::<i64>,
-        &None::<u32>);
+        &None::<i64>);
 
         let investors: Vec<Address> = (0..investor_count)
             .map(|_| Address::generate(&env))
@@ -348,6 +345,7 @@ fn prop_status_transitions_open_to_funded_only() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let initial = client.get_escrow();
@@ -390,6 +388,7 @@ fn prop_status_settle_transition() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     client.fund(&investor, &target);
@@ -431,6 +430,7 @@ fn prop_status_withdraw_transition() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     token.stellar.mint(&investor, &target);
@@ -476,6 +476,7 @@ fn prop_no_regression_from_funded_status() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     client.fund(&investor, &target);
@@ -525,6 +526,7 @@ fn prop_no_regression_after_withdraw() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     token.stellar.mint(&investor, &target);
@@ -566,6 +568,7 @@ fn prop_settled_is_terminal_for_settle() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     client.fund(&investor, &target);
@@ -605,6 +608,7 @@ fn prop_withdrawn_is_terminal_for_withdraw() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     token.stellar.mint(&investor, &target);
@@ -644,6 +648,7 @@ fn prop_status_invariant_all_states_valid_range() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     assert!(client.get_escrow().status == 0);
@@ -688,6 +693,7 @@ fn prop_funded_amount_sum_of_contributions() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let inv1 = Address::generate(&env);
@@ -742,6 +748,7 @@ fn prop_funded_amount_respects_funding_target() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let fund_amount = target + excess;
@@ -784,6 +791,7 @@ fn prop_funded_amount_non_decreasing_across_multiple_funders() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let amt1: i128 = 50_000_000_000i128;
@@ -840,6 +848,7 @@ fn prop_funded_amount_equals_contribution_sum_for_funded_escrow() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let amounts: [i128; 3] = [50_000_000_000i128, 100_000_000_000i128, 50_000_000_000i128];
@@ -962,6 +971,7 @@ fn fuzz_multi_investor_fund_ordering_snapshot_once_only() {
             &None,
             &None,
             &None::<i64>,
+            &None::<u32>,
         );
 
         // Randomize investor count/order and positive amounts. Keep the sequence small so
@@ -1190,6 +1200,7 @@ fn funded_and_settled_escrow<'a>(
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     for (investor, amount) in contributions {
@@ -1552,7 +1563,7 @@ fn cancelled_escrow<'a>(
         &admin,
         &soroban_sdk::String::from_str(env, invoice_id),
         &sme,
-        &target,
+        &total,
         &800i64,
         &0u64,
         &token,
@@ -1564,15 +1575,11 @@ fn cancelled_escrow<'a>(
         &None,
         &None,
         &None,
-        &None,
-        &None,
-        &None::<i64>,
-        &None::<u32>,
     );
     for (investor, amount) in contributions {
         client.fund(investor, amount);
     }
-    client.cancel_funding(&0u32);
+    client.cancel_funding();
     client
 }
 
@@ -1726,6 +1733,7 @@ fn tiered_funded_and_settled_escrow<'a>(
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     for (investor, amount, lock_secs) in contributions {
@@ -2172,6 +2180,7 @@ fn slots_no_cap_is_none_after_multiple_funds() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     assert_eq!(
@@ -2230,7 +2239,8 @@ proptest! {
             &None,
             &None,
             &None,
-        &None::<i64>,);
+        &None::<i64>,
+        &None::<u32>,);
 
         // Verify invariant on fresh contract.
         assert_slots_invariant(&client, "initial");
@@ -2325,6 +2335,7 @@ fn slots_repeat_deposit_does_not_decrement_remaining() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let investor = Address::generate(&env);
@@ -2395,6 +2406,7 @@ fn slots_lower_cap_mid_sequence_invariant() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     // Fund 3 distinct investors.
@@ -2418,7 +2430,7 @@ fn slots_lower_cap_mid_sequence_invariant() {
     assert_eq!(remaining_before_lower, 3, "6 - 3 = 3 remaining slots");
 
     // Lower cap to exactly count (minimum valid lower: 3).
-    client.lower_max_unique_investors(&3u32, &0u32);
+    client.lower_max_unique_investors(&3u32);
     assert_slots_invariant(&client, "after lower_cap to 3");
 
     let cap_after_lower = client.get_max_unique_investors_cap().unwrap();
@@ -2436,7 +2448,7 @@ fn slots_lower_cap_mid_sequence_invariant() {
     // First reset cap to 6, then lower to 5.
     // Actually raise it back then lower again to test a partial lowering.
     client.raise_max_unique_investors(&6u32);
-    client.lower_max_unique_investors(&5u32, &1u32);
+    client.lower_max_unique_investors(&5u32);
     assert_slots_invariant(&client, "after raise then lower to 5");
 
     let remaining_at_5 = client.get_remaining_investor_slots().unwrap();
@@ -2477,6 +2489,7 @@ fn slots_fund_batch_conservation() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     assert_slots_invariant(&client, "pre-batch");
@@ -2575,7 +2588,8 @@ proptest! {
             &None,
             &None,
             &None,
-        &None::<i64>,);
+        &None::<i64>,
+        &None::<u32>,);
 
         let investors: Vec<Address> = (0..n_investors)
             .map(|_| Address::generate(&env))
@@ -2716,7 +2730,7 @@ proptest! {
                         rng.gen_usize(2) as u32 + 1
                     );
                     if target_cap >= count && target_cap >= 1 && target_cap < current_cap {
-                        client.lower_max_unique_investors(&target_cap, &client.get_admin_nonce());
+                        client.lower_max_unique_investors(&target_cap);
                         current_cap = target_cap;
                     }
 
@@ -2772,6 +2786,7 @@ fn slots_cap_exactly_hit_remaining_is_zero() {
         &None,
         &None,
         &None::<i64>,
+        &None::<u32>,
     );
 
     let investors: Vec<Address> = (0..cap as usize).map(|_| Address::generate(&env)).collect();
