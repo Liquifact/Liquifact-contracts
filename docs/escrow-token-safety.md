@@ -17,6 +17,7 @@ Located in [`escrow/src/external_calls.rs`](../escrow/src/external_calls.rs), th
 
 | Check | Condition | Error code |
 |-------|-----------|------------|
+| Distinct parties | `from != treasury` | `TransferSameSenderRecipient` (283); inbound: `InboundTransferSameSenderRecipient` (284) |
 | Amount validity | `amount > 0` | `TransferAmountNotPositive` (36) |
 | Balance sufficiency | `sender.balance >= amount` | `InsufficientTokenBalanceBeforeTransfer` (37) |
 

@@ -1,4 +1,3 @@
-
 use soroban_sdk::contracterror;
 
 /// Stable typed errors emitted by LiquiFact escrow entrypoints.
@@ -445,4 +444,10 @@ pub enum EscrowError {
     PartialSettleNotOpen = 281,
     /// [`LiquifactEscrow::get_contributions`] exceeded [`MAX_INVESTOR_READ_BATCH`].
     ContributionReadBatchTooLarge = 282,
+    /// Outbound funding-token transfer where sender and recipient are the same address
+    /// (`external_calls::transfer_funding_token_with_balance_checks`, invariant 1).
+    TransferSameSenderRecipient = 283,
+    /// Inbound funding-token transfer where investor and recipient are the same address
+    /// (`external_calls::transfer_funding_token_inbound_with_balance_checks`, invariant 1).
+    InboundTransferSameSenderRecipient = 284,
 }

@@ -110,7 +110,7 @@ fn test_muxed_address_compatibility() {
     // resulting value must round-trip back to the original address so that
     // callers relying on the compatibility contract observe no change.
     let muxed_treasury: MuxedAddress = treasury.clone().into();
-    assert_eq!(Address::from(muxed_treasury.clone()), treasury);
+    assert_eq!(muxed_treasury.address(), treasury);
 
     // Transfer should work with MuxedAddress internally
     transfer_funding_token_with_balance_checks(&env, &token.id, &holder, &treasury, amount);
@@ -1040,7 +1040,7 @@ fn sweep_liability_floor_blocked_emits_no_dust_event() {
 // ── State invariant tests for Issue #1257 ──────────────────────────────────
 
 #[test]
-#[should_panic(expected = "HostError: Error(Contract, #253)")]
+#[should_panic(expected = "HostError: Error(Contract, #283)")]
 fn test_outbound_self_transfer_rejected_pre_transfer() {
     let env = Env::default();
     env.mock_all_auths();
@@ -1070,7 +1070,7 @@ fn test_outbound_self_transfer_rejected_with_contract_error() {
 }
 
 #[test]
-#[should_panic(expected = "HostError: Error(Contract, #254)")]
+#[should_panic(expected = "HostError: Error(Contract, #284)")]
 fn test_inbound_self_transfer_rejected_pre_transfer() {
     let env = Env::default();
     env.mock_all_auths();
@@ -1220,4 +1220,182 @@ fn test_invariant_balance_zero_after_two_transfers_total() {
     transfer_funding_token_with_balance_checks(&env, &token.id, &holder, &treasury, 600i128);
     assert_eq!(token.token.balance(&holder), 0i128);
     assert_eq!(token.token.balance(&treasury), total);
+}
+
+// ── State invariant coverage for Issue #1382 ───────────────────────────────
+//
+// Each guard in `external_calls` fails with its own typed code, in a fixed
+// order, before the token is touched (guards 1-3). These tests pin the exact
+// code per guard and direction, the guard precedence, that rejected calls leave
+// balances unchanged and can be retried, and that the helpers keep no state
+// between calls.
+
+mod issue_1382 {
+    use super::super::super::external_calls::{
+        transfer_funding_token_inbound_with_balance_checks,
+        transfer_funding_token_with_balance_checks, transfer_into_escrow_with_balance_checks,
+    };
+    use super::*;
+
+    fn funded(env: &Env, amount: i128) -> (StellarTestToken<'_>, Address, Address) {
+        env.mock_all_auths();
+        let token = install_stellar_asset_token(env);
+        let from = deploy_id(env);
+        let to = Address::generate(env);
+        if amount > 0 {
+            token.stellar.mint(&from, &amount);
+        }
+        (token, from, to)
+    }
+
+    // Outbound: one test per guard, pinned to its exact code.
+
+    #[test]
+    #[should_panic(expected = "HostError: Error(Contract, #36)")]
+    fn outbound_zero_amount_is_code_36() {
+        let env = Env::default();
+        let (token, from, to) = funded(&env, 10);
+        transfer_funding_token_with_balance_checks(&env, &token.id, &from, &to, 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "HostError: Error(Contract, #36)")]
+    fn outbound_negative_amount_is_code_36() {
+        let env = Env::default();
+        let (token, from, to) = funded(&env, 10);
+        transfer_funding_token_with_balance_checks(&env, &token.id, &from, &to, -1);
+    }
+
+    #[test]
+    #[should_panic(expected = "HostError: Error(Contract, #37)")]
+    fn outbound_insufficient_balance_is_code_37() {
+        let env = Env::default();
+        let (token, from, to) = funded(&env, 10);
+        transfer_funding_token_with_balance_checks(&env, &token.id, &from, &to, 11);
+    }
+
+    /// Guard 1 (self-transfer) runs before guard 2 (positivity): a call that
+    /// violates both always reports the self-transfer code.
+    #[test]
+    #[should_panic(expected = "HostError: Error(Contract, #283)")]
+    fn outbound_self_transfer_takes_precedence_over_non_positive_amount() {
+        let env = Env::default();
+        let (token, from, _) = funded(&env, 10);
+        transfer_funding_token_with_balance_checks(&env, &token.id, &from, &from, 0);
+    }
+
+    // Inbound: same guards, inbound codes.
+
+    #[test]
+    #[should_panic(expected = "HostError: Error(Contract, #171)")]
+    fn inbound_zero_amount_is_code_171() {
+        let env = Env::default();
+        let (token, investor, escrow) = funded(&env, 10);
+        transfer_funding_token_inbound_with_balance_checks(&env, &token.id, &investor, &escrow, 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "HostError: Error(Contract, #172)")]
+    fn inbound_insufficient_balance_is_code_172() {
+        let env = Env::default();
+        let (token, investor, escrow) = funded(&env, 10);
+        transfer_funding_token_inbound_with_balance_checks(&env, &token.id, &investor, &escrow, 11);
+    }
+
+    #[test]
+    #[should_panic(expected = "HostError: Error(Contract, #284)")]
+    fn inbound_self_transfer_takes_precedence_over_non_positive_amount() {
+        let env = Env::default();
+        let (token, investor, _) = funded(&env, 10);
+        transfer_funding_token_inbound_with_balance_checks(
+            &env, &token.id, &investor, &investor, -5,
+        );
+    }
+
+    #[test]
+    fn inbound_exact_balance_moves_exactly_amount() {
+        let env = Env::default();
+        let (token, investor, escrow) = funded(&env, 750);
+        transfer_funding_token_inbound_with_balance_checks(
+            &env, &token.id, &investor, &escrow, 750,
+        );
+        assert_eq!(token.token.balance(&investor), 0);
+        assert_eq!(token.token.balance(&escrow), 750);
+    }
+
+    /// The public alias is the inbound helper, not a separate code path.
+    #[test]
+    fn alias_matches_inbound_helper() {
+        let env = Env::default();
+        let (token, investor, escrow) = funded(&env, 300);
+        transfer_into_escrow_with_balance_checks(&env, &token.id, &investor, &escrow, 120);
+        transfer_funding_token_inbound_with_balance_checks(
+            &env, &token.id, &investor, &escrow, 180,
+        );
+        assert_eq!(token.token.balance(&investor), 0);
+        assert_eq!(token.token.balance(&escrow), 300);
+    }
+
+    // Retries and repeated calls.
+
+    /// A rejected inbound call moves nothing; retrying with a valid amount
+    /// succeeds exactly as a first attempt would.
+    #[test]
+    fn inbound_rejected_call_leaves_balances_unchanged_and_is_retryable() {
+        let env = Env::default();
+        let (token, investor, escrow) = funded(&env, 100);
+
+        let rejected = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            transfer_funding_token_inbound_with_balance_checks(
+                &env, &token.id, &investor, &escrow, 101,
+            );
+        }));
+        assert!(
+            rejected.is_err(),
+            "over-balance inbound transfer must be rejected"
+        );
+        assert_eq!(token.token.balance(&investor), 100);
+        assert_eq!(token.token.balance(&escrow), 0);
+
+        transfer_funding_token_inbound_with_balance_checks(
+            &env, &token.id, &investor, &escrow, 100,
+        );
+        assert_eq!(token.token.balance(&investor), 0);
+        assert_eq!(token.token.balance(&escrow), 100);
+    }
+
+    /// The helpers keep no per-leg state: repeating the identical call on the
+    /// same (token, from, to) leg is evaluated like the first one, and the
+    /// running totals stay exact.
+    #[test]
+    fn repeated_identical_legs_are_independent_and_exact() {
+        let env = Env::default();
+        let (token, from, to) = funded(&env, 30);
+        for i in 1..=3 {
+            transfer_funding_token_with_balance_checks(&env, &token.id, &from, &to, 10);
+            assert_eq!(token.token.balance(&from), 30 - 10 * i);
+            assert_eq!(token.token.balance(&to), 10 * i);
+        }
+        // The fourth identical call now lacks funds and is rejected the same
+        // way every time, without touching balances.
+        for _ in 0..2 {
+            let rejected = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                transfer_funding_token_with_balance_checks(&env, &token.id, &from, &to, 10);
+            }));
+            assert!(rejected.is_err());
+            assert_eq!(token.token.balance(&from), 0);
+            assert_eq!(token.token.balance(&to), 30);
+        }
+    }
+
+    /// Opposite directions on the same address pair are independent legs.
+    #[test]
+    fn outbound_and_inbound_legs_on_same_pair_both_conserve_value() {
+        let env = Env::default();
+        let (token, escrow, other) = funded(&env, 500);
+        transfer_funding_token_with_balance_checks(&env, &token.id, &escrow, &other, 200);
+        transfer_funding_token_inbound_with_balance_checks(&env, &token.id, &other, &escrow, 50);
+        assert_eq!(token.token.balance(&escrow), 350);
+        assert_eq!(token.token.balance(&other), 150);
+    }
 }
