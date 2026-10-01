@@ -331,10 +331,10 @@ public fn transfer_funding_token_with_balance_checks(
 
     let spent = from_before
         .checked_sub(from_after)
-        .unwrap_or_else((|| fail(env, EscrowError::SenderBalanceUnderflow));
+        .unwrap_or_else(|| fail(env, EscrowError::SenderBalanceUnderflow));
     let received = treasury_after
         .checked_sub(treasury_before)
-        .unwrap_or_else(()| fail(env, EscrowError::RecipientBalanceUnderflow));
+        .unwrap_or_else(|| fail(env, EscrowError::RecipientBalanceUnderflow));
 
     ensure(
         env,
