@@ -198,3 +198,47 @@ fn deployed_contract_id_is_stable() {
     client.set_collateral_limit(&1234);
     assert_eq!(client.get_collateral_limit(), 1234);
 }
+
+/// Simulates concurrent execution and racing requests by interleaving valid,
+/// invalid, and duplicate requests. This ensures that the state remains consistent
+/// and the contract handles races deterministically.
+#[test]
+fn concurrent_execution_and_racing_requests_simulation() {
+    let env = Env::default();
+    let (client, _admin) = setup_with_limit(&env, 100);
+
+    // Simulate Thread A sets limit to 200
+    client.set_collateral_limit(&200);
+    assert_eq!(client.get_collateral_limit(), 200);
+
+    // Simulate Thread B racing and sending invalid limit
+    let result_b = client.try_set_collateral_limit(&-50);
+    assert_contract_error(result_b, EscrowError::InvalidCollateralLimit);
+    assert_eq!(client.get_collateral_limit(), 200);
+
+    // Simulate Thread C setting limit to 300
+    client.set_collateral_limit(&300);
+    assert_eq!(client.get_collateral_limit(), 300);
+
+    // Simulate Thread A duplicate work / idempotent retry (arriving late)
+    client.set_collateral_limit(&200);
+    assert_eq!(client.get_collateral_limit(), 200);
+    
+    // Verify timing boundary condition where limit is changed to 0 rapidly
+    client.set_collateral_limit(&0);
+    assert_eq!(client.get_collateral_limit(), 0);
+}
+
+/// Validates that intensive idempotent retries and duplicate work do not cause
+/// unexpected side effects or state drift.
+#[test]
+fn idempotent_retries_and_duplicate_work() {
+    let env = Env::default();
+    let (client, _admin) = setup_with_limit(&env, 500);
+
+    // Simulate aggressive retries
+    for _ in 0..50 {
+        client.set_collateral_limit(&500);
+        assert_eq!(client.get_collateral_limit(), 500);
+    }
+}

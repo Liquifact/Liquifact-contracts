@@ -176,6 +176,9 @@ mod collateral_storage;
 ///
 /// See `docs/OPERATOR_RUNBOOK.md` for the full redeploy-vs-upgrade decision tree.
 pub const SCHEMA_VERSION: u32 = 6;
+
+/// Explicit legacy version before version markers were introduced.
+pub const LEGACY_VERSION: u32 = 5;
 // See the schema version contract documentation: [Escrow schema versioning](../docs/escrow-schema-versioning.md)
 
 /// Version of the lifecycle event topics emitted by this contract.
@@ -737,6 +740,8 @@ pub const MAX_PAUSE_TOGGLE_WINDOW_SECS: u64 = 7_776_000; // 90 days
     AlreadyCurrentSchemaVersion = 91,
     /// [`LiquifactEscrow::migrate`] has no implemented path from the requested version.
     NoMigrationPath = 92,
+    /// Storage lacks a version marker and does not match the known legacy layout.
+    AmbiguousLegacyStorage = 93,
 
     /// [`LiquifactEscrow::fund`] / [`LiquifactEscrow::fund_with_commitment`] received non-positive amount.
     FundingAmountNotPositive = 100,
@@ -6550,10 +6555,23 @@ impl LiquifactEscrow {
     ///
     /// See `docs/OPERATOR_RUNBOOK.md` §2 for step-by-step instructions on implementing
     /// a concrete migration path.
-    pub fn migrate(env: Env, from_version: u32) -> u32 {
+    pub fn migrate(env: Env, from_version: u32, expected_nonce: u32) -> u32 {
         Self::load_escrow_require_admin(&env);
+        Self::consume_admin_nonce(&env, expected_nonce);
 
-        let stored: u32 = env.storage().instance().get(&DataKey::Version).unwrap_or(0);
+        let stored: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::Version)
+            .unwrap_or_else(|| {
+                let has_token = env.storage().instance().has(&DataKey::FundingToken);
+                let has_treasury = env.storage().instance().has(&DataKey::Treasury);
+                if has_token && has_treasury {
+                    LEGACY_VERSION
+                } else {
+                    fail(&env, EscrowError::AmbiguousLegacyStorage)
+                }
+            });
 
         ensure(
             &env,
@@ -6562,14 +6580,17 @@ impl LiquifactEscrow {
         );
 
         if from_version >= SCHEMA_VERSION {
-            fail(&env, EscrowError::AlreadyCurrentSchemaVersion)
-        } else {
-            // No migration path is implemented for any version below SCHEMA_VERSION.
-            // To add one: implement the transformation here, call
-            //   env.storage().instance().set(&DataKey::Version, &NEW_VERSION);
-            // and return NEW_VERSION before reaching this typed error.
-            fail(&env, EscrowError::NoMigrationPath)
+            fail(&env, EscrowError::AlreadyCurrentSchemaVersion);
         }
+
+        if from_version == LEGACY_VERSION {
+            env.storage()
+                .instance()
+                .set(&DataKey::Version, &SCHEMA_VERSION);
+            return SCHEMA_VERSION;
+        }
+
+        fail(&env, EscrowError::NoMigrationPath)
     }
 
     /// Replaces the deployed WASM bytecode for this contract instance while preserving all
