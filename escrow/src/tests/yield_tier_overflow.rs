@@ -50,7 +50,6 @@ fn setup_tiered_escrow<'a>(
         &None,
         &None,
         &None::<i64>,
-        &None::<u32>,
     );
 
     (client, admin, sme, sac.stellar)

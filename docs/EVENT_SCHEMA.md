@@ -37,6 +37,12 @@ in the topic list, after all other `#[topic]` fields. Indexers MUST ignore this
 extra topic when reading from a known schema version and SHOULD reject events
 whose version is not `v1` when strict compatibility is required.
 
+The trailing version topic is a **compatibility contract**: it is additive and
+must never be reordered, renamed, or removed. Consumers that pin to `v1` rely on
+the exact topic ordering and data field names documented below. Any future
+schema change MUST introduce a new version value (for example `v2`) rather than
+mutating the `v1` layout in place.
+
 ## Event Catalog
 
 The current contract defines 20 event structs.
@@ -66,6 +72,11 @@ The current contract defines 20 event structs.
 | `AttestationDigestUnrevoked` | `att_unrev` | `unrevoke_attestation_digest` |
 | `AllowlistEnabledChanged` | `al_ena` | `set_allowlist_active` |
 | `InvestorAllowlistChanged` | `al_set` | `set_investor_allowlisted`, `set_investors_allowlisted` |
+
+The `name` symbol for each event is part of the compatibility contract. Symbols
+are stable identifiers: they MUST NOT be reused for a different event and MUST
+NOT be changed without a versioned migration plan. Indexers route on
+`topic[1] == name`, so symbol drift is a breaking change.
 
 ## Complete Topic And Data Layout
 
@@ -525,6 +536,12 @@ Data:
 | `investor` | `Address` | Updated investor |
 | `allowed` | `u32` | `1` = allowed, `0` = blocked |
 
+`set_investors_allowlisted` emits one `InvestorAllowlistChanged` event per
+investor in input order. The batch is bounded by `MAX_INVESTOR_ALLOWLIST_BATCH`;
+if the input exceeds the bound the call fails before any event is emitted, so
+consumers never observe a partial batch. Duplicate investors within a single
+batch are rejected before emission to keep the event stream deterministic.
+
 ## Nested Types
 
 ### `InvoiceEscrow`
@@ -568,6 +585,13 @@ Status values:
 - Do not treat collateral or attestation events as proof of off-chain custody,
   KYC status, or legal enforceability. They are metadata/audit records emitted
   after the corresponding authenticated write succeeds.
+- Treat the topic list as an ordered tuple. The trailing `version` topic is
+  always last; consumers MUST NOT assume any topic after it. New optional
+  topics, if ever introduced, will be added before `version` and gated by a
+  version bump.
+- Data payloads are maps keyed by field name. Consumers MUST tolerate unknown
+  keys within a known version (forward-compatible reads) but MUST NOT rely on
+  key ordering.
 
 ## Security And State Invariants
 
@@ -582,6 +606,12 @@ Status values:
   `set_investors_allowlisted` and `revoke_attestation_digests`, which emit O(n)
   events for `n <= MAX_INVESTOR_ALLOWLIST_BATCH` and `n <= MAX_ATTESTATION_REVOKE_BATCH`
   respectively.
+- Event emission is atomic with respect to the entrypoint's storage writes: a
+  failed or reverted call emits no events, so indexers never observe a state
+  transition that did not commit.
+- The `FundingStateChanged` `0 → 1` edge is emitted exactly once per escrow
+  instance; concurrent or retried calls cannot produce duplicate emissions
+  because the transition is guarded by the `FundingCloseSnapshot` write.
 
 ## Changelog
 
@@ -592,3 +622,4 @@ Status values:
 | 2026-05-31 | v0.3 | Issue #272: replaced drifted reference with complete `#[contractevent]` topic and data layout from `escrow/src/lib.rs` |
 | 2026-06-24 | v0.4 | Added `settled_at_ledger_timestamp` field to `EscrowSettled` event; added `is_settleable` view |
 | 2026-07-27 | v0.5 | Added `AttestationDigestUnrevoked` event for `unrevoke_attestation_digest`; updated `AttestationDigestRevoked` to include `revoke_attestation_digests` |
+| 2026-08-14 | v0.6 | Issue #allowlist_event_payloads: documented compatibility contracts for topic ordering, `name` symbols, version topic, batch emission atomicity, and forward-compatible data reads |

@@ -3,7 +3,7 @@ type: Feature
 title: "Add an extend-only entrypoint to lengthen the funding deadline while the escrow is open"
 labels: type:feature, area:funding, stack:soroban, stack:rust, priority:medium, MAYBE REWARDED, GRANTFOX OSS, OFFICIAL CAMPAIGN
 assignees: ''
----
+---`
 
 ## Add an extend-only entrypoint to lengthen the funding deadline while the escrow is open
 
