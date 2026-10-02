@@ -435,3 +435,5 @@ MIT
 
 <!-- handsoff-issue-1307 -->
 - #1307: Protect state invariants in escrow/src/tests/arithmetic_overflow.rs
+
+<!-- Updated documentation references -->
