@@ -157,6 +157,9 @@ use soroban_sdk::{
 
 pub mod external_calls;
 mod keys;
+pub mod errors;
+pub mod types;
+pub mod storage;
 
 /// Upper bound on [`LiquifactEscrow::set_investors_allowlisted`] batch size per call.
 pub const MAX_INVESTOR_ALLOWLIST_BATCH: u32 = 32;

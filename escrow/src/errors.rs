@@ -84,22 +84,22 @@ pub enum EscrowError {
     NoCollateralToClear = 300,
 
     // ------------------------------------------------------------------------------
-    // Pause Configuration & Rate-Limit Errors (230..239)
+    // Pause Configuration & Rate-Limit Errors (223..234)
     // ------------------------------------------------------------------------------
     /// `LiquifactEscrow::set_pause_max_duration` received a duration outside
-    /// `MIN_PAUSE_MAX_DURATION_SECS`..=[`MAX_PAUSE_MAX_DURATION_SECS`. Zero is always allowed.
-    PauseMaxDurationOutOfRange = 230,
+    /// `MIN_PAUSE_MAX_DURATION_SECS`..=[`MAX_PAUSE_MAX_DURATION_SECS`]. Zero is always allowed.
+    PauseMaxDurationOutOfRange = 223,
     /// `LiquifactEscrow::set_pause_rate_limit` received a toggle limit outside
-    /// `MIN_PAUSE_TOGGLE_LIMIT`..=[`@MAX_PAUSE_TOGGLE_LIMIT`. Zero is allowed only with zero window.
-    PauseToggleLimitOutOfRange = 231,
+    /// `MIN_PAUSE_TOGGLE_LIMIT`..=[`MAX_PAUSE_TOGGLE_LIMIT`]. Zero is allowed only with zero window.
+    PauseToggleLimitOutOfRange = 224,
     /// `LiquifactEscrow::set_pause_rate_limit` received a window outside
-    /// `MIN_PAUSE_TOGGLE_WINDOW_SECS`..=[`MAX_PAUSE_TOGGLE_WINDOW_SECS`. Zero is allowed only with zero toggles.
-    PauseToggleWindowOutOfRange = 232,
+    /// `MIN_PAUSE_TOGGLE_WINDOW_SECS`..=[`MAX_PAUSE_TOGGLE_WINDOW_SECS`]. Zero is allowed only with zero toggles.
+    PauseToggleWindowOutOfRange = 225,
     /// `LiquifactEscrow::set_pause_rate_limit` received an inconsistent configuration:
     /// nonzero toggles must have a nonzero window, and nonzero window must have nonzero toggles.
-    PauseRateLimitInvalidCombination = 233,
+    PauseRateLimitInvalidCombination = 226,
     /// `LiquifactEscrow::set_paused` blocked because the admin has exceeded the configured pause toggle rate limit.
-    PauseToggleRateLimitExceeded = 234,
+    PauseToggleRateLimitExceeded = 227,
 
     // ------------------------------------------------------------------------------
     // Fee Schedule Errors (240..249)
@@ -107,9 +107,9 @@ pub enum EscrowError {
     /// `LiquifactEscrow::set_fee_schedule` received a fee outside the schedule's declared min/max bounds.
     FeeScheduleOutOfBounds = 240,
     /// `LiquifactEscrow::set_fee_schedule` attempted to create a second pending schedule before the first activates.
-    FeeCheduleAlreadyPending = 241,
+    FeeScheduleAlreadyPending = 241,
     /// `LiquifactEscrow::set_fee_schedule` received an activation ledger in the past.
-    FeeCheduleInvalidActivation = 242,
+    FeeScheduleInvalidActivation = 242,
     /// `LiquifactEscrow::set_fee_schedule` attempted to submit a schedule identical to the active schedule.
     FeeScheduleSameAsActive = 243,
     FundingTokenScaleInvalid = 244,
