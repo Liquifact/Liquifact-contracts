@@ -1,7 +1,4 @@
-use soroban_sdk::{
-    contract, contracterror, contractimpl, panic_with_error, symbol_short, Address, BytesN, Env,
-    Symbol,
-};
+use soroban_sdk::{contract, contracterror, contractimpl, symbol_short, Address, BytesN, Env, Symbol};
 
 const YIELD_TIER_KEY: Symbol = symbol_short!("YLD_TIER");
 const ADMIN_KEY: Symbol = symbol_short!("ADMIN");
@@ -21,7 +18,8 @@ const VERSION_KEY: Symbol = symbol_short!("VERSION");
 #[repr(u32)]
 pub enum Error {
     NotAuthorized = 1,
-    InvalidYieldTier = 2,
+    AlreadyInitialized = 2,
+    NotInitialized = 3,
 }
 
 /// Persisted yield-tier state.
@@ -50,36 +48,30 @@ fn validate_yield_tier(tier: &YieldTierState) -> Result<(), Error> {
 
 #[contractimpl]
 impl YieldTierContract {
-    /// Initializes the contract with an authorized admin.
-    ///
-    /// Re-initialization or concurrent initialization attempts are rejected with
-    /// `Error::AlreadyInitialized` to preserve admin immutability.
-    pub fn init(env: Env, admin: Address) {
+    /// Initializes the yield tier contract with an admin address.
+    /// Returns `Err(Error::AlreadyInitialized)` if initialization has already occurred,
+    /// making retry/re-entry failure recovery deterministic and reviewable.
+    pub fn init(env: Env, admin: Address) -> Result<(), Error> {
         if env.storage().instance().has(&ADMIN_KEY) {
-            panic_with_error!(&env, Error::AlreadyInitialized);
+            return Err(Error::AlreadyInitialized);
         }
         env.storage().instance().set(&ADMIN_KEY, &admin);
-        env.storage().instance().set(&VERSION_KEY, &0u32);
+        Ok(())
     }
 
-    /// Internal helper that verifies the contract is initialized and the admin is authorized.
-    fn require_admin(env: &Env) -> Result<Address, Error> {
-        let admin: Address = env
-            .storage()
-            .instance()
-            .get(&ADMIN_KEY)
-            .ok_or(Error::NotInitialized)?;
+    /// Upgrades the contract WASM hash.
+    /// Returns `Err(Error::NotInitialized)` if the contract has not been initialized.
+    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) -> Result<(), Error> {
+        let admin: Address = match env.storage().instance().get(&ADMIN_KEY) {
+            Some(a) => a,
+            None => return Err(Error::NotInitialized),
+        };
         admin.require_auth();
         Ok(admin)
     }
 
-    /// Returns the registered admin address if initialized.
-    pub fn get_admin(env: Env) -> Result<Address, Error> {
-        env.storage()
-            .instance()
-            .get(&ADMIN_KEY)
-            .ok_or(Error::NotInitialized)
-    }
+        env.deployer().update_current_contract_wasm(new_wasm_hash.clone());
+        env.events().publish((symbol_short!("upgrade"),), (new_wasm_hash,));
 
     /// Returns the current monotonic version counter for state mutations.
     pub fn get_version(env: Env) -> u32 {
@@ -119,11 +111,12 @@ impl YieldTierContract {
     }
 
     /// Sets the yield-tier state (admin-only).
-    ///
-    /// Valid payloads are constrained to the concrete tier states. `Unset` is a
-    /// read-time default and is not allowed as a persisted configuration value.
+    /// Returns `Err(Error::NotInitialized)` if the contract has not been initialized.
     pub fn set_yield_tier(env: Env, tier: YieldTierState) -> Result<(), Error> {
-        let admin: Address = env.storage().instance().get(&ADMIN_KEY).unwrap();
+        let admin: Address = match env.storage().instance().get(&ADMIN_KEY) {
+            Some(a) => a,
+            None => return Err(Error::NotInitialized),
+        };
         admin.require_auth();
         validate_yield_tier(&tier)?;
         env.storage().instance().set(&YIELD_TIER_KEY, &tier);
@@ -166,5 +159,4 @@ impl YieldTierContract {
     }
 }
 
-#[cfg(test)]
 mod test;
