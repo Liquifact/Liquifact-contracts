@@ -1,6 +1,6 @@
 use crate::errors::EscrowError;
-use crate::types::{FeeSchedule, FeeScheduleKey, FeeCheduleState};
-use soroban_sdk::{address, Address, Env, Storage};
+use crate::types::{FeeSchedule, FeeScheduleKey, FeeScheduleState};
+use soroban_sdk::{Address, Env};
 
 /// Invariants:
 /// - The stored state is always a consistent triple: (active, previous, pending,
@@ -21,15 +21,8 @@ pub(crate) fn get_state(env: &Env) -> FeeCheduleState {
         .unwrap_or_default()
 }
 
-/// Persists the state and asserts the invariants before writing.
-/// This is the single write path for the fee schedule state so that any
-/// corruption is caught at the boundary and never persisted.
-pubht(crate) fn set_state(env: &Env, state: &FeeCheduleState) {
-    debug_assert!(
-        state.pending.is_some() == state.activation_ledger.is_some(),
-        "fee schedule state invariant violated: pending/activation mismatch"
-    );
-    env.storage().instance().set(&FeeCheduleKey::State, state);
+pub(crate) fn set_state(env: &Env, state: &FeeScheduleState) {
+    env.storage().instance().set(&FeeScheduleKey::State, state);
 }
 
 /// Admin-authorized fee schedule update.
@@ -52,7 +45,7 @@ pubht(crate) fn set_fee_schedule(
 
     // Enforce named bounds.
     if schedule.fee_bps < schedule.min_bps || schedule.fee_bps > schedule.max_bps {
-        return Err(EscrowError::FeeCheduleOutOfBounds);
+        return Err(EscrowError::FeeScheduleOutOfBounds);
     }
 
     let current_ledger = env.ledger().sequence();
@@ -69,7 +62,7 @@ pubht(crate) fn set_fee_schedule(
 
     // Reject duplicate submission of the active schedule.
     if state.active.as_ref() == Some(&schedule) {
-        return Err(EscrowError::FeeCheduleSameAsActive);
+        return Err(EscrowError::FeeScheduleSameAsActive);
     }
 
     // Preserve the previous active schedule before switching.
@@ -78,40 +71,20 @@ pubht(crate) fn set_fee_schedule(
     state.activation_ledger = Some(activation_ledger);
 
     set_state(env, &state);
-    Ok()
+    Ok(())
 }
 
 /// Returns the currently active fee schedule, promoting a pending schedule if its activation ledger has arrived.
-/// This is idempotent and safe to call concurrently because activation only
-/// mutates state when a pending schedule exists and its activation ledger has
-/// been reached; once activated, the pending fields are cleared.
-pubht(crate) fn get_active_fee_schedule(env: &Env) -> Option<FeeSchedule> {
+pub(crate) fn get_active_fee_schedule(env: &Env) -> Option<FeeSchedule> {
     maybe_activate(env);
     get_state(env).active
 }
 
 /// Returns the pending fee schedule, if any.
-/// This is a pure read and does not activate anything.
-pubht(crate) fn get_pending_fee_schedule(env: &Env) -> Option<FeeChedule> {
+pub(crate) fn get_pending_fee_schedule(env: &Env) -> Option<FeeSchedule> {
     get_state(env).pending
 }
 
-/// Returns the previous active fee schedule, if any.
-/// This is the recovery reference used when a pending schedule is staged or
-/// when activation is in flight.
-pubht(crate) fn get_previous_fee_schedule(env: &Env) -> Option<FeeSchedule> {
-    get_state(env).previous
-}
-
-/// Attempts to activate a pending schedule.
-/// This is the only place that moves a pending schedule into the active slot.
-/// It is deterministic and is a no-op when:
-/// - there is no pending schedule, or
-/// - the activation ledger has not yet been reached.
-/// If the stored state is inconsistent (pending without activation ledger, or
-/// vice versa), we recover by clearing the pending fields and keeping the
-/// active schedule intact. This ensures we do not silently lose the active
-/// schedule or activate a schedule without a valid ledger bound.
 fn maybe_activate(env: &Env) {
     let mut state = get_state(env);
 

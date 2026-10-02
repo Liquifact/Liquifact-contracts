@@ -159,7 +159,12 @@ pub mod errors;
 pub use crate::errors::EscrowError;
 pub mod external_calls;
 mod keys;
-mod collateral_storage;
+pub mod errors;
+pub mod types;
+pub mod storage;
+
+/// Upper bound on [`LiquifactEscrow::set_investors_allowlisted`] batch size per call.
+pub const MAX_INVESTOR_ALLOWLIST_BATCH: u32 = 32;
 
 /// Current storage schema version written to [`DataKey::Version`] by [`LiquifactEscrow::init`].
 ///
