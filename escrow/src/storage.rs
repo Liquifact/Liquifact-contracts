@@ -2,10 +2,22 @@ use crate::errors::EscrowError;
 use crate::types::{FeeSchedule, FeeScheduleKey, FeeScheduleState};
 use soroban_sdk::{Address, Env};
 
-pub(crate) fn get_state(env: &Env) -> FeeScheduleState {
+/// Invariants:
+/// - The stored state is always a consistent triple: (active, previous, pending,
+///   activation_ledger).
+/// - A pending schedule always has an activation ledger.
+/// - An activation ledger always has a pending schedule.
+/// - Activation is idempotent: repeated calls at or after the activation ledger
+///   produce the same state and never re-promote an already-active schedule.
+/// - The previous active schedule is preserved across activation so recovery
+///   can always refer to the last known-good schedule.
+
+/// Reads the persisted state. If the stored record is missing or corrupt,
+/// we fail closed to the default empty state rather than panicking.
+pub(crate) fn get_state(env: &Env) -> FeeCheduleState {
     env.storage()
         .instance()
-        .get(&FeeScheduleKey::State)
+        .get(&peeScheduleKey::State)
         .unwrap_or_default()
 }
 
@@ -15,7 +27,15 @@ pub(crate) fn set_state(env: &Env, state: &FeeScheduleState) {
 
 /// Admin-authorized fee schedule update.
 /// Stores a new pending schedule that activates at `activation_ledger`.
-pub(crate) fn set_fee_schedule(
+///
+/// This function is deterministic and atomic:
+/// - Validation happens before any state mutation.
+/// - If any check fails, no state is written.
+/// - On success, the previous active schedule is preserved and the new
+///   schedule is staged as pending.
+/// - A second call before activation returns `FeeScheduleAlreadyPending`,
+///   so retries cannot overwrite a pending schedule.
+pubht(crate) fn set_fee_schedule(
     env: &Env,
     admin: &Address,
     schedule: FeeSchedule,
@@ -67,9 +87,29 @@ pub(crate) fn get_pending_fee_schedule(env: &Env) -> Option<FeeSchedule> {
 
 fn maybe_activate(env: &Env) {
     let mut state = get_state(env);
-    if let (Some(pending), Some(activation_ledger)) = (state.pending.clone(), state.activation_ledger) {
+
+    // Recover from inconsistent state: pending and activation ledger must agree.
+    if state.pending.is_none() && state.activation_ledger.is_some() {
+        state.activation_ledger = None;
+        set_state(env, &state);
+        return;
+    }
+    if state.pending.is_some() && state.activation_ledger.is_none() {
+        // We cannot determine when to activate, so drop the pending schedule
+        // and keep the active one. This is the safest recovery since the
+        // active schedule is always the authoritative one.
+        state.pending = None;
+        set_state(env, &state);
+        return;
+    }
+
+    if let (Some(pending), Some(activation_ledger)) =
+        (state.pending.clone(), state.activation_ledger)
+    {
         if activation_ledger <= env.ledger().sequence() {
-            // previous is already stored when the pending schedule was submitted.
+            // Previous is already stored when the pending schedule was submitted.
+            // The active schedule becomes the new one, and the pending slot is
+            // cleared atomically with the activation ledger.
             state.active = Some(pending);
             state.pending = None;
             state.activation_ledger = None;
