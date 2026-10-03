@@ -154,6 +154,7 @@ fn test_init_unauthorized_panics() {
 }
 
 #[test]
+#[test]
 fn test_reinit_same_parameters_rejected() {
     use soroban_sdk::testutils::Events as _;
 
@@ -185,7 +186,7 @@ fn test_reinit_same_parameters_rejected() {
             &None,
             &None::<i64>,
         ),
-        EscrowError::EscrowAlreadyInitialized,
+        EscrowError::AlreadyInitialized,
     );
     assert_eq!(client.get_escrow(), escrow);
     assert_eq!(env.events().all(), events_before);
@@ -225,7 +226,7 @@ fn test_reinit_different_admin_rejected() {
             &None,
             &None::<i64>,
         ),
-        EscrowError::EscrowAlreadyInitialized,
+        EscrowError::AlreadyInitialized,
     );
     assert_eq!(client.get_escrow(), escrow);
     assert_eq!(env.events().all(), events_before);
@@ -265,7 +266,7 @@ fn test_reinit_different_token_rejected() {
             &None,
             &None::<i64>,
         ),
-        EscrowError::EscrowAlreadyInitialized,
+        EscrowError::AlreadyInitialized,
     );
     assert_eq!(client.get_escrow(), escrow);
     assert_eq!(client.get_funding_token(), token_before);
@@ -279,10 +280,7 @@ fn test_reinit_during_another_call_rejected() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
     default_init(&client, &env, &admin, &sme);
-    // Touch a distinct config field (maturity-max-horizon) so the escrow is in
-    // a non-fresh, initialized state; directly setting maturity to its current
-    // value (0) would trip `MaturityUnchanged`.
-    client.update_maturity_max_horizon(&100u64, &0u32);
+    client.update_maturity(&0u64);
     let escrow = client.get_escrow();
     let token = client.get_funding_token();
     let treasury = client.get_treasury();
@@ -308,7 +306,7 @@ fn test_reinit_during_another_call_rejected() {
             &None,
             &None::<i64>,
         ),
-        EscrowError::EscrowAlreadyInitialized,
+        EscrowError::AlreadyInitialized,
     );
     assert_eq!(client.get_escrow(), escrow);
     assert_eq!(env.events().all(), events_before);
@@ -1729,7 +1727,7 @@ fn test_update_maturity_beyond_horizon_rejected() {
         &None::<i64>,
     );
     assert_contract_error(
-        client.try_update_maturity(&(1000u64 + DEFAULT_MATURITY_MAX_HORIZON_SECS + 1), &0u32),
+        client.try_update_maturity(&(1000u64 + DEFAULT_MATURITY_MAX_HORIZON_SECS + 1)),
         EscrowError::MaturityExceedsMaxHorizon,
     );
 }
@@ -1761,7 +1759,7 @@ fn test_update_maturity_in_past_rejected() {
         &None::<i64>,
     );
     assert_contract_error(
-        client.try_update_maturity(&1000u64, &0u32),
+        client.try_update_maturity(&1000u64),
         EscrowError::MaturityInPast,
     );
 }

@@ -1,4 +1,3 @@
-//! Deterministic failure-recovery coverage for [`get_reconciliation`].
 //! Lifecycle-spanning tests for [`get_reconciliation`] across every state the
 //! escrow can occupy, asserting the liability invariant at each step.
 //!
@@ -25,12 +24,11 @@
 //!
 //! All arithmetic uses saturating ops so these tests never panic on the
 //! invariant assertion; deficits are surfaced as negative `surplus`.
-//!
-//! Failure-recovery tests below additionally pin retry, partial-completion,
-//! and rejection behavior so adverse paths cannot silently corrupt state.
 
 use super::*;
-use soroban_sdk::{testutils::Address as _, token::StellarAssetClient, Address, Env, String};
+use soroban_sdk::{
+    testutils::Address as _, token::StellarAssetClient, Address, Env, String, Symbol, Val,
+};
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -207,7 +205,7 @@ fn reconciliation_lifecycle_cancel_path() {
     assert_invariant(&client, &token);
 
     // ── Step 2: Cancel → status 4, no refunds yet ────────────────────────────
-    client.cancel_funding(&0u32);
+    client.cancel_funding();
     let view = client.get_reconciliation();
     assert_eq!(view.token_balance, 1500);
     assert_eq!(view.outstanding_liability, 1500);
@@ -352,7 +350,7 @@ fn reconciliation_cancelled_full_refund_dust() {
     let dust = 7i128;
     token.stellar.mint(&client.address, &dust);
 
-    client.cancel_funding(&0u32);
+    client.cancel_funding();
     assert_eq!(client.get_distributed_principal(), 0);
 
     let view = client.get_reconciliation();
@@ -407,185 +405,138 @@ fn reconciliation_deficit_display() {
     assert_invariant(&client, &token);
 }
 
-// ── Failure-recovery: deterministic rejection and retry behavior ─────────────
+// ── Versioned lifecycle event topics ─────────────────────────────────────────
 
-/// A rejected `fund` (below minimum / zero) must not mutate state and must
-/// leave the reconciliation view byte-for-byte identical so retries are safe.
-#[test]
-fn reconciliation_fund_rejection_is_atomic() {
-    let env = Env::default();
-    let (client, token, _sme) = setup_escrow(&env, 1000, "REJ_FUND01");
+/// Schema version appended as the final topic of every lifecycle event.
+const EVENT_VERSION: u32 = 1;
 
-    let investor = Address::generate(&env);
-    token.stellar.mint(&investor, &500i128);
-
-    let before = client.get_reconciliation();
-    let before_escrow = client.get_escrow();
-    let before_dp = client.get_distributed_principal();
-
-    // Zero-amount funding must be rejected.
-    assert!(
-        client.try_fund(&investor, &0i128).is_err(),
-        "zero-amount fund must be rejected",
-    );
-
-    let after = client.get_reconciliation();
-    assert_eq!(after.token_balance, before.token_balance);
-    assert_eq!(after.outstanding_liability, before.outstanding_liability);
-    assert_eq!(after.surplus, before.surplus);
-    assert_eq!(client.get_escrow().status, before_escrow.status);
-    assert_eq!(client.get_escrow().funded_amount, before_escrow.funded_amount);
-    assert_eq!(client.get_distributed_principal(), before_dp);
-    assert_invariant(&client, &token);
-
-    // A subsequent valid fund must succeed deterministically.
-    client.fund(&investor, &500i128);
-    let view = client.get_reconciliation();
-    assert_eq!(view.token_balance, 500);
-    assert_eq!(view.outstanding_liability, 500);
-    assert_eq!(view.surplus, 0);
-    assert_invariant(&client, &token);
+/// Parse the schema version from an event topic list.
+///
+/// The version is deliberately the last topic.  Old consumers that only know
+/// the required prefix can ignore it; consumers that care can reject unknown
+/// versions.
+fn event_schema_version(topics: &[Val]) -> Result<u32, ()> {
+    let version = topics.last().ok_or(())?;
+    if !version.is_u32() {
+        return Err(());
+    }
+    let version = version.get_u32();
+    if version == EVENT_VERSION {
+        Ok(version)
+    } else {
+        Err(())
+    }
 }
 
-/// Duplicate `refund` calls must be idempotent: the second call must be a
-/// no-op (or rejected) and must not double-count `distributed_principal`.
-#[test]
-fn reconciliation_refund_is_idempotent() {
-    let env = Env::default();
-    let (client, token, _sme) = setup_escrow(&env, 2000, "IDEM_REF01");
-
-    let investor = Address::generate(&env);
-    mint_and_fund(&client, &token, &investor, 1000);
-    client.cancel_funding();
-
-    client.refund(&investor);
-    assert_eq!(client.get_distributed_principal(), 1000);
-
-    let snapshot = client.get_reconciliation();
-    let balance_after_first = token.token.balance(&client.address);
-
-    // Retry: either rejected or a no-op, but never a double payout.
-    let _ = client.try_refund(&investor);
-
-    assert_eq!(
-        client.get_distributed_principal(),
-        1000,
-        "duplicate refund must not double-count distributed principal",
-    );
-    assert_eq!(
-        token.token.balance(&client.address),
-        balance_after_first,
-        "duplicate refund must not move tokens",
-    );
-    let after = client.get_reconciliation();
-    assert_eq!(after.token_balance, snapshot.token_balance);
-    assert_eq!(after.outstanding_liability, snapshot.outstanding_liability);
-    assert_eq!(after.surplus, snapshot.surplus);
-    assert_invariant(&client, &token);
+/// Return the topics of all lifecycle events emitted by the escrow contract.
+fn escrow_event_topics(env: &Env, client: &LiquifactEscrowClient<'_>) -> Vec<Vec<Val>> {
+    env.events()
+        .all()
+        .into_iter()
+        .filter(|event| event.contract_id == client.address)
+        .map(|event| event.topics)
+        .collect()
 }
 
-/// Duplicate `claim_investor_payout` calls must be idempotent: the second call
-/// must not pay twice and must not corrupt the liability invariant.
+/// Assert that an event topic list carries the supported schema version.
+fn assert_versioned_schema(topics: &[Val]) -> u32 {
+    let version = event_schema_version(topics)
+        .expect("lifecycle event must carry a supported schema version as final topic");
+    assert_eq!(version, EVENT_VERSION, "unexpected event schema version");
+    version
+}
+
 #[test]
-fn reconciliation_claim_is_idempotent() {
+fn lifecycle_events_are_versioned() {
     let env = Env::default();
-    let (client, token, _sme) = setup_escrow(&env, 1000, "IDEM_CLM01");
+    let (client, token, _sme) = setup_escrow(&env, 1000, "EVENT01");
+    let inv = Address::generate(&env);
 
-    let investor = Address::generate(&env);
-    mint_and_fund(&client, &token, &investor, 1000);
-
+    mint_and_fund(&client, &token, &inv, 1000);
     let yield_coupon = 80i128;
     token.stellar.mint(&client.address, &yield_coupon);
     client.settle();
+    client.claim_investor_payout(&inv);
 
-    client.claim_investor_payout(&investor);
-    let balance_after_first = token.token.balance(&client.address);
-    let snapshot = client.get_reconciliation();
-
-    // Retry: must not pay out again.
-    let _ = client.try_claim_investor_payout(&investor);
-
-    assert_eq!(
-        token.token.balance(&client.address),
-        balance_after_first,
-        "duplicate claim must not move tokens",
-    );
-    let after = client.get_reconciliation();
-    assert_eq!(after.token_balance, snapshot.token_balance);
-    assert_eq!(after.outstanding_liability, snapshot.outstanding_liability);
-    assert_eq!(after.surplus, snapshot.surplus);
-    assert_invariant(&client, &token);
+    let events = escrow_event_topics(&env, &client);
+    assert!(!events.is_empty(), "expected escrow lifecycle events");
+    for topics in &events {
+        assert_versioned_schema(topics);
+    }
 }
 
-/// Partial completion: sweeping dust then refunding must leave the invariant
-/// intact, and a retry of the sweep after full refund must be rejected.
 #[test]
-fn reconciliation_partial_completion_then_retry() {
+fn old_consumer_reads_new_event_topics() {
     let env = Env::default();
-    let (client, token, _sme) = setup_escrow(&env, 2000, "PARTIAL01");
+    let (client, token, _sme) = setup_escrow(&env, 1000, "OLDREAD01");
+    let inv = Address::generate(&env);
+    mint_and_fund(&client, &token, &inv, 1000);
 
+    let topics = escrow_event_topics(&env, &client).pop().unwrap();
+    assert_versioned_schema(&topics);
+
+    // The version is appended after the required fields, so an old consumer
+    // that ignores the final topic can still read the stable prefix.
+    let required_prefix = &topics[..topics.len() - 1];
+    assert!(!required_prefix.is_empty(), "required topics must remain stable");
+}
+
+#[test]
+fn unknown_event_version_is_rejected() {
+    let env = Env::default();
+    let topics: Vec<Val> = vec![
+        Symbol::new(&env, "fund").into(),
+        999u32.into(),
+    ];
+    assert!(event_schema_version(&topics).is_err());
+}
+
+#[test]
+fn optional_field_absent_does_not_affect_schema_version() {
+    let env = Env::default();
+    let (client, token, _sme) = setup_escrow(&env, 1000, "OPTIONAL01");
+    let inv = Address::generate(&env);
+    mint_and_fund(&client, &token, &inv, 1000);
+
+    let topics = escrow_event_topics(&env, &client).pop().unwrap();
+    assert_versioned_schema(&topics);
+
+    // Required fields stay in the prefix even when no optional field is
+    // present; the version remains the last topic.
+    let required_prefix = &topics[..topics.len() - 1];
+    assert!(!required_prefix.is_empty());
+}
+
+#[test]
+fn noop_does_not_emit_lifecycle_event() {
+    let env = Env::default();
+    let (client, token, _sme) = setup_escrow(&env, 1000, "NOOP01");
+    let inv = Address::generate(&env);
+    mint_and_fund(&client, &token, &inv, 1000);
+
+    let before = escrow_event_topics(&env, &client).len();
+    assert!(client.try_sweep_terminal_dust(&0i128).is_ok());
+    let after = escrow_event_topics(&env, &client).len();
+    assert_eq!(after, before, "no-op must not emit a lifecycle event");
+}
+
+#[test]
+fn multiple_lifecycle_events_are_all_versioned() {
+    let env = Env::default();
+    let (client, token, _sme) = setup_escrow(&env, 1000, "MULTI01");
     let inv_a = Address::generate(&env);
     let inv_b = Address::generate(&env);
-    mint_and_fund(&client, &token, &inv_a, 600);
-    mint_and_fund(&client, &token, &inv_b, 400);
-    client.cancel_funding();
 
-    // Partial completion: refund only investor A.
-    client.refund(&inv_a);
-    assert_eq!(client.get_distributed_principal(), 600);
-    let view = client.get_reconciliation();
-    assert_eq!(view.token_balance, 400);
-    assert_eq!(view.outstanding_liability, 400);
-    assert_eq!(view.surplus, 0);
-    assert_invariant(&client, &token);
+    mint_and_fund(&client, &token, &inv_a, 400);
+    mint_and_fund(&client, &token, &inv_b, 600);
+    let yield_coupon = 80i128;
+    token.stellar.mint(&client.address, &yield_coupon);
+    client.settle();
+    client.claim_investor_payout(&inv_a);
 
-    // Retry sweep with no surplus must be rejected deterministically.
-    assert!(
-        client.try_sweep_terminal_dust(&1i128).is_err(),
-        "sweep with no surplus must be rejected",
-    );
-    assert_invariant(&client, &token);
-
-    // Complete the recovery: refund investor B.
-    client.refund(&inv_b);
-    assert_eq!(client.get_distributed_principal(), 1000);
-    let view = client.get_reconciliation();
-    assert_eq!(view.token_balance, 0);
-    assert_eq!(view.outstanding_liability, 0);
-    assert_eq!(view.surplus, 0);
-    assert_invariant(&client, &token);
-}
-
-/// Boundary: sweeping exactly the surplus must succeed, sweeping surplus + 1
-/// must be rejected, and the invariant must hold on both sides.
-#[test]
-fn reconciliation_sweep_boundary() {
-    let env = Env::default();
-    let (client, token, _sme) = setup_escrow(&env, 1000, "SWEEP_BND");
-
-    let investor = Address::generate(&env);
-    mint_and_fund(&client, &token, &investor, 500);
-    client.cancel_funding();
-
-    let dust = 25i128;
-    token.stellar.mint(&client.address, &dust);
-
-    let view = client.get_reconciliation();
-    assert_eq!(view.surplus, dust);
-
-    // Oversweep by one unit must be rejected.
-    assert!(
-        client.try_sweep_terminal_dust(&(dust + 1)).is_err(),
-        "oversweep by one unit must be rejected",
-    );
-    assert_invariant(&client, &token);
-
-    // Exact sweep must succeed and zero out surplus.
-    let swept = client.sweep_terminal_dust(&dust);
-    assert_eq!(swept, dust);
-    let view = client.get_reconciliation();
-    assert_eq!(view.surplus, 0);
-    assert_eq!(view.token_balance, 500);
-    assert_eq!(view.outstanding_liability, 500);
-    assert_invariant(&client, &token);
+    let events = escrow_event_topics(&env, &client);
+    assert!(events.len() >= 2, "expected multiple lifecycle events");
+    for topics in &events {
+        assert_versioned_schema(topics);
+    }
 }

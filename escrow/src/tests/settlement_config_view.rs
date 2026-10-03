@@ -3,12 +3,15 @@
 //! Covers:
 //! - Default values before [`LiquifactEscrow::init`] is called.
 //! - Values reflect what was passed to `init`.
-//! - Values match the individual getters so the bundled view cannot drift.
-//! - The bundled view is idempotent (pure read).
-//! - The struct shape is pinned via field-by-field destructuring.
+//! - Values match the individual getters (`get_settlement_limit`, `get_protocol_fee_bps`,
+//!   and `get_escrow().yield_bps` / `.maturity`).
+//! - Reflects admin mutation via [`LiquifactEscrow::set_settlement_limit`].
+//! - Edge cases: non-zero maturity, explicit protocol fee, min/max settlement limits.
 
-use super::super::{LiquifactEscrow, LiquifactEscrowClient, SettlementConfig};
-use crate::DEFAULT_MATURITY_MAX_HORIZON_SECS;
+use super::super::{
+    LiquifactEscrow, LiquifactEscrowClient, SettlementConfig, DEFAULT_SETTLEMENT_LIMIT,
+    MAX_SETTLEMENT_LIMIT, MIN_SETTLEMENT_LIMIT,
+};
 use soroban_sdk::testutils::{Address as _, Ledger};
 use soroban_sdk::{Address, Env};
 
@@ -50,7 +53,6 @@ fn init_escrow(
         &None,
         &None,
         &protocol_fee_bps,
-        &None::<u32>,
     );
 }
 
@@ -63,18 +65,17 @@ fn test_defaults_before_init() {
     let client = deploy(&env);
 
     let config = client.get_settlement_config();
-    assert_eq!(config.yield_bps, 0);
-    assert_eq!(config.maturity, 0);
-    assert_eq!(config.protocol_fee_bps, 0);
-    assert_eq!(config.yield_tiers.len(), 0);
+
     assert_eq!(
-        config.maturity_max_horizon,
-        DEFAULT_MATURITY_MAX_HORIZON_SECS
+        config.settlement_limit, DEFAULT_SETTLEMENT_LIMIT,
+        "settlement_limit should be DEFAULT_SETTLEMENT_LIMIT before init"
     );
-    assert_eq!(config.funding_deadline, None);
-    assert_eq!(config.min_contribution_floor, 0);
-    assert_eq!(config.max_unique_investors_cap, None);
-    assert_eq!(config.max_per_investor_cap, None);
+    assert_eq!(config.yield_bps, 0, "yield_bps should be 0 before init");
+    assert_eq!(
+        config.protocol_fee_bps, 0,
+        "protocol_fee_bps should be 0 before init"
+    );
+    assert_eq!(config.maturity, 0, "maturity should be 0 before init");
 }
 
 /// After `init`, fields should reflect the values supplied at init time.
@@ -83,12 +84,15 @@ fn test_values_after_init_basic() {
     let env = Env::default();
     env.mock_all_auths();
     let client = deploy(&env);
-    init_escrow(&env, &client, 800i64, 0u64, None);
+
+    init_escrow(&env, &client, 800, 0, None);
 
     let config = client.get_settlement_config();
+
+    assert_eq!(config.settlement_limit, DEFAULT_SETTLEMENT_LIMIT);
     assert_eq!(config.yield_bps, 800);
-    assert_eq!(config.maturity, 0);
     assert_eq!(config.protocol_fee_bps, 0);
+    assert_eq!(config.maturity, 0);
 }
 
 /// Non-zero `maturity` must be reflected.
@@ -97,10 +101,18 @@ fn test_values_after_init_with_maturity() {
     let env = Env::default();
     env.mock_all_auths();
     let client = deploy(&env);
-    init_escrow(&env, &client, 800i64, 2_000_000u64, None);
+
+    // Set ledger time so maturity > now passes validation.
+    let mut ledger_info = env.ledger().get();
+    ledger_info.timestamp = 1_000;
+    env.ledger().set(ledger_info);
+
+    let maturity: u64 = 1_000 + 60 * 60; // 1 hour from now
+    init_escrow(&env, &client, 500, maturity, None);
 
     let config = client.get_settlement_config();
-    assert_eq!(config.maturity, 2_000_000);
+    assert_eq!(config.maturity, maturity);
+    assert_eq!(config.yield_bps, 500);
 }
 
 /// Explicit `protocol_fee_bps` at init must be reflected.
@@ -109,10 +121,12 @@ fn test_values_after_init_with_protocol_fee() {
     let env = Env::default();
     env.mock_all_auths();
     let client = deploy(&env);
-    init_escrow(&env, &client, 800i64, 0u64, Some(500i64));
+
+    init_escrow(&env, &client, 300, 0, Some(250));
 
     let config = client.get_settlement_config();
-    assert_eq!(config.protocol_fee_bps, 500);
+    assert_eq!(config.protocol_fee_bps, 250);
+    assert_eq!(config.yield_bps, 300);
 }
 
 /// `get_settlement_config` must match the individual getters so the bundled view
@@ -122,45 +136,74 @@ fn test_config_matches_individual_getters() {
     let env = Env::default();
     env.mock_all_auths();
     let client = deploy(&env);
-    init_escrow(&env, &client, 800i64, 0u64, Some(500i64));
+
+    init_escrow(&env, &client, 750, 0, Some(100));
 
     let config = client.get_settlement_config();
     let escrow = client.get_escrow();
+
+    assert_eq!(config.settlement_limit, client.get_settlement_limit());
     assert_eq!(config.yield_bps, escrow.yield_bps);
-    assert_eq!(config.maturity, escrow.maturity);
     assert_eq!(config.protocol_fee_bps, client.get_protocol_fee_bps());
+    assert_eq!(config.maturity, escrow.maturity);
 }
 
-/// `get_settlement_config` has the expected shape — verified via field-by-field
-/// destructuring so a future struct change causes a compile error.
+/// After `set_settlement_limit`, the view must reflect the updated value.
+#[test]
+fn test_settlement_limit_update_reflected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+
+    init_escrow(&env, &client, 800, 0, None);
+
+    // Starts at default.
+    assert_eq!(
+        client.get_settlement_config().settlement_limit,
+        DEFAULT_SETTLEMENT_LIMIT
+    );
+
+    // Admin updates the limit.
+    client.set_settlement_limit(&10);
+    assert_eq!(client.get_settlement_config().settlement_limit, 10);
+
+    // Update to min bound.
+    client.set_settlement_limit(&MIN_SETTLEMENT_LIMIT);
+    assert_eq!(
+        client.get_settlement_config().settlement_limit,
+        MIN_SETTLEMENT_LIMIT
+    );
+
+    // Update to max bound.
+    client.set_settlement_limit(&MAX_SETTLEMENT_LIMIT);
+    assert_eq!(
+        client.get_settlement_config().settlement_limit,
+        MAX_SETTLEMENT_LIMIT
+    );
+}
+
+/// `get_settlement_config` has the expected shape (all four fields present) — verified
+/// via field-by-field destructuring so a future struct change causes a compile error.
 #[test]
 fn test_config_struct_shape() {
     let env = Env::default();
     env.mock_all_auths();
     let client = deploy(&env);
-    init_escrow(&env, &client, 800i64, 0u64, None);
+
+    init_escrow(&env, &client, 600, 0, Some(50));
+    client.set_settlement_limit(&20);
 
     let SettlementConfig {
+        settlement_limit,
         yield_bps,
-        maturity,
         protocol_fee_bps,
-        yield_tiers,
-        maturity_max_horizon,
-        funding_deadline,
-        min_contribution_floor,
-        max_unique_investors_cap,
-        max_per_investor_cap,
+        maturity,
     } = client.get_settlement_config();
 
-    assert_eq!(yield_bps, 800);
+    assert_eq!(settlement_limit, 20);
+    assert_eq!(yield_bps, 600);
+    assert_eq!(protocol_fee_bps, 50);
     assert_eq!(maturity, 0);
-    assert_eq!(protocol_fee_bps, 0);
-    assert_eq!(yield_tiers.len(), 0);
-    assert_eq!(maturity_max_horizon, DEFAULT_MATURITY_MAX_HORIZON_SECS);
-    assert_eq!(funding_deadline, None);
-    assert_eq!(min_contribution_floor, 0);
-    assert_eq!(max_unique_investors_cap, None);
-    assert_eq!(max_per_investor_cap, None);
 }
 
 /// Zero `protocol_fee_bps` (omitted at init) returns `0`, not an error.
@@ -169,9 +212,11 @@ fn test_zero_protocol_fee_default() {
     let env = Env::default();
     env.mock_all_auths();
     let client = deploy(&env);
-    init_escrow(&env, &client, 800i64, 0u64, None);
 
-    assert_eq!(client.get_settlement_config().protocol_fee_bps, 0);
+    init_escrow(&env, &client, 1000, 0, None);
+
+    let config = client.get_settlement_config();
+    assert_eq!(config.protocol_fee_bps, 0);
 }
 
 /// All fields remain stable between multiple calls (pure read, no state mutation).
@@ -180,18 +225,13 @@ fn test_config_is_idempotent() {
     let env = Env::default();
     env.mock_all_auths();
     let client = deploy(&env);
-    init_escrow(&env, &client, 800i64, 2_000_000u64, Some(500i64));
 
-    let a = client.get_settlement_config();
-    let b = client.get_settlement_config();
-    assert_eq!(a.yield_bps, b.yield_bps);
-    assert_eq!(a.maturity, b.maturity);
-    assert_eq!(a.protocol_fee_bps, b.protocol_fee_bps);
-    assert_eq!(a.maturity_max_horizon, b.maturity_max_horizon);
-    assert_eq!(a.funding_deadline, b.funding_deadline);
-    assert_eq!(a.min_contribution_floor, b.min_contribution_floor);
-    assert_eq!(a.max_unique_investors_cap, b.max_unique_investors_cap);
-    assert_eq!(a.max_per_investor_cap, b.max_per_investor_cap);
+    init_escrow(&env, &client, 400, 0, Some(200));
+
+    let first = client.get_settlement_config();
+    let second = client.get_settlement_config();
+
+    assert_eq!(first, second);
 }
 
 /// Defaults before init are also idempotent.
@@ -200,10 +240,8 @@ fn test_defaults_idempotent_before_init() {
     let env = Env::default();
     let client = deploy(&env);
 
-    let a = client.get_settlement_config();
-    let b = client.get_settlement_config();
-    assert_eq!(a.yield_bps, b.yield_bps);
-    assert_eq!(a.maturity, b.maturity);
-    assert_eq!(a.protocol_fee_bps, b.protocol_fee_bps);
-    assert_eq!(a.maturity_max_horizon, b.maturity_max_horizon);
+    let first = client.get_settlement_config();
+    let second = client.get_settlement_config();
+
+    assert_eq!(first, second);
 }

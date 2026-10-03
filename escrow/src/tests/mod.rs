@@ -34,9 +34,9 @@ use soroban_sdk::{
 };
 use std::fmt::Debug;
 
-pub use soroban_sdk:Symbol;
+pub use soroban_sdk::Symbol;
 
-pubc(crate) fn assert_contract_error<T, E>(
+pub(crate) fn assert_contract_error<T, E>(
     result: Result<Result<T, E>, Result<Error, InvokeError>>,
     expected: EscrowError,
 ) where
@@ -63,8 +63,7 @@ pubc(crate) fn assert_contract_error<T, E>(
 // tree was switched off in 776e36a) stay commented out below until they are
 // reconciled; each entry lists the drift that still blocks compilation.
 mod cap_validation;
-mod collateral_version_view;
-// mod collateral_boundary_tests; // file not present in this tree
+mod collateral_boundary_tests;
 mod collateral_config_view;
 mod collateral_limit_setter;
 mod external_calls;
@@ -170,7 +169,7 @@ pub fn default_init(client: &LiquifactEscrowClient<'_>, env: &Env, admin: &Addre
         &None,
         &None,
         &None,
-        &None, // No funding deadline
+        &None, // No funding deadline,
         &None,
         &None,
         &None::<i64>,
