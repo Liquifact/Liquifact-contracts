@@ -6,7 +6,7 @@ use crate::{
     DEFAULT_MATURITY_MAX_HORIZON_SECS,
 };
 
-use soroban_sdk::Event;
+use soroban_sdk::{Event, IntoVal};
 
 // Admin/governance operations: target changes, maturity changes, admin handover,
 // legal hold, migration guards, and collateral metadata.
@@ -40,7 +40,7 @@ fn test_update_maturity_emits_event() {
     client.update_maturity(&2000u64);
     let all_events = env.events().all();
     assert_eq!(
-        all_events.events().last().unwrap().clone(),
+        env.events().all().last().unwrap().clone(),
         crate::MaturityUpdatedEvent {
             name: symbol_short!("maturity"),
             invoice_id: client.get_escrow().invoice_id,
@@ -249,6 +249,36 @@ fn test_set_protocol_fee_bps_rejects_out_of_range_values() {
         client.try_set_protocol_fee_bps(&-1i64),
         EscrowError::ProtocolFeeBpsOutOfRange,
     );
+}
+
+#[test]
+fn test_set_protocol_fee_bps_accepts_inclusive_bounds_and_rejections_are_atomic() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    assert_eq!(client.set_protocol_fee_bps(&1i64), 1i64);
+    assert_eq!(client.set_protocol_fee_bps(&0i64), 0i64);
+    assert_eq!(client.get_protocol_fee_bps(), 0i64);
+
+    assert_eq!(client.set_protocol_fee_bps(&10_000i64), 10_000i64);
+    let events_before_rejections = env.events().all().events().len();
+
+    assert_contract_error(
+        client.try_set_protocol_fee_bps(&-1i64),
+        EscrowError::ProtocolFeeBpsOutOfRange,
+    );
+    assert_eq!(client.get_protocol_fee_bps(), 10_000i64);
+    assert_eq!(env.events().all().events().len(), events_before_rejections);
+
+    assert_contract_error(
+        client.try_set_protocol_fee_bps(&10_001i64),
+        EscrowError::ProtocolFeeBpsOutOfRange,
+    );
+    assert_eq!(client.get_protocol_fee_bps(), 10_000i64);
+    assert_eq!(env.events().all().events().len(), events_before_rejections);
 }
 
 #[test]
@@ -670,12 +700,13 @@ fn test_propose_admin_rejects_unchanged_pending_admin() {
     let pending = Address::generate(&env);
     default_init(&client, &env, &admin, &sme);
 
-    client.propose_admin(&pending, &None);
+    client.propose_admin(&pending, &0u32);
 
     assert_contract_error(
-        client.try_propose_admin(&pending, &None),
+        client.try_propose_admin(&pending, &1u32),
         EscrowError::PendingAdminUnchanged,
     );
+    assert_eq!(client.get_pending_admin(), Some(pending));
 }
 
 #[test]
@@ -689,14 +720,14 @@ fn test_propose_admin_supersede_emits_distinct_event() {
     let second = Address::generate(&env);
     default_init(&client, &env, &admin, &sme);
 
-    client.propose_admin(&first, &None);
-    client.propose_admin(&second, &None);
+    client.propose_admin(&first, &0u32);
+    client.propose_admin(&second, &1u32);
 
     // Snapshot events immediately: `env.events().all()` only retains the most
     // recent invocation's events, so any intervening read (e.g. get_escrow)
     // would clear the supersede/proposed pair emitted by the second call.
     let events = env.events().all();
-    let event_list = events.events();
+    let event_list = events;
     let invoice_id = client.get_escrow().invoice_id;
     let superseded = AdminProposalSuperseded {
         name: symbol_short!("adm_sup"),
@@ -735,7 +766,7 @@ fn test_propose_admin_emits_event() {
 
     let all_events = env.events().all();
     assert_eq!(
-        all_events.events().last().unwrap().clone(),
+        all_events.last().unwrap().clone(),
         AdminProposedEvent {
             name: symbol_short!("adm_prop"),
             invoice_id: client.get_escrow().invoice_id,
@@ -757,16 +788,16 @@ fn test_propose_admin_emits_only_admin_proposed_event() {
     let new_admin = Address::generate(&env);
     default_init(&client, &env, &admin, &sme);
 
-    client.propose_admin(&new_admin, &None);
+    client.propose_admin(&new_admin, &0u32);
 
     let events = env.events().all();
     assert_eq!(
-        events.events().len(),
+        events.len(),
         1,
         "propose_admin must emit exactly one event"
     );
     assert_eq!(
-        events.events().last().unwrap().clone(),
+        events.last().unwrap().clone(),
         AdminProposedEvent {
             name: symbol_short!("adm_prop"),
             invoice_id: client.get_escrow().invoice_id,
@@ -791,11 +822,11 @@ fn test_transfer_admin_emits_both_admin_proposed_and_deprecated_events() {
     let new_admin = Address::generate(&env);
     default_init(&client, &env, &admin, &sme);
 
-    client.transfer_admin(&new_admin);
+    client.transfer_admin(&new_admin, &0u32);
 
     let events = env.events().all();
     assert_eq!(
-        events.events().len(),
+        events.len(),
         2,
         "transfer_admin must emit exactly two events: AdminProposedEvent then DeprecatedTransferAdminUsed"
     );
@@ -804,7 +835,7 @@ fn test_transfer_admin_emits_both_admin_proposed_and_deprecated_events() {
 
     // First event: AdminProposedEvent from the propose_admin delegation
     assert_eq!(
-        events.events().first().unwrap().clone(),
+        events.first().unwrap().clone(),
         AdminProposedEvent {
             name: symbol_short!("adm_prop"),
             invoice_id: invoice_id.clone(),
@@ -816,7 +847,7 @@ fn test_transfer_admin_emits_both_admin_proposed_and_deprecated_events() {
 
     // Second event: DeprecatedTransferAdminUsed from the shim itself
     assert_eq!(
-        events.events().get(1).unwrap().clone(),
+        events.get(1).unwrap().clone(),
         DeprecatedTransferAdminUsed {
             name: symbol_short!("depr_xfer"),
             invoice_id,
@@ -887,11 +918,11 @@ fn test_accept_admin_event_carries_prior_and_new_admin() {
     let contract_id = client.address.clone();
     default_init(&client, &env, &old_admin, &sme);
 
-    client.propose_admin(&new_admin, &None);
+    client.propose_admin(&new_admin, &0u32);
     client.accept_admin();
 
     let events = env.events().all();
-    let last_event = events.events().last().unwrap().clone();
+    let last_event = events.last().unwrap().clone();
     assert_eq!(
         last_event,
         AdminAcceptedEvent {
@@ -985,12 +1016,13 @@ fn test_pending_admin_remaining_secs_reports_positive_window() {
     default_init(&client, &env, &admin, &sme);
 
     env.ledger().set_timestamp(1_000);
-    client.propose_admin(&new_admin, &Some(60));
+    client.propose_admin(&new_admin, &0u32);
 
-    assert_eq!(client.get_pending_admin_expiry(), Some(1_060));
-    assert_eq!(client.get_pending_admin_remaining_secs(), Some(60));
+    let expected_expiry = 1_000 + crate::DEFAULT_ADMIN_PROPOSAL_VALIDITY_SECS;
+    assert_eq!(client.get_pending_admin_expiry(), Some(expected_expiry));
+    assert_eq!(client.get_pending_admin_remaining_secs(), Some(crate::DEFAULT_ADMIN_PROPOSAL_VALIDITY_SECS));
 
-    env.ledger().set_timestamp(1_059);
+    env.ledger().set_timestamp(expected_expiry - 1);
     assert_eq!(client.get_pending_admin_remaining_secs(), Some(1));
 }
 
@@ -1002,8 +1034,8 @@ fn test_pending_admin_remaining_secs_zero_at_expiry_and_accept_still_succeeds() 
     default_init(&client, &env, &admin, &sme);
 
     env.ledger().set_timestamp(2_000);
-    client.propose_admin(&new_admin, &Some(30));
-    env.ledger().set_timestamp(2_030);
+    client.propose_admin(&new_admin, &0u32);
+    env.ledger().set_timestamp(2_000 + crate::DEFAULT_ADMIN_PROPOSAL_VALIDITY_SECS);
 
     assert_eq!(client.get_pending_admin_remaining_secs(), Some(0));
 
@@ -1021,8 +1053,8 @@ fn test_pending_admin_remaining_secs_zero_after_expiry_and_accept_rejects() {
     default_init(&client, &env, &admin, &sme);
 
     env.ledger().set_timestamp(3_000);
-    client.propose_admin(&new_admin, &Some(15));
-    env.ledger().set_timestamp(3_016);
+    client.propose_admin(&new_admin, &0u32);
+    env.ledger().set_timestamp(3_000 + crate::DEFAULT_ADMIN_PROPOSAL_VALIDITY_SECS + 1);
 
     assert_eq!(client.get_pending_admin_remaining_secs(), Some(0));
     assert_contract_error(client.try_accept_admin(), EscrowError::AdminProposalExpired);
@@ -1037,7 +1069,7 @@ fn test_pending_admin_remaining_secs_handles_saturating_far_future_expiry() {
     default_init(&client, &env, &admin, &sme);
 
     env.ledger().set_timestamp(u64::MAX - 5);
-    client.propose_admin(&new_admin, &Some(100));
+    client.propose_admin(&new_admin, &0u32);
 
     assert_eq!(client.get_pending_admin_expiry(), Some(u64::MAX));
     assert_eq!(client.get_pending_admin_remaining_secs(), Some(5));
@@ -1082,7 +1114,226 @@ fn test_migrate_from_zero_uninitialized_panics() {
     env.mock_all_auths();
     let client = deploy(&env);
     // Uninitialized storage returns version 0; migrate(0) hits the no-path branch.
-    client.migrate(&0u32);
+    client.migrate(&0u32, &0u32);
+}
+
+// ── migrate() exhaustive typed-error contract tests ──────────────────────────
+//
+// migrate() is intentionally a no-op in the current release. Every path
+// requires admin auth, validates the version, and terminates with one of three
+// typed errors. These tests prove each branch fires correctly, that auth is
+// checked before version reads, and that DataKey::Version is never mutated.
+//
+// See docs/OPERATOR_RUNBOOK.md §2 for the operator-side migration matrix.
+// See escrow/src/lib.rs migrate() rustdoc for the per-error classification.
+
+/// Unauthenticated callers must be rejected before any version check.
+/// If auth were checked after the version guard, a mismatched `from_version`
+/// could leak via `MigrationVersionMismatch` instead of the auth failure.
+#[test]
+fn test_migrate_rejects_non_admin_before_version_check() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    env.mock_auths(&[]);
+    let result = client.try_migrate(&99u32, &0u32);
+
+    assert!(
+        result.is_err(),
+        "migrate should reject an unauthenticated call"
+    );
+    assert!(
+        !matches!(
+            result,
+            Err(Err(soroban_sdk::InvokeError::Contract(code)))
+                if code == EscrowError::MigrationVersionMismatch as u32
+        ),
+        "migrate must not reach version checks before admin auth (got MigrationVersionMismatch)"
+    );
+}
+
+/// `migrate(SCHEMA_VERSION - 1)` after `init` (which stores
+/// `SCHEMA_VERSION == 6`) must raise `MigrationVersionMismatch` because the
+/// stored version (6) does not equal the claimed source version (5).
+#[test]
+fn test_migrate_version_mismatch_stored_neq_claimed() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    assert_contract_error(
+        client.try_migrate(&(SCHEMA_VERSION - 1), &0u32),
+        EscrowError::MigrationVersionMismatch,
+    );
+    assert_eq!(
+        client.get_version(),
+        SCHEMA_VERSION,
+        "DataKey::Version must not change on MigrationVersionMismatch"
+    );
+}
+
+/// Claiming a far-below `from_version` (0) against stored version 6 must
+/// also raise `MigrationVersionMismatch`, not `NoMigrationPath`.
+#[test]
+fn test_migrate_far_below_stored_raises_mismatch() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    assert_contract_error(
+        client.try_migrate(&0u32, &0u32),
+        EscrowError::MigrationVersionMismatch,
+    );
+    assert_eq!(client.get_version(), SCHEMA_VERSION);
+}
+
+/// Calling `migrate` with `from_version == SCHEMA_VERSION` (boundary: the
+/// contract is already at the latest schema) must raise
+/// `AlreadyCurrentSchemaVersion`.
+#[test]
+fn test_migrate_at_schema_version_raises_already_current() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    assert_contract_error(
+        client.try_migrate(&SCHEMA_VERSION, &0u32),
+        EscrowError::AlreadyCurrentSchemaVersion,
+    );
+    assert_eq!(client.get_version(), SCHEMA_VERSION);
+}
+
+/// Any `from_version > SCHEMA_VERSION` claims a schema newer than the
+/// contract knows about; this also maps to
+/// `AlreadyCurrentSchemaVersion`.
+#[test]
+fn test_migrate_above_schema_version_raises_already_current() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    assert_contract_error(
+        client.try_migrate(&(SCHEMA_VERSION + 1), &0u32),
+        EscrowError::AlreadyCurrentSchemaVersion,
+    );
+    assert_eq!(client.get_version(), SCHEMA_VERSION);
+}
+
+/// When the stored version is below `SCHEMA_VERSION` and matches the claimed
+/// `from_version`, the contract reaches the terminal `NoMigrationPath` branch.
+#[test]
+fn test_migrate_below_schema_version_matching_stored_raises_no_path() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    let older = SCHEMA_VERSION - 1;
+    env.as_contract(&client.address, || {
+        env.storage().instance().set(&DataKey::Version, &older);
+    });
+
+    assert_contract_error(
+        client.try_migrate(&older, &0u32),
+        EscrowError::NoMigrationPath,
+    );
+    assert_eq!(
+        client.get_version(),
+        older,
+        "DataKey::Version must not change on NoMigrationPath"
+    );
+}
+
+/// Every `from_version` in `[1, SCHEMA_VERSION - 1]` with a matching stored
+/// version must raise `NoMigrationPath` — exhaustive coverage of the
+/// "no implemented path" branch for all known historical versions.
+#[test]
+fn test_migrate_all_historical_versions_raise_no_path() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    for &historical in &[1u32, 2, 3, 4, 5] {
+        let (client, admin, sme) = setup(&env);
+        default_init(&client, &env, &admin, &sme);
+        env.as_contract(&client.address, || {
+            env.storage().instance().set(&DataKey::Version, &historical);
+        });
+
+        assert_contract_error(
+            client.try_migrate(&historical, &0u32),
+            EscrowError::NoMigrationPath,
+        );
+        assert_eq!(client.get_version(), historical);
+    }
+}
+
+/// An uninitialized contract has `DataKey::Version` absent from storage,
+/// which `.get(...).unwrap_or(0)` maps to `0`. Calling `migrate(0)` must
+/// raise `NoMigrationPath`, not panic or silently succeed.
+#[test]
+fn test_migrate_from_zero_uninitialized_raises_no_path() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+
+    assert_contract_error(
+        client.try_migrate(&0u32, &0u32),
+        EscrowError::NoMigrationPath,
+    );
+
+    let stored_after: u32 = env.as_contract(&client.address, || {
+        env.storage().instance().get(&DataKey::Version).unwrap_or(0)
+    });
+    assert_eq!(
+        stored_after, 0,
+        "DataKey::Version must remain 0 (absent) on NoMigrationPath"
+    );
+}
+
+/// Cross-branch immutability sweep: for representative values in every
+/// error branch, confirm `DataKey::Version` is unchanged after the call.
+#[test]
+fn test_migrate_version_immutable_across_all_error_branches() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let cases: &[(u32, u32, EscrowError)] = &[
+        (6, 5, EscrowError::MigrationVersionMismatch),
+        (6, 6, EscrowError::AlreadyCurrentSchemaVersion),
+        (6, 7, EscrowError::AlreadyCurrentSchemaVersion),
+        (5, 5, EscrowError::NoMigrationPath),
+        (0, 0, EscrowError::NoMigrationPath),
+    ];
+
+    for &(stored, claimed, expected) in cases {
+        let (client, admin, sme) = setup(&env);
+
+        if stored == 0 {
+            // Uninitialized: just deploy; do not call init.
+        } else {
+            default_init(&client, &env, &admin, &sme);
+            if stored != SCHEMA_VERSION {
+                env.as_contract(&client.address, || {
+                    env.storage().instance().set(&DataKey::Version, &stored);
+                });
+            }
+        }
+
+        let result = client.try_migrate(&claimed, &0u32);
+        assert_contract_error(result, expected);
+
+        let actual_stored: u32 = env.as_contract(&client.address, || {
+            env.storage()
+                .instance()
+                .get(&DataKey::Version)
+                .unwrap_or(stored)
+        });
+        assert_eq!(
+            actual_stored, stored,
+            "DataKey::Version changed for stored={stored}, claimed={claimed}"
+        );
+    }
 }
 
 #[test]
@@ -1888,7 +2139,7 @@ fn test_settle_passes_exactly_at_maturity_ledger_time() {
     client.fund(&investor, &5_000i128);
 
     // Advance ledger to exactly maturity — must succeed
-    env.ledger().with_mut(|l| l.timestamp = 5000);
+    env.ledger().set_timestamp(5000);
     let settled = client.settle();
     assert_eq!(settled.escrow.status, 2);
 }
@@ -1930,7 +2181,7 @@ fn test_settle_fails_one_second_before_maturity() {
     client.fund(&investor, &5_000i128);
 
     // One second before maturity — must reject
-    env.ledger().with_mut(|l| l.timestamp = 4999);
+    env.ledger().set_timestamp(4999);
     client.settle();
 }
 
@@ -1971,6 +2222,47 @@ fn test_update_maturity_twice_overwrites() {
     let updated = client.update_maturity(&3000u64);
     assert_eq!(updated.maturity, 3000u64);
     assert_eq!(client.get_escrow().maturity, 3000u64);
+}
+
+#[test]
+fn test_update_maturity_edge_cases_success() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let client = deploy(&env);
+
+    let token = Address::generate(&env);
+    let treasury = Address::generate(&env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "MAT_EDGE"),
+        &sme,
+        &5_000i128,
+        &800i64,
+        &1000u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+        &None::<u32>,
+    );
+
+    let updated1 = client.update_maturity(&2000u64, &0u32);
+    assert_eq!(updated1.maturity, 2000u64);
+
+    let updated2 = client.update_maturity(&500u64, &1u32);
+    assert_eq!(updated2.maturity, 500u64);
 }
 
 // ── Authorization guard ordering audit (issue #265) ───────────────────────────
@@ -2153,6 +2445,241 @@ fn auth_audit_sweep_terminal_dust_requires_treasury() {
     client.sweep_terminal_dust(&100i128);
 }
 
+// --- Additional Negative-Auth Audit Tests ---
+
+#[test]
+#[should_panic]
+fn auth_audit_init_requires_admin() {
+    let env = Env::default();
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let client = deploy(&env);
+    env.mock_auths(&[]);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "AUTHINT"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+        &None::<u32>,
+    );
+}
+
+#[test]
+#[should_panic]
+fn auth_audit_cancel_funding_requires_admin() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    env.mock_all_auths();
+    default_init(&client, &env, &admin, &sme);
+    env.mock_auths(&[]);
+    client.cancel_funding(&0u32);
+}
+
+#[test]
+#[should_panic]
+fn auth_audit_refund_requires_investor() {
+    let env = Env::default();
+    let (client, _, _, investor, _) = auth_audit_init_funded(&env);
+    env.mock_all_auths();
+    client.cancel_funding(&0u32);
+    env.mock_auths(&[]);
+    client.refund(&investor);
+}
+
+#[test]
+#[should_panic]
+fn auth_audit_set_investors_allowlisted_requires_admin() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    env.mock_all_auths();
+    default_init(&client, &env, &admin, &sme);
+    env.mock_auths(&[]);
+    client.set_investors_allowlisted(&soroban_sdk::Vec::new(&env), &true, &0u32);
+}
+
+#[test]
+#[should_panic]
+fn auth_audit_update_funding_target_requires_admin() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    env.mock_all_auths();
+    default_init(&client, &env, &admin, &sme);
+    env.mock_auths(&[]);
+    client.update_funding_target(&100_000i128, &0u32);
+}
+
+#[test]
+#[should_panic]
+fn auth_audit_lower_max_unique_investors_requires_admin() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    env.mock_all_auths();
+    default_init(&client, &env, &admin, &sme);
+    env.mock_auths(&[]);
+    client.lower_max_unique_investors(&1u32, &0u32);
+}
+
+#[test]
+#[should_panic]
+fn auth_audit_update_maturity_requires_admin() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    env.mock_all_auths();
+    default_init(&client, &env, &admin, &sme);
+    env.mock_auths(&[]);
+    client.update_maturity(&5000u64, &0u32);
+}
+
+#[test]
+#[should_panic]
+fn auth_audit_rotate_beneficiary_requires_auth() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    env.mock_all_auths();
+    default_init(&client, &env, &admin, &sme);
+    env.mock_auths(&[]);
+    client.rotate_beneficiary(&Address::generate(&env), &0u32);
+}
+
+#[test]
+#[should_panic]
+fn auth_audit_revoke_attestation_digest_requires_admin() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    env.mock_all_auths();
+    default_init(&client, &env, &admin, &sme);
+    env.mock_auths(&[]);
+    client.revoke_attestation_digest(&0u32);
+}
+
+#[test]
+#[should_panic]
+fn auth_audit_clear_legal_hold_requires_admin() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    env.mock_all_auths();
+    default_init(&client, &env, &admin, &sme);
+    client.set_legal_hold(&true, &0u32);
+    env.mock_auths(&[]);
+    client.clear_legal_hold(&1u32);
+}
+
+#[test]
+#[should_panic]
+fn auth_audit_request_clear_legal_hold_requires_admin() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    env.mock_all_auths();
+    default_init(&client, &env, &admin, &sme);
+    env.mock_auths(&[]);
+    client.request_clear_legal_hold(&0u32);
+}
+
+#[test]
+#[should_panic]
+fn auth_audit_record_sme_collateral_commitment_requires_sme() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    env.mock_all_auths();
+    default_init(&client, &env, &admin, &sme);
+    env.mock_auths(&[]);
+    client.record_sme_collateral_commitment(&symbol_short!("USDC"), &1000i128);
+}
+
+#[test]
+#[should_panic]
+fn auth_audit_partial_settle_requires_auth() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    env.mock_all_auths();
+    default_init(&client, &env, &admin, &sme);
+    env.mock_auths(&[]);
+    client.partial_settle(&sme);
+}
+
+#[test]
+#[should_panic]
+fn auth_audit_fund_batch_requires_investor() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    env.mock_all_auths();
+    default_init(&client, &env, &admin, &sme);
+    let investor = Address::generate(&env);
+    env.mock_auths(&[]);
+    client.fund_batch(&soroban_sdk::vec![&env, (investor.clone(), TARGET)]);
+}
+
+#[test]
+#[should_panic]
+fn auth_audit_sweep_terminal_dust_wrong_signer() {
+    // Edge case: treasury vs admin on sweep
+    let env = Env::default();
+    env.mock_all_auths();
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let investor = Address::generate(&env);
+    let token = install_stellar_asset_token(&env);
+    let treasury = Address::generate(&env);
+    let escrow_id = deploy_id(&env);
+    let client = LiquifactEscrowClient::new(&env, &escrow_id);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "WRSW"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &token.id,
+        &None,
+        &treasury, // Valid treasury
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+        &None::<u32>,
+    );
+    client.fund(&investor, &TARGET);
+    client.settle();
+
+    // Simulate admin trying to sweep instead of treasury
+    use soroban_sdk::testutils::MockAuth;
+    use soroban_sdk::{IntoVal, Vec as SorobanVec};
+    env.mock_auths(&[MockAuth {
+        address: &admin, // wrong signer (admin instead of treasury)
+        invoke: &soroban_sdk::testutils::MockAuthInvoke {
+            contract: &client.address,
+            fn_name: "sweep_terminal_dust",
+            args: SorobanVec::from_array(&env, [(100i128,).into_val(&env)]),
+            sub_invokes: &[],
+        },
+    }]);
+
+    client.sweep_terminal_dust(&100i128); // Panics because caller != treasury
+}
+
 // --- rotate_beneficiary tests ---
 
 #[test]
@@ -2170,7 +2697,7 @@ fn test_rotate_beneficiary_success_dual_auth() {
     assert_eq!(updated.sme_address, new_sme);
     assert_eq!(client.get_escrow().sme_address, new_sme);
 
-    let all_evts = rotate_events.events();
+    let all_evts = env.events().all();
     let total_evts = all_evts.len();
     assert!(total_evts >= 2);
 
@@ -2369,10 +2896,12 @@ fn test_rotate_beneficiary_then_withdraw_goes_to_new_sme() {
         &TARGET,
         &(env.ledger().sequence() + 10_000),
     );
+    // The beneficiary is immutable once any funding is recorded, so rotate to
+    // the new SME first (escrow still open, funded_amount == 0).
+    client.rotate_beneficiary(&new_sme);
     client.fund(&investor, &TARGET);
     // Mint funded_amount into the escrow contract so withdraw() can transfer it.
     token.stellar.mint(&escrow_id, &TARGET);
-    client.rotate_beneficiary(&new_sme);
     client.withdraw();
     assert_eq!(token.stellar.balance(&new_sme), TARGET);
 }
@@ -2408,7 +2937,7 @@ fn test_rotate_beneficiary_partial_funding_panics() {
         &None::<i64>,
     );
     client.fund(&investor, &TARGET); // partial funding
-    client.rotate_beneficiary(&new_sme);
+    client.rotate_beneficiary(&new_sme, &0u32);
 }
 
 #[test]
@@ -2420,14 +2949,16 @@ fn test_rebind_registry_ref_before_and_after_funding() {
     default_init(&client, &env, &admin, &sme);
 
     // Before funding, admin may rebind the registry.
-    client.rebind_registry_ref(&Some(registry.clone()));
+    client.rebind_registry_ref(&Some(registry.clone()), &0u32);
     assert_eq!(client.get_registry_ref(), Some(registry.clone()));
 
     // After funding, rebind should be rejected.
     let investor = Address::generate(&env);
     client.fund(&investor, &TARGET);
     let new_registry = Address::generate(&env);
-    let res = std::panic::catch_unwind(|| client.rebind_registry_ref(&Some(new_registry)));
+    let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.rebind_registry_ref(&Some(new_registry), &1u32)
+    }));
     assert!(res.is_err());
 }
 
@@ -2442,8 +2973,8 @@ fn test_cancel_pending_admin_propose_then_cancel_clears_pending() {
     let new_admin = Address::generate(&env);
     default_init(&client, &env, &admin, &sme);
 
-    client.propose_admin(&new_admin, &None);
-    let cancelled = client.cancel_pending_admin();
+    client.propose_admin(&new_admin, &0u32);
+    let cancelled = client.cancel_pending_admin(&1u32);
 
     assert_eq!(cancelled, new_admin);
     assert_eq!(client.get_pending_admin(), None);
@@ -2460,8 +2991,8 @@ fn test_cancel_pending_admin_accept_after_cancel_fails() {
     let new_admin = Address::generate(&env);
     default_init(&client, &env, &admin, &sme);
 
-    client.propose_admin(&new_admin, &None);
-    client.cancel_pending_admin();
+    client.propose_admin(&new_admin, &0u32);
+    client.cancel_pending_admin(&1u32);
 
     assert_contract_error(client.try_accept_admin(), EscrowError::NoPendingAdmin);
 }
@@ -2474,7 +3005,7 @@ fn test_cancel_pending_admin_without_proposal_rejected() {
     default_init(&client, &env, &admin, &sme);
 
     assert_contract_error(
-        client.try_cancel_pending_admin(),
+        client.try_cancel_pending_admin(&0u32),
         EscrowError::NoPendingAdmin,
     );
 }
@@ -2489,9 +3020,9 @@ fn test_cancel_pending_admin_non_admin_rejected() {
     let new_admin = Address::generate(&env);
     default_init(&client, &env, &admin, &sme);
 
-    client.propose_admin(&new_admin, &None);
+    client.propose_admin(&new_admin, &0u32);
     env.mock_auths(&[]);
-    client.cancel_pending_admin();
+    client.cancel_pending_admin(&1u32);
 }
 
 /// Cancel then re-propose a different admin — the new proposal is accepted.
@@ -2504,12 +3035,12 @@ fn test_cancel_pending_admin_cancel_then_repropose_succeeds() {
     default_init(&client, &env, &admin, &sme);
 
     // Propose first, then cancel
-    client.propose_admin(&first, &None);
-    client.cancel_pending_admin();
+    client.propose_admin(&first, &0u32);
+    client.cancel_pending_admin(&1u32);
     assert_eq!(client.get_pending_admin(), None);
 
     // Propose second, then accept
-    client.propose_admin(&second, &None);
+    client.propose_admin(&second, &2u32);
     let updated = client.accept_admin();
     assert_eq!(updated.admin, second);
     assert_eq!(client.get_pending_admin(), None);
@@ -2522,7 +3053,7 @@ fn test_cancel_pending_admin_uninitialized_panics() {
     let env = Env::default();
     env.mock_all_auths();
     let client = deploy(&env);
-    client.cancel_pending_admin();
+    client.cancel_pending_admin(&0u32);
 }
 
 /// Verify that cancel_pending_admin emits AdminProposalCancelled event.
@@ -2536,8 +3067,8 @@ fn test_cancel_pending_admin_emits_event() {
     let new_admin = Address::generate(&env);
     default_init(&client, &env, &admin, &sme);
 
-    client.propose_admin(&new_admin, &None);
-    client.cancel_pending_admin();
+    client.propose_admin(&new_admin, &0u32);
+    client.cancel_pending_admin(&1u32);
 
     let all_events = env.events().all();
     assert_eq!(
@@ -2904,7 +3435,7 @@ fn test_update_maturity_max_horizon_unauthorized() {
         &None::<i64>,
     );
     env.mock_auths(&[]);
-    client.update_maturity_max_horizon(&3_600u64);
+    client.update_maturity_max_horizon(&3_600u64, &0u32);
 }
 
 /// `update_maturity_max_horizon` must emit a `MaturityMaxHorizonUpdated` event
@@ -2938,7 +3469,7 @@ fn test_update_maturity_max_horizon_emits_event() {
     );
 
     let new_horizon = 3_600u64;
-    client.update_maturity_max_horizon(&new_horizon);
+    client.update_maturity_max_horizon(&new_horizon, &0u32);
 
     let all_events = env.events().all();
     assert_eq!(
@@ -3001,7 +3532,7 @@ fn test_lowered_horizon_existing_maturity_untouched_and_far_update_rejected() {
 
     // Lower the horizon to 500 s: new ceiling = now(1_000) + 500 = 1_500.
     // The existing maturity (2_000) is beyond that ceiling but must survive unchanged.
-    client.update_maturity_max_horizon(&500u64);
+    client.update_maturity_max_horizon(&500u64, &0u32);
     assert_eq!(
         client.get_escrow().maturity,
         2_000u64,
@@ -3011,7 +3542,7 @@ fn test_lowered_horizon_existing_maturity_untouched_and_far_update_rejected() {
     // A subsequent update to 1_501 (one second beyond the new ceiling) must fail.
     assert!(
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            client.update_maturity(&1_501u64);
+            client.update_maturity(&1_501u64, &1u32);
         }))
         .is_err(),
         "update_maturity beyond the new horizon must be rejected"
@@ -3056,12 +3587,12 @@ fn test_lowered_horizon_allows_within_horizon_maturity_update() {
     );
 
     // Lower the horizon to 2 hours.
-    client.update_maturity_max_horizon(&7_200u64);
+    client.update_maturity_max_horizon(&7_200u64, &0u32);
     assert_eq!(client.get_maturity_max_horizon(), 7_200u64);
 
     // 1 hour from now (3_600 s) is within the new 2-hour horizon.
     let near_maturity = 1_000u64 + 3_600u64;
-    let updated = client.update_maturity(&near_maturity);
+    let updated = client.update_maturity(&near_maturity, &1u32);
     assert_eq!(
         updated.maturity, near_maturity,
         "maturity within the new horizon must be accepted"
@@ -3083,11 +3614,11 @@ fn test_post_handover_admin_can_clear_hold_set_by_old_admin() {
     default_init(&client, &env, &old_admin, &sme);
 
     // 1. Old admin sets a legal hold
-    client.set_legal_hold(&true);
+    client.set_legal_hold(&true, &0u32);
     assert!(client.get_legal_hold());
 
     // 2. Old admin proposes new admin
-    client.propose_admin(&new_admin, &None);
+    client.propose_admin(&new_admin, &1u32);
 
     // 3. New admin accepts admin handover
     client.accept_admin();
@@ -3099,12 +3630,12 @@ fn test_post_handover_admin_can_clear_hold_set_by_old_admin() {
         invoke: &soroban_sdk::testutils::MockAuthInvoke {
             contract: &client.address,
             fn_name: "clear_legal_hold",
-            args: soroban_sdk::Vec::<soroban_sdk::Val>::new(&env),
+            args: soroban_sdk::Vec::from_array(&env, [2u32.into_val(&env)]),
             sub_invokes: &[],
         },
     }]);
     assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        client.clear_legal_hold();
+        client.clear_legal_hold(&2u32);
     }))
     .is_err());
 
@@ -3114,11 +3645,11 @@ fn test_post_handover_admin_can_clear_hold_set_by_old_admin() {
         invoke: &soroban_sdk::testutils::MockAuthInvoke {
             contract: &client.address,
             fn_name: "clear_legal_hold",
-            args: soroban_sdk::Vec::<soroban_sdk::Val>::new(&env),
+            args: soroban_sdk::Vec::from_array(&env, [2u32.into_val(&env)]),
             sub_invokes: &[],
         },
     }]);
-    client.clear_legal_hold();
+    client.clear_legal_hold(&2u32);
     assert!(!client.get_legal_hold());
 }
 
@@ -3140,7 +3671,7 @@ fn test_partial_settle_legal_hold_typed_error() {
     let (client, admin, sme) = setup(&env);
     default_init(&client, &env, &admin, &sme);
 
-    client.set_legal_hold(&true);
+    client.set_legal_hold(&true, &0u32);
 
     assert_contract_error(
         client.try_partial_settle(&sme),
@@ -3317,9 +3848,8 @@ fn test_pending_admin_remaining_positive_before_expiry() {
     let (client, admin, sme) = setup(&env);
     default_init(&client, &env, &admin, &sme);
     let new_admin = Address::generate(&env);
-    let window = 3600u64;
-    client.propose_admin(&new_admin, &Some(window));
-    assert_eq!(client.get_pending_admin_remaining_secs(), Some(window));
+    client.propose_admin(&new_admin, &0u32);
+    assert_eq!(client.get_pending_admin_remaining_secs(), Some(crate::DEFAULT_ADMIN_PROPOSAL_VALIDITY_SECS));
 }
 
 #[test]
@@ -3329,14 +3859,13 @@ fn test_pending_admin_remaining_zero_at_and_after_expiry() {
     let (client, admin, sme) = setup(&env);
     default_init(&client, &env, &admin, &sme);
     let new_admin = Address::generate(&env);
-    let window = 100u64;
-    client.propose_admin(&new_admin, &Some(window));
+    client.propose_admin(&new_admin, &0u32);
     let expiry = client.get_pending_admin_expiry().unwrap();
-    env.ledger().with_mut(|l| l.timestamp = expiry);
+    env.ledger().set_timestamp(expiry);
     assert_eq!(client.get_pending_admin_remaining_secs(), Some(0));
     // accept_admin still succeeds at expiry (inclusive bound)
     client.accept_admin();
-    env.ledger().with_mut(|l| l.timestamp = expiry + 1);
+    env.ledger().set_timestamp(expiry + 1);
     assert_eq!(client.get_pending_admin_remaining_secs(), None);
 }
 
@@ -3347,9 +3876,40 @@ fn test_pending_admin_remaining_consistent_with_accept_admin() {
     let (client, admin, sme) = setup(&env);
     default_init(&client, &env, &admin, &sme);
     let new_admin = Address::generate(&env);
-    client.propose_admin(&new_admin, &Some(10));
+    client.propose_admin(&new_admin, &0u32);
     let expiry = client.get_pending_admin_expiry().unwrap();
-    env.ledger().with_mut(|l| l.timestamp = expiry + 1);
+    env.ledger().set_timestamp(expiry + 1);
     assert_eq!(client.get_pending_admin_remaining_secs(), Some(0));
     assert_contract_error(client.try_accept_admin(), EscrowError::AdminProposalExpired);
+}
+
+// A recovery is an administrative state transition, not a best-effort cleanup call. It must
+// participate in the same nonce serialization as proposal and cancellation so a delayed retry
+// cannot remove a proposal created after the retry was signed.
+#[test]
+fn test_recover_admin_replay_and_stale_nonce_are_harmless() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    let abandoned = Address::generate(&env);
+    client.propose_admin(&abandoned, &0u32);
+    let expiry = client.get_pending_admin_expiry().unwrap();
+    env.ledger().set_timestamp(expiry + 1);
+
+    client.recover_admin(&soroban_sdk::String::from_str(&env, "expired"), &1u32);
+    assert_eq!(client.get_pending_admin(), None);
+    assert_contract_error(
+        client.try_recover_admin(&soroban_sdk::String::from_str(&env, "replay"), &1u32),
+        EscrowError::AdminNonceMismatch,
+    );
+    assert_eq!(client.get_admin_nonce(), 2u32);
+
+    let successor = Address::generate(&env);
+    client.propose_admin(&successor, &2u32);
+    assert_contract_error(
+        client.try_recover_admin(&soroban_sdk::String::from_str(&env, "delayed"), &1u32),
+        EscrowError::AdminNonceMismatch,
+    );
+    assert_eq!(client.get_pending_admin(), Some(successor));
 }

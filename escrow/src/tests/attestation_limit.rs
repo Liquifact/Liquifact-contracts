@@ -1,3 +1,10 @@
+// State invariants protected by this test module:
+// 1. `get_attestation_limit` returns `DEFAULT_ATTESTATION_LIMIT` until an admin
+//    explicitly sets a value; the stored value is always within
+//    `[MIN_ATTESTATION_LIMIT, MAX_ATTESTATION_LIMIT]`.
+// 2. Only the admin may mutate the limit; rejected calls leave state unchanged.
+// 3. `append_attestation_digest` / `append_attestation_digests` never grow the
+//    append log beyond the currently configured limit.
 // Tests for the admin-only `set_attestation_limit` / `get_attestation_limit` setters:
 // default value, in-bounds set, out-of-bounds rejection, non-admin rejection, event emission,
 // and enforcement by `append_attestation_digest` / `append_attestation_digests`.
@@ -264,6 +271,34 @@ fn append_attestation_digest_respects_configured_limit() {
     assert_eq!(client.get_attestation_append_log().len(), 1);
 }
 
+/// Lowering the limit below the current log length must not truncate existing
+/// entries, but must block further appends until the limit is raised again.
+#[test]
+fn lowering_limit_below_log_length_preserves_existing_entries() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    init_escrow(&env, &client, &admin, &sme);
+
+    // Fill three entries under the default limit.
+    client.append_attestation_digest(&digest(&env, 1));
+    client.append_attestation_digest(&digest(&env, 2));
+    client.append_attestation_digest(&digest(&env, 3));
+    assert_eq!(client.get_attestation_append_log().len(), 3);
+
+    // Lower the limit below the current log length.
+    client.set_attestation_limit(&1);
+    assert_eq!(client.get_attestation_limit(), 1);
+    // Existing entries are preserved (no silent data loss).
+    assert_eq!(client.get_attestation_append_log().len(), 3);
+
+    // Further appends are rejected because the log is already at/over the limit.
+    assert_contract_error(
+        client.try_append_attestation_digest(&digest(&env, 4)),
+        EscrowError::AttestationAppendLogCapacityReached,
+    );
+    assert_eq!(client.get_attestation_append_log().len(), 3);
+}
+
 /// Default limit (32) still allows all 32 appends.
 #[test]
 fn append_attestation_digest_default_limit_allows_full_log() {
@@ -306,6 +341,33 @@ fn append_attestation_digests_batch_respects_configured_limit() {
         client.try_append_attestation_digest(&digest(&env, 3)),
         EscrowError::AttestationAppendLogCapacityReached,
     );
+}
+
+/// A batch that would exceed the configured limit must be rejected atomically:
+/// no partial writes and the log length is unchanged.
+#[test]
+fn append_attestation_digests_batch_rejects_when_over_limit_atomically() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    init_escrow(&env, &client, &admin, &sme);
+
+    client.set_attestation_limit(&2);
+    client.append_attestation_digest(&digest(&env, 1));
+    assert_eq!(client.get_attestation_append_log().len(), 1);
+
+    // Batch of 2 would push the log to 3 > limit 2: must be rejected whole.
+    let batch = SorobanVec::from_array(&env, [digest(&env, 2), digest(&env, 3)]);
+    assert_contract_error(
+        client.try_append_attestation_digests(&batch),
+        EscrowError::AttestationAppendLogCapacityReached,
+    );
+    // No partial write occurred.
+    assert_eq!(client.get_attestation_append_log().len(), 1);
+
+    // A batch that exactly fits is still accepted.
+    let fits = SorobanVec::from_array(&env, [digest(&env, 4)]);
+    client.append_attestation_digests(&fits);
+    assert_eq!(client.get_attestation_append_log().len(), 2);
 }
 
 /// Raising the limit after appends allows more entries.
@@ -352,5 +414,24 @@ proptest! {
         } else {
             assert_contract_error(result, EscrowError::AttestationLimitOutOfRange);
         }
+        // Invariant: after any set attempt, the stored limit is either the
+        // default (unchanged) or the accepted in-bounds value.
+        let stored = client.get_attestation_limit();
+        assert!(stored >= MIN_ATTESTATION_LIMIT && stored <= MAX_ATTESTATION_LIMIT);
+    }
+
+    #[test]
+    fn fuzz_rejected_set_does_not_mutate_state(limit in 0u32..=64u32) {
+        prop_assume!(limit < MIN_ATTESTATION_LIMIT || limit > MAX_ATTESTATION_LIMIT);
+        let env = Env::default();
+        let (client, admin, sme) = setup(&env);
+        init_escrow(&env, &client, &admin, &sme);
+
+        assert_contract_error(
+            client.try_set_attestation_limit(&limit),
+            EscrowError::AttestationLimitOutOfRange,
+        );
+        // Rejected call must not mutate the stored limit.
+        assert_eq!(client.get_attestation_limit(), DEFAULT_ATTESTATION_LIMIT);
     }
 }

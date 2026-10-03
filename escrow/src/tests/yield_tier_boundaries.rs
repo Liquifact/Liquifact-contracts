@@ -7,7 +7,7 @@
 //! its exact threshold.
 
 use super::{assert_contract_error, deploy, LiquifactEscrowClient, TARGET};
-use crate::{EscrowError, YieldTier, YieldTierPreview};
+use crate::{EscrowError, YieldResolution, YieldTier};
 use soroban_sdk::{testutils::Address as _, Address, Env, String, Vec as SorobanVec};
 
 const BOUNDED_TIER_COUNT_PROBE: u32 = 64;
@@ -125,14 +125,14 @@ fn test_lock_boundaries_accept_zero_and_u64_max() {
 
     assert_eq!(
         client.preview_yield_tier(&1i128, &0u64),
-        YieldTierPreview {
+        YieldResolution {
             effective_yield_bps: 0,
             matched_lock_secs: 0
         }
     );
     assert_eq!(
         client.preview_yield_tier(&1i128, &u64::MAX),
-        YieldTierPreview {
+        YieldResolution {
             effective_yield_bps: 10_000,
             matched_lock_secs: u64::MAX
         }
@@ -200,77 +200,77 @@ fn test_preview_selection_uses_bounded_boundary_matrix() {
     let cases = [
         (
             0,
-            YieldTierPreview {
+            YieldResolution {
                 effective_yield_bps: 0,
                 matched_lock_secs: 0,
             },
         ),
         (
             1,
-            YieldTierPreview {
+            YieldResolution {
                 effective_yield_bps: 100,
                 matched_lock_secs: 1,
             },
         ),
         (
             2,
-            YieldTierPreview {
+            YieldResolution {
                 effective_yield_bps: 100,
                 matched_lock_secs: 1,
             },
         ),
         (
             9,
-            YieldTierPreview {
+            YieldResolution {
                 effective_yield_bps: 100,
                 matched_lock_secs: 1,
             },
         ),
         (
             10,
-            YieldTierPreview {
+            YieldResolution {
                 effective_yield_bps: 200,
                 matched_lock_secs: 10,
             },
         ),
         (
             11,
-            YieldTierPreview {
+            YieldResolution {
                 effective_yield_bps: 200,
                 matched_lock_secs: 10,
             },
         ),
         (
             99,
-            YieldTierPreview {
+            YieldResolution {
                 effective_yield_bps: 200,
                 matched_lock_secs: 10,
             },
         ),
         (
             100,
-            YieldTierPreview {
+            YieldResolution {
                 effective_yield_bps: 300,
                 matched_lock_secs: 100,
             },
         ),
         (
             101,
-            YieldTierPreview {
+            YieldResolution {
                 effective_yield_bps: 300,
                 matched_lock_secs: 100,
             },
         ),
         (
             u64::MAX - 1,
-            YieldTierPreview {
+            YieldResolution {
                 effective_yield_bps: 300,
                 matched_lock_secs: 100,
             },
         ),
         (
             u64::MAX,
-            YieldTierPreview {
+            YieldResolution {
                 effective_yield_bps: 10_000,
                 matched_lock_secs: u64::MAX,
             },

@@ -1,10 +1,12 @@
 # Escrow Pause Switch — Incident Response Reference
 
-`DataKey::Paused` is a lightweight boolean flag stored in contract instance
-storage. When `true` it blocks every risk-bearing entrypoint for rapid incident
-response. This document describes who can toggle it, which entrypoints are
-gated, how auto-expiry and rate limiting work, and how the pause relates to the
-compliance legal hold.
+`DataKey::Paused` is a **typed, scoped** operational pause stored in contract
+instance storage. It blocks risk-bearing entrypoints for rapid incident
+response, records *which flows are affected* (a [`PauseScope`]) and *why*
+(a typed [`PauseReason`]), and exposes them via a safe read-only
+`get_pause_state()` view. This document describes who can toggle it, how
+scopes and reasons work, which entrypoints are gated, how auto-expiry and rate
+limiting work, and how the pause relates to the compliance legal hold.
 
 ---
 
@@ -16,24 +18,62 @@ be a governed address (multisig or DAO). This matches the same auth boundary
 as [`set_legal_hold`].
 
 ```rust
-pub fn set_paused(env: Env, active: bool) {
+pub fn set_paused(env: Env, active: bool, scope: PauseScope, reason: PauseReason) {
     let escrow = Self::load_escrow_require_admin(&env);
-    // rate-limit check, storage write, event emission
+    // rate-limit check, typed storage write, event emission
 }
 ```
 
 ---
 
+## Typed reason and scope
+
+Every pause is stored as a [`PauseState`] under `DataKey::PauseState`, written
+atomically with the legacy `Paused`/`PausedAt` flags. It records exactly one
+`scope` (which flows are blocked) and one `reason` (why). Pausing **one** scope
+(`Funding`, `Settlement`, `Withdrawal`, or `Claims`) blocks only that entrypoint
+family; pausing `All` blocks every gated entrypoint.
+
+```rust
+pub enum PauseScope { Funding, Settlement, Withdrawal, Claims, All }
+pub enum PauseReason { Maintenance, Incident, Security, TokenIntegration }
+pub struct PauseState { pub scope: PauseScope, pub reason: PauseReason, pub activated_at: u64 }
+```
+
+`PauseReason` is a protocol-constant (not free-form) so off-chain consumers and
+dashboards can branch on a small, stable set. The compliance/legal hold is a
+**separate** mechanism (`DataKey::LegalHold`) and is never represented as a
+pause reason.
+
+- `set_paused(true, scope, reason)` activates a scoped pause; reactivating an
+already-active scope refreshes `activated_at`/reason (idempotent).
+- `set_paused(false, scope, reason)` clears the active pause **only** when
+`scope == All` or `scope` matches the active scope. A wrong scope fails with
+`PauseScopeMismatch` (code 246) rather than silently doing nothing, so an
+operator can never believe a pause was lifted when it was not.
+- `set_paused(false, All, _)` clears whatever scope is currently active.
+
+### Read-only pause state
+
+`get_pause_state() -> Option<PauseState>` returns the current effective typed
+state (`None` when no pause is active, including after auto-expiry). It is a
+**pure read**: no auth, no storage mutation, never blocked. `is_paused()`
+continues to report just the effective boolean, and `get_pause_state()` is the
+view that explains *what* is blocked and *why*.
+
+---
+
 ## Gated entrypoints
 
-When `paused_active()` returns `true`, the following entrypoints are blocked:
+Gates are **scope-aware**: an entrypoint is blocked only if the active scope
+matches its family (`All`, or the matching single scope).
 
-| Function | Error variant |
-|---|---|
-| `fund` / `fund_with_commitment` | `PausedBlocksFunding` (210) |
-| `settle` | `PausedBlocksSettlement` (211) |
-| `withdraw` | `PausedBlocksWithdrawal` (212) |
-| `claim_investor_payout` | `PausedBlocksInvestorClaims` (213) |
+| Function | Scope | Error variant |
+|---|---|---|
+| `fund` / `fund_with_commitment` / `fund_batch` | Funding | `PausedBlocksFunding` (210) |
+| `settle` | Settlement | `PausedBlocksSettlement` (211) |
+| `withdraw` | Withdrawal | `PausedBlocksWithdrawal` (212) |
+| `claim_investor_payout` | Claims | `PausedBlocksInvestorClaims` (213) |
 
 The check calls `paused_active(&env)`, which:
 
@@ -138,20 +178,32 @@ ledger timestamp exceeds `PauseToggleWindowStart + window_secs`.
 
 | Function | Effect | Error if |
 |---|---|---|
-| `set_paused(true/false)` | Toggle pause state | Rate limit exceeded |
+| `set_paused(active, scope, reason)` | Activate/clear a typed, scoped pause | Rate limit exceeded; wrong-scope unpause → `PauseScopeMismatch` (246) |
 | `set_pause_max_duration(duration)` | Set auto-expiry window | Duration out of bounds |
 | `get_pause_max_duration()` | Read current auto-expiry | — |
 | `set_pause_rate_limit(limit, window)` | Set toggle rate limit | Invalid combination or out of bounds |
-| `is_paused()` | Read current pause state | — |
+| `is_paused()` | Read current pause boolean (effective) | — |
+| `get_pause_state()` | Read typed scope + reason (`Option<PauseState>`) | — |
 
 ---
+
+## Storage compatibility
+
+`DataKey::PauseState` is an **additive key (ADR-007)**. Instances deployed before
+this feature store only the legacy `Paused`/`PausedAt` booleans; on those
+instances an active pause without a `PauseState` is treated as
+[`PauseScope::All`] — it blocks every gated entrypoint exactly as before. For
+new instances the typed `PauseState` is always written, so `get_pause_state()`
+returns the exact scope/reason on fresh deployments.
 
 ## Incident response procedure
 
 1. **Assess** whether the incident needs an operational pause (quick) or a
    compliance legal hold (timelocked). Refer to the decision tree in
    [`OPERATOR_RUNBOOK.md`](OPERATOR_RUNBOOK.md) §7.
-2. **Pause** via `set_paused(true)` (single admin call, no delay).
+2. **Pause** via `set_paused(true, scope, reason)` — pick the narrowest
+   [`PauseScope`] that stops the affected flow (e.g. `Funding`) and a
+   [`PauseReason`] that explains why (single admin call, no delay).
 3. **Optionally configure** an auto-expiry via `set_pause_max_duration` so the
    pause self-clears after the incident window.
 4. **Resolve** the underlying incident off-chain.
@@ -178,7 +230,13 @@ The matrix in `escrow/src/tests/pause.rs` covers:
 10. Rate limit blocks excessive toggles.
 11. `PauseMaxDurationUpdated` and `PauseRateLimitUpdated` events are emitted on
     configuration changes.
-12. `PausedChanged` event is emitted on every toggle.
+12. `PausedChanged` event is emitted on every toggle and now carries the
+    effective `scope` and `reason`.
+13. `get_pause_state()` returns `None` when unpaused and the typed `(scope,
+    reason)` when paused; it is readable while paused and never blocked.
+14. Typed scope/reason edge cases: pause one scope, pause all scopes, unpause
+    wrong scope (`PauseScopeMismatch`), already-paused idempotency, and
+    unauthorized scoped pause all fail/succeed as documented.
 
 ---
 

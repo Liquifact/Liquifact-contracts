@@ -1,4 +1,5 @@
 //! Storage arithmetic safety tests — overflow and underflow at extreme values.
+//! Storage arithmetic safety tests — overflow and underflow at extreme values.
 //!
 //! Every arithmetic path in the escrow contract that touches stored values uses
 //! `checked_*` or `saturating_*` ops.  This module verifies that:
@@ -23,7 +24,7 @@
 // Bring in the shared test helpers (setup, free_addresses, install_stellar_asset_token,
 // assert_contract_error, StellarTestToken, deploy, etc.) plus all re-exported types.
 use super::*;
-use crate::{LiquifactEscrow, MAX_INVOICE_AMOUNT, MIN_PAUSE_MAX_DURATION_SECS};
+use crate::{LiquifactEscrow, MAX_INVOICE_AMOUNT, MIN_PAUSE_MAX_DURATION_SECS, PauseReason, PauseScope};
 use soroban_sdk::{
     testutils::{Address as _, Ledger as _},
     Address, Env, InvokeError, String,
@@ -67,6 +68,7 @@ fn setup_with_token(
         &None,
         &None,
         &protocol_fee_bps,
+        &None::<u32>, // token_decimals
     );
     (client, id, sme, sac)
 }
@@ -108,6 +110,7 @@ fn setup_no_token(
         &None,
         &None,
         &protocol_fee_bps,
+        &None::<u32>, // token_decimals
     );
     (client, id, sme)
 }
@@ -934,7 +937,7 @@ fn paused_active_expiry_overflow_fails_safe_as_still_paused() {
     let mut ledger = env.ledger().get();
     ledger.timestamp = 1_000;
     env.ledger().set(ledger);
-    client.set_paused(&true);
+    client.set_paused(&true, &PauseScope::All, &PauseReason::Incident);
 
     // The pause is active and should block fund().
     assert_contract_error(
@@ -971,7 +974,7 @@ fn paused_active_cleared_unblocks_fund() {
     let env = Env::default();
     let (client, _id, _sme) = setup_no_token(&env, "PAUNB", 1_000i128, 0, 0, None);
 
-    client.set_paused(&true);
+    client.set_paused(&true, &PauseScope::All, &PauseReason::Incident);
 
     // Should be blocked.
     assert_contract_error(
@@ -979,7 +982,7 @@ fn paused_active_cleared_unblocks_fund() {
         EscrowError::PausedBlocksFunding,
     );
 
-    client.set_paused(&false);
+    client.set_paused(&false, &PauseScope::All, &PauseReason::Incident);
 
     // After clearing, the error must not be PausedBlocksFunding.
     let pause_blocked = soroban_sdk::Error::from_contract_error(
