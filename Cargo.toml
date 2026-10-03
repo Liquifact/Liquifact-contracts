@@ -1,3 +1,18 @@
+[package]
+name = "liquifact_yield_tier"
+version = "0.1.0"
+edition = "2021"
+description = "LiquiFact yield tier contract"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+soroban-sdk = "25.0"
+
+[dev-dependencies]
+soroban-sdk = { version = "25.0", features = ["testutils"] }
+
 [workspace]
 members = ["escrow"]
 resolver = "2" 
