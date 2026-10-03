@@ -445,4 +445,20 @@ pub enum EscrowError {
     PartialSettleNotOpen = 281,
     /// [`LiquifactEscrow::get_contributions`] exceeded [`MAX_INVESTOR_READ_BATCH`].
     ContributionReadBatchTooLarge = 282,
+
+    // -------------------------------------------------------------------------
+    // Transfer self-transfer guards (283..284)
+    // -------------------------------------------------------------------------
+    /// Outbound token transfer rejected because sender and recipient are the same address.
+    ///
+    /// A self-transfer circumvents the balance-delta conservation model: the same address appears
+    /// on both sides, so any balance mutation can be "explained away" while no net movement
+    /// actually occurs. Checked before balance reads so the pre-flight invariant cannot be
+    /// bypassed by supplying a zero or negative amount.
+    TransferSameSenderRecipient = 283,
+    /// Inbound token transfer rejected because sender and recipient are the same address.
+    ///
+    /// Same reasoning as [`TransferSameSenderRecipient`] but for the inbound
+    /// (investor → escrow) leg.
+    InboundTransferSameSenderRecipient = 284,
 }
