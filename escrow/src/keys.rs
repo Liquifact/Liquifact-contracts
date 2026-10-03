@@ -1,4 +1,4 @@
-#allow(dead_code)
+#![allow(dead_code)]
 //! Centralized constructors for funding-related storage keys.
 //!
 //! #Purpose
@@ -31,52 +31,52 @@ use crate::DataKey;
 use soroban_sdk::Address;
 
 /// Per-investor persistent principal recorded by `fund` / `fund_with_commitment` / `fund_batch`.
-pub(crate):: fn investor_contribution(investor: Address) -> DataKey {
+pub(crate) fn investor_contribution(investor: Address) -> DataKey {
     DataKey::InvestorContribution(investor)
 }
 
 /// Per-investor persistent effective yield (bps) selected on the investor's first deposit.
-pub(crate):: fn investor_effective_yield(investor: Address) -> DataKey {
+pub(crate) fn investor_effective_yield(investor: Address) -> DataKey {
     DataKey::InvestorEffectiveYield(investor)
 }
 
 /// Per-investor persistent claim-not-before ledger timestamp (`0` = no extra claim gate).
-pub(crate):: fn investor_claim_not_before(investor: Address) -> DataKey {
+pub(crate) fn investor_claim_not_before(investor: Address) -> DataKey {
     DataKey::InvestorClaimNotBefore(investor)
 }
 
 /// Per-investor persistent claimed-payout marker.
-pub(crate):: fn investor_claimed(investor: Address) -> DataKey {
+pub(crate) fn investor_claimed(investor: Address) -> DataKey {
     DataKey::InvestorClaimed(investor)
 }
 
 /// Instance-storage minimum per-call contribution floor (`0` = no floor).
-pub(crate):: fn min_contribution_floor() -> DataKey {
+pub(crate) fn min_contribution_floor() -> DataKey {
     DataKey::MinContributionFloor
 }
 
 /// Instance-storage cap on distinct investor addresses (absent = unlimited).
-pub(crate):: fn max_unique_investors_cap() -> DataKey {
+pub(crate) fn max_unique_investors_cap() -> DataKey {
     DataKey::MaxUniqueInvestorsCap
 }
 
 /// Instance-storage cap on total principal for a single investor address (absent = unlimited).
-pub(crate):: fn max_per_investor_cap() -> DataKey {
+pub(crate) fn max_per_investor_cap() -> DataKey {
     DataKey::MaxPerInvestorCap
 }
 
 /// Instance-storage count of distinct investor addresses that have funded so far.
-pub(crate):: fn unique_funder_count() -> DataKey {
+pub(crate) fn unique_funder_count() -> DataKey {
     DataKey::UniqueFunderCount
 }
 
 /// Instance-storage ordered list of investor addresses backing paginated enumeration.
-pub(crate):: fn investor_index() -> DataKey {
+pub(crate) fn investor_index() -> DataKey {
     DataKey::InvestorIndex
 }
 
 /// Instance-storage optional funding deadline timestamp (absent = no deadline).
-pub(crate):: fn funding_deadline() -> DataKey {
+pub(crate) fn funding_deadline() -> DataKey {
     DataKey::FundingDeadline
 }
 
@@ -86,7 +86,7 @@ pub(crate) fn funding_close_snapshot() -> DataKey {
 }
 
 /// Instance-storage immutable SEP-41 funding token address, set once at `init`.
-pub(crate):: fn funding_token() -> DataKey {
+pub(crate) fn funding_token() -> DataKey {
     DataKey::FundingToken
 }
 

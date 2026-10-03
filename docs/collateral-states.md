@@ -52,6 +52,9 @@ stateDiagram-v2
 | `clear_sme_collateral_commitment` (line 3457) | Pledged | NoPledge | SME (`require_auth`) | `collateral_pledge_get` must return `Some` | `NoCollateralToClear` (169) |
 | `set_collateral_limit` (line 3396) | — (orthogonal) | — (updates config) | Admin (`require_auth`) | `new_limit > 0` | `CollateralLimitNotPositive` (63) |
 | | | | | `new_limit <= MAX_INVOICE_AMOUNT` | `CollateralLimitExceedsMax` (65) |
+| `batch_record_collateral` | NoPledge, Pledged | Pledged | SME (`require_auth`) | `items.len() > 0` | `CollateralBatchEmpty` (66) |
+| | | | | `items.len() <= MAX_COLLATERAL_BATCH` | `CollateralBatchTooLarge` (67) |
+| | | | | each item passes every single-entry guard (`amount > 0`, `asset != ""`, `amount <= get_collateral_limit()`, timestamp not backwards) | that item's code (60/61/64/62) — **whole batch rejected atomically**, no partial write |
 
 All read-only entrypoints (`get_sme_collateral_commitment` line 3351, `get_collateral_limit` line 3360, `get_collateral_config` line 3370, `get_collateral_records` line 3425) have no state transition effect and require no authorisation.
 
