@@ -343,6 +343,30 @@ fn append_attestation_digests_batch_respects_configured_limit() {
     );
 }
 
+/// Empty and oversized batches are rejected before any append or storage mutation.
+#[test]
+fn append_attestation_digests_rejects_invalid_batch_sizes() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    init_escrow(&env, &client, &admin, &sme);
+
+    let empty = SorobanVec::new(&env);
+    assert_contract_error(
+        client.try_append_attestation_digests(&empty),
+        EscrowError::AttestationAppendBatchEmpty,
+    );
+
+    let mut oversized = SorobanVec::new(&env);
+    for i in 0..=crate::MAX_ATTESTATION_APPEND_BATCH {
+        oversized.push_back(digest(&env, i as u8));
+    }
+    assert_contract_error(
+        client.try_append_attestation_digests(&oversized),
+        EscrowError::AttestationAppendBatchTooLarge,
+    );
+    assert_eq!(client.get_attestation_append_log().len(), 0);
+}
+
 /// A batch that would exceed the configured limit must be rejected atomically:
 /// no partial writes and the log length is unchanged.
 #[test]
