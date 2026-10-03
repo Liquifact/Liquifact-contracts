@@ -445,4 +445,10 @@ pub enum EscrowError {
     PartialSettleNotOpen = 281,
     /// [`LiquifactEscrow::get_contributions`] exceeded [`MAX_INVESTOR_READ_BATCH`].
     ContributionReadBatchTooLarge = 282,
+    /// [`LiquifactEscrow::set_attestation_limit`] received a value outside the supported range.
+    AttestationLimitOutOfRange = 283,
+    /// [`LiquifactEscrow::append_attestation_digests`] received an empty batch.
+    AttestationAppendBatchEmpty = 284,
+    /// [`LiquifactEscrow::append_attestation_digests`] exceeded the per-call batch bound.
+    AttestationAppendBatchTooLarge = 285,
 }

@@ -193,10 +193,19 @@ pub const EVENT_SCHEMA_VERSION: u32 = 1;
 /// Upper bound on [`LiquifactEscrow::append_attestation_digest`] entries to keep storage bounded.
 /// Revocation via [`LiquifactEscrow::revoke_attestation_digest`] does not consume a slot.
 pub const MAX_ATTESTATION_APPEND_ENTRIES: u32 = 32;
-pub const MAX_ATTESTATION_APPEND_BATCH: u32 = MAX_ATTESTATION_APPEND_ENTRIES;
 
 /// Maximum number of digests accepted by a single `append_attestation_digests` call.
 pub const MAX_ATTESTATION_APPEND_BATCH: u32 = 32;
+
+/// Default append-log limit, preserving the original fixed-capacity behavior.
+pub const DEFAULT_ATTESTATION_LIMIT: u32 = MAX_ATTESTATION_APPEND_ENTRIES;
+
+/// Minimum configurable append-log limit. A zero limit would permanently disable
+/// the append-only audit trail, so configuration must remain positive.
+pub const MIN_ATTESTATION_LIMIT: u32 = 1;
+
+/// Maximum configurable append-log limit; never exceeds the original storage bound.
+pub const MAX_ATTESTATION_LIMIT: u32 = MAX_ATTESTATION_APPEND_ENTRIES;
 
 /// Maximum number of indices that can be revoked in a single batch call.
 pub const MAX_ATTESTATION_REVOKE_BATCH: u32 = 32;
@@ -3967,7 +3976,7 @@ impl LiquifactEscrow {
 
         ensure(
             &env,
-            log.len() + n <= limit,
+            log.len() <= limit && n <= limit - log.len(),
             EscrowError::AttestationAppendLogCapacityReached,
         );
 
@@ -4393,7 +4402,7 @@ impl LiquifactEscrow {
         let mut log: Vec<BytesN<32>> = Self::load_attestation_log(&env);
         ensure(
             &env,
-            log.len() < MAX_ATTESTATION_APPEND_ENTRIES,
+            log.len() < Self::get_attestation_limit(env.clone()),
             EscrowError::AttestationAppendLogCapacityReached,
         );
         let idx = log.len();

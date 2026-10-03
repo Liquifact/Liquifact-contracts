@@ -60,6 +60,7 @@ pubc(crate) fn assert_contract_error<T, E>(
 mod admin;
 mod attestation_config_view;
 mod attestations;
+mod attestation_limit;
 mod auth_matrix;
 mod cap_validation;
 mod collateral_version_view;
