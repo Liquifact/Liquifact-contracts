@@ -282,7 +282,12 @@ impl LiquifactEscrow {
             panic_with_error!(&env, CloseError::ActiveBalance);
         }
 
-        if env.storage().instance().get(&DataKey::Dispute).unwrap_or(false) {
+        if env
+            .storage()
+            .instance()
+            .get(&DataKey::Dispute)
+            .unwrap_or(false)
+        {
             panic_with_error!(&env, CloseError::ActiveDispute);
         }
 
@@ -315,7 +320,10 @@ impl LiquifactEscrow {
 
     /// Toggles the dispute active flag. Bumps TTL by the disputed threshold.
     pub fn set_dispute_active(env: Env, active: bool) {
-        let mut escrow: InvoiceEscrow = env.storage().instance().get(&DataKey::Escrow)
+        let mut escrow: InvoiceEscrow = env
+            .storage()
+            .instance()
+            .get(&DataKey::Escrow)
             .unwrap_or_else(|| panic_with_error!(&env, CloseError::NotInitialized));
         escrow.admin.require_auth();
         escrow.dispute_active = active;
@@ -505,7 +513,11 @@ pub(crate) fn get_lifecycle_ttl(escrow: &InvoiceEscrow) -> u32 {
     }
 }
 
-pub(crate) fn extend_ttl_for_activity(env: &Env, escrow: &InvoiceEscrow, investor: Option<Address>) {
+pub(crate) fn extend_ttl_for_activity(
+    env: &Env,
+    escrow: &InvoiceEscrow,
+    investor: Option<Address>,
+) {
     let ttl = get_lifecycle_ttl(escrow);
     env.storage().instance().extend_ttl(ttl, ttl);
     if let Some(addr) = investor {
@@ -3612,7 +3624,11 @@ impl LiquifactEscrow {
     /// | Legal hold active | [`EscrowError::LegalHoldBlocksBeneficiaryRotation`] |
     /// | Escrow not open or funded | [`EscrowError::RotationNotOpen`] |
     /// | `new_sme_address == current SME` | [`EscrowError::NewSmeSameAsCurrent`] |
-    pub fn rotate_beneficiary(env: Env, new_sme_address: Address, expected_nonce: u32) -> InvoiceEscrow {
+    pub fn rotate_beneficiary(
+        env: Env,
+        new_sme_address: Address,
+        expected_nonce: u32,
+    ) -> InvoiceEscrow {
         // Legal-hold gate (read-only).
         guard_not_legal_hold(&env, EscrowError::LegalHoldBlocksBeneficiaryRotation);
 
@@ -3780,10 +3796,14 @@ impl LiquifactEscrow {
             .instance()
             .get(&DataKey::AdminNonce)
             .unwrap_or(0);
-        ensure(env, current == expected_nonce, EscrowError::AdminNonceMismatch);
-        let next = current.checked_add(1).unwrap_or_else(|| {
-            fail(env, EscrowError::AdminNonceMismatch)
-        });
+        ensure(
+            env,
+            current == expected_nonce,
+            EscrowError::AdminNonceMismatch,
+        );
+        let next = current
+            .checked_add(1)
+            .unwrap_or_else(|| fail(env, EscrowError::AdminNonceMismatch));
         env.storage().instance().set(&DataKey::AdminNonce, &next);
     }
 
@@ -5672,7 +5692,12 @@ impl LiquifactEscrow {
     /// - [`LiquifactEscrow::is_investor_allowlisted`] — check if an address is allowlisted
     /// - [`LiquifactEscrow::set_investors_allowlisted`] — batch variant for multiple addresses
     /// - [`docs/escrow-allowlist.md`](../docs/escrow-allowlist.md) — full allowlist model documentation
-    pub fn set_investor_allowlisted(env: Env, investor: Address, allowed: bool, expected_nonce: u32) {
+    pub fn set_investor_allowlisted(
+        env: Env,
+        investor: Address,
+        allowed: bool,
+        expected_nonce: u32,
+    ) {
         let escrow = Self::load_escrow_require_admin(&env);
         Self::consume_admin_nonce(&env, expected_nonce);
         env.storage()
@@ -5728,7 +5753,12 @@ impl LiquifactEscrow {
     /// - [`LiquifactEscrow::set_investor_allowlisted`] — single-address variant
     /// - [`LiquifactEscrow::is_investor_allowlisted`] — check if an address is allowlisted
     /// - [`docs/escrow-allowlist.md`](../docs/escrow-allowlist.md) — full allowlist model documentation
-    pub fn set_investors_allowlisted(env: Env, investors: Vec<Address>, allowed: bool, expected_nonce: u32) {
+    pub fn set_investors_allowlisted(
+        env: Env,
+        investors: Vec<Address>,
+        allowed: bool,
+        expected_nonce: u32,
+    ) {
         let escrow = Self::load_escrow_require_admin(&env);
         Self::consume_admin_nonce(&env, expected_nonce);
 
