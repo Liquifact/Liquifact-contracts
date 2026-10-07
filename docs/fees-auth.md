@@ -1,5 +1,10 @@
 # Fees: authorization and access rules
 
+> **Compatibility contract:** The behavior documented in this file is a public
+> compatibility surface. Entrypoint names, error codes, event shapes, field
+> semantics, and the "no update path" invariant for `protocol_fee_bps` are
+> preserved across upgrades. Any change to them requires a tested migration path.
+
 Documents **who** may configure or realize the protocol fee, **when**, and **what happens on
 rejection** — for auditors, integrators, and reviewers. Verified directly against
 `escrow/src/lib.rs` (line references below); this is not a design proposal.
@@ -19,6 +24,11 @@ rejection** — for auditors, integrators, and reviewers. Verified directly agai
 | **SME** (`sme_address`) | Triggers fee *realization* by calling `withdraw`. Does not choose or see the fee rate change — it was fixed at `init`. |
 | **Treasury** | Passive recipient of the fee transfer inside `withdraw`. **Does not authorize anything on this path** — see [Treasury is not authorized here](#treasury-is-not-authorized-on-the-withdraw-path). |
 | **Investor** | No interaction with fees at all. Settlement (`settle`), claims (`claim_investor_payout`), and refunds (`refund`) never apply or reference `protocol_fee_bps`. |
+
+**Invariant (roles):** No role other than `admin` (at `init`) may write
+`DataKey::ProtocolFeeBps`, and no role other than `sme_address` may trigger a
+fee realization via `withdraw`. Treasury and investor never appear as
+authorizers on any fee path.
 
 ---
 
@@ -40,6 +50,12 @@ rejection** — for auditors, integrators, and reviewers. Verified directly agai
   errors and auth failures are distinct failure classes.
 - **Effect:** `protocol_fee_bps` (or `0`) is written once to `DataKey::ProtocolFeeBps` and never
   read-modified again by any other entrypoint.
+
+**Invariant (init):** The fee write is atomic with the rest of `init` — either
+the entire escrow is created with a validated `protocol_fee_bps` in `0..=10_000`,
+or no state (including `DataKey::ProtocolFeeBps`) is written. A rejected `init`
+must not leave a partially-initialized escrow that later reads a stale or
+default fee.
 
 ### `withdraw` — realizes the fee (SME-authorized)
 
@@ -70,6 +86,14 @@ rejection** — for auditors, integrators, and reviewers. Verified directly agai
   can trigger it) rather than a reachable rejection path — do not design integration tests
   expecting to hit it under normal configuration.
 
+**Invariant (withdraw):** On any rejection in checks 1–7, no storage write and
+no token transfer occurs; `status`, `DistributedPrincipal`, and balances are
+unchanged. On success, `net + fee == funded_amount` exactly, `status` becomes
+terminal `3`, and `DistributedPrincipal` increases by the full gross
+`funded_amount`. Concurrent or retried `withdraw` calls cannot double-realize
+the fee because the funded→withdrawn transition is terminal and gated on
+`status == 1`.
+
 - **Effect on success:** `status` → `3` (withdrawn, terminal); `DistributedPrincipal` increases by
   the **full gross** `funded_amount` (fee + net combined) so liability accounting stays correct
   regardless of the split; `fee` transfers to treasury (skipped entirely when `fee == 0` — no
@@ -85,6 +109,12 @@ rejection** — for auditors, integrators, and reviewers. Verified directly agai
   [ADR-007](adr/ADR-007-storage-key-evolution.md)) or for escrows where `protocol_fee_bps` was
   never supplied at `init`.
 
+**Compatibility contract:** `get_protocol_fee_bps` is a pure read with no auth
+and no state mutation. Its return type (`i64`), units (basis points), and
+default (`0` for unset/legacy escrows) are stable. Callers may rely on the
+returned value being in `0..=10_000` for any escrow created by a version of
+this contract that validated the parameter at `init`.
+
 ---
 
 ## No update path (by design)
@@ -98,6 +128,12 @@ If you are reading this alongside a PR or branch that adds such a setter: that i
 additive change** to the authorization surface documented here, not a correction of it. This
 document reflects the fee model as implemented on `main` at the time of writing (commit
 `e2eaacd`).
+
+**Compatibility contract:** The absence of a fee setter is itself a preserved
+guarantee. Integrators and auditors may treat `protocol_fee_bps` as immutable
+for the lifetime of an escrow instance. Introducing a setter would be a
+breaking change to this contract and must ship with an explicit migration
+plan, updated tests, and a revision of this document.
 
 ## Treasury is not authorized on the withdraw path
 
@@ -124,6 +160,12 @@ complete.
 
 Indexers reconstructing gross principal must compute `amount + fee`, not read `amount` alone.
 
+**Compatibility contract:** The `SmeWithdrew` event name (`"sme_wd"`), topic
+layout (`invoice_id`), and field set (`amount`, `recipient`, `fee`) are stable.
+`amount` is always net and `fee` is always the protocol fee; the sum equals the
+gross `funded_amount`. Indexers may rely on exactly one emission per successful
+`withdraw` and on no emission for rejected calls.
+
 ---
 
 ## Worked example
@@ -144,6 +186,14 @@ sub-basis-point residue stays with the SME; the treasury is never over-charged b
 `checked_add`/`checked_sub` at every step): `net + fee == funded_amount`, exactly, with no principal
 created or destroyed by the split.
 
+**Boundary cases covered by this contract:**
+
+- `protocol_fee_bps = 0` (default/unset): `fee = 0`, treasury transfer skipped, SME receives gross.
+- `protocol_fee_bps = 10_000` (max): `fee = funded_amount`, `net = 0`, SME transfer skipped.
+- Rounding: floor division always favors the SME; treasury is never over-charged.
+- Invalid input (`< 0` or `> 10_000`): rejected at `init` with
+  `EscrowError::ProtocolFeeBpsOutOfRange` (215) before any storage write.
+
 ---
 
 ## Cross-references
@@ -155,3 +205,12 @@ created or destroyed by the split.
   `get_protocol_fee_bps` defaults to `0` for pre-existing escrow instances.
 - [`docs/escrow-token-safety.md`](escrow-token-safety.md) — the balance-delta-checked transfer
   wrapper both the fee and net legs of `withdraw` use.
+
+## Compatibility test coverage
+
+The invariants above are exercised by `escrow/src/tests/fees.rs`. That suite is
+the executable contract for this document: success paths, rejection paths
+(out-of-range `init`, unauthorized `withdraw`, unfunded `withdraw`), boundary
+values (`0`, `10_000`, rounding), and regression cases for the zero-fee gas
+profile and the `SmeWithdrew` event shape. Any change to fee behavior must
+update both this document and that suite together.

@@ -26,7 +26,7 @@ fn test_release_exact_remaining() {
     env.mock_all_auths();
     let (client, escrow_id, sme) = init_and_fund_with_real_token(&env, TARGET, "INV001");
 
-    let token = client.funding_token();
+    let token = client.get_funding_token();
     let token_client = TokenClient::new(&env, &token);
 
     let init_sme_balance = token_client.balance(&sme);

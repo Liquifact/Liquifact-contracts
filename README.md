@@ -430,3 +430,8 @@ cargo llvm-cov --features testutils --fail-under-lines 95 --summary-only -p liqu
 ## Contributing
 
 MIT
+
+## Handsoff notes
+
+<!-- handsoff-issue-1307 -->
+- #1307: Protect state invariants in escrow/src/tests/arithmetic_overflow.rs

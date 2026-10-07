@@ -35,21 +35,22 @@ stateDiagram-v2
         
         WithdrawalComplete --> Idle : Escrow Active / Closed
     }
+```
+
 | Current State | Description | Trigger / Entrypoint | Next Allowed State |
 | :--- | :--- | :--- | :--- |
-| **`Unconfigured`** | Contract is deployed but uninitialized. `DataKey::ProtocolFeeBps` is unset in storage. | Contract Deployment | `Configured` |
-| **`Configured`** | `protocol_fee_bps` (0 <= bps <= 10,000) is stored immutably under `DataKey::ProtocolFeeBps`. | `LiquifactEscrow::init` | **Immutable** (No fee updates allowed) |
-| **`Idle`** | Contract initialized and operational; waiting for SME withdrawal. | `init` complete | `FeeCalculation` |
-| **`FeeCalculation`** | Calculates fee split and SME payout floor division. | `LiquifactEscrow::withdraw` | `DisburseTreasury` or `DirectDisburse` |
-| **`WithdrawalComplete`** | Transfers executed according to the computed fee split. | Settlement completion | `Idle` |
+| ***`Unconfigured`*** | Contract is deployed but uninitialized. `DataKey::ProtocolFeeBps` is unset in storage. | Contract Deployment | `Configured` |
+| ***`Configured`*** | `protocol_fee_bps` (0 <= bps <= 10,000) is stored immutably under `DataKey::ProtocolFeeBps`. | `LiquifactEscrow::init` | **Immutable** (No fee updates allowed) |
+| ***`Idle`*** | Contract initialized and operational; waiting for SME withdrawal. | `init` complete | `FeeCalculation` |
+| ***`FeeCalculation`*** | Calculates fee split and SME payout floor division. | `LiquifactEscrow::withdraw` | `DisburseTreasury` or `DirectDisburse` |
+| ***`WithdrawalComplete`*** | Transfers executed according to the computed fee split. | Settlement completion | `Idle` |
 
 ---
 
 ## Entrypoints & State Enforcement
 
 ### 1. `LiquifactEscrow::init`
-* **Auth Guard:** `admin.require_auth()`
-* **Parameter:** `protocol_fee_bps: Option<i64>` (defaults `None` to `0`)
+* **Auth Guard:** `admin.require_auth()`(* **Parameter:** `protocol_fee_bps: Option<i64>` (defaults `None` to `0`)
 * **Validation:** Enforces 0 <= protocol_fee_bps <= 10,000.
 * **Rejection:** Values outside this range revert with `EscrowError::ProtocolFeeBpsOutOfRange` (**215**).
 * **Storage Write:** Saves `protocol_fee_bps` immutably under `DataKey::ProtocolFeeBps`.
