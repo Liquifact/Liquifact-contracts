@@ -1,4 +1,3 @@
-
 use soroban_sdk::contracterror;
 
 /// Stable typed errors emitted by LiquiFact escrow entrypoints.

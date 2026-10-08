@@ -49,13 +49,13 @@ fn setup_with_init(env: &Env) -> (LiquifactEscrowClient<'_>, Address) {
     (client, admin)
 }
 
-fn attestation_log_stats(client: &LiquifactEscrowClient<'>) -> (u32, u32) {
+fn attestation_log_stats(client: &LiquifactEscrowClient<'_>) -> (u32, u32) {
     let used = client.get_attestation_append_log().len();
     (used, MAX_ATTESTATION_APPEND_ENTRIES.saturating_sub(used))
 }
 
 /// The number of free attestation append-log slots remaining.
-fn remaining_attestation_slots(client: &LiquifactEscrowClient<'>) -> u32 {
+fn remaining_attestation_slots(client: &LiquifactEscrowClient<'_>) -> u32 {
     let used = client.get_attestation_append_log().len();
     MAX_ATTESTATION_APPEND_ENTRIES.saturating_sub(used)
 }
@@ -173,7 +173,7 @@ fn test_attestation_log_stats_tracks_partial_fill() {
     assert_eq(used, 5);
     assert_eq(
         remaining_attestation_slots(&client),
-        MAX_ATTESTATION_APPEND_ENTRIES - 5
+        MAX_ATTESTATION_APPEND_ENTRIES - 5,
     );
 }
 
@@ -235,7 +235,7 @@ fn test_append_exactly_max_entries_succeeds() {
     }
     assert_eq(
         client.get_attestation_append_log().len(),
-        MAX_ATTESTATION_APPEND_ENTRIES
+        MAX_ATTESTATION_APPEND_ENTRIES,
     );
 }
 
@@ -352,7 +352,7 @@ fn test_append_batch_ordered_contiguous() {
     client.append_attestation_digests(&batch);
     let log = client.get_attestation_append_log();
     assert_eq(log.len(), 5);
-    for in 0u8..5 {
+    for i in 0u8..5 {
         assert_eq(log.get(i as u32).unwrap(), digest(&env, i));
     }
 }
@@ -379,7 +379,7 @@ fn test_append_batch_appends_after_existing() {
 fn test_append_batch_empty_noop() {
     let env = Env::default();
     let (client, _) = setup_with_init(&env);
-    let batch = Vec:<new>(&env);
+    let batch = Vec::new(&env);
     client.append_attestation_digests(&batch);
     assert_eq(client.get_attestation_append_log().len(), 0);
 }
@@ -414,7 +414,7 @@ fn test_append_batch_exactly_fills_capacity() {
     client.append_attestation_digests(&batch);
     assert_eq(
         client.get_attestation_append_log().len(),
-        MAX_ATTESTATION_APPEND_ENTRIES
+        MAX_ATTESTATION_APPEND_ENTRIES,
     );
 }
 
@@ -434,7 +434,7 @@ fn test_append_batch_exceeds_capacity_fails() {
     assert_contract_error(res, EscrowError::AttestationAppendLogCapacityReached);
     assert_eq(
         client.get_attestation_append_log().len(),
-        MAX_ATTESTATION_APPEND_ENTRIES - 1
+        MAX_ATTESTATION_APPEND_ENTRIES - 1,
     );
 }
 
@@ -458,13 +458,13 @@ fn test_append_batch_at_limit_succeeds() {
     let env = Env::default();
     let (client, _) = setup_with_init(&env);
     let mut batch = Vec::new(&env);
-    for in 0u8..(MAX_ATTESTATION_APPEND_BATCH as u8) {
+    for i in 0u8..(MAX_ATTESTATION_APPEND_BATCH as u8) {
         batch.push_back(digest(&env, i));
     }
     client.append_attestation_digests(&batch);
     assert_eq(
         client.get_attestation_append_log().len(),
-        MAX_ATTESTATION_APPEND_BATCH
+        MAX_ATTESTATION_APPEND_BATCH,
     );
 }
 
@@ -526,7 +526,7 @@ fn test_revoke_batch_at_limit_succeeds() {
     client.revoke_attestation_digests(&indices);
     assert_eq(
         client.get_attestation_append_log().len(),
-        MAX_ATTESTATION_REVOKE_BATCH
+        MAX_ATTESTATION_REVOKE_BATCH,
     );
 }
 

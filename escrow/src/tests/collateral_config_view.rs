@@ -323,7 +323,7 @@ fn test_set_limit_requires_admin_auth() {
     env.set_source_account(&sme);
     let res = client.try_set_collateral_limit(&5_000i128);
     match res {
-        Err(_) => {} // auth failure expected
+        Err(_) => {}     // auth failure expected
         Ok(Err(_)) => {} // EscrowError::NotAdmin via mock is also a failure path
         _ => panic!("expected auth/NotAdmin failure for non-admin setter call"),
     }
@@ -390,10 +390,8 @@ fn test_batch_record_over_ceiling_atomic_reject() {
     // build a batch where item 1 is fine but item 2 exceeds ceiling
     let a1 = Symbol::new(&env, "A1");
     let a2 = Symbol::new(&env, "A2");
-    let items = soroban_sdk::Vec::from_array(
-        &env,
-        [(a1.clone(), 3_000i128), (a2.clone(), 5_001i128)],
-    );
+    let items =
+        soroban_sdk::Vec::from_array(&env, [(a1.clone(), 3_000i128), (a2.clone(), 5_001i128)]);
     assert_contract_error(
         Ok(client.try_batch_record_collateral(&items)),
         EscrowError::CollateralLimitExceeded,

@@ -41,9 +41,7 @@
 //!   succeeds (equality is allowed, as it is the replay case) but no backwards
 //!   timestamp passes.
 
-use super::super::{
-    CollateralState, LiquifactEscrow, LiquifactEscrowClient, MAX_INVOICE_AMOUNT,
-};
+use super::super::{CollateralState, LiquifactEscrow, LiquifactEscrowClient, MAX_INVOICE_AMOUNT};
 use crate::tests::assert_contract_error;
 use crate::EscrowError;
 use soroban_sdk::testutils::{Address as _, Ledger as _};

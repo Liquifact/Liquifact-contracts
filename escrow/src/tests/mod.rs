@@ -1,4 +1,4 @@
-#`!llow](
+#![allow(
     unused_imports,
     unused_variables,
     dead_code,
@@ -34,9 +34,9 @@ use soroban_sdk::{
 };
 use std::fmt::Debug;
 
-pub use soroban_sdk:Symbol;
+pub use soroban_sdk::Symbol;
 
-pubc(crate) fn assert_contract_error<T, E>(
+pub(crate) fn assert_contract_error<T, E>(
     result: Result<Result<T, E>, Result<Error, InvokeError>>,
     expected: EscrowError,
 ) where
@@ -81,7 +81,6 @@ mod collateral_validation_helpers;
 // mod integration;
 // mod integration_status_guards;
 // mod legal_hold;
-mod auth_matrix;
 mod migration_errors;
 // mod paginated_views;
 // mod pause;
@@ -136,7 +135,7 @@ pub struct StellarTestToken<'a> {
     pub stellar: StellarAssetClient<'a>,
 }
 
-pub fn install_stellar_asset_token<'a>(env: '&a Env) -> StellarTestToken<'a> {
+pub fn install_stellar_asset_token<'a>(env: &'a Env) -> StellarTestToken<'a> {
     let sac = env.register_stellar_asset_contract_v2(Address::generate(env));
     let id = sac.address();
     StellarTestToken {
@@ -167,8 +166,7 @@ pub fn default_init(client: &LiquifactEscrowClient<'_>, env: &Env, admin: &Addre
         &None, // No funding deadline
         &None,
         &None,
-        &None:<i64,
-        &None::u32,
+        &None::<i64>,
     );
 }
 
@@ -208,8 +206,7 @@ pub fn init_and_fund_with_real_token<'a>(
         &None,
         &None,
         &None,
-        &None::<i64,
-        &None::<u32,
+        &None,
     );
 
     let investor = Address::generate(env);

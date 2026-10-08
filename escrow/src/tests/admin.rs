@@ -791,11 +791,7 @@ fn test_propose_admin_emits_only_admin_proposed_event() {
     client.propose_admin(&new_admin, &0u32);
 
     let events = env.events().all();
-    assert_eq!(
-        events.len(),
-        1,
-        "propose_admin must emit exactly one event"
-    );
+    assert_eq!(events.len(), 1, "propose_admin must emit exactly one event");
     assert_eq!(
         events.last().unwrap().clone(),
         AdminProposedEvent {
@@ -1020,7 +1016,10 @@ fn test_pending_admin_remaining_secs_reports_positive_window() {
 
     let expected_expiry = 1_000 + crate::DEFAULT_ADMIN_PROPOSAL_VALIDITY_SECS;
     assert_eq!(client.get_pending_admin_expiry(), Some(expected_expiry));
-    assert_eq!(client.get_pending_admin_remaining_secs(), Some(crate::DEFAULT_ADMIN_PROPOSAL_VALIDITY_SECS));
+    assert_eq!(
+        client.get_pending_admin_remaining_secs(),
+        Some(crate::DEFAULT_ADMIN_PROPOSAL_VALIDITY_SECS)
+    );
 
     env.ledger().set_timestamp(expected_expiry - 1);
     assert_eq!(client.get_pending_admin_remaining_secs(), Some(1));
@@ -1035,7 +1034,8 @@ fn test_pending_admin_remaining_secs_zero_at_expiry_and_accept_still_succeeds() 
 
     env.ledger().set_timestamp(2_000);
     client.propose_admin(&new_admin, &0u32);
-    env.ledger().set_timestamp(2_000 + crate::DEFAULT_ADMIN_PROPOSAL_VALIDITY_SECS);
+    env.ledger()
+        .set_timestamp(2_000 + crate::DEFAULT_ADMIN_PROPOSAL_VALIDITY_SECS);
 
     assert_eq!(client.get_pending_admin_remaining_secs(), Some(0));
 
@@ -1054,7 +1054,8 @@ fn test_pending_admin_remaining_secs_zero_after_expiry_and_accept_rejects() {
 
     env.ledger().set_timestamp(3_000);
     client.propose_admin(&new_admin, &0u32);
-    env.ledger().set_timestamp(3_000 + crate::DEFAULT_ADMIN_PROPOSAL_VALIDITY_SECS + 1);
+    env.ledger()
+        .set_timestamp(3_000 + crate::DEFAULT_ADMIN_PROPOSAL_VALIDITY_SECS + 1);
 
     assert_eq!(client.get_pending_admin_remaining_secs(), Some(0));
     assert_contract_error(client.try_accept_admin(), EscrowError::AdminProposalExpired);
@@ -3849,7 +3850,10 @@ fn test_pending_admin_remaining_positive_before_expiry() {
     default_init(&client, &env, &admin, &sme);
     let new_admin = Address::generate(&env);
     client.propose_admin(&new_admin, &0u32);
-    assert_eq!(client.get_pending_admin_remaining_secs(), Some(crate::DEFAULT_ADMIN_PROPOSAL_VALIDITY_SECS));
+    assert_eq!(
+        client.get_pending_admin_remaining_secs(),
+        Some(crate::DEFAULT_ADMIN_PROPOSAL_VALIDITY_SECS)
+    );
 }
 
 #[test]

@@ -508,7 +508,10 @@ fn test_collateral_commitment_error_codes_unchanged() {
     // Verify exact error code: 60 for CollateralAmountNotPositive
     let result = client.try_record_sme_collateral_commitment(&asset, &0i128);
     assert!(result.is_err());
-    assert_eq!(result.unwrap_err(), EscrowError::CollateralAmountNotPositive);
+    assert_eq!(
+        result.unwrap_err(),
+        EscrowError::CollateralAmountNotPositive
+    );
 
     // Verify exact error code: 61 for CollateralAssetEmpty
     let empty = Symbol::new(&env, "");
@@ -615,7 +618,10 @@ fn test_collateral_commitment_helper_prevents_invalid_state() {
 
     // State is unchanged — commitment not recorded
     let config = client.get_collateral_config();
-    assert_eq!(config.sme_commitment, crate::CollateralCommitmentSnapshot::None);
+    assert_eq!(
+        config.sme_commitment,
+        crate::CollateralCommitmentSnapshot::None
+    );
 
     // Now record a valid amount
     client.record_sme_collateral_commitment(&asset, &1_000i128);
@@ -871,7 +877,10 @@ fn test_absent_pledge_key_get_sme_collateral_returns_none() {
     // Never called record_sme_collateral_commitment — pledge key absent.
     assert_eq!(client.get_sme_collateral_commitment(), None);
     let cfg = client.get_collateral_config();
-    assert_eq!(cfg.sme_commitment, crate::CollateralCommitmentSnapshot::None);
+    assert_eq!(
+        cfg.sme_commitment,
+        crate::CollateralCommitmentSnapshot::None
+    );
     let state = client.get_collateral_state();
     assert!(!state.is_set);
     assert_eq!(state.amount, 0);
@@ -935,8 +944,7 @@ fn test_batch_record_one_zero_amount_rejects_all_atomically() {
     init_escrow(&env, &client, &admin, &sme);
     let a1 = Symbol::new(&env, "A");
     let a2 = Symbol::new(&env, "B");
-    let items =
-        soroban_sdk::Vec::from_array(&env, [(a1.clone(), 500i128), (a2.clone(), 0i128)]);
+    let items = soroban_sdk::Vec::from_array(&env, [(a1.clone(), 500i128), (a2.clone(), 0i128)]);
 
     assert_contract_error(
         client.try_batch_record_collateral(&items),
@@ -953,8 +961,7 @@ fn test_batch_record_one_empty_asset_rejects_all_atomically() {
     init_escrow(&env, &client, &admin, &sme);
     let empty = Symbol::new(&env, "");
     let ok = Symbol::new(&env, "USDC");
-    let items =
-        soroban_sdk::Vec::from_array(&env, [(ok, 500i128), (empty, 500i128)]);
+    let items = soroban_sdk::Vec::from_array(&env, [(ok, 500i128), (empty, 500i128)]);
 
     assert_contract_error(
         client.try_batch_record_collateral(&items),
@@ -971,8 +978,7 @@ fn test_batch_record_one_over_ceiling_rejects_all_atomically() {
     client.set_collateral_limit(&1_000i128);
     let a1 = Symbol::new(&env, "OK");
     let a2 = Symbol::new(&env, "BAD");
-    let items =
-        soroban_sdk::Vec::from_array(&env, [(a1, 999i128), (a2, 1_001i128)]);
+    let items = soroban_sdk::Vec::from_array(&env, [(a1, 999i128), (a2, 1_001i128)]);
 
     assert_contract_error(
         client.try_batch_record_collateral(&items),
@@ -1069,7 +1075,10 @@ fn test_deterministic_sequence_two_runs_equal() {
     assert_eq!(lim1, lim2);
     assert_eq!(lim1, 6_000);
     assert_eq!(stored1.as_ref().unwrap().amount, 6_000);
-    assert_eq!(stored1.as_ref().unwrap().amount, stored2.as_ref().unwrap().amount);
+    assert_eq!(
+        stored1.as_ref().unwrap().amount,
+        stored2.as_ref().unwrap().amount
+    );
     assert_eq!(stored1.as_ref().unwrap().recorded_at, 5);
     assert_eq!(
         stored1.as_ref().unwrap().recorded_at,

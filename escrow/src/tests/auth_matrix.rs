@@ -227,7 +227,10 @@ fn test_accept_admin_wrong_signer_preserves_handover_state() {
     }]);
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| client.accept_admin()));
 
-    assert!(result.is_err(), "expected pending-admin authorization to be enforced");
+    assert!(
+        result.is_err(),
+        "expected pending-admin authorization to be enforced"
+    );
     assert_eq!(client.get_escrow().admin, admin);
     assert_eq!(client.get_pending_admin(), Some(pending_admin));
 }

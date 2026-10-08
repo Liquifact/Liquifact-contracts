@@ -1,4 +1,4 @@
-#allow(dead_code, unused_imports)]
+#![allow(dead_code, unused_imports)]
 /// Validation boundaries for the key constructors in `escrow/src/keys.rs`.
 ///
 /// These tests pin the deterministic behavior of every key builder:
@@ -10,7 +10,6 @@
 /// The key constructors are the only supported way to build a `DataKey`
 /// for funding storage; these tests are the regression barrier against
 /// discriminant drift or accidental renames.
-
 use crate::keys::*;
 use crate::DataKey;
 use soroban_sdk::{Address, Env};
@@ -43,10 +42,7 @@ fn investor_contribution_distinct_investors_differ() {
     let env = Env::default();
     let a = Address::generate(&env);
     let b = Address::generate(&env);
-    assert_ne!(
-        investor_contribution(a),
-        investor_contribution(b)
-    );
+    assert_ne!(investor_contribution(a), investor_contribution(b));
 }
 
 #[test]
@@ -164,10 +160,7 @@ fn callback_context_matches_variant() {
 fn callback_context_boundaries_are_distinct() {
     assert_ne!(callback_context(0), callback_context(1));
     assert_ne!(callback_context(0), callback_context(u64::MAX));
-    assert_ne!(
-        callback_context(u64::MAX - 1),
-        callback_context(u64::MAX)
-    );
+    assert_ne!(callback_context(u64::MAX - 1), callback_context(u64::MAX));
     assert_ne!(callback_context(1), callback_context(u64::MAX - 1));
 }
 
