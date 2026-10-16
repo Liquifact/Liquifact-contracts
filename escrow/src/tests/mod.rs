@@ -59,6 +59,7 @@ pubc(crate) fn assert_contract_error<T, E>(
 // modules stay assertion-focused and each test still owns a fresh Env.
 mod admin;
 mod attestation_config_view;
+mod attestation_event_schema;
 mod attestations;
 mod auth_matrix;
 mod cap_validation;
