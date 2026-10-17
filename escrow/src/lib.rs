@@ -1064,7 +1064,7 @@ pub const MAX_PAUSE_TOGGLE_WINDOW_SECS: u64 = 7_776_000; // 90 days
     UnfundEscrowNotOpen = 279,
     /// [`LiquifactEscrow::unfund`] blocked because a compliance/legal hold is active.
     UnfundLegalHoldActive = 280,
-}
+
 
 #[inline(always)]
 pub(crate) fn fail(env: &Env, error: EscrowError) -> ! {
