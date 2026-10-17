@@ -266,7 +266,7 @@ pub struct AttestationLimitUpdated {
 }
 
 #[contractimpl]
-impl LiquifactEscrow {
+impl LiquifactEscrow {}
     /// Finalizes the escrow after all balance and dispute obligations have settled.
     ///
     /// # Preconditions
@@ -279,96 +279,78 @@ impl LiquifactEscrow {
     /// - Marks the escrow as closed (one-shot).
     /// - Stores [`CloseMetadata`].
     /// - Emits a [`CloseFinalizedEvt`].
-    pub fn close_escrow(env: Env) {
-        let escrow: InvoiceEscrow = env
-            .storage()
-            .instance()
-            .get(&DataKey::Escrow)
-            .unwrap_or_else(|| panic_with_error!(&env, CloseError::NotInitialized));
-        let admin = escrow.admin;
-        admin.require_auth();
+    pub fn close_escrow(env: Env) {}
+        pub fn transfer_funding_token_with_balance_checks(
+    env: &Env,
+    token_addr: &Address,
+    from: &Address,
+    treasury: &Address,
+    amount: i128,
+    nonce: u64,
+) {
+    ensure(
+        env,
+        from != treasury,
+        EscrowError::TransferSameSenderRecipient,
+    );
+    ensure(env, amount > 0, EscrowError::TransferAmountNotPositive);
+    advance_nonce(
+        env,
+        TransferDirection::Outbound,
+        token_addr,
+        from,
+        treasury,
+        nonce,
+    );
+    acquire_in_flight(
+        env,
+        TransferDirection::Outbound,
+        token_addr,
+        from,
+        treasury,
+    );
 
-        if env.storage().instance().has(&CLOSED_SYMBOL) {
-            panic_with_error!(&env, CloseError::AlreadyClosed);
-        }
+    const token: <type> = TokenClient::new(env, token_addr);
+    let from_before = token.balance(from);
+    let treasury_before = token.balance(treasury);
+    ensure(
+        env,
+        from_before >= amount,
+        EscrowError::InsufficientTokenBalanceBeforeTransfer,
+    );
 
-        let funding_token: Address = env
-            .storage()
-            .instance()
-            .get(&DataKey::FundingToken)
-            .unwrap_or_else(|| panic_with_error!(&env, CloseError::NotInitialized));
-        let token = TokenClient::new(&env, &funding_token);
-        let balance = token.balance(&env.current_contract_address());
-        if balance > 0 {
-            panic_with_error!(&env, CloseError::ActiveBalance);
-        }
+    token.transfer(from, MuxedAddress::from(treasury.clone()), &amount);
 
-        if env
-            .storage()
-            .instance()
-            .get(&DataKey::Dispute)
-            .unwrap_or(false)
-        {
-            panic_with_error!(&env, CloseError::ActiveDispute);
-        }
+    let from_after = token.balance(from);
+    let treasury_after = token.balance(treasury);
 
-        let metadata = CloseMetadata {
-            admin: admin.clone(),
-            timestamp: env.ledger().timestamp(),
-            sequence: env.ledger().sequence(),
-        };
+    let spent = from_before
+        .checked_sub(from_after)
+        .unwrap_or_else(|| fail(env, EscrowError::SenderBalanceUnderflow));
+    let received = treasury_after
+        .checked_sub(treasury_before)
+        .unwrap_or_else(|| fail(env, EscrowError::RecipientBalanceUnderflow));
 
-        env.storage()
-            .instance()
-            .set(&CLOSED_SYMBOL, &true);
-        env.storage()
-            .instance()
-            .set(&CLOSE_METADATA_SYMBOL, &metadata);
+    ensure(
+        env,
+        spent == amount,
+        EscrowError::SenderBalanceDeltaMismatch,
+    );
+    ensure(
+        env,
+        received == amount,
+        EscrowError::RecipientBalanceDeltaMismatch,
+    );
 
-        CloseFinalizedEvt {
-            name: symbol_short!("close"),
-            metadata: metadata.clone(),
-        }
-        .publish(&env);
-    }
-
-    /// Returns the close metadata if the escrow has been closed.
-    pub fn get_closure_metadata(env: Env) -> Option<CloseMetadata> {
-        env.storage()
-            .instance()
-            .get(&CLOSE_METADATA_SYMBOL)
-    }
-
-    /// Toggles the dispute active flag. Bumps TTL by the disputed threshold.
-    pub fn set_dispute_active(env: Env, active: bool) {
-        let mut escrow: InvoiceEscrow = env
-            .storage()
-            .instance()
-            .get(&DataKey::Escrow)
-            .unwrap_or_else(|| panic_with_error!(&env, CloseError::NotInitialized));
-        escrow.admin.require_auth();
-        // State invariant: a terminal escrow (settled/withdrawn/cancelled) has already
-        // finalized its disposition; toggling the dispute flag afterwards would let a
-        // late dispute retroactively block `close_escrow` or mislead off-chain indexers
-        // that key on `dispute_active`. Reject the transition outright.
-        if is_terminal_status(escrow.status) {
-            panic_with_error!(&env, CloseError::AlreadyClosed);
-        }
-        // Idempotent no-op: writing the same value would emit a spurious event and
-        // rewrite storage, so short-circuit before any mutation.
-        if escrow.dispute_active == active {
-            return;
-        }
-        escrow.dispute_active = active;
-        env.storage().instance().set(&DataKey::Escrow, &escrow);
-        // Mirror the flag into the dedicated dispute key so every reader
-        // (`close_escrow`, `is_dispute_active`, guards) observes one source of
-        // truth. Without this, a dispute set here would be invisible to
-        // `close_escrow` and could allow a close during an active dispute.
-        env.storage().instance().set(&DataKey::Dispute, &active);
-        extend_ttl_for_activity(&env, &escrow, None);
-    }
+    release_in_flight(
+        env,
+        TransferDirection::Outbound,
+        token_addr,
+        from,
+        treasury,
+    );
 }
+    emit_transfer_event!(env, TransferDirection::Outbound, nonce, amount);
 
 /// Default maximum maturity horizon in seconds (~5 years) when no explicit horizon is configured.
 pub const DEFAULT_MATURITY_MAX_HORIZON_SECS: u64 = 157_680_000; // ~5 years (365.25 * 24 * 3600 * 5)
