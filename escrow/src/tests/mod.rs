@@ -91,6 +91,7 @@ mod yield_tier_boundaries;
 mod decimal_scale_tests;
 mod key_invariants;
 mod release_tests;
+mod validation_boundaries;
 
 /// Registers a new escrow contract instance and returns its contract id.
 pub fn deploy_id(env: &Env) -> Address {
