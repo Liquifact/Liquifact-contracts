@@ -89,6 +89,7 @@ mod settlement_config_view;
 mod yield_tier_boundaries;
 // mod admin_recovery;  // file not present in this tree
 mod decimal_scale_tests;
+mod key_invariants;
 mod release_tests;
 
 /// Registers a new escrow contract instance and returns its contract id.
