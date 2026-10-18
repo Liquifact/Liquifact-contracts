@@ -1,5 +1,13 @@
 # Allowlist Error Codes
 
+> **Validation boundaries.** This document is the normative reference for the
+> accepted, rejected, duplicate, and boundary-case inputs of the investor
+> allowlist subsystem. The invariants below are enforced in
+> `escrow/src/lib.rs` and exercised by
+> `escrow/src/tests/allowlist_event_payloads.rs`. Any change to a bound or
+> rejection condition is a breaking change and must update this document and
+> its focused tests in the same PR.
+
 The escrow contract's investor allowlist subsystem uses three typed Soroban error codes from
 [`EscrowError`](../escrow/src/lib.rs). This document lists each code, the exact conditions that
 trigger it, which entrypoints can emit it, and how integrators can avoid it.
@@ -12,6 +20,51 @@ All codes are **append-only and stable** — SDKs must branch on the numeric
 | Constant | Value | Description |
 | --- | ---: | --- |
 | `MAX_INVESTOR_ALLOWLIST_BATCH` | 32 | Maximum addresses per `set_investors_allowlisted` call |
+
+## Validation Boundaries
+
+The following table defines the exact boundary for each allowlist input. Values
+outside the accepted range are rejected deterministically with the listed error
+code; no partial state is written.
+
+| Input | Accepted | Rejected | Boundary case | Error |
+| --- | --- | --- | --- | --- |
+| `investors.len()` in `set_investors_allowlisted` | `1..=MAX_INVESTOR_ALLOWLIST_BATCH` (1–32) | `0` and `> 32` | `len == 1` accepted; `len == 32` accepted; `len == 33` rejected | `InvestorBatchEmpty` (70) for `0`; `InvestorBatchTooLarge` (71) for `> 32` |
+| Duplicate addresses within one batch | First occurrence applied, subsequent occurrences are idempotent no-ops | — (duplicates are not an error) | A batch of all-identical addresses is accepted and results in a single effective write | None |
+| `allowed` flag | `true` or `false` | — | Re-setting an existing entry to the same value is a no-op that still emits an event | None |
+| `investor` address in `set_investor_allowlisted` | Any valid `Address` | — | Re-adding an already-allowlisted address is idempotent | None |
+| `investor` in `fund` / `fund_with_commitment` / `fund_batch` | Allowlisted when gate is active | Not allowlisted (no entry or entry `false`) when gate is active | Gate inactive ⇒ check is skipped entirely | `InvestorNotAllowlisted` (104) |
+| `get_allowlisted_investors(start, limit)` | `limit` capped at 50 | `limit > 50` is clamped, not an error | `limit == 0` returns an empty page | None |
+
+### Invariants
+
+1. **Atomicity.** A rejected batch writes no allowlist entries; a rejected
+   funding call transfers no tokens and mutates no balances.
+2. **Idempotence.** Applying the same `set_investor_allowlisted(investor, allowed)`
+   call twice yields the same stored state as applying it once. Events are still
+   emitted on the second call so off-chain indexers observe the intent.
+3. **Determinism.** Given identical inputs and prior state, the accept/reject
+   decision and the resulting state are identical across runs and nodes.
+4. **Gate monotonicity.** `set_allowlist_active` never mutates the allowlist
+   itself; toggling the gate only changes whether the gate is consulted.
+5. **No silent expiry.** `InvestorAllowlisted` entries are persistent storage;
+   `bump_ttl` must be called by custodians to prevent archival. An archived
+   entry reads as absent and therefore as not-allowlisted.
+
+### Failure-mode handling
+
+- **Partial failure.** `set_investors_allowlisted` validates the whole vector
+  before writing any entry, so a batch that fails validation leaves prior state
+  untouched. `fund_batch` validates all entries up front and is atomic: one
+  non-allowlisted address fails the entire call.
+- **Retries.** All admin entrypoints are idempotent, so a retried call after a
+  timeout cannot double-apply or corrupt state. Funding calls are not
+  idempotent by design; callers must not retry a funding call whose result is
+  unknown without first reading on-chain state.
+- **Concurrent execution.** Soroban executes a contract invocation
+  single-threaded per ledger, so two concurrent invocations are serialized by
+  the ledger. The last writer wins for `set_investor_allowlisted`; no
+  interleaving can produce a state that violates the invariants above.
 
 ## Error Reference
 
@@ -70,6 +123,25 @@ All codes are **append-only and stable** — SDKs must branch on the numeric
 6. Admin calls set_investors_allowlisted([Alice, Bob], true) — both re-added
 7. Alice calls fund(alice, 500)                      — succeeds again
 ```
+
+## Observability
+
+Failures are diagnosable without exposing sensitive data:
+
+- Rejections surface as typed `ContractError(code)` values (70, 71, 104) that
+  SDKs branch on numerically; no panic strings are part of the stable surface.
+- Allowlist mutations emit events carrying the investor address and the new
+  `allowed` flag, so indexers can reconstruct the allowlist from the event log
+  alone. Event payload shapes are covered by
+  `escrow/src/tests/allowlist_event_payloads.rs`.
+- No error path logs or returns amounts, balances, or other investor-private
+  data beyond the address already present in the triggering call.
+
+## Test Coverage
+
+Focused tests for accepted input, rejected input, duplicate submissions, and
+boundary values live in `escrow/src/tests/allowlist_event_payloads.rs`. Any
+change to a bound in the table above must add or update a test in that module.
 
 ## Stability Policy
 

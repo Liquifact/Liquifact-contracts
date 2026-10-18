@@ -1,5 +1,11 @@
 # Allowlist State Diagram
 
+> **Concurrency note:** This document describes the allowlist state machine as
+> observed by a single transaction. For the concurrent-execution hardening
+> contract (serialization, idempotency, and race behavior) see the invariants
+> in [`allowlist.md`](allowlist.md) and the tests in
+> `escrow/src/test_allowlist_tests.rs`.
+
 This note documents the investor allowlist **state machine** as implemented in
 `escrow/src/lib.rs`. It covers the gate toggle, per-investor membership, the
 transitions each entrypoint may perform, and how the funding path enforces the
@@ -66,6 +72,12 @@ stateDiagram-v2
 There is **no** typed error for gate writes under admin auth. Non-admin callers
 fail with a host authorization trap before storage is touched.
 
+**Concurrency invariant:** `set_allowlist_active` is a single-key write of
+`DataKey::AllowlistActive`. Concurrent invocations serialize on the ledger
+entry; the last committed value wins and the emitted `AllowlistEnabledChanged`
+event always reflects the value actually written. Idempotent writes are safe
+to retry and never leave the gate in a torn state.
+
 **Read view:** `is_allowlist_active()` — no auth.
 
 ---
@@ -120,6 +132,14 @@ membership state; only extends rent).
 `get_allowlisted_investors_count`, `get_allowlist_page` — the list/count/page
 views re-check live membership and skip revoked or archived entries.
 
+**Concurrency invariant:** membership writes are keyed by
+`DataKey::InvestorAllowlisted(addr)`. Concurrent `set_investor_allowlisted`
+calls for the same address serialize on that key; the index
+(`DataKey::AllowlistIndex`) is only mutated on the observed `false → true` /
+`true → false` edge, so a duplicate allow/revoke is a no-op for the index and
+never produces a duplicate or dangling entry. Batch writes apply the same
+per-address rule and are not atomic across addresses beyond the transaction.
+
 ---
 
 ## Combined Funding Outcome
@@ -161,6 +181,12 @@ The allowlist check runs only after earlier `fund_impl` guards (auth, amount,
 pause, legal hold, open status, funding deadline). A failure on those guards
 never consults membership.
 
+**Concurrency invariant:** the gate read and the membership read inside
+`fund_impl` occur in the same transaction, so a concurrent admin write cannot
+interleave between them. A funding attempt either observes a consistent
+`(gate, membership)` pair or fails on an earlier guard; it never observes a
+half-applied allowlist change.
+
 ---
 
 ## Entrypoint Cross-Reference
@@ -190,6 +216,12 @@ never consults membership.
   `InvestorAllowlisted` entries or the index.
 - **Archival ≡ revoke for enforcement.** An archived persistent key reads as
   NotAllowlisted and is rejected when the gate is Active.
+- **Retries are idempotent.** Re-running any admin allowlist write with the same
+  arguments is safe: the stored value converges to the requested value and the
+  index reflects at most one entry per address.
+- **No partial batch state.** A `set_investors_allowlisted` call that fails
+  validation (`70` / `71`) performs no writes; a successful call applies every
+  address in the same transaction.
 
 ---
 

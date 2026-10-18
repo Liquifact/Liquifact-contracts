@@ -46,6 +46,7 @@ mod admin;
 mod admin_nonce;
 mod attestations;
 mod cap_validation;
+mod collateral_version_view;
 mod coverage;
 mod external_calls;
 mod external_calls_mocked;
