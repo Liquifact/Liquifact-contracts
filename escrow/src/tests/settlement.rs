@@ -3784,9 +3784,8 @@ fn test_set_partial_close_min_bps_admin_and_validation() {
     // Admin succeeds
     let new_bps = client.set_partial_close_min_bps(&2_500u32);
     assert_eq!(new_bps, 2_500u32);
-    assert_eq!(client.get_partial_close_min_bps(), 2_500u32);
 
-    // Assert event payload
+    // Assert event payload (snapshot immediately before subsequent invocations overwrite event buffer)
     let all_events = env.events().all();
     let contract_id = client.address.clone();
     let expected = PartialCloseMinBpsUpdated {
@@ -3797,6 +3796,8 @@ fn test_set_partial_close_min_bps_admin_and_validation() {
     }
     .to_xdr(&env, &contract_id);
     assert_eq!(all_events.events().last().unwrap().clone(), expected);
+
+    assert_eq!(client.get_partial_close_min_bps(), 2_500u32);
 
     // Out of range (bps > 10_000)
     assert_contract_error(
