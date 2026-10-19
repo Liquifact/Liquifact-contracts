@@ -109,3 +109,8 @@ pub(crate) fn callback_nonce() -> DataKey {
 pub(crate) fn callback_context(nonce: u64) -> DataKey {
     DataKey::CallbackContext(nonce)
 }
+
+/// Per-investor persistent marker indicating membership in `DataKey::InvestorIndex`.
+pub(crate) fn investor_indexed(investor: Address) -> DataKey {
+    DataKey::InvestorIndexed(investor)
+}

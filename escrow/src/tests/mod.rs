@@ -85,6 +85,7 @@ mod reconciliation_lifecycle;
 mod settlement;
 mod settlement_config_view;
 mod timelocked_upgrade;
+mod unfund_investor_index;
 mod withdraw_attestation_gate;
 mod yield_tier_boundaries;
 /// Registers a new escrow contract instance and returns its contract id.

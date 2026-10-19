@@ -1251,7 +1251,6 @@ pub enum DataKey {
     /// instance.  Absent ⇒ `0`.  Incremented atomically with each accepted extension.
     /// **Additive key (ADR-007):** absent on instances predating this key — reads as `0`.
     FundingDeadlineExtensionCount,
-
     // --- Issue #1544: Timelocked upgrade ---
     /// Pending WASM upgrade proposal `(new_wasm_hash: BytesN<32>, eta: u64)`.
     ///
@@ -1261,6 +1260,9 @@ pub enum DataKey {
     ///
     /// Absent ⇒ no proposal is pending.
     PendingUpgrade,
+    /// Persistent marker set to `true` while `investor` has a positive contribution and is present
+    /// in `DataKey::InvestorIndex`. Cleared when the investor fully unfunds.
+    InvestorIndexed(Address),
 }
 
 // --- Data types ---
@@ -3840,6 +3842,25 @@ impl LiquifactEscrow {
             .set(&keys::investor_claimed(investor), &value);
     }
 
+    fn is_persistent_investor_indexed(env: &Env, investor: Address) -> bool {
+        env.storage()
+            .persistent()
+            .get(&keys::investor_indexed(investor))
+            .unwrap_or(false)
+    }
+
+    fn set_persistent_investor_indexed(env: &Env, investor: Address, indexed: bool) {
+        if indexed {
+            env.storage()
+                .persistent()
+                .set(&keys::investor_indexed(investor), &true);
+        } else {
+            env.storage()
+                .persistent()
+                .remove(&keys::investor_indexed(investor));
+        }
+    }
+
     /// Public API: contribution recorded for `investor` (persistent storage).
     pub fn get_contribution(env: Env, investor: Address) -> i128 {
         Self::get_persistent_investor_contribution(&env, investor)
@@ -6214,15 +6235,18 @@ impl LiquifactEscrow {
                 &cur_funder_count.saturating_add(1),
             );
 
-            let mut index: Vec<Address> = env
-                .storage()
-                .instance()
-                .get(&keys::investor_index())
-                .unwrap_or_else(|| Vec::new(&env));
-            index.push_back(investor.clone());
-            env.storage()
-                .instance()
-                .set(&keys::investor_index(), &index);
+            if !Self::is_persistent_investor_indexed(&env, investor.clone()) {
+                let mut index: Vec<Address> = env
+                    .storage()
+                    .instance()
+                    .get(&keys::investor_index())
+                    .unwrap_or_else(|| Vec::new(&env));
+                index.push_back(investor.clone());
+                env.storage()
+                    .instance()
+                    .set(&keys::investor_index(), &index);
+                Self::set_persistent_investor_indexed(&env, investor.clone(), true);
+            }
         }
 
         env.storage().instance().set(&DataKey::Escrow, &escrow);
@@ -7956,7 +7980,7 @@ impl LiquifactEscrow {
         // Extend TTL for all per-investor persistent keys written during unfund.
         Self::extend_investor_ttl(&env, &investor);
 
-        // 7. Decrement UniqueFunderCount when contribution reaches zero.
+        // 7. Decrement UniqueFunderCount and clean up investor state when contribution reaches zero.
         if remaining_contribution == 0 {
             let cur: u32 = env
                 .storage()
@@ -7966,6 +7990,32 @@ impl LiquifactEscrow {
             env.storage()
                 .instance()
                 .set(&keys::unique_funder_count(), &cur.saturating_sub(1));
+
+            // Remove investor from InvestorIndex while preserving relative order
+            let mut index: Vec<Address> = env
+                .storage()
+                .instance()
+                .get(&keys::investor_index())
+                .unwrap_or_else(|| Vec::new(&env));
+            let len = index.len();
+            for i in 0..len {
+                if index.get(i).unwrap() == investor {
+                    index.remove(i);
+                    break;
+                }
+            }
+            env.storage()
+                .instance()
+                .set(&keys::investor_index(), &index);
+
+            // Clean up per-investor yield, claim lock, and indexing marker
+            env.storage()
+                .persistent()
+                .remove(&keys::investor_effective_yield(investor.clone()));
+            env.storage()
+                .persistent()
+                .remove(&keys::investor_claim_not_before(investor.clone()));
+            Self::set_persistent_investor_indexed(&env, investor.clone(), false);
         }
 
         // 8. Persist updated escrow.
