@@ -791,6 +791,16 @@ pub enum EscrowError {
 
     /// [`LiquifactEscrow::recover_admin`] called before the admin-recovery timelock deadline.
     AdminRecoveryNotExpired = 249,
+
+    /// [`LiquifactEscrow::set_require_attestation_for_withdraw`] called while the escrow is
+    /// already funded (`status != 0`).  The requirement flag may only be configured while the
+    /// escrow is still open.
+    AttestationRequirementNotOpen = 250,
+
+    /// [`LiquifactEscrow::withdraw`] blocked because `RequireAttestationForWithdraw` is `true`
+    /// and no primary attestation hash has been bound yet.  Bind one via
+    /// [`LiquifactEscrow::bind_primary_attestation_hash`] before retrying.
+    AttestationRequiredForWithdraw = 251,
 }
 
 #[inline(always)]
@@ -1185,6 +1195,11 @@ pub enum DataKey {
     /// Stored cross-contract callback context ([`CallbackContext`]) keyed by invocation nonce.
     /// Binds expected origin address, invocation nonce, and lifecycle phase.
     CallbackContext(u64),
+    /// When `true`, [`LiquifactEscrow::withdraw`] requires a primary attestation hash to be
+    /// bound before the SME may pull liquidity.  Absent ⇒ `false` (no requirement).
+    /// Set by admin via [`LiquifactEscrow::set_require_attestation_for_withdraw`];
+    /// only mutable while the escrow is open (`status == 0`).
+    RequireAttestationForWithdraw,
 }
 
 // --- Data types ---
@@ -2100,6 +2115,18 @@ pub struct PrimaryAttestationBound {
     pub name: Symbol,
     pub invoice_id: Symbol,
     pub digest: BytesN<32>,
+}
+
+/// Emitted by [`LiquifactEscrow::set_require_attestation_for_withdraw`] whenever the
+/// withdraw-attestation-gate flag changes.  `required` is `1` when the gate is enabled,
+/// `0` when disabled, matching the convention used by other boolean event fields in this
+/// contract.
+#[contractevent]
+pub struct AttestationRequirementChanged {
+    #[topic]
+    pub name: Symbol,
+    pub invoice_id: Symbol,
+    pub required: u32,
 }
 
 #[contractevent]
@@ -3511,6 +3538,64 @@ impl LiquifactEscrow {
         env.storage()
             .instance()
             .get(&DataKey::PrimaryAttestationHash)
+    }
+
+    /// Enable or disable the requirement that a primary attestation hash must be bound
+    /// before [`LiquifactEscrow::withdraw`] may proceed.
+    ///
+    /// **Authorization:** [`InvoiceEscrow::admin`].
+    ///
+    /// **Status gate:** only callable while the escrow is **open** (`status == 0`).
+    /// After funding closes the requirement is immutable so investors can rely on the
+    /// disbursement rule that was in force when they committed principal.
+    ///
+    /// **Idempotent:** setting the same value twice is allowed (no error, but the event
+    /// is still emitted so off-chain indexers can replay the full history).
+    ///
+    /// Emits [`AttestationRequirementChanged`] (topic: `att_req`).
+    ///
+    /// # Errors
+    /// - [`EscrowError::AttestationRequirementNotOpen`] — called after funding has closed
+    ///   (`status != 0`).
+    pub fn set_require_attest_withdraw(env: Env, required: bool) -> bool {
+        let escrow = Self::load_escrow_require_admin(&env);
+        ensure(
+            &env,
+            escrow.status == 0,
+            EscrowError::AttestationRequirementNotOpen,
+        );
+        env.storage()
+            .instance()
+            .set(&DataKey::RequireAttestationForWithdraw, &required);
+        AttestationRequirementChanged {
+            name: symbol_short!("att_req"),
+            invoice_id: escrow.invoice_id.clone(),
+            required: if required { 1 } else { 0 },
+        }
+        .publish(&env);
+        required
+    }
+
+    /// Read-only bundled view of withdraw requirements.
+    ///
+    /// Returns `(attestation_required, attestation_bound)` where:
+    /// - `attestation_required` — `true` when the admin has enabled the attestation gate
+    ///   via [`LiquifactEscrow::set_require_attestation_for_withdraw`].
+    /// - `attestation_bound` — `true` when a primary attestation hash has already been
+    ///   bound via [`LiquifactEscrow::bind_primary_attestation_hash`].
+    ///
+    /// No auth required.  Returns `(false, false)` before `init`.
+    pub fn get_withdraw_requirements(env: Env) -> (bool, bool) {
+        let attestation_required: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::RequireAttestationForWithdraw)
+            .unwrap_or(false);
+        let attestation_bound: bool = env
+            .storage()
+            .instance()
+            .has(&DataKey::PrimaryAttestationHash);
+        (attestation_required, attestation_bound)
     }
 
     /// Append a digest to a bounded on-chain log (see [`MAX_ATTESTATION_APPEND_ENTRIES`]) for **versioned**
@@ -6107,17 +6192,21 @@ impl LiquifactEscrow {
     /// # Guard ordering
     ///
     /// 1. Operational pause + legal-hold gates (read-only).
-    /// 2. `sme_address.require_auth()` (via `load_escrow_require_sme`).
-    /// 3. Status == 1 (funded) check.
-    /// 4. Contract balance sufficiency check ([`EscrowError::InsufficientContractBalance`]).
-    /// 5. Checked fee/net computation.
-    /// 6. Status transition to 3, `DistributedPrincipal` update (by the full gross
+    /// 2. Attestation gate (read-only): if `RequireAttestationForWithdraw` is `true`, a
+    ///    primary attestation hash must be bound ([`EscrowError::AttestationRequiredForWithdraw`]).
+    /// 3. `sme_address.require_auth()` (via `load_escrow_require_sme`).
+    /// 4. Status == 1 (funded) check.
+    /// 5. Contract balance sufficiency check ([`EscrowError::InsufficientContractBalance`]).
+    /// 6. Checked fee/net computation.
+    /// 7. Status transition to 3, `DistributedPrincipal` update (by the full gross
     ///    `funded_amount`), storage write.
-    /// 7. SEP-41 token transfers (fee → treasury, net → SME) with balance-delta verification.
-    /// 8. Event emission ([`SmeWithdrew`], carrying `amount = sme_payout` and `fee`).
+    /// 8. SEP-41 token transfers (fee → treasury, net → SME) with balance-delta verification.
+    /// 9. Event emission ([`SmeWithdrew`], carrying `amount = sme_payout` and `fee`).
     ///
     /// # Errors
     /// - [`EscrowError::LegalHoldBlocksWithdrawal`] — hold is active.
+    /// - [`EscrowError::AttestationRequiredForWithdraw`] — attestation gate enabled but no
+    ///   primary hash bound.
     /// - [`EscrowError::WithdrawalNotFunded`] — escrow not in funded state.
     /// - [`EscrowError::InsufficientContractBalance`] — contract holds less than `funded_amount`.
     /// - [`EscrowError::WithdrawFeeArithmeticOverflow`] — `funded_amount * fee_bps` overflowed `i128`.
@@ -6136,6 +6225,23 @@ impl LiquifactEscrow {
             PauseEntry::Withdrawal,
         );
         guard_not_legal_hold(&env, EscrowError::LegalHoldBlocksWithdrawal);
+
+        // Attestation gate (read-only, before require_auth).  If the admin has enabled the
+        // requirement, a primary attestation hash must already be bound.
+        let attestation_required: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::RequireAttestationForWithdraw)
+            .unwrap_or(false);
+        if attestation_required {
+            ensure(
+                &env,
+                env.storage()
+                    .instance()
+                    .has(&DataKey::PrimaryAttestationHash),
+                EscrowError::AttestationRequiredForWithdraw,
+            );
+        }
 
         let mut escrow = Self::load_escrow_require_sme(&env);
 
