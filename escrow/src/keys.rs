@@ -99,3 +99,9 @@ pub(crate) fn callback_nonce() -> DataKey {
 pub(crate) fn callback_context(nonce: u64) -> DataKey {
     DataKey::CallbackContext(nonce)
 }
+
+/// Per-investor **persistent** refund marker, written once when a cancelled-escrow
+/// refund succeeds.  Absent ⇒ `false`.  Independent TTL from the contract instance.
+pub(crate) fn investor_refunded(investor: Address) -> DataKey {
+    DataKey::InvestorRefunded(investor)
+}
