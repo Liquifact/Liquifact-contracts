@@ -791,6 +791,12 @@ pub enum EscrowError {
 
     /// [`LiquifactEscrow::recover_admin`] called before the admin-recovery timelock deadline.
     AdminRecoveryNotExpired = 249,
+
+    /// [`LiquifactEscrow::set_performance_fee_bps`] called with `bps > 5_000`.
+    PerformanceFeeBpsOutOfRange = 250,
+
+    /// [`LiquifactEscrow::set_performance_fee_bps`] called after funding began.
+    PerformanceFeeLocked = 251,
 }
 
 #[inline(always)]
@@ -1185,6 +1191,9 @@ pub enum DataKey {
     /// Stored cross-contract callback context ([`CallbackContext`]) keyed by invocation nonce.
     /// Binds expected origin address, invocation nonce, and lifecycle phase.
     CallbackContext(u64),
+    /// Performance fee (u32 bps, `0..=5_000`) taken from each investor's coupon at claim.
+    /// **Additive key (ADR-007):** absent ⇒ `0`.
+    PerformanceFeeBps,
 }
 
 // --- Data types ---
@@ -2013,6 +2022,23 @@ pub struct SmeWithdrew {
     pub amount: i128,
     pub recipient: Address,
     /// Protocol fee routed to [`DataKey::Treasury`] (`0` when `protocol_fee_bps == 0`).
+    pub fee: i128,
+}
+
+#[contractevent]
+pub struct PerformanceFeeUpdated {
+    #[topic]
+    pub name: Symbol,
+    pub old_bps: u32,
+    pub new_bps: u32,
+}
+
+#[contractevent]
+pub struct PerformanceFeeCollected {
+    pub name: Symbol,
+    #[topic]
+    pub investor: Address,
+    pub invoice_id: Symbol,
     pub fee: i128,
 }
 
@@ -3260,6 +3286,24 @@ impl LiquifactEscrow {
         escrow
     }
 
+    /// `(net, fee)` split of the gross payout: `fee = floor(coupon × bps / 10_000)` where
+    /// `coupon = max(payout - contribution, 0)`, so principal is never charged.
+    fn split_payout(env: &Env, investor: &Address) -> (i128, i128) {
+        let payout = Self::compute_investor_payout(env.clone(), investor.clone());
+        let contribution = Self::get_persistent_investor_contribution(env, investor.clone());
+        let coupon = payout.saturating_sub(contribution).max(0);
+        let bps: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::PerformanceFeeBps)
+            .unwrap_or(0);
+        let fee = coupon
+            .checked_mul(bps as i128)
+            .and_then(|s| s.checked_div(10_000))
+            .unwrap_or_else(|| fail(env, EscrowError::ComputePayoutArithmeticOverflow));
+        (payout - fee, fee)
+    }
+
     /// Load the current escrow and require SME authorization in one step.
     ///
     /// Consolidates the repeated `let escrow = Self::get_escrow(env.clone()); escrow.sme_address.require_auth();`
@@ -3409,6 +3453,31 @@ impl LiquifactEscrow {
         .publish(&env);
 
         new_fee_bps
+    }
+
+    /// Admin-only setter for the performance fee (bps of each investor's coupon, `0..=5_000`).
+    /// Only allowed while `status == 0` and `funded_amount == 0`; emits [`PerformanceFeeUpdated`].
+    pub fn set_performance_fee_bps(env: Env, bps: u32) -> u32 {
+        let escrow = Self::load_escrow_require_admin(&env);
+        ensure(
+            &env,
+            escrow.status == 0 && escrow.funded_amount == 0,
+            EscrowError::PerformanceFeeLocked,
+        );
+        ensure(&env, bps <= 5_000, EscrowError::PerformanceFeeBpsOutOfRange);
+        let old_bps: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::PerformanceFeeBps)
+            .unwrap_or(0);
+        env.storage().instance().set(&DataKey::PerformanceFeeBps, &bps);
+        PerformanceFeeUpdated {
+            name: symbol_short!("perf_upd"),
+            old_bps,
+            new_bps: bps,
+        }
+        .publish(&env);
+        bps
     }
 
     /// Optional cap on **distinct** investor addresses (`prev == 0` at fund time); [`None`] if unlimited.
@@ -6295,13 +6364,13 @@ impl LiquifactEscrow {
         }
 
         // Compute on-chain gross payout via pro-rata math.
-        let payout = Self::compute_investor_payout(env.clone(), investor.clone());
-        ensure(&env, payout > 0, EscrowError::PayoutZero);
+        let (net, fee) = Self::split_payout(&env, &investor);
+        ensure(&env, net > 0, EscrowError::PayoutZero);
 
         // Mark before transfer — prevents double-pay on any re-entrant path.
         Self::set_persistent_investor_claimed(&env, investor.clone(), true);
 
-        // Transfer gross payout from this contract to the investor.
+        // Transfer net payout to the investor and the performance fee (if any) to the treasury.
         let this = env.current_contract_address();
         let token_addr = Self::funding_token_or_fail(&env);
         external_calls::transfer_funding_token_with_balance_checks(
@@ -6309,8 +6378,25 @@ impl LiquifactEscrow {
             &token_addr,
             &this,
             &investor,
-            payout,
+            net,
         );
+        if fee > 0 {
+            let treasury = Self::treasury_or_fail(&env);
+            external_calls::transfer_funding_token_with_balance_checks(
+                &env,
+                &token_addr,
+                &this,
+                &treasury,
+                fee,
+            );
+            PerformanceFeeCollected {
+                name: symbol_short!("perf_fee"),
+                investor: investor.clone(),
+                invoice_id: escrow.invoice_id.clone(),
+                fee,
+            }
+            .publish(&env);
+        }
 
         InvestorPayoutClaimed {
             name: symbol_short!("inv_claim"),
@@ -6364,8 +6450,14 @@ impl LiquifactEscrow {
             return 0;
         }
 
-        // All gates passed: return the gross payout
-        Self::compute_investor_payout(env, investor)
+        // All gates passed: return the payout net of the performance fee
+        Self::split_payout(&env, &investor).0
+    }
+
+    /// Read-only `(net, fee)` split of `investor`'s gross payout under the current performance
+    /// fee. `net + fee == compute_investor_payout`. No gating applied.
+    pub fn preview_claim_split(env: Env, investor: Address) -> (i128, i128) {
+        Self::split_payout(&env, &investor)
     }
 
     /// On-chain read-only pro-rata gross payout for `investor`.

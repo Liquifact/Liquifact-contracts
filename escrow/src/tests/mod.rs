@@ -76,6 +76,7 @@ mod migration_errors;
 mod paginated_views;
 mod pause;
 mod pauser_boundary_tests;
+mod performance_fee;
 mod properties;
 mod reconciliation_lifecycle;
 mod settlement;
