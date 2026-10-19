@@ -791,6 +791,10 @@ pub enum EscrowError {
 
     /// [`LiquifactEscrow::recover_admin`] called before the admin-recovery timelock deadline.
     AdminRecoveryNotExpired = 249,
+
+    /// [`LiquifactEscrow::set_investor_allocation`] given an allocation that is not positive or
+    /// is below the investor's current contribution.
+    InvestorAllocationInvalid = 250,
 }
 
 #[inline(always)]
@@ -1185,6 +1189,9 @@ pub enum DataKey {
     /// Stored cross-contract callback context ([`CallbackContext`]) keyed by invocation nonce.
     /// Binds expected origin address, invocation nonce, and lifecycle phase.
     CallbackContext(u64),
+    /// Admin-assigned per-investor allocation (persistent). When present it replaces
+    /// [`DataKey::MaxPerInvestorCap`] for that investor. Absent ⇒ global cap applies.
+    InvestorAllocation(Address),
 }
 
 // --- Data types ---
@@ -2176,6 +2183,16 @@ pub struct InvestorAllowlistChanged {
     pub investor: Address,
     /// `1` = allowed, `0` = blocked.
     pub allowed: u32,
+}
+
+#[contractevent]
+pub struct InvestorAllocationSet {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub investor: Address,
+    pub invoice_id: Symbol,
+    pub allocation: Option<i128>,
 }
 
 #[contractevent]
@@ -3427,6 +3444,11 @@ impl LiquifactEscrow {
         env.storage().instance().get(&keys::max_per_investor_cap())
     }
 
+    /// Cap that applies to `investor`: their allocation if set, else the global cap.
+    pub fn get_investor_effective_cap(env: Env, investor: Address) -> Option<i128> {
+        Self::effective_cap(&env, &investor)
+    }
+
     /// Distinct funders counted so far (each address counted once when it first receives principal).
     ///
     /// **Sybil:** this limits distinct **chain accounts**, not real-world persons; Sybil resistance is
@@ -3560,6 +3582,46 @@ impl LiquifactEscrow {
             .get(&DataKey::AttestationRevoked(index))
             .unwrap_or(false);
         Some(AttestationDigestInfo { digest, revoked })
+    }
+
+    /// Per-investor allocation if set, otherwise the global per-investor cap.
+    fn effective_cap(env: &Env, investor: &Address) -> Option<i128> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::InvestorAllocation(investor.clone()))
+            .or_else(|| env.storage().instance().get(&keys::max_per_investor_cap()))
+    }
+
+    /// Store or clear one allocation and emit the event.
+    fn write_allocation(
+        env: &Env,
+        investor: &Address,
+        allocation: Option<i128>,
+        invoice_id: Symbol,
+    ) {
+        let k = DataKey::InvestorAllocation(investor.clone());
+        match allocation {
+            Some(a) => {
+                env.storage().persistent().set(&k, &a);
+                let ttl = Self::get_storage_limit(env.clone());
+                env.storage().persistent().extend_ttl(&k, ttl, ttl);
+            }
+            None => env.storage().persistent().remove(&k),
+        }
+        InvestorAllocationSet {
+            name: symbol_short!("alloc_set"),
+            investor: investor.clone(),
+            invoice_id,
+            allocation,
+        }
+        .publish(env);
+    }
+
+    fn check_allocation(env: &Env, investor: &Address, allocation: Option<i128>) {
+        if let Some(a) = allocation {
+            let c = Self::get_persistent_investor_contribution(env, investor.clone());
+            ensure(env, a > 0 && a >= c, EscrowError::InvestorAllocationInvalid);
+        }
     }
 
     // --- Persistent per-investor storage helpers ---
@@ -4895,6 +4957,39 @@ impl LiquifactEscrow {
         .publish(&env);
     }
 
+    /// Set (`Some`) or clear (`None`) a per-investor allocation that replaces the global
+    /// per-investor cap for that investor. Admin only, status 0.
+    ///
+    /// # Errors
+    /// [`EscrowError::InvestorAllocationInvalid`] if `allocation <= 0` or is below the
+    /// investor's current contribution.
+    pub fn set_investor_allocation(env: Env, investor: Address, allocation: Option<i128>) {
+        let escrow = Self::load_escrow_require_admin(&env);
+        require_funding_open(&env, escrow.status);
+        Self::check_allocation(&env, &investor, allocation);
+        Self::write_allocation(&env, &investor, allocation, escrow.invoice_id);
+    }
+
+    /// Batch form of [`LiquifactEscrow::set_investor_allocation`]; every entry is validated
+    /// before any is written (all-or-nothing).
+    pub fn set_investor_allocations(env: Env, entries: Vec<(Address, Option<i128>)>) {
+        let escrow = Self::load_escrow_require_admin(&env);
+        require_funding_open(&env, escrow.status);
+        let n = entries.len();
+        ensure(&env, n > 0, EscrowError::InvestorBatchEmpty);
+        ensure(
+            &env,
+            n <= MAX_INVESTOR_ALLOWLIST_BATCH,
+            EscrowError::InvestorBatchTooLarge,
+        );
+        for (inv, a) in entries.iter() {
+            Self::check_allocation(&env, &inv, a);
+        }
+        for (inv, a) in entries.iter() {
+            Self::write_allocation(&env, &inv, a, escrow.invoice_id.clone());
+        }
+    }
+
     /// Batch add or remove investors from the allowlist.
     ///
     /// Accepts a `Vec<Address>` and a single `allowed` flag. Requires admin authorization
@@ -5736,11 +5831,7 @@ impl LiquifactEscrow {
             .checked_add(amount)
             .unwrap_or_else(|| fail(&env, EscrowError::InvestorContributionOverflow));
 
-        if let Some(cap) = env
-            .storage()
-            .instance()
-            .get::<DataKey, i128>(&keys::max_per_investor_cap())
-        {
+        if let Some(cap) = Self::effective_cap(&env, &investor) {
             ensure(
                 &env,
                 new_contribution <= cap,
