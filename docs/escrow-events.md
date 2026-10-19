@@ -259,9 +259,10 @@ Emitted when an admin toggles the compliance hold.
 - `active` (u32): `1` for enabled, `0` for cleared.
 
 ### `PausedChanged`
-Emitted when an admin toggles the lightweight operational pause via `set_paused`.
-Orthogonal to `LegalHoldChanged` — it signals the incident-response circuit
-breaker (no compliance semantics, no clear delay), not the compliance hold.
+Emitted when the lightweight operational pause is toggled via `set_paused`, or activated via
+`pause_as_pauser` by the dedicated emergency-pauser role. Orthogonal to `LegalHoldChanged` —
+it signals the incident-response circuit breaker (no compliance semantics, no clear delay),
+not the compliance hold.
 
 **Topics:**
 1. `paused` (Symbol)
@@ -269,6 +270,23 @@ breaker (no compliance semantics, no clear delay), not the compliance hold.
 
 **Data Payload:**
 - `active` (u32): `1` for enabled, `0` for cleared.
+- `scope` (PauseScope): which flows the pause blocks (on clear, the scope that was lifted).
+- `reason` (PauseReason): why the pause was applied (on clear, the reason of the lifted pause).
+
+A pauser-initiated pause emits a byte-identical event to an admin-initiated one — indexers
+cannot (and need not) distinguish the two from the event alone.
+
+### `PauserChanged`
+Emitted when the admin installs, replaces, or revokes the dedicated emergency-pauser role
+(`DataKey::Pauser`) via `set_pauser`.
+
+**Topics:**
+1. `pauser` (Symbol)
+2. `invoice_id` (Symbol)
+
+**Data Payload:**
+- `pauser` (Option<Address>): the newly configured pauser; absent (`None`) when the role was
+  revoked.
 
 ### `CollateralClearedEvt`
 Emitted when the SME clears the metadata-only collateral commitment recorded under

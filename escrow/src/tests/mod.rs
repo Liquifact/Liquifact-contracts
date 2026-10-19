@@ -81,6 +81,7 @@ mod paginated_views;
 mod pause;
 mod pause_bypass;
 mod pauser_boundary_tests;
+mod pauser_role;
 mod properties;
 mod reconciliation_lifecycle;
 mod settlement;

@@ -10,22 +10,27 @@
 
 The **operational pause** is a lightweight incident-response circuit breaker controlled exclusively by the escrow's current `admin`. It is a single-call toggle (no clear delay, no multi-phase handshake) designed for rapid response to events such as a suspected token bug, oracle feed anomaly, or operational incident.
 
+An optional, dedicated **pauser** key may also activate a scoped pause (see §2.4) without waiting on a governed multisig. The pauser is deliberately **one-way**: it can pause but never unpause, and it can change no pause configuration.
+
 The pause is **orthogonal** to the compliance/legal hold: each flag blocks its gated entrypoints independently, and toggling one never reads or writes the other's storage key.
 
 ---
 
 ## 1. Roles
 
-| Role | Can call `set_paused`? | Gated by pause? |
-|---|---|---|
-| `escrow.admin` (current) | **Yes** — sole authorizer | No — `set_paused` itself has no pause gate |
-| `escrow.sme_address` | No — panics on `require_auth` | **Yes** — `settle`, `withdraw` are pause-gated |
-| Investors | No | **Yes** — `fund`, `fund_with_commitment`, `fund_batch`, `claim_investor_payout` are pause-gated |
-| `DataKey::PendingAdmin` | No | No |
-| Treasury | No | No — `sweep_terminal_dust` is **not** pause-gated |
-| Any other address | No | N/A |
+| Role | Can call `set_paused`? | Can call `pause_as_pauser`? | Gated by pause? |
+|---|---|---|---|
+| `escrow.admin` (current) | **Yes** — sole authorizer | No | No — `set_paused` itself has no pause gate |
+| `DataKey::Pauser` (optional, dedicated) | No | **Yes** — activate only, never clear | No |
+| `escrow.sme_address` | No — panics on `require_auth` | No — may not be installed as pauser | **Yes** — `settle`, `withdraw` are pause-gated |
+| Investors | No | No | **Yes** — `fund`, `fund_with_commitment`, `fund_batch`, `claim_investor_payout` are pause-gated |
+| `DataKey::PendingAdmin` | No | No | No |
+| Treasury | No | No — may not be installed as pauser | No — `sweep_terminal_dust` is **not** pause-gated |
+| Any other address | No | No — rejected with `NotPauser` (254) | N/A |
 
 **Key insight:** Only the current `escrow.admin` may call `set_paused`. Admin rotation (`propose_admin` + `accept_admin`) is **not** blocked by pause, so a governance-controlled admin can always rotate authority to clear a stale pause.
+
+**Pauser insight:** The pauser widens the *response* surface without widening the *control* surface. It can only ever add a pause; every lever that could remove, weaken, or reconfigure one stays with the admin (see §2.4).
 
 ---
 
@@ -87,6 +92,78 @@ pub fn is_paused(env: Env) -> bool {
 ```
 
 No `require_auth` — any caller can read the flag.
+
+### 2.4 The emergency-pauser role
+
+> Issue: [#1548](https://github.com/opratem/Liquifact-contracts/issues/1548)
+
+Three new entrypoints and one new storage key implement a dedicated operational key that can
+**activate** a pause immediately, without waiting on a governed multisig.
+
+| Entrypoint | Authorized role | Purpose |
+|---|---|---|
+| `set_pauser(pauser: Option<Address>) -> Option<Address>` | `escrow.admin` | Install / revoke the pauser. Returns the previously configured pauser. |
+| `get_pauser() -> Option<Address>` | none (read-only) | Read the configured pauser; `None` when unset. |
+| `pause_as_pauser(pauser, scope, reason)` | the stored pauser | Activate (or widen) a scoped pause. |
+
+#### 2.4.1 `set_pauser` — installation rules
+
+```text
+escrow/src/lib.rs — set_pauser
+```
+
+| Step | Detail |
+|---|---|
+| 1. Load escrow + admin auth | `Self::load_escrow_require_admin(&env)` — panics if the caller is not the current admin |
+| 2. Role-conflict check | Reject the SME address and the treasury address with `PauserRoleConflict` (253) |
+| 3. Storage write | `DataKey::Pauser ← Address`, or `remove` when `None` |
+| 4. Emit event | `PauserChanged { name: "pauser", invoice_id, pauser: Option<Address> }` |
+
+The pauser must be a **dedicated** key. It may not be the SME address (which already carries
+risk-bearing authority) nor the treasury address (which receives protocol fees) — otherwise a
+single key would wear two hats on the same escrow.
+
+`None` revokes the pauser: the key is removed from storage and every later
+`pause_as_pauser` call fails with `NotPauser` (254).
+
+#### 2.4.2 `pause_as_pauser` — guard ordering
+
+```text
+escrow/src/lib.rs — pause_as_pauser
+```
+
+| Step | Detail |
+|---|---|
+| 1. Load escrow | `DataKey::Escrow` — `EscrowNotInitialized` (20) if absent |
+| 2. Verify the caller is the stored pauser | `stored_pauser == pauser` else `NotPauser` (254) |
+| 3. Auth | `pauser.require_auth()` — the pauser can never be impersonated |
+| 4. Rate-limit window | `pause_toggle_window(&env)` — **shared** with the admin, one combined count |
+| 5. Activate | `activate_pause(&env, invoice_id, scope, reason)` — identical state write and event as the admin path |
+| 6. Commit the rate-limit slot | `commit_pause_toggle(&env, …)` |
+
+Steps 2 and 3 are ordered so that a **wrong** caller gets the typed `NotPauser` error rather
+than an opaque auth panic, while a **correct** caller can never be impersonated: the address
+passed as the argument must be the one stored on-chain, and that same address must sign the
+invocation.
+
+#### 2.4.3 What the pauser may **not** do
+
+| Action | Who may do it | Enforced by |
+|---|---|---|
+| Un-pause | `escrow.admin` only | `set_paused(false, …)` calls `load_escrow_require_admin`; the pauser has no un-pause entrypoint at all |
+| Change pause configuration | `escrow.admin` only | `set_pause_max_duration`, `set_pause_cooldown`, `set_pause_rate_limit` are all admin-only |
+| Install / revoke a pauser | `escrow.admin` only | `set_pauser` is admin-only |
+| Extend a pause past its max duration | nobody | `activate_pause` never resets `PausedAt`; a re-pause only changes `scope`/`reason` |
+| Narrow an active pause's scope | nobody | `PauseAlreadyActive` (250) — the pauser may only widen |
+| Pause again during the cooldown | nobody | `PauseCooldownActive` (251) |
+
+#### 2.4.4 Shared semantics with the admin path
+
+`pause_as_pauser` and `set_paused(true, …)` call the **same** `activate_pause` helper, so they
+write byte-identical state and emit a byte-identical `PausedChanged { active: 1 }` event. They
+also draw from the **same** rolling rate-limit window: the configured limit applies to the
+*combined* count of admin toggles and pauser toggles, so a pauser cannot be used to bypass a
+rate limit configured to protect the admin.
 
 ---
 
@@ -197,6 +274,8 @@ The following state-mutating entrypoints are **not** affected by the operational
 | Entrypoint | Authorized role | Reason excluded |
 |---|---|---|
 | `set_paused` | `escrow.admin` | Self-evident — can't clear pause if gated |
+| `pause_as_pauser` | `DataKey::Pauser` | The pauser may only *add* a pause; it is never gated by one |
+| `set_pauser` | `escrow.admin` | Role management — a gated pauser could not be revoked |
 | `set_legal_hold` / `clear_legal_hold` | `escrow.admin` | Compliance hold is orthogonal to operational pause |
 | `propose_admin` | `escrow.admin` | Admin rotation must remain available to un-pause |
 | `accept_admin` | `DataKey::PendingAdmin` | Admin rotation must remain available to un-pause |
@@ -238,16 +317,42 @@ pub struct PausedChanged {
     #[topic]
     pub invoice_id: Symbol,
     pub active: u32,           // 1 = pause enabled, 0 = cleared
+    pub scope: PauseScope,     // which flows the pause blocks (on clear, the scope lifted)
+    pub reason: PauseReason,   // why the pause was applied (on clear, the lifted reason)
 }
 ```
 
-Emitted by **every** `set_paused` call, including no-op calls (`set_paused(true)` when already true).
+Emitted by **every** `set_paused` call, including no-op calls (`set_paused(true)` when already
+true), and by every successful `pause_as_pauser` call. A pauser-initiated pause emits a
+byte-identical event to an admin-initiated one.
 
 Topics for indexer filtering:
 - **Topic 1:** `"paused"` (Symbol)
 - **Topic 2:** `invoice_id` (Symbol)
 
 See also: [`docs/escrow-events.md` § `PausedChanged`](escrow-events.md#pausedchanged).
+
+---
+
+## 5.1 Event: `PauserChanged`
+
+```rust
+#[contractevent]
+pub struct PauserChanged {
+    #[topic]
+    pub name: Symbol,            // "pauser"
+    #[topic]
+    pub invoice_id: Symbol,
+    pub pauser: Option<Address>, // None = revoked
+}
+```
+
+Emitted by **every** `set_pauser` call — on installation, on replacement, and on revocation
+(`pauser: None`).
+
+Topics for indexer filtering:
+- **Topic 1:** `"pauser"` (Symbol)
+- **Topic 2:** `invoice_id` (Symbol)
 
 ---
 
@@ -272,6 +377,17 @@ See also: [`docs/escrow-events.md` § `PausedChanged`](escrow-events.md#pausedch
 - **Storage class:** Instance
 - **Default when absent:** `false` (not paused)
 - **Read pattern:** `env.storage().instance().get(&DataKey::Paused).unwrap_or(false)`
+
+### 7.1 Storage Key: `DataKey::Pauser`
+
+- **Key:** `DataKey::Pauser`
+- **Type:** `Option<Address>` (stored as a bare `Address`; absence means "no pauser")
+- **Storage class:** Instance
+- **Default when absent:** `None` — no pauser configured, so `pause_as_pauser` always fails with
+  `NotPauser` (254)
+- **Written by:** `set_pauser` (admin-only)
+- **Additive key (ADR-007):** appended at the end of the `DataKey` enum, so instances deployed
+  before this change simply read the default.
 
 ---
 
@@ -304,6 +420,21 @@ When both flags are simultaneously active, the pause gate fires first in the can
 
 5. **Pause during legal hold:** Pausing while a legal hold is active adds an extra layer of blocking. Even if the legal hold is cleared, the pause must also be cleared before the gated entrypoints become callable.
 
+6. **The pauser is a one-way key:** The pauser can only ever *add* a pause. It cannot un-pause,
+   cannot change any pause configuration (max duration, cooldown, rate limit), cannot appoint or
+   revoke a pauser, and cannot extend a pause past its max duration — every one of those levers
+   remains admin-only. A compromised pauser therefore causes at most a temporary DoS that the
+   admin can clear, and nothing else.
+
+7. **Pauser blast radius is bounded:** A pauser-initiated pause is subject to exactly the same
+   max-duration expiry, cooldown, and shared rate limit as an admin-initiated one. The pauser
+   cannot pause indefinitely and cannot use its own toggles to exhaust the admin's rate-limit
+   budget without also consuming its own share of that same budget.
+
+8. **Dedicated key enforced at install time:** `set_pauser` rejects the SME address and the
+   treasury address with `PauserRoleConflict` (253), so the pauser can never be a key that
+   already carries risk-bearing or fee-receiving authority on the same escrow.
+
 ---
 
 ## 10. Test Coverage
@@ -323,12 +454,30 @@ Full test coverage in `escrow/src/tests/pause.rs`:
 | Typed errors | `fund_returns_typed_error_when_paused`, `settle_returns_typed_error_when_paused`, `withdraw_returns_typed_error_when_paused`, `claim_returns_typed_error_when_paused` |
 | Toggle cycle | `pause_toggle_cycle` |
 
+Full test coverage for the emergency-pauser role in `escrow/src/tests/pauser_role.rs`:
+
+| Test category | Tests |
+|---|---|
+| Core flow | `pauser_pauses_funding_scope_and_admin_unpauses` |
+| Scope rules | `pauser_may_widen_but_not_narrow_the_scope` |
+| Cannot un-pause | `pauser_cannot_unpause` |
+| Cannot reconfigure | `pauser_cannot_change_pause_configuration` |
+| Cannot appoint | `pauser_cannot_set_pauser` |
+| Authorization | `non_pauser_cannot_pause_as_pauser`, `no_pauser_configured_fails_with_not_pauser`, `clearing_pauser_revokes_it` |
+| Role conflicts | `pauser_may_not_be_sme_or_treasury`, `set_pauser_by_non_admin_panics` |
+| Shared rate limit | `rate_limit_is_shared_across_admin_and_pauser`, `rate_limit_is_shared_across_pauser_and_admin` |
+| Events | `event_payloads_are_identical_between_admin_and_pauser`, `set_pauser_emits_pauser_changed_event` |
+| Bounded blast radius | `pauser_cannot_extend_the_max_duration`, `pauser_pause_respects_the_cooldown` |
+
 ---
 
 ## 11. Cross-References
 
-- **Implementation:** `escrow/src/lib.rs` — `set_paused` (~line 3096), `paused_active` (~line 1643), `is_paused` (~line 2361)
-- **Tests:** `escrow/src/tests/pause.rs`
+- **Implementation:** `escrow/src/lib.rs` — `set_paused`, `set_pauser`, `get_pauser`,
+  `pause_as_pauser`, `activate_pause`, `pause_toggle_window`, `commit_pause_toggle`,
+  `paused_active`, `is_paused`
+- **Tests:** `escrow/src/tests/pause.rs`, `escrow/src/tests/pause_bypass.rs`,
+  `escrow/src/tests/pauser_boundary_tests.rs`, `escrow/src/tests/pauser_role.rs`
 - **Events:** `docs/escrow-events.md` § `PausedChanged`
 - **Security checklist:** `docs/escrow-security-checklist.md` §5.10, §6
 - **Auth boundaries:** `docs/adr/ADR-002-auth-boundaries.md`
