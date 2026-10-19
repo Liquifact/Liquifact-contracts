@@ -66,6 +66,7 @@ mod external_calls;
 mod external_calls_mocked;
 mod funding;
 mod init;
+mod investor_allocation;
 // `integration` (integration.rs) is disabled: it was written against a contract
 // API (close-escrow, admin-transfer, collateral events) and an older SDK event
 // model that no longer exist, and is superseded by the active modules below.
