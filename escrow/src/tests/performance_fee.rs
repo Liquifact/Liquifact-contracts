@@ -76,7 +76,11 @@ fn fee_split_conserves_and_moves_balances() {
         invoice_id: symbol_short!("INV001"),
         fee: 20_000,
     };
-    assert!(env.events().all().contains(&ev.to_xdr(&env, &client.address)));
+    assert!(env
+        .events()
+        .all()
+        .events()
+        .contains(&ev.to_xdr(&env, &client.address)));
 }
 
 #[test]
@@ -113,7 +117,11 @@ fn setter_range_event_and_lock() {
         old_bps: 0,
         new_bps: 5_000,
     };
-    assert!(env.events().all().contains(&ev.to_xdr(&env, &client.address)));
+    assert!(env
+        .events()
+        .all()
+        .events()
+        .contains(&ev.to_xdr(&env, &client.address)));
 
     let investor = Address::generate(&env);
     client.fund(&investor, &1);
