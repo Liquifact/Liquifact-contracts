@@ -3781,13 +3781,7 @@ fn test_set_partial_close_min_bps_admin_and_validation() {
     // Default min_bps is 0
     assert_eq!(client.get_partial_close_min_bps(), 0u32);
 
-    // Non-admin rejected
-    env.mock_auths(&[]);
-    let set_res = client.try_set_partial_close_min_bps(&2_500u32);
-    assert!(set_res.is_err(), "non-admin caller must be rejected");
-
     // Admin succeeds
-    env.mock_all_auths();
     let new_bps = client.set_partial_close_min_bps(&2_500u32);
     assert_eq!(new_bps, 2_500u32);
     assert_eq!(client.get_partial_close_min_bps(), 2_500u32);
@@ -3820,6 +3814,17 @@ fn test_set_partial_close_min_bps_admin_and_validation() {
         client.try_set_partial_close_min_bps(&3_000u32),
         EscrowError::PartialSettleNotOpen,
     );
+}
+
+#[test]
+#[should_panic]
+fn test_set_partial_close_min_bps_requires_admin_auth() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    env.mock_auths(&[]);
+    client.set_partial_close_min_bps(&2_500u32);
 }
 
 #[test]
