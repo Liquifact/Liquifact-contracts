@@ -407,6 +407,14 @@ pub const MIN_PAUSE_TOGGLE_WINDOW_SECS: u64 = 60; // 1 minute
 /// Maximum rate-limit window (seconds) accepted by [`LiquifactEscrow::set_pause_rate_limit`].
 pub const MAX_PAUSE_TOGGLE_WINDOW_SECS: u64 = 7_776_000; // 90 days
 
+/// Minimum delay (seconds) between a `propose_upgrade` call and the earliest
+/// `execute_upgrade` call. 48 hours gives investors and indexers advance notice.
+pub const UPGRADE_TIMELOCK_SECS: u64 = 172_800; // 48 hours
+
+/// Maximum window (seconds) after the timelock ETA during which `execute_upgrade` is valid.
+/// After `eta + UPGRADE_EXECUTION_WINDOW_SECS` the proposal expires and must be re-proposed.
+pub const UPGRADE_EXECUTION_WINDOW_SECS: u64 = 604_800; // 7 days
+
 /// Stable typed errors emitted by LiquiFact escrow entrypoints.
 ///
 /// Codes are append-only: never reuse or renumber a variant. Client SDKs should branch on the
@@ -821,6 +829,19 @@ pub enum EscrowError {
     /// (`new_deadline - original_deadline`) would exceed
     /// [`MAX_FUNDING_DEADLINE_TOTAL_EXTENSION_SECS`]. Use a smaller extension.
     FundingDeadlineExtensionTooLong = 253,
+
+    // --- Issue #1544: Timelocked upgrade ---
+    /// [`LiquifactEscrow::execute_upgrade`] called before the timelock ETA has elapsed.
+    UpgradeTimelockActive = 254,
+    /// [`LiquifactEscrow::execute_upgrade`] called after the execution window has expired.
+    UpgradeProposalExpired = 255,
+    /// [`LiquifactEscrow::execute_upgrade`] or [`LiquifactEscrow::cancel_upgrade`] called
+    /// when no upgrade proposal is pending.
+    NoPendingUpgrade = 256,
+    /// [`LiquifactEscrow::execute_upgrade`] blocked because a compliance legal hold is active.
+    LegalHoldBlocksUpgrade = 257,
+    /// Arithmetic overflow computing `now + UPGRADE_TIMELOCK_SECS` in `propose_upgrade`.
+    UpgradeEtaOverflow = 258,
 }
 
 #[inline(always)]
@@ -1230,6 +1251,16 @@ pub enum DataKey {
     /// instance.  Absent ⇒ `0`.  Incremented atomically with each accepted extension.
     /// **Additive key (ADR-007):** absent on instances predating this key — reads as `0`.
     FundingDeadlineExtensionCount,
+
+    // --- Issue #1544: Timelocked upgrade ---
+    /// Pending WASM upgrade proposal `(new_wasm_hash: BytesN<32>, eta: u64)`.
+    ///
+    /// Written by [`LiquifactEscrow::propose_upgrade`]; cleared atomically by
+    /// [`LiquifactEscrow::execute_upgrade`] (before the deployer call) or by
+    /// [`LiquifactEscrow::cancel_upgrade`].
+    ///
+    /// Absent ⇒ no proposal is pending.
+    PendingUpgrade,
 }
 
 // --- Data types ---
@@ -2280,6 +2311,40 @@ pub struct LegalHoldClearCancelled {
 /// - `new_wasm_hash`: the 32-byte hash of the incoming WASM binary.
 #[contractevent]
 pub struct ContractUpgraded {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    pub new_wasm_hash: BytesN<32>,
+}
+
+/// Emitted by [`LiquifactEscrow::propose_upgrade`] when a new WASM upgrade is proposed.
+#[contractevent]
+pub struct UpgradeProposed {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    pub new_wasm_hash: BytesN<32>,
+    pub eta: u64,
+}
+
+/// Emitted by [`LiquifactEscrow::cancel_upgrade`] when a pending upgrade is cancelled.
+#[contractevent]
+pub struct UpgradeCancelled {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    pub cancelled_wasm_hash: BytesN<32>,
+}
+
+/// Emitted by the legacy [`LiquifactEscrow::upgrade`] entrypoint (alias for `propose_upgrade`).
+///
+/// Signals that the caller used the deprecated `upgrade` entrypoint and should migrate
+/// to `propose_upgrade` + `execute_upgrade`.
+#[contractevent]
+pub struct DeprecatedUpgradeUsed {
     #[topic]
     pub name: Symbol,
     #[topic]
@@ -5665,16 +5730,16 @@ impl LiquifactEscrow {
     /// 3. Upload to the network: `stellar contract upload --wasm ...` → captures `NEW_WASM_HASH`.
     /// 4. Diff the new `DataKey` enum against the deployed version: verify only additive changes.
     /// 5. Test on Testnet with a mirror instance before Mainnet.
-    /// 6. Call `upgrade(NEW_WASM_HASH)` with admin credentials.
-    /// 7. Verify `get_version()` and `get_escrow()` return expected values.
-    /// 8. Clear legal hold: `clear_legal_hold()`.
+    /// 6. Call `propose_upgrade(NEW_WASM_HASH)` with admin credentials.
+    /// 7. After the 48 h timelock, call `execute_upgrade()` within the 7-day execution window.
+    /// 8. Verify `get_version()` and `get_escrow()` return expected values.
+    /// 9. Clear legal hold: `clear_legal_hold()`.
     /// See `docs/OPERATOR_RUNBOOK.md` §§3–7 for the complete procedure.
     ///
     /// ## Rollback
     ///
-    /// Re-upload the previous WASM (already recorded on-chain) and call `upgrade(PREV_WASM_HASH)`.
-    /// This works only when stored data is still compatible with old WASM types. If stored data
-    /// was already rewritten by a `migrate` call, rollback requires a redeploy.
+    /// Cancel a pending proposal with `cancel_upgrade()` before the ETA. After execution,
+    /// re-upload the previous WASM and call `propose_upgrade(PREV_WASM_HASH)`.
     ///
     /// ## Risks
     ///
@@ -5682,12 +5747,80 @@ impl LiquifactEscrow {
     /// or changes a stored struct's XDR shape) will silently corrupt stored state on the next read.
     /// There is no on-chain undo once `update_current_contract_wasm` completes. Test thoroughly
     /// on Testnet before upgrading production contracts.
-    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
-        // Auth first — matches migrate() ordering
+
+    /// Propose a WASM upgrade with a 48-hour timelock.
+    ///
+    /// Stores `(new_wasm_hash, eta)` under [`DataKey::PendingUpgrade`] where
+    /// `eta = now + UPGRADE_TIMELOCK_SECS`. Replaces any earlier pending proposal.
+    /// Emits [`UpgradeProposed`].
+    ///
+    /// After `eta`, call [`LiquifactEscrow::execute_upgrade`] within the
+    /// [`UPGRADE_EXECUTION_WINDOW_SECS`] window to apply the WASM swap.
+    ///
+    /// # Authorization
+    /// The current escrow admin must authorize this call.
+    ///
+    /// # Errors
+    /// - [`EscrowError::UpgradeEtaOverflow`] if `now + UPGRADE_TIMELOCK_SECS` overflows.
+    pub fn propose_upgrade(env: Env, new_wasm_hash: BytesN<32>) -> u64 {
+        let escrow = Self::load_escrow_require_admin(&env);
+        let now = env.ledger().timestamp();
+        let eta = now
+            .checked_add(UPGRADE_TIMELOCK_SECS)
+            .unwrap_or_else(|| fail(&env, EscrowError::UpgradeEtaOverflow));
+
+        // Store as a (BytesN<32>, u64) tuple; replaces any prior proposal atomically.
+        env.storage()
+            .instance()
+            .set(&DataKey::PendingUpgrade, &(new_wasm_hash.clone(), eta));
+
+        UpgradeProposed {
+            name: symbol_short!("upg_prop"),
+            invoice_id: escrow.invoice_id,
+            new_wasm_hash,
+            eta,
+        }
+        .publish(&env);
+
+        eta
+    }
+
+    /// Execute a pending upgrade after the timelock has elapsed.
+    ///
+    /// Requires a pending proposal written by [`LiquifactEscrow::propose_upgrade`],
+    /// `now >= eta` (else [`EscrowError::UpgradeTimelockActive`]),
+    /// `now <= eta + UPGRADE_EXECUTION_WINDOW_SECS` (else [`EscrowError::UpgradeProposalExpired`]),
+    /// and no active legal hold (else [`EscrowError::LegalHoldBlocksUpgrade`]).
+    ///
+    /// Clears the proposal **before** calling `update_current_contract_wasm` to prevent replay.
+    /// Emits [`ContractUpgraded`] before the deployer call (defensive ordering).
+    ///
+    /// # Authorization
+    /// The current escrow admin must authorize this call.
+    pub fn execute_upgrade(env: Env) {
         let escrow = Self::load_escrow_require_admin(&env);
 
-        // Emit event before the deployer call so the event is recorded even if
-        // the deployer call somehow reverts (defensive ordering)
+        let pending: Option<(BytesN<32>, u64)> =
+            env.storage().instance().get(&DataKey::PendingUpgrade);
+        let (new_wasm_hash, eta) =
+            pending.unwrap_or_else(|| fail(&env, EscrowError::NoPendingUpgrade));
+
+        let now = env.ledger().timestamp();
+
+        // Timelock must have elapsed.
+        ensure(&env, now >= eta, EscrowError::UpgradeTimelockActive);
+
+        // Execution window must not have passed.
+        let window_end = eta.saturating_add(UPGRADE_EXECUTION_WINDOW_SECS);
+        ensure(&env, now <= window_end, EscrowError::UpgradeProposalExpired);
+
+        // Legal hold blocks upgrade execution (but not proposal or cancellation).
+        guard_not_legal_hold(&env, EscrowError::LegalHoldBlocksUpgrade);
+
+        // Clear proposal before deployer call — prevents replay if deployer somehow reverts.
+        env.storage().instance().remove(&DataKey::PendingUpgrade);
+
+        // Emit event before the deployer call (defensive ordering).
         ContractUpgraded {
             name: symbol_short!("upgrade"),
             invoice_id: escrow.invoice_id,
@@ -5695,8 +5828,60 @@ impl LiquifactEscrow {
         }
         .publish(&env);
 
-        // Replace contract WASM — no state is modified
         env.deployer().update_current_contract_wasm(new_wasm_hash);
+    }
+
+    /// Cancel a pending upgrade proposal.
+    ///
+    /// Removes [`DataKey::PendingUpgrade`] and emits [`UpgradeCancelled`].
+    /// Fails with [`EscrowError::NoPendingUpgrade`] if no proposal exists.
+    ///
+    /// A legal hold does **not** block cancellation — operators should be able to cancel
+    /// any pending upgrade at any time for safety.
+    ///
+    /// # Authorization
+    /// The current escrow admin must authorize this call.
+    pub fn cancel_upgrade(env: Env) {
+        let escrow = Self::load_escrow_require_admin(&env);
+
+        let pending: Option<(BytesN<32>, u64)> =
+            env.storage().instance().get(&DataKey::PendingUpgrade);
+        let (cancelled_wasm_hash, _eta) =
+            pending.unwrap_or_else(|| fail(&env, EscrowError::NoPendingUpgrade));
+
+        env.storage().instance().remove(&DataKey::PendingUpgrade);
+
+        UpgradeCancelled {
+            name: symbol_short!("upg_cncl"),
+            invoice_id: escrow.invoice_id,
+            cancelled_wasm_hash,
+        }
+        .publish(&env);
+    }
+
+    /// Return the current pending upgrade proposal, or `None` if no proposal is pending.
+    pub fn get_pending_upgrade(env: Env) -> Option<(BytesN<32>, u64)> {
+        env.storage().instance().get(&DataKey::PendingUpgrade)
+    }
+
+    /// Legacy alias for [`LiquifactEscrow::propose_upgrade`].
+    ///
+    /// Existing callers that invoke `upgrade(hash)` will now create a time-delayed proposal
+    /// instead of swapping code immediately. Use [`LiquifactEscrow::execute_upgrade`] after
+    /// the 48-hour timelock to complete the swap.
+    ///
+    /// Emits [`DeprecatedUpgradeUsed`] in addition to [`UpgradeProposed`] so integrators
+    /// can detect and migrate away from the legacy entrypoint.
+    #[deprecated(note = "use propose_upgrade followed by execute_upgrade")]
+    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
+        let invoice_id = Self::get_escrow(env.clone()).invoice_id;
+        Self::propose_upgrade(env.clone(), new_wasm_hash.clone());
+        DeprecatedUpgradeUsed {
+            name: symbol_short!("depr_upg"),
+            invoice_id,
+            new_wasm_hash,
+        }
+        .publish(&env);
     }
 
     /// Record investor deposit: transfer tokens from investor to escrow.
