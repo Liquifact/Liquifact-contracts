@@ -791,6 +791,21 @@ pub enum EscrowError {
 
     /// [`LiquifactEscrow::recover_admin`] called before the admin-recovery timelock deadline.
     AdminRecoveryNotExpired = 249,
+
+    /// Clearing the SME collateral commitment after funding while the escrow is not terminal.
+    CollateralLockedAfterFunding = 250,
+
+    /// Legal hold blocks collateral clear/record after funding.
+    LegalHoldBlocksCollateralChange = 251,
+
+    /// Collateral asset differs from the recorded asset after funding.
+    CollateralAssetChangeAfterFunding = 252,
+
+    /// Collateral amount lower than the recorded amount after funding.
+    CollateralDecreaseAfterFunding = 253,
+
+    /// `batch_record_collateral` entries name different assets.
+    CollateralBatchMixedAssets = 254,
 }
 
 #[inline(always)]
@@ -3864,6 +3879,31 @@ impl LiquifactEscrow {
         env.storage().instance().get(&DataKey::SmeCollateralPledge)
     }
 
+    /// After funding: legal hold freezes the record; asset must match and amount must not shrink.
+    fn guard_collateral_monotonic(
+        env: &Env,
+        escrow: &InvoiceEscrow,
+        prior: Option<&SmeCollateralCommitment>,
+        asset: &Symbol,
+        amount: i128,
+    ) {
+        if escrow.funded_amount > 0 {
+            guard_not_legal_hold(env, EscrowError::LegalHoldBlocksCollateralChange);
+            if let Some(p) = prior {
+                ensure(
+                    env,
+                    p.asset == *asset,
+                    EscrowError::CollateralAssetChangeAfterFunding,
+                );
+                ensure(
+                    env,
+                    amount >= p.amount,
+                    EscrowError::CollateralDecreaseAfterFunding,
+                );
+            }
+        }
+    }
+
     /// Retire the recorded SME collateral pledge.
     ///
     /// Metadata-only: no tokens are moved. Requires SME auth.
@@ -3880,6 +3920,15 @@ impl LiquifactEscrow {
             .unwrap_or_else(|| fail(&env, EscrowError::NoCollateralToClear));
 
         let escrow = Self::load_escrow_require_sme(&env);
+
+        if escrow.funded_amount > 0 {
+            guard_not_legal_hold(&env, EscrowError::LegalHoldBlocksCollateralChange);
+            ensure(
+                &env,
+                is_terminal_status(escrow.status),
+                EscrowError::CollateralLockedAfterFunding,
+            );
+        }
 
         env.storage()
             .instance()
@@ -4307,6 +4356,7 @@ impl LiquifactEscrow {
                 EscrowError::CollateralTimestampBackwards,
             );
         }
+        Self::guard_collateral_monotonic(&env, &escrow, prior.as_ref(), &asset, amount);
 
         let commitment = SmeCollateralCommitment {
             asset,
@@ -4373,6 +4423,11 @@ impl LiquifactEscrow {
                 asset != Symbol::new(&env, ""),
                 EscrowError::CollateralAssetEmpty,
             );
+            ensure(
+                &env,
+                asset == items.get(0).unwrap().0,
+                EscrowError::CollateralBatchMixedAssets,
+            );
         }
 
         let escrow = Self::load_escrow_require_sme(&env);
@@ -4390,6 +4445,11 @@ impl LiquifactEscrow {
                 EscrowError::CollateralTimestampBackwards,
             );
         }
+
+        // Last-write semantics: the final amount is what ends up stored.
+        let (first_asset, _) = items.get(0).unwrap();
+        let (_, final_amount) = items.get(n - 1).unwrap();
+        Self::guard_collateral_monotonic(&env, &escrow, prior.as_ref(), &first_asset, final_amount);
 
         let mut last_commitment = SmeCollateralCommitment {
             asset: Symbol::new(&env, ""),

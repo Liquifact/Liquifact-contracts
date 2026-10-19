@@ -53,6 +53,21 @@ stateDiagram-v2
 | `set_collateral_limit` (line 3396) | — (orthogonal) | — (updates config) | Admin (`require_auth`) | `new_limit > 0` | `CollateralLimitNotPositive` (63) |
 | | | | | `new_limit <= MAX_INVOICE_AMOUNT` | `CollateralLimitExceedsMax` (65) |
 
+### Lock after funding
+
+Once `funded_amount > 0` the pledge is monotonic:
+
+| Entrypoint | Extra guard after funding | Error |
+|---|---|---|
+| `clear_sme_collateral_commitment` | legal hold off | `LegalHoldBlocksCollateralChange` (251) |
+| | status terminal (2, 3, 4) | `CollateralLockedAfterFunding` (250) |
+| `record_sme_collateral_commitment`, `batch_record_collateral` | legal hold off | `LegalHoldBlocksCollateralChange` (251) |
+| | asset equals existing asset | `CollateralAssetChangeAfterFunding` (252) |
+| | amount >= existing amount | `CollateralDecreaseAfterFunding` (253) |
+| `batch_record_collateral` (always) | all entries name the same asset | `CollateralBatchMixedAssets` (254) |
+
+Before funding, behaviour is unchanged.
+
 All read-only entrypoints (`get_sme_collateral_commitment` line 3351, `get_collateral_limit` line 3360, `get_collateral_config` line 3370, `get_collateral_records` line 3425) have no state transition effect and require no authorisation.
 
 ---
