@@ -45,12 +45,14 @@ dashboards can branch on a small, stable set. The compliance/legal hold is a
 **separate** mechanism (`DataKey::LegalHold`) and is never represented as a
 pause reason.
 
-- `set_paused(true, scope, reason)` activates a scoped pause; reactivating an
-already-active scope refreshes `activated_at`/reason (idempotent).
+- `set_paused(true, scope, reason)` activates a scoped pause. Re-pausing an
+  already-active pause **never resets the max-duration clock** — it keeps the
+  original `activated_at`/`PausedAt` and may only widen the scope (see
+  [Re-pausing an active pause](#re-pausing-an-active-pause-max-duration-bypass-prevention)).
 - `set_paused(false, scope, reason)` clears the active pause **only** when
-`scope == All` or `scope` matches the active scope. A wrong scope fails with
-`PauseScopeMismatch` (code 246) rather than silently doing nothing, so an
-operator can never believe a pause was lifted when it was not.
+  `scope == All` or `scope` matches the active scope. A wrong scope fails with
+  `PauseScopeMismatch` (code 246) rather than silently doing nothing, so an
+  operator can never believe a pause was lifted when it was not.
 - `set_paused(false, All, _)` clears whatever scope is currently active.
 
 ### Read-only pause state
@@ -145,11 +147,72 @@ set_pause_max_duration(duration: u64)
 Auto-expiry is read inside `paused_active()`: if `PausedAt + max_duration <=
 ledger.timestamp()`, the function returns `false` even though `DataKey::Paused`
 is still `true` in storage. The stored flag is **not** automatically cleared —
-a subsequent admin call to `set_paused(true)` will re-activate with a fresh
-timestamp.
+it is cleared lazily on the next `set_paused(true)` call.
 
-The current pause activation timestamp is stored in `DataKey::PausedAt` and
-overwritten on each `set_paused(true)` call.
+### Re-pausing an active pause (max-duration bypass prevention)
+
+An active pause cannot be extended past its max duration by re-pausing. A
+second `set_paused(true, scope, reason)` call while a pause is still effective:
+
+- Keeps the original `PausedAt`/`activated_at` — the max-duration clock is **not**
+  reset, so the configured cap always bounds how long the entrypoints stay
+  blocked.
+- May only **widen** the scope (e.g. `Funding` → `All`). Re-pausing with the same
+  scope is accepted as an idempotent no-op (the timestamp is still preserved).
+  A **narrower** scope — including a switch between two different single-family
+  scopes — is rejected with `EscrowError::PauseAlreadyActive` (code 250) and the
+  active pause is left untouched.
+- A widening re-pause emits `PausedChanged` with the new scope.
+
+Because the four single-family scopes are mutually incomparable, the only
+widening is *family* → `All`.
+
+### Re-activating after auto-expiry (cooldown)
+
+When a pause has auto-expired (`paused_active()` returns `false` while `Paused`
+is still `true`), the stale flag and `PauseState` are cleared when the expiry is
+noticed during `set_paused(true)`. A fresh `set_paused(true)` then requires:
+
+```
+now >= PausedAt + max_duration + cooldown
+```
+
+where `cooldown` is configured via `set_pause_cooldown` (defaults to `0`).
+Before the cooldown elapses, activation fails with
+`EscrowError::PauseCooldownActive` (code 251) and nothing is written; after it
+elapses the pause activates with a fresh timestamp.
+
+An explicit `set_paused(false, ...)` is a *deliberate* un-pause, not an expiry:
+it clears the pause immediately and does **not** start a cooldown.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Inactive: no pause active
+    Inactive --> Active: set_paused true, fresh clock
+    Active --> Active: set_paused true with wider scope, keeps PausedAt
+    Active --> Active: set_paused true with same scope, keeps PausedAt
+    Active --> Active: set_paused true with narrower scope, rejected PauseAlreadyActive
+    Active --> Expired: PausedAt plus max_duration reached
+    Active --> Inactive: set_paused false, matching scope or All
+    Expired --> Cooldown: set_paused true before the cooldown elapses
+    Cooldown --> Cooldown: rejected PauseCooldownActive
+    Cooldown --> Active: set_paused true, stale flag cleared, fresh clock
+    Expired --> Inactive: set_paused false, clears the stale flag
+```
+
+### Cooldown configuration (`set_pause_cooldown`)
+
+```
+set_pause_cooldown(secs: u64) -> u64
+  ├─ 0                     → no cooldown (default)
+  ├─ 1 ..= MAX_PAUSE_MAX_DURATION_SECS → cooldown applied after a pause expires
+  └─ above the ceiling     → EscrowError::PauseCooldownOutOfRange (252)
+```
+
+The cooldown is bounded by the same ceiling as the pause max duration
+(`MAX_PAUSE_MAX_DURATION_SECS`, 90 days) so it cannot exceed it. Emits
+`PauseCooldownUpdated` with the old and new values. `get_pause_cooldown()` reads
+the current value (`0` when unset).
 
 ---
 
@@ -178,9 +241,11 @@ ledger timestamp exceeds `PauseToggleWindowStart + window_secs`.
 
 | Function | Effect | Error if |
 |---|---|---|
-| `set_paused(active, scope, reason)` | Activate/clear a typed, scoped pause | Rate limit exceeded; wrong-scope unpause → `PauseScopeMismatch` (246) |
+| `set_paused(active, scope, reason)` | Activate/clear a typed, scoped pause | Rate limit exceeded; re-pause narrow → `PauseAlreadyActive` (250); cooldown active → `PauseCooldownActive` (251); wrong-scope unpause → `PauseScopeMismatch` (246) |
 | `set_pause_max_duration(duration)` | Set auto-expiry window | Duration out of bounds |
 | `get_pause_max_duration()` | Read current auto-expiry | — |
+| `set_pause_cooldown(secs)` | Set cooldown after expiry before re-activation | Cooldown out of bounds → `PauseCooldownOutOfRange` (252) |
+| `get_pause_cooldown()` | Read current cooldown | — |
 | `set_pause_rate_limit(limit, window)` | Set toggle rate limit | Invalid combination or out of bounds |
 | `is_paused()` | Read current pause boolean (effective) | — |
 | `get_pause_state()` | Read typed scope + reason (`Option<PauseState>`) | — |
@@ -205,12 +270,18 @@ returns the exact scope/reason on fresh deployments.
    [`PauseScope`] that stops the affected flow (e.g. `Funding`) and a
    [`PauseReason`] that explains why (single admin call, no delay).
 3. **Optionally configure** an auto-expiry via `set_pause_max_duration` so the
-   pause self-clears after the incident window.
+   pause self-clears after the incident window, and a `set_pause_cooldown` so the
+   next pause cannot start immediately afterwards.
 4. **Resolve** the underlying incident off-chain.
 5. **Unpause** via `set_paused(false)` (or wait for auto-expiry).
 6. **If a legal hold was also active:** the gated entrypoints will remain
    blocked with `LegalHoldBlocks*` errors until the hold is cleared via the
    two-step process documented in [`escrow-legal-hold.md`](escrow-legal-hold.md).
+
+> **Note:** re-pausing an active pause does **not** extend it. The max-duration
+> clock keeps running from the first activation, and a narrower scope is
+> rejected with `PauseAlreadyActive`. To keep a pause running for longer, raise
+> `set_pause_max_duration` — never rely on re-pausing.
 
 ---
 
@@ -238,6 +309,25 @@ The matrix in `escrow/src/tests/pause.rs` covers:
     wrong scope (`PauseScopeMismatch`), already-paused idempotency, and
     unauthorized scoped pause all fail/succeed as documented.
 
+The matrix in `escrow/src/tests/pause_bypass.rs` covers the max-duration
+bypass fix (issue #1549):
+
+1. Re-pausing an active pause does **not** extend it: with a 1 h max duration
+   and a re-pause at 59 min, the pause still expires at 1 h and funding is
+   unblocked at 1 h 30 min.
+2. Widening the scope keeps the original `activated_at` and emits
+   `PausedChanged` with the new scope.
+3. Narrowing (or switching between two single-family scopes) fails with
+   `PauseAlreadyActive` and leaves the active pause untouched.
+4. Cooldown boundaries: `expiry + cooldown - 1` fails with
+   `PauseCooldownActive`, `expiry + cooldown` succeeds with a fresh clock.
+5. The stale `Paused` flag and `PauseState` of an expired pause are cleared when
+   the expiry is noticed during `set_paused`.
+6. With `max_duration == 0` (unlimited) the legacy behaviour is preserved
+   (never expires, explicit un-pause clears it, re-activation after an
+   un-pause starts a fresh clock) apart from the widen/narrow rule.
+7. `set_pause_cooldown` bounds enforcement and admin-only authorization.
+
 ---
 
 ## Out-of-scope items
@@ -247,4 +337,4 @@ The matrix in `escrow/src/tests/pause.rs` covers:
 | Multi-party approval to pause | Out of scope — use a governed `admin` |
 | Pause on non-risk-bearing reads | Out of scope — reads are always safe |
 | Fee-on-transfer or rebasing tokens | Out of scope — unsupported by design |
-| Automatic storage cleanup on expiry | Out of scope — `PausedAt` and `Paused` are not rewritten by auto-expiry |
+| Automatic storage cleanup on expiry | Out of scope — auto-expiry never rewrites `PausedAt`/`Paused`; the stale flag is cleared lazily by the next `set_paused(true)` |

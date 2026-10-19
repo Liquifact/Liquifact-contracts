@@ -75,6 +75,7 @@ mod legal_hold;
 mod migration_errors;
 mod paginated_views;
 mod pause;
+mod pause_bypass;
 mod pauser_boundary_tests;
 mod properties;
 mod reconciliation_lifecycle;

@@ -791,6 +791,27 @@ pub enum EscrowError {
 
     /// [`LiquifactEscrow::recover_admin`] called before the admin-recovery timelock deadline.
     AdminRecoveryNotExpired = 249,
+
+    /// [`LiquifactEscrow::set_paused`] called with `active == true` while a pause is still
+    /// effective and the requested scope is **narrower** than the active scope (for example
+    /// `All` → `Funding`). The active pause is left untouched.
+    ///
+    /// Re-pausing an active pause never resets its activation clock: the original
+    /// [`DataKey::PausedAt`] is preserved, so the max-duration cap cannot be extended by
+    /// re-pausing. Widening the scope (`Funding` → `All`) is allowed and emits
+    /// [`PausedChanged`]; narrowing is rejected with this error.
+    PauseAlreadyActive = 250,
+
+    /// [`LiquifactEscrow::set_paused`] called with `active == true` after a pause auto-expired
+    /// but before the configured cooldown elapsed.
+    ///
+    /// The cooldown is measured from the original [`DataKey::PausedAt`] plus the configured
+    /// [`DataKey::PauseMaxDurationSecs`]; it is `0` (disabled) by default.
+    PauseCooldownActive = 251,
+
+    /// [`LiquifactEscrow::set_pause_cooldown`] received a value outside
+    /// `0..=`[`MAX_PAUSE_MAX_DURATION_SECS`].
+    PauseCooldownOutOfRange = 252,
 }
 
 #[inline(always)]
@@ -1185,6 +1206,13 @@ pub enum DataKey {
     /// Stored cross-contract callback context ([`CallbackContext`]) keyed by invocation nonce.
     /// Binds expected origin address, invocation nonce, and lifecycle phase.
     CallbackContext(u64),
+    /// Cooldown (seconds) that must elapse after a pause auto-expires before a new pause may
+    /// be activated. Absent ⇒ `0` (no cooldown). Bounded by
+    /// [`MAX_PAUSE_MAX_DURATION_SECS`].
+    ///
+    /// **Additive key (ADR-007):** appended at the end of the enum; instances deployed before
+    /// this key simply read the default (`0`).
+    PauseCooldownSecs,
 }
 
 // --- Data types ---
@@ -1240,6 +1268,17 @@ impl PauseScope {
                 | (PauseScope::Withdrawal, PauseEntry::Withdrawal)
                 | (PauseScope::Claims, PauseEntry::Claims)
         )
+    }
+
+    /// Whether `self` is at least as wide as `other` (i.e. `self` blocks every flow that
+    /// `other` blocks).
+    ///
+    /// Used by [`LiquifactEscrow::set_paused`] to decide whether a re-pause may widen an
+    /// active pause without resetting its activation clock. [`PauseScope::All`] is the widest
+    /// scope; the four single-family scopes are mutually incomparable, so the only widening
+    /// is family → `All` (an identical scope is also accepted and is a no-op).
+    pub(crate) fn covers(self, other: PauseScope) -> bool {
+        self == PauseScope::All || self == other
     }
 }
 
@@ -2239,6 +2278,24 @@ pub struct CallbackExecutedEvent {
     pub origin: Address,
     pub nonce: u64,
     pub phase: u32,
+}
+
+/// Emitted by [`LiquifactEscrow::set_pause_cooldown`] whenever the configured pause cooldown
+/// changes.
+///
+/// # Fields
+/// - `name`: Hardcoded `pausecd` symbol.
+/// - `invoice_id`: Symbol representation of the invoice.
+/// - `old_value`: The previous cooldown in seconds (`0` when unset).
+/// - `new_value`: The new cooldown in seconds.
+#[contractevent]
+pub struct PauseCooldownUpdated {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    pub old_value: u64,
+    pub new_value: u64,
 }
 
 // ---------------------------------------------------------------------------
@@ -4443,9 +4500,32 @@ impl LiquifactEscrow {
     /// `Paused`/`PausedAt` flags so all existing pause logic (auto-expiry, rate limiting, read
     /// views) continues to work. While active, `scope` decides which of `fund`/
     /// `fund_with_commitment`/`fund_batch`, `settle`, `withdraw`, and `claim_investor_payout` are
-    /// blocked; [`PauseScope::All`] blocks every gated entrypoint. Reactivating an already-active
-    /// pause refreshes `activated_at` and the recorded reason (idempotent from the caller's
-    /// perspective — [`LiquifactEscrow::is_paused`] stays `true`).
+    /// blocked; [`PauseScope::All`] blocks every gated entrypoint.
+    ///
+    /// ## Re-pausing an active pause
+    /// A pause that is still effective **cannot be extended** by re-pausing it. When
+    /// `active == true` and a pause is currently active:
+    /// - The original [`DataKey::PausedAt`] / [`PauseState::activated_at`] are **preserved**, so
+    ///   the max-duration clock keeps running from the first activation. The configured
+    ///   [`DataKey::PauseMaxDurationSecs`] therefore always bounds how long the entrypoints stay
+    ///   blocked, no matter how often the admin re-pauses.
+    /// - The scope may only be **widened** (e.g. `Funding` → `All`) or kept identical. A
+    ///   **narrower** scope is rejected with [`EscrowError::PauseAlreadyActive`]; the active
+    ///   pause is left untouched. Widening emits [`PausedChanged`] with the new scope.
+    ///
+    /// ## Re-activating after auto-expiry
+    /// [`LiquifactEscrow::paused_active`] is a pure read computation, so the stored `Paused`
+    /// flag can still be `true` after a pause auto-expired. When that is noticed here, the stale
+    /// `Paused` flag and [`DataKey::PauseState`] are cleared and a fresh pause is only allowed
+    /// once
+    ///
+    /// ```text
+    /// now >= PausedAt + max_duration + cooldown
+    /// ```
+    ///
+    /// where `cooldown` is configured via [`LiquifactEscrow::set_pause_cooldown`] (`0` — no
+    /// cooldown — by default). Before the cooldown elapses the call fails with
+    /// [`EscrowError::PauseCooldownActive`].
     ///
     /// # Clearing (`active == false`)
     /// - Clears the active pause when `scope == PauseScope::All` or `scope` equals the active
@@ -4467,6 +4547,10 @@ impl LiquifactEscrow {
     /// # Errors
     /// - [`EscrowError::PauseToggleRateLimitExceeded`] if the configured toggle-rate limit was
     ///   already reached within the current window.
+    /// - [`EscrowError::PauseAlreadyActive`] if `active == true` while a pause is active and the
+    ///   requested scope is narrower than the active scope.
+    /// - [`EscrowError::PauseCooldownActive`] if `active == true` after an expired pause but
+    ///   before the configured cooldown elapsed.
     /// - [`EscrowError::PauseScopeMismatch`] if `active == false` and `scope`(≠ `All`) does not
     ///   match the currently active pause's scope.
     pub fn set_paused(env: Env, active: bool, scope: PauseScope, reason: PauseReason) {
@@ -4513,21 +4597,97 @@ impl LiquifactEscrow {
             );
         }
 
+        // Snapshot the stored pause state *before* any mutation so the widen/narrow and
+        // cooldown decisions are made against the pre-call state (ADR-002 guard ordering:
+        // read -> decide -> write).
+        let stored_paused: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::Paused)
+            .unwrap_or(false);
+        let existing: Option<PauseState> = env.storage().instance().get(&DataKey::PauseState);
+        let now_active = Self::paused_active(&env);
+
         if active {
-            env.storage().instance().set(
-                &DataKey::PauseState,
-                &PauseState {
-                    scope,
-                    reason,
-                    activated_at: now,
-                },
-            );
-            env.storage().instance().set(&DataKey::Paused, &true);
-            env.storage().instance().set(&DataKey::PausedAt, &now);
+            // An expired pause leaves a stale `Paused` flag behind (`paused_active` is a pure
+            // read computation). Clear it — but only after the cooldown has elapsed, so a
+            // fresh activation can never start before `PausedAt + max_duration + cooldown`.
+            if stored_paused && !now_active {
+                let max_duration: u64 = env
+                    .storage()
+                    .instance()
+                    .get(&DataKey::PauseMaxDurationSecs)
+                    .unwrap_or(DEFAULT_PAUSE_MAX_DURATION_SECS);
+                let cooldown: u64 = env
+                    .storage()
+                    .instance()
+                    .get(&DataKey::PauseCooldownSecs)
+                    .unwrap_or(0);
+                // `unwrap_or(0)` mirrors `paused_active`, so the deadline is computed from the
+                // exact same origin the auto-expiry used.
+                let paused_at: u64 = env
+                    .storage()
+                    .instance()
+                    .get(&DataKey::PausedAt)
+                    .unwrap_or(0);
+                let earliest = paused_at
+                    .saturating_add(max_duration)
+                    .saturating_add(cooldown);
+                ensure(&env, now >= earliest, EscrowError::PauseCooldownActive);
+                // Drop the stale flag and typed state so the fresh activation starts from a
+                // clean slate (no orphan `PauseState` left behind).
+                env.storage().instance().remove(&DataKey::PauseState);
+                env.storage().instance().set(&DataKey::Paused, &false);
+            }
+
+            // Effective scope of a currently *active* pause, if any.
+            let effective_scope: Option<PauseScope> = match &existing {
+                Some(s) if now_active => Some(s.scope),
+                // Legacy global pause (Paused set, no typed state) is treated as All.
+                None if stored_paused && now_active => Some(PauseScope::All),
+                // No active pause (or a stale state that was just cleared).
+                _ => None,
+            };
+
+            if let Some(existing_scope) = effective_scope {
+                // The new scope must be at least as wide as the active one. Narrowing is
+                // rejected outright so a re-pause can neither shrink the blast radius nor
+                // reset the max-duration clock.
+                if !scope.covers(existing_scope) {
+                    fail(&env, EscrowError::PauseAlreadyActive);
+                }
+                // Widening (or an idempotent re-pause): keep the original activation
+                // timestamp so the max-duration clock is not reset. Only scope/reason change;
+                // `PausedAt` is intentionally left untouched.
+                let paused_at: u64 = env
+                    .storage()
+                    .instance()
+                    .get(&DataKey::PausedAt)
+                    .unwrap_or(0);
+                env.storage().instance().set(
+                    &DataKey::PauseState,
+                    &PauseState {
+                        scope,
+                        reason,
+                        activated_at: paused_at,
+                    },
+                );
+                // The `Paused` flag stays `true` and `PausedAt` is unchanged.
+            } else {
+                // No active pause: normal activation with a fresh clock.
+                env.storage().instance().set(
+                    &DataKey::PauseState,
+                    &PauseState {
+                        scope,
+                        reason,
+                        activated_at: now,
+                    },
+                );
+                env.storage().instance().set(&DataKey::Paused, &true);
+                env.storage().instance().set(&DataKey::PausedAt, &now);
+            }
         } else {
             // Determine the currently effective pause scope, if any.
-            let now_active = Self::paused_active(&env);
-            let existing: Option<PauseState> = env.storage().instance().get(&DataKey::PauseState);
             let (effective_scope, cleared_reason) = match &existing {
                 Some(s) => (s.scope, s.reason),
                 // Legacy global pause (Paused set, no typed state) is treated as All.
@@ -4640,6 +4800,63 @@ impl LiquifactEscrow {
             .instance()
             .get(&DataKey::PauseMaxDurationSecs)
             .unwrap_or(DEFAULT_PAUSE_MAX_DURATION_SECS)
+    }
+
+    /// Set the pause cooldown (seconds) that must elapse after a pause auto-expires before a
+    /// new pause may be activated. Only the **current** [`InvoiceEscrow::admin`] may call.
+    ///
+    /// The cooldown is measured from the original [`DataKey::PausedAt`] plus the configured
+    /// [`DataKey::PauseMaxDurationSecs`], so the earliest a new pause may start is
+    /// `PausedAt + max_duration + cooldown`. It has no effect while a pause is still active
+    /// (a widening re-pause is unaffected by the cooldown) and none after an explicit
+    /// [`LiquifactEscrow::set_paused`] un-pause.
+    ///
+    /// Pass `0` to disable the cooldown (the default, pre-existing behavior). Any other value
+    /// must not exceed [`MAX_PAUSE_MAX_DURATION_SECS`].
+    ///
+    /// # Errors
+    /// - [`EscrowError::PauseCooldownOutOfRange`] if `new_cooldown_secs` exceeds
+    ///   [`MAX_PAUSE_MAX_DURATION_SECS`].
+    ///
+    /// # Events
+    /// Emits [`PauseCooldownUpdated`] with the old and new values.
+    pub fn set_pause_cooldown(env: Env, new_cooldown_secs: u64) -> u64 {
+        let escrow = Self::load_escrow_require_admin(&env);
+
+        ensure(
+            &env,
+            new_cooldown_secs <= MAX_PAUSE_MAX_DURATION_SECS,
+            EscrowError::PauseCooldownOutOfRange,
+        );
+
+        let old_value: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::PauseCooldownSecs)
+            .unwrap_or(0);
+
+        env.storage()
+            .instance()
+            .set(&DataKey::PauseCooldownSecs, &new_cooldown_secs);
+
+        PauseCooldownUpdated {
+            name: symbol_short!("pausecd"),
+            invoice_id: escrow.invoice_id,
+            old_value,
+            new_value: new_cooldown_secs,
+        }
+        .publish(&env);
+
+        new_cooldown_secs
+    }
+
+    /// Read the configured pause cooldown ([`DataKey::PauseCooldownSecs`]); `0` (the default)
+    /// means no cooldown.
+    pub fn get_pause_cooldown(env: Env) -> u64 {
+        env.storage()
+            .instance()
+            .get(&DataKey::PauseCooldownSecs)
+            .unwrap_or(0)
     }
 
     /// Set the pause-toggle rate limit: at most `max_toggles` calls to
