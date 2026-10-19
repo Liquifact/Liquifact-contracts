@@ -1326,7 +1326,7 @@ fn test_update_funding_target_by_admin_succeeds() {
         &admin,
         &soroban_sdk::String::from_str(&env, "INV001"),
         &sme,
-        &5_000i128,
+        &10_000i128,
         &800i64,
         &3000u64,
         &token,
@@ -1511,7 +1511,7 @@ fn test_update_funding_target_event_fields() {
         &admin,
         &soroban_sdk::String::from_str(&env, "EVT001"),
         &sme,
-        &5_000i128,
+        &10_000i128,
         &800i64,
         &0u64,
         &token,
@@ -1535,7 +1535,7 @@ fn test_update_funding_target_event_fields() {
         std::vec![FundingTargetUpdated {
             name: symbol_short!("fund_tgt"),
             invoice_id: client.get_escrow().invoice_id,
-            old_target: 5_000i128,
+            old_target: 10_000i128,
             new_target: 9_000i128,
         }
         .to_xdr(&env, &contract_id)]

@@ -62,6 +62,7 @@ mod auth_matrix;
 mod cap_validation;
 #[rustfmt::skip]
 mod coverage;
+mod envelope_bounds;
 mod external_calls;
 mod external_calls_mocked;
 mod funding;

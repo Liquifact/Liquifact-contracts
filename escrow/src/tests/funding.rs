@@ -4869,19 +4869,20 @@ fn test_remaining_capacity_recomputes_after_target_raised() {
 
     client.fund(&investor, &initial_deposit);
 
-    // Capacity before target update
+    // The invoice face value (amount = TARGET) bounds the target; init sets
+    // funding_target = amount, so raising above TARGET is rejected (error 250).
+    // To exercise the raise path, first lower the target (capacity shrinks),
+    // then raise it back to amount (capacity grows).
+    let lowered_target = TARGET * 3 / 4;
+    client.update_funding_target(&lowered_target);
 
     let capacity_before = client.get_remaining_funding_capacity();
+    assert_eq!(capacity_before, lowered_target - initial_deposit);
 
-    assert_eq!(capacity_before, TARGET - initial_deposit);
-
-    // Raise the target
-
-    let new_target = TARGET * 2;
+    // Raise the target back to the invoice amount (allowed: new_target <= amount).
+    let new_target = TARGET;
 
     client.update_funding_target(&new_target);
-
-    // Capacity must reflect new target
 
     let capacity_after = client.get_remaining_funding_capacity();
 
@@ -5103,9 +5104,10 @@ fn test_remaining_capacity_across_deposits_and_target_update() {
         TARGET - funded_before_update
     );
 
-    // Update target to 150% of original
+    // Update target to 80% of original (must be >= funded_before_update and <= TARGET).
+    // Lowering within bounds to test capacity recomputes correctly.
 
-    let new_target = TARGET * 3 / 2;
+    let new_target = TARGET * 4 / 5;
 
     client.update_funding_target(&new_target);
 

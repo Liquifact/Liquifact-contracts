@@ -296,6 +296,15 @@ pub enum FeeScheduleError {
 /// This is the limiting constraint: it is tighter than both (1) and (2)
 /// by many orders of magnitude. All intermediate `checked_*` operations
 /// are overflow-free by construction for every valid init.
+///
+/// **Envelope enforcement (issue #1535):** three guards keep every value that
+/// feeds the payout math inside this bound:
+/// - `init` rejects `amount > MAX_INVOICE_AMOUNT` (`AmountExceedsMax`, 14).
+/// - `update_funding_target` rejects `new_target > escrow.amount`
+///   (`TargetExceedsInvoiceAmount`, 250), so `target ≤ amount ≤ MAX_INVOICE_AMOUNT`.
+/// - `fund_impl` rejects `funded_amount > MAX_INVOICE_AMOUNT` after the
+///   `checked_add` (`FundedAmountExceedsSafeEnvelope`, 251), so even
+///   over-funding past the target keeps `total_principal ≤ MAX_INVOICE_AMOUNT`.
 pub const MAX_INVOICE_AMOUNT: i128 = (1i128 << 63) - 1; // floor(√(i128::MAX / 2))
 
 /// Upper bound on [`LiquifactEscrow::fund_batch`] entries to keep storage/CPU bounded.
@@ -791,6 +800,23 @@ pub enum EscrowError {
 
     /// [`LiquifactEscrow::recover_admin`] called before the admin-recovery timelock deadline.
     AdminRecoveryNotExpired = 249,
+
+    /// [`LiquifactEscrow::update_funding_target`] rejected a `new_target` strictly greater
+    /// than the escrow's invoice face value (`InvoiceEscrow::amount`). The funding target
+    /// may never exceed the invoice amount, which itself is bounded by
+    /// [`MAX_INVOICE_AMOUNT`] at `init`, so `target ≤ amount ≤ MAX_INVOICE_AMOUNT` keeps
+    /// the payout math inside its proven overflow-free envelope. Code `250` — stable,
+    /// append-only (ADR-007).
+    TargetExceedsInvoiceAmount = 250,
+
+    /// [`LiquifactEscrow::fund_impl`] rejected a fund leg because the resulting
+    /// `funded_amount` would exceed [`MAX_INVOICE_AMOUNT`]. Over-funding past the
+    /// target remains permitted, but the cumulative principal is bounded so that
+    /// `FundingCloseSnapshot.total_principal ≤ MAX_INVOICE_AMOUNT` and
+    /// [`LiquifactEscrow::compute_investor_payout`] can never trap with
+    /// [`EscrowError::ComputePayoutArithmeticOverflow`] for any
+    /// `yield_bps ∈ [0, 10_000]`. Code `251` — stable, append-only (ADR-007).
+    FundedAmountExceedsSafeEnvelope = 251,
 }
 
 #[inline(always)]
@@ -5125,6 +5151,19 @@ impl LiquifactEscrow {
             new_target >= escrow.funded_amount,
             EscrowError::TargetBelowFundedAmount,
         );
+        // Enforce the overflow-safe invoice envelope: the funding target may never
+        // exceed the invoice face value. `amount` is bounded by `MAX_INVOICE_AMOUNT`
+        // at `init`, so `target ≤ amount ≤ MAX_INVOICE_AMOUNT` and the settlement
+        // payout math (which scales with `total_principal`) stays inside its proven
+        // overflow-free envelope for every `yield_bps ∈ [0, 10_000]`. Without this
+        // guard an admin could raise the target up to `i128::MAX`, letting investors
+        // advance more than the invoice is worth and push `funded_amount` past
+        // `MAX_INVOICE_AMOUNT`.
+        ensure(
+            &env,
+            new_target <= escrow.amount,
+            EscrowError::TargetExceedsInvoiceAmount,
+        );
 
         let old_target = escrow.funding_target;
         escrow.funding_target = new_target;
@@ -5833,10 +5872,21 @@ impl LiquifactEscrow {
         let investor_effective_yield_bps = resolution.effective_yield_bps;
         let tier_lock_secs = resolution.matched_lock_secs;
 
-        escrow.funded_amount = escrow
+        // Enforce the safe funding envelope: cumulative principal must never exceed
+        // MAX_INVOICE_AMOUNT so compute_investor_payout stays inside its proven
+        // overflow-free envelope for every yield_bps ∈ [0, 10_000]. This tighter bound
+        // fires before the i128 checked_add backstop (FundedAmountOverflow, 110),
+        // which remains as a defensive last-resort guard.
+        let new_funded_amount = escrow
             .funded_amount
             .checked_add(amount)
             .unwrap_or_else(|| fail(&env, EscrowError::FundedAmountOverflow));
+        ensure(
+            &env,
+            new_funded_amount <= MAX_INVOICE_AMOUNT,
+            EscrowError::FundedAmountExceedsSafeEnvelope,
+        );
+        escrow.funded_amount = new_funded_amount;
 
         if escrow.status == 0 && escrow.funded_amount >= escrow.funding_target {
             escrow.status = 1;
