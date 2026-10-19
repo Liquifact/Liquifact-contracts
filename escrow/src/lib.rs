@@ -842,6 +842,10 @@ pub enum EscrowError {
     LegalHoldBlocksUpgrade = 257,
     /// Arithmetic overflow computing `now + UPGRADE_TIMELOCK_SECS` in `propose_upgrade`.
     UpgradeEtaOverflow = 258,
+
+    /// [`LiquifactEscrow::settle`] post-condition failed: the escrow balance is below the
+    /// settlement pool after collecting the SME shortfall.
+    SettlementPoolUnderfunded = 259,
 }
 
 #[inline(always)]
@@ -1793,6 +1797,21 @@ pub struct EscrowSettled {
     /// Computed using the same checked arithmetic and floor rounding as
     /// [`LiquifactEscrow::compute_investor_payout`]: `coupon = funded_amount × yield_bps / 10_000` (floor),
     /// then `settle_pool = funded_amount + coupon`.
+    pub settle_pool: i128,
+}
+
+/// Emitted by [`LiquifactEscrow::settle`] when the SME funds the coupon shortfall.
+#[contractevent]
+pub struct SettlementFunded {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    /// SME address that funded the shortfall.
+    pub payer: Address,
+    /// Amount transferred into the escrow in this settlement.
+    pub amount: i128,
+    /// Full settlement pool that the escrow must hold before claims open.
     pub settle_pool: i128,
 }
 
@@ -3782,9 +3801,7 @@ impl LiquifactEscrow {
 
         for key in keys_to_check.iter() {
             if env.storage().persistent().has(key) {
-                env.storage()
-                    .persistent()
-                    .extend_ttl(key, ttl, ttl);
+                env.storage().persistent().extend_ttl(key, ttl, ttl);
             }
         }
     }
@@ -6366,19 +6383,31 @@ impl LiquifactEscrow {
         }
 
         // Compute settle_pool using the same arithmetic as compute_investor_payout.
-        // coupon = funded_amount × yield_bps / 10_000  (floor)
-        // settle_pool = funded_amount + coupon
-        let coupon = escrow
-            .funded_amount
-            .checked_mul(escrow.yield_bps as i128)
-            .unwrap_or_else(|| fail(&env, EscrowError::ComputePayoutArithmeticOverflow))
-            .checked_div(10_000)
-            .unwrap_or_else(|| fail(&env, EscrowError::ComputePayoutArithmeticOverflow));
+        let (coupon, settle_pool) = Self::settle_amounts(&env, &escrow);
 
-        let settle_pool = escrow
-            .funded_amount
-            .checked_add(coupon)
-            .unwrap_or_else(|| fail(&env, EscrowError::ComputePayoutArithmeticOverflow));
+        // Settlement is pre-funded: pull any coupon shortfall from the SME (already
+        // authenticated by load_escrow_require_sme) before opening claims. The transfer runs
+        // before the status write so a failed transfer leaves the escrow funded.
+        let token_addr = Self::funding_token_or_fail(&env);
+        let this = env.current_contract_address();
+        let shortfall = Self::settlement_shortfall(&env, &escrow, settle_pool);
+        if shortfall > 0 {
+            external_calls::transfer_into_escrow_with_balance_checks(
+                &env,
+                &token_addr,
+                &escrow.sme_address,
+                &this,
+                shortfall,
+            );
+        }
+
+        // Defensive post-condition: the escrow must hold the whole pool before claims open.
+        let balance_after = TokenClient::new(&env, &token_addr).balance(&this);
+        ensure(
+            &env,
+            balance_after >= settle_pool,
+            EscrowError::SettlementPoolUnderfunded,
+        );
 
         escrow.status = 2;
 
@@ -6388,6 +6417,16 @@ impl LiquifactEscrow {
         // Extend instance TTL once at settlement.
         let ttl = Self::get_storage_limit(env.clone());
         env.storage().instance().extend_ttl(ttl, ttl);
+        if shortfall > 0 {
+            SettlementFunded {
+                name: symbol_short!("set_fund"),
+                invoice_id: escrow.invoice_id.clone(),
+                payer: escrow.sme_address.clone(),
+                amount: shortfall,
+                settle_pool,
+            }
+            .publish(&env);
+        }
 
         EscrowSettled {
             name: symbol_short!("escrow_sd"),
@@ -6441,6 +6480,37 @@ impl LiquifactEscrow {
             let escrow_addr = escrows.get(i).unwrap();
             let client = LiquifactEscrowClient::new(&env, &escrow_addr);
             client.settle();
+        }
+    }
+
+    /// Computes `(coupon, settle_pool)` for `settle`, using the legacy base-yield formula
+    /// `coupon = funded_amount * yield_bps / 10_000` (floor).
+    fn settle_amounts(env: &Env, escrow: &InvoiceEscrow) -> (i128, i128) {
+        let coupon = escrow
+            .funded_amount
+            .checked_mul(escrow.yield_bps as i128)
+            .unwrap_or_else(|| fail(env, EscrowError::ComputePayoutArithmeticOverflow))
+            .checked_div(10_000)
+            .unwrap_or_else(|| fail(env, EscrowError::ComputePayoutArithmeticOverflow));
+
+        let settle_pool = escrow
+            .funded_amount
+            .checked_add(coupon)
+            .unwrap_or_else(|| fail(env, EscrowError::ComputePayoutArithmeticOverflow));
+
+        (coupon, settle_pool)
+    }
+
+    /// Returns `max(0, settle_pool - token.balance(escrow))` using checked arithmetic.
+    ///
+    /// `_escrow` is accepted so callers pass the same snapshot they used to compute
+    /// `settle_pool`, keeping the helper signature aligned with the issue spec.
+    fn settlement_shortfall(env: &Env, _escrow: &InvoiceEscrow, settle_pool: i128) -> i128 {
+        let token_addr = Self::funding_token_or_fail(env);
+        let balance = TokenClient::new(env, &token_addr).balance(&env.current_contract_address());
+        match settle_pool.checked_sub(balance) {
+            Some(shortfall) if shortfall > 0 => shortfall,
+            _ => 0,
         }
     }
 
@@ -6908,6 +6978,30 @@ impl LiquifactEscrow {
             .unwrap_or_else(|| fail(&env, EscrowError::ComputePayoutArithmeticOverflow))
     }
 
+    /// Returns the amount the SME must transfer for [`LiquifactEscrow::settle`] to pre-fund
+    /// the full settlement pool, or `0` unless the escrow is funded (`status == 1`).
+    ///
+    /// Uses the same `settlement_shortfall` helper as `settle`, so the view cannot drift from
+    /// the entrypoint. `settle_pool` is the legacy base-yield pool used by `settle`.
+    ///
+    /// # Authorization
+    /// None - pure read; no auth required and no state mutation.
+    pub fn get_settlement_shortfall(env: Env) -> i128 {
+        let Some(escrow) = env
+            .storage()
+            .instance()
+            .get::<DataKey, InvoiceEscrow>(&DataKey::Escrow)
+        else {
+            return 0;
+        };
+        if escrow.status != 1 {
+            return 0;
+        }
+
+        let (_, settle_pool) = Self::settle_amounts(&env, &escrow);
+        Self::settlement_shortfall(&env, &escrow, settle_pool)
+    }
+
     pub fn update_maturity(env: Env, new_maturity: u64) -> InvoiceEscrow {
         let mut escrow = Self::load_escrow_require_admin(&env);
 
@@ -7339,9 +7433,7 @@ impl LiquifactEscrow {
 
             for key in keys_to_check.iter() {
                 if env.storage().persistent().has(key) {
-                    env.storage()
-                        .persistent()
-                        .extend_ttl(key, ttl, ttl);
+                    env.storage().persistent().extend_ttl(key, ttl, ttl);
                 }
             }
         }
@@ -7452,21 +7544,14 @@ impl LiquifactEscrow {
                     // five per-investor keys written yet. Skipping absent keys is safe:
                     // there is nothing to keep alive if the entry does not exist.
                     if env.storage().persistent().has(&key) {
-                        env.storage().persistent().extend_ttl(
-                            &key,
-                            ttl,
-                            ttl,
-                        );
+                        env.storage().persistent().extend_ttl(&key, ttl, ttl);
                     }
                 }
                 // ── All other keys live in instance storage ───────────────────
                 // Instance TTL is contract-wide; one call covers all instance keys.
                 _ => {
                     if !extended_instance {
-                        env.storage().instance().extend_ttl(
-                            ttl,
-                            ttl,
-                        );
+                        env.storage().instance().extend_ttl(ttl, ttl);
                         extended_instance = true;
                     }
                 }

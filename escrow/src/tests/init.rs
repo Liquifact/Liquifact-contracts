@@ -500,6 +500,9 @@ fn test_max_bound_funded_escrow_compute_investor_payout_no_overflow() {
     sac_admin.mint(&investor, &crate::MAX_INVOICE_AMOUNT);
     client.fund(&investor, &crate::MAX_INVOICE_AMOUNT);
 
+    // Pre-fund the 100% coupon so settle is solvent without charging the SME.
+    sac_admin.mint(&contract_id, &crate::MAX_INVOICE_AMOUNT);
+
     // Settle: no maturity lock means immediate settlement.
     client.settle();
 

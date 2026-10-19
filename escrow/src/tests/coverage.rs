@@ -3268,6 +3268,7 @@ fn read_view_distributed_principal_after_refund() {
     &None::<i64>,);
     tok.stellar.mint(&investor, &200);
     client.fund(&investor, &200);
+    tok.stellar.mint(&client.address, &2);
     client.settle();
 
     // The settled escrow status confirms the event was emitted

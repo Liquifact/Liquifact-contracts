@@ -84,6 +84,7 @@ mod properties;
 mod reconciliation_lifecycle;
 mod settlement;
 mod settlement_config_view;
+mod settlement_funding;
 mod timelocked_upgrade;
 mod withdraw_attestation_gate;
 mod yield_tier_boundaries;

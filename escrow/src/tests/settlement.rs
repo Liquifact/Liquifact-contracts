@@ -1778,6 +1778,8 @@ fn settled_at_recorded_with_maturity() {
     let investor = Address::generate(&env);
     sac_admin.mint(&investor, &TARGET);
     client2.fund(&investor, &TARGET);
+    // Pre-fund the 500 bps coupon so settle is solvent without charging the SME.
+    sac_admin.mint(&escrow_id, &(TARGET * 500 / 10_000));
 
     // Advance ledger past maturity.
     let settle_ts = maturity + 100;
@@ -2656,10 +2658,12 @@ fn test_settle_pool_large_principal() {
     let investor = Address::generate(&env);
     sac.stellar.mint(&investor, &principal);
     client.fund(&investor, &principal);
+    let coupon_top_up = principal * yield_bps as i128 / 10_000;
+    sac.stellar.mint(&client.address, &coupon_top_up);
     client.settle();
 
     // Compute expected settle_pool:
-    // coupon = 1_000_000_000_000_000_000 × 100 / 10_000 = 10_000_000_000_000_000
+    // coupon = 1_000_000_000_000_000_000 A- 100 / 10_000 = 10_000_000_000_000_000
     // settle_pool = 1_000_000_000_000_000_000 + 10_000_000_000_000_000 = 1_010_000_000_000_000_000
     let expected_coupon = 10_000_000_000_000_000i128;
     let expected_settle_pool = principal + expected_coupon;

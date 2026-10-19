@@ -5734,7 +5734,7 @@ fn test_update_funding_target_settled_rejected() {
 
     env.mock_all_auths();
 
-    let client = setup_partially_funded(&env, 10_000i128, 10_000i128);
+    let (client, _escrow_id, _sme) = init_and_fund_with_real_token(&env, 10_000i128, "UFT001");
 
     client.settle();
 
