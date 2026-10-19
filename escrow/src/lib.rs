@@ -842,6 +842,16 @@ pub enum EscrowError {
     LegalHoldBlocksUpgrade = 257,
     /// Arithmetic overflow computing `now + UPGRADE_TIMELOCK_SECS` in `propose_upgrade`.
     UpgradeEtaOverflow = 258,
+
+    // --- Issue #1528: Repayment after withdrawal (codes 260-263, leaving 259 for #1527) ---
+    /// [`LiquifactEscrow::repay`] blocked while a legal hold is active.
+    LegalHoldBlocksRepayment = 260,
+    /// [`LiquifactEscrow::repay`] called when the escrow is not withdrawn (`status != 3`).
+    RepaymentNotOpen = 261,
+    /// [`LiquifactEscrow::repay`] received a non-positive amount.
+    RepaymentAmountNotPositive = 262,
+    /// [`LiquifactEscrow::repay`] amount exceeds the outstanding settlement pool.
+    RepaymentExceedsOutstanding = 263,
 }
 
 #[inline(always)]
@@ -1261,6 +1271,16 @@ pub enum DataKey {
     ///
     /// Absent ⇒ no proposal is pending.
     PendingUpgrade,
+
+    /// Cumulative funds repaid into a withdrawn escrow (`status == 3`), in funding-token units.
+    ///
+    /// **Instance storage.** Absent -> `0` (no repayment yet). Incremented by
+    /// [`LiquifactEscrow::repay`] until it reaches the settlement pool, at which point the
+    /// escrow transitions back to settled (`status == 2`) and the normal claim flow applies.
+    ///
+    /// **Additive key (ADR-007):** absent on instances predating this key -> read as `0`,
+    /// preserving legacy behaviour.
+    RepaidAmount,
 }
 
 // --- Data types ---
@@ -1794,6 +1814,23 @@ pub struct EscrowSettled {
     /// [`LiquifactEscrow::compute_investor_payout`]: `coupon = funded_amount × yield_bps / 10_000` (floor),
     /// then `settle_pool = funded_amount + coupon`.
     pub settle_pool: i128,
+}
+
+/// Emitted on every successful [`LiquifactEscrow::repay`] call.
+#[contractevent]
+pub struct EscrowRepaid {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    /// Address that funded this instalment.
+    pub payer: Address,
+    /// Amount transferred into the escrow in this call.
+    pub amount: i128,
+    /// Cumulative amount repaid after this call.
+    pub repaid_total: i128,
+    /// Amount still required before the escrow settles.
+    pub outstanding: i128,
 }
 
 #[contractevent]
@@ -3187,8 +3224,14 @@ impl LiquifactEscrow {
     /// by [`LiquifactEscrow::refund`] each time an investor's principal is returned. This makes
     /// the invariant computable on-chain without iterating over all investor addresses.
     ///
-    /// In **settled** (2) and **withdrawn** (3) states, disbursement is off-chain and this
-    /// floor does not apply.
+    /// In **withdrawn** (status 3) escrows with any recorded repayment, the sweep is rejected
+    /// if it would reduce the contract balance below [`DataKey::RepaidAmount`]:
+    ///
+    /// ```text
+    /// assert balance - sweep_amt >= repaid_amount
+    /// ```
+    ///
+    /// In **settled** (2) state, disbursement is off-chain and this floor does not apply.
     ///
     /// # Authorization
     /// The configured **treasury** account must authorize this call; the admin cannot sweep unless
@@ -3229,16 +3272,16 @@ impl LiquifactEscrow {
         let sweep_amt = amount.min(balance);
         ensure(&env, sweep_amt > 0, EscrowError::EffectiveSweepAmountZero);
 
-        // Liability floor (cancelled escrows only): sweep must not reduce the balance below
-        // principal still owed to investors who have not yet called refund().
+        // Liability floor: a sweep must not consume funds that are owed to investors.
         //
-        // In settled (2) and withdrawn (3) states, disbursement is off-chain and
-        // distributed_principal stays 0, so the floor is not applicable there.
-        // In cancelled (4) state, refund() is the on-chain redemption path and increments
-        // distributed_principal atomically, making the invariant computable here.
+        // Cancelled (4): refund() is the on-chain redemption path and increments
+        // distributed_principal atomically, so the floor is the outstanding principal.
         //
-        // outstanding = funded_amount - distributed_principal
-        // Invariant: balance - sweep_amt >= outstanding
+        // Withdrawn (3): once the SME has started repaying, the balance held by the
+        // contract is committed to the settlement pool and must stay >= RepaidAmount
+        // until the escrow reaches status 2.
+        //
+        // Settled (2): disbursement is off-chain (claims) and no repaid floor applies.
         if escrow.status == 4 {
             let distributed: i128 = env
                 .storage()
@@ -3253,6 +3296,21 @@ impl LiquifactEscrow {
                 balance_after_sweep >= outstanding,
                 EscrowError::SweepExceedsLiabilityFloor,
             );
+        } else if escrow.status == 3 {
+            let repaid: i128 = env
+                .storage()
+                .instance()
+                .get(&DataKey::RepaidAmount)
+                .unwrap_or(0);
+            if repaid > 0 {
+                // sweep_amt <= balance (from amount.min(balance) above), so this subtraction is safe.
+                let balance_after_sweep = balance - sweep_amt;
+                ensure(
+                    &env,
+                    balance_after_sweep >= repaid,
+                    EscrowError::SweepExceedsLiabilityFloor,
+                );
+            }
         }
 
         external_calls::transfer_funding_token_with_balance_checks(
@@ -3782,9 +3840,7 @@ impl LiquifactEscrow {
 
         for key in keys_to_check.iter() {
             if env.storage().persistent().has(key) {
-                env.storage()
-                    .persistent()
-                    .extend_ttl(key, ttl, ttl);
+                env.storage().persistent().extend_ttl(key, ttl, ttl);
             }
         }
     }
@@ -6444,6 +6500,109 @@ impl LiquifactEscrow {
         }
     }
 
+    /// Repay a withdrawn escrow (`status == 3`) on-chain, in one or more instalments.
+    ///
+    /// The payer transfers `amount` of the bound funding token into the escrow. When the
+    /// cumulative repayment reaches the settlement pool, the escrow transitions to settled
+    /// (`status == 2`), records [`DataKey::SettledAt`], and emits [`EscrowSettled`], enabling
+    /// the normal investor claim flow.
+    ///
+    /// Returns the outstanding amount after this call (`settle_pool - repaid_total`).
+    ///
+    /// # Guard ordering
+    /// 1. Operational pause gate for [`PauseEntry::Settlement`] ([`EscrowError::PausedBlocksSettlement`]).
+    /// 2. Legal-hold gate ([`EscrowError::LegalHoldBlocksRepayment`]).
+    /// 3. Withdrawn-status gate ([`EscrowError::RepaymentNotOpen`]).
+    /// 4. Positive-amount gate ([`EscrowError::RepaymentAmountNotPositive`]).
+    /// 5. `payer.require_auth()`.
+    /// 6. Outstanding-bound check ([`EscrowError::RepaymentExceedsOutstanding`]).
+    ///
+    /// # Events
+    /// Emits [`EscrowRepaid`] on every call and, once the pool is fully repaid,
+    /// [`EscrowSettled`].
+    pub fn repay(env: Env, payer: Address, amount: i128) -> i128 {
+        guard_not_paused(
+            &env,
+            EscrowError::PausedBlocksSettlement,
+            PauseEntry::Settlement,
+        );
+        guard_not_legal_hold(&env, EscrowError::LegalHoldBlocksRepayment);
+
+        let mut escrow = Self::get_escrow(env.clone());
+        ensure(&env, escrow.status == 3, EscrowError::RepaymentNotOpen);
+        ensure(&env, amount > 0, EscrowError::RepaymentAmountNotPositive);
+
+        payer.require_auth();
+
+        let settle_pool = Self::base_settle_pool(&env, &escrow);
+        let repaid: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::RepaidAmount)
+            .unwrap_or(0);
+        let outstanding = settle_pool.saturating_sub(repaid);
+        ensure(
+            &env,
+            amount <= outstanding,
+            EscrowError::RepaymentExceedsOutstanding,
+        );
+
+        let new_repaid = repaid
+            .checked_add(amount)
+            .unwrap_or_else(|| fail(&env, EscrowError::ComputePayoutArithmeticOverflow));
+        let new_outstanding = settle_pool.saturating_sub(new_repaid);
+
+        // Checks-effects-interactions: record the repayment before the token transfer so a
+        // re-entrant path cannot observe a stale RepaidAmount. Soroban reverts all writes if
+        // the transfer fails.
+        env.storage()
+            .instance()
+            .set(&DataKey::RepaidAmount, &new_repaid);
+
+        let now = env.ledger().timestamp();
+        let fully_repaid = new_repaid == settle_pool;
+        if fully_repaid {
+            escrow.status = 2;
+            env.storage().instance().set(&DataKey::SettledAt, &now);
+            env.storage().instance().set(&DataKey::Escrow, &escrow);
+        }
+
+        let token_addr = Self::funding_token_or_fail(&env);
+        let this = env.current_contract_address();
+        external_calls::transfer_into_escrow_with_balance_checks(
+            &env,
+            &token_addr,
+            &payer,
+            &this,
+            amount,
+        );
+
+        if fully_repaid {
+            EscrowSettled {
+                name: symbol_short!("escrow_sd"),
+                invoice_id: escrow.invoice_id.clone(),
+                funded_amount: escrow.funded_amount,
+                yield_bps: escrow.yield_bps,
+                maturity: escrow.maturity,
+                settled_at_ledger_timestamp: now,
+                settle_pool,
+            }
+            .publish(&env);
+        }
+
+        EscrowRepaid {
+            name: symbol_short!("repaid"),
+            invoice_id: escrow.invoice_id.clone(),
+            payer,
+            amount,
+            repaid_total: new_repaid,
+            outstanding: new_outstanding,
+        }
+        .publish(&env);
+
+        new_outstanding
+    }
+
     /// SME pulls funded liquidity, net of the immutable protocol fee.
     ///
     /// Splits `funded_amount` of the bound funding token into a treasury **fee** and an SME
@@ -6831,6 +6990,34 @@ impl LiquifactEscrow {
             .unwrap_or_else(|| fail(&env, EscrowError::ComputePayoutArithmeticOverflow))
     }
 
+    /// Shared base-yield settlement-pool computation used by
+    /// [`LiquifactEscrow::get_settlement_pool`] and [`LiquifactEscrow::repay`].
+    /// Returns `0` before funding.
+    fn base_settle_pool(env: &Env, escrow: &InvoiceEscrow) -> i128 {
+        let Some(snap) = env
+            .storage()
+            .instance()
+            .get::<DataKey, FundingCloseSnapshot>(&keys::funding_close_snapshot())
+        else {
+            return 0;
+        };
+
+        let total_principal = snap.total_principal;
+        if total_principal <= 0 {
+            return 0;
+        }
+
+        let coupon = total_principal
+            .checked_mul(escrow.yield_bps as i128)
+            .unwrap_or_else(|| fail(env, EscrowError::ComputePayoutArithmeticOverflow))
+            .checked_div(10_000)
+            .unwrap_or_else(|| fail(env, EscrowError::ComputePayoutArithmeticOverflow));
+
+        total_principal
+            .checked_add(coupon)
+            .unwrap_or_else(|| fail(env, EscrowError::ComputePayoutArithmeticOverflow))
+    }
+
     /// Authoritative on-chain aggregate view of the total settlement pool owed by the SME.
     ///
     /// Returns `total_principal + floor(total_principal × yield_bps / 10_000)`, computed
@@ -6873,8 +7060,8 @@ impl LiquifactEscrow {
     ///
     /// None — pure read; no auth required and no state mutation.
     pub fn get_settlement_pool(env: Env) -> i128 {
-        // Snapshot must exist (written when escrow first reaches status == 1).
-        // Return 0 before funding, matching compute_investor_payout semantics.
+        // Preserve legacy behaviour: return 0 before funding without requiring the
+        // escrow snapshot to be readable.
         let Some(snap) = env
             .storage()
             .instance()
@@ -6882,30 +7069,41 @@ impl LiquifactEscrow {
         else {
             return 0;
         };
-
-        let total_principal = snap.total_principal;
-        if total_principal <= 0 {
+        if snap.total_principal <= 0 {
             return 0;
         }
 
-        // Read the escrow base yield_bps.
-        let escrow: InvoiceEscrow = env
+        let escrow = Self::get_escrow(env.clone());
+        Self::base_settle_pool(&env, &escrow)
+    }
+
+    /// Returns `(repaid_total, outstanding)` for a withdrawn (status 3) or settled (status 2)
+    /// escrow, or `(0, 0)` in every other state (including before initialization).
+    ///
+    /// `outstanding` is `settle_pool - repaid_total`, using the same settlement-pool formula
+    /// as [`LiquifactEscrow::get_settlement_pool`].
+    ///
+    /// # Authorization
+    /// None - pure read; no auth required and no state mutation.
+    pub fn get_repayment_status(env: Env) -> (i128, i128) {
+        let Some(escrow) = env
             .storage()
             .instance()
-            .get(&DataKey::Escrow)
-            .unwrap_or_else(|| fail(&env, EscrowError::EscrowNotInitialized));
+            .get::<DataKey, InvoiceEscrow>(&DataKey::Escrow)
+        else {
+            return (0, 0);
+        };
+        if escrow.status != 2 && escrow.status != 3 {
+            return (0, 0);
+        }
 
-        // coupon = total_principal × yield_bps / 10_000  (floor)
-        let coupon = total_principal
-            .checked_mul(escrow.yield_bps as i128)
-            .unwrap_or_else(|| fail(&env, EscrowError::ComputePayoutArithmeticOverflow))
-            .checked_div(10_000)
-            .unwrap_or_else(|| fail(&env, EscrowError::ComputePayoutArithmeticOverflow));
-
-        // settle_pool = total_principal + coupon
-        total_principal
-            .checked_add(coupon)
-            .unwrap_or_else(|| fail(&env, EscrowError::ComputePayoutArithmeticOverflow))
+        let settle_pool = Self::base_settle_pool(&env, &escrow);
+        let repaid: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::RepaidAmount)
+            .unwrap_or(0);
+        (repaid, settle_pool.saturating_sub(repaid))
     }
 
     pub fn update_maturity(env: Env, new_maturity: u64) -> InvoiceEscrow {
@@ -7339,9 +7537,7 @@ impl LiquifactEscrow {
 
             for key in keys_to_check.iter() {
                 if env.storage().persistent().has(key) {
-                    env.storage()
-                        .persistent()
-                        .extend_ttl(key, ttl, ttl);
+                    env.storage().persistent().extend_ttl(key, ttl, ttl);
                 }
             }
         }
@@ -7452,21 +7648,14 @@ impl LiquifactEscrow {
                     // five per-investor keys written yet. Skipping absent keys is safe:
                     // there is nothing to keep alive if the entry does not exist.
                     if env.storage().persistent().has(&key) {
-                        env.storage().persistent().extend_ttl(
-                            &key,
-                            ttl,
-                            ttl,
-                        );
+                        env.storage().persistent().extend_ttl(&key, ttl, ttl);
                     }
                 }
                 // ── All other keys live in instance storage ───────────────────
                 // Instance TTL is contract-wide; one call covers all instance keys.
                 _ => {
                     if !extended_instance {
-                        env.storage().instance().extend_ttl(
-                            ttl,
-                            ttl,
-                        );
+                        env.storage().instance().extend_ttl(ttl, ttl);
                         extended_instance = true;
                     }
                 }

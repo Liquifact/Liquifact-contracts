@@ -82,6 +82,7 @@ mod pause;
 mod pauser_boundary_tests;
 mod properties;
 mod reconciliation_lifecycle;
+mod repayment;
 mod settlement;
 mod settlement_config_view;
 mod timelocked_upgrade;
