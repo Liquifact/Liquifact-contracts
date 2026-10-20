@@ -1,4 +1,4 @@
-#`!llow_dead_code]
+#![allow(dead_code)]
 //! Centralized constructors for funding-related storage keys.
 //!
 //# Purpose
