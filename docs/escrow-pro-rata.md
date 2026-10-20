@@ -229,3 +229,14 @@ None — pure read; no auth required and no state mutation.
 
 See `docs/escrow-read-api.md` → `get_settlement_pool` for the complete parameter and return
 documentation.
+
+
+## Tier-aware settlement pool invariant
+
+The instance aggregate `YieldWeightedPrincipal` tracks \(\sum_i contribution_i \times effective\_yield\_bps_i\). The reported settlement pool is principal plus the aggregate coupon rounded down once. Because individual investor payouts floor their proportional shares, the pool satisfies:
+
+\[
+\sum_i compute\_investor\_payout(i) \le settle\_pool \le \sum_i payout_i + n\_investors
+\]
+
+Funding adds the investor's effective-yield weight and unfunding subtracts that same weight. Yield updates do not rewrite yields already stored for investors. If the additive aggregate key is absent on a legacy instance, reads retain the historical base-yield formula.
