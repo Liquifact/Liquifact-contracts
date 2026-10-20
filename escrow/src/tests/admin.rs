@@ -3,7 +3,8 @@ use crate::{
     AdminAcceptedEvent, AdminProposalCancelled, AdminProposalSuperseded, AdminProposedEvent,
     DeprecatedTransferAdminUsed, EscrowCloseSnapshot, FundingTargetUpdated,
     MaturityMaxHorizonRaised, ProtocolFeeUpdated, RegistryRefRebound,
-    DEFAULT_MATURITY_MAX_HORIZON_SECS,
+    DEFAULT_MATURITY_MAX_HORIZON_SECS, MAX_ADMIN_PROPOSAL_VALIDITY_SECS,
+    MIN_ADMIN_PROPOSAL_VALIDITY_SECS,
 };
 
 use soroban_sdk::Event;
@@ -985,12 +986,19 @@ fn test_pending_admin_remaining_secs_reports_positive_window() {
     default_init(&client, &env, &admin, &sme);
 
     env.ledger().set_timestamp(1_000);
-    client.propose_admin(&new_admin, &Some(60));
+    client.propose_admin(&new_admin, &Some(MIN_ADMIN_PROPOSAL_VALIDITY_SECS));
 
-    assert_eq!(client.get_pending_admin_expiry(), Some(1_060));
-    assert_eq!(client.get_pending_admin_remaining_secs(), Some(60));
+    assert_eq!(
+        client.get_pending_admin_expiry(),
+        Some(1_000 + MIN_ADMIN_PROPOSAL_VALIDITY_SECS)
+    );
+    assert_eq!(
+        client.get_pending_admin_remaining_secs(),
+        Some(MIN_ADMIN_PROPOSAL_VALIDITY_SECS)
+    );
 
-    env.ledger().set_timestamp(1_059);
+    env.ledger()
+        .set_timestamp(1_000 + MIN_ADMIN_PROPOSAL_VALIDITY_SECS - 1);
     assert_eq!(client.get_pending_admin_remaining_secs(), Some(1));
 }
 
@@ -1002,8 +1010,9 @@ fn test_pending_admin_remaining_secs_zero_at_expiry_and_accept_still_succeeds() 
     default_init(&client, &env, &admin, &sme);
 
     env.ledger().set_timestamp(2_000);
-    client.propose_admin(&new_admin, &Some(30));
-    env.ledger().set_timestamp(2_030);
+    client.propose_admin(&new_admin, &Some(MIN_ADMIN_PROPOSAL_VALIDITY_SECS));
+    let expiry = client.get_pending_admin_expiry().unwrap();
+    env.ledger().set_timestamp(expiry);
 
     assert_eq!(client.get_pending_admin_remaining_secs(), Some(0));
 
@@ -1021,8 +1030,9 @@ fn test_pending_admin_remaining_secs_zero_after_expiry_and_accept_rejects() {
     default_init(&client, &env, &admin, &sme);
 
     env.ledger().set_timestamp(3_000);
-    client.propose_admin(&new_admin, &Some(15));
-    env.ledger().set_timestamp(3_016);
+    client.propose_admin(&new_admin, &Some(MIN_ADMIN_PROPOSAL_VALIDITY_SECS));
+    let expiry = client.get_pending_admin_expiry().unwrap();
+    env.ledger().set_timestamp(expiry + 1);
 
     assert_eq!(client.get_pending_admin_remaining_secs(), Some(0));
     assert_contract_error(client.try_accept_admin(), EscrowError::AdminProposalExpired);
@@ -1030,17 +1040,99 @@ fn test_pending_admin_remaining_secs_zero_after_expiry_and_accept_rejects() {
 }
 
 #[test]
-fn test_pending_admin_remaining_secs_handles_saturating_far_future_expiry() {
+fn test_pending_admin_expiry_overflow_fails() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
     let new_admin = Address::generate(&env);
     default_init(&client, &env, &admin, &sme);
 
-    env.ledger().set_timestamp(u64::MAX - 5);
-    client.propose_admin(&new_admin, &Some(100));
+    env.ledger()
+        .set_timestamp(u64::MAX - MIN_ADMIN_PROPOSAL_VALIDITY_SECS + 1);
+    assert_contract_error(
+        client.try_propose_admin(&new_admin, &Some(MIN_ADMIN_PROPOSAL_VALIDITY_SECS)),
+        EscrowError::AdminProposalExpiryOverflow,
+    );
+}
 
-    assert_eq!(client.get_pending_admin_expiry(), Some(u64::MAX));
-    assert_eq!(client.get_pending_admin_remaining_secs(), Some(5));
+#[test]
+fn test_admin_proposal_window_bounds() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    for window in [
+        MIN_ADMIN_PROPOSAL_VALIDITY_SECS - 1,
+        MAX_ADMIN_PROPOSAL_VALIDITY_SECS + 1,
+        u64::MAX,
+    ] {
+        let candidate = Address::generate(&env);
+        assert_contract_error(
+            client.try_propose_admin(&candidate, &Some(window)),
+            EscrowError::AdminProposalWindowOutOfRange,
+        );
+    }
+
+    let min_candidate = Address::generate(&env);
+    client.propose_admin(&min_candidate, &Some(MIN_ADMIN_PROPOSAL_VALIDITY_SECS));
+    assert_eq!(
+        client.get_pending_admin_expiry(),
+        Some(MIN_ADMIN_PROPOSAL_VALIDITY_SECS)
+    );
+
+    let max_candidate = Address::generate(&env);
+    client.propose_admin(&max_candidate, &Some(MAX_ADMIN_PROPOSAL_VALIDITY_SECS));
+    assert_eq!(
+        client.get_pending_admin_expiry(),
+        Some(MAX_ADMIN_PROPOSAL_VALIDITY_SECS)
+    );
+}
+
+#[test]
+fn test_admin_proposal_rejects_role_conflicts() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    for candidate in [
+        client.get_escrow().sme_address,
+        client.get_treasury(),
+        client.address.clone(),
+    ] {
+        assert_contract_error(
+            client.try_propose_admin(&candidate, &None),
+            EscrowError::AdminCandidateConflictsWithRole,
+        );
+    }
+}
+
+#[test]
+#[allow(deprecated)]
+fn test_deprecated_transfer_admin_cannot_bypass_role_conflicts() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    assert_contract_error(
+        client.try_transfer_admin(&sme),
+        EscrowError::AdminCandidateConflictsWithRole,
+    );
+}
+
+#[test]
+fn test_accept_admin_rechecks_role_conflict_after_beneficiary_rotation() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    let candidate = Address::generate(&env);
+
+    client.propose_admin(&candidate, &None);
+    client.rotate_beneficiary(&candidate);
+
+    assert_contract_error(
+        client.try_accept_admin(),
+        EscrowError::AdminCandidateConflictsWithRole,
+    );
+    assert_eq!(client.get_pending_admin(), Some(candidate));
 }
 
 #[test]
@@ -3333,7 +3425,7 @@ fn test_pending_admin_remaining_zero_at_and_after_expiry() {
     let (client, admin, sme) = setup(&env);
     default_init(&client, &env, &admin, &sme);
     let new_admin = Address::generate(&env);
-    let window = 100u64;
+    let window = MIN_ADMIN_PROPOSAL_VALIDITY_SECS;
     client.propose_admin(&new_admin, &Some(window));
     let expiry = client.get_pending_admin_expiry().unwrap();
     env.ledger().set_timestamp(expiry);
@@ -3351,7 +3443,7 @@ fn test_pending_admin_remaining_consistent_with_accept_admin() {
     let (client, admin, sme) = setup(&env);
     default_init(&client, &env, &admin, &sme);
     let new_admin = Address::generate(&env);
-    client.propose_admin(&new_admin, &Some(10));
+    client.propose_admin(&new_admin, &Some(MIN_ADMIN_PROPOSAL_VALIDITY_SECS));
     let expiry = client.get_pending_admin_expiry().unwrap();
     env.ledger().set_timestamp(expiry + 1);
     assert_eq!(client.get_pending_admin_remaining_secs(), Some(0));
