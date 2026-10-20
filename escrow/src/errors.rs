@@ -112,4 +112,11 @@ pub enum EscrowError {
     FeeCheduleInvalidActivation = 242,
     /// `LiquifactEscrow::set_fee_schedule` attempted to submit a schedule identical to the active schedule.
     FeeScheduleSameAsActive = 243,
+
+    // ------------------------------------------------------------------------------
+    // Callback Context Errors (250..259)
+    // ------------------------------------------------------------------------------
+    CallbackPendingLimitReached = 250,
+    CallbackExpired = 251,
+    CallbackNonceOverflow = 252,
 }

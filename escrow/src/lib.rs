@@ -328,6 +328,20 @@ pub const MAX_DUST_SWEEP_AMOUNT: i128 = 100_000_000;
 /// Maximum UTF-8 byte length for the invoice `String` at init (matches Soroban [`Symbol`] max).
 pub const MAX_INVOICE_ID_STRING_LEN: u32 = 32;
 
+/// Maximum number of pending (unconsumed, unexpired) callback contexts allowed at once.
+///
+/// [`LiquifactEscrow::register_callback`] fails with
+/// [`EscrowError::CallbackPendingLimitReached`] when this many contexts are already
+/// pending. Execution or [`LiquifactEscrow::prune_expired_callback`] frees a slot.
+pub const MAX_PENDING_CALLBACKS: u32 = 16;
+
+/// Validity window (seconds) for a registered callback context.
+///
+/// [`LiquifactEscrow::execute_callback`] rejects a context once
+/// `now > created_at + CALLBACK_CONTEXT_TTL_SECS` with [`EscrowError::CallbackExpired`].
+/// [`LiquifactEscrow::prune_expired_callback`] may remove such a context.
+pub const CALLBACK_CONTEXT_TTL_SECS: u64 = 604_800; // 7 days
+
 /// Default validity window for [`LiquifactEscrow::propose_admin`] when no explicit window is supplied.
 ///
 /// After `ledger.timestamp() + DEFAULT_ADMIN_PROPOSAL_VALIDITY_SECS`, [`LiquifactEscrow::accept_admin`]
@@ -791,6 +805,18 @@ pub enum EscrowError {
 
     /// [`LiquifactEscrow::recover_admin`] called before the admin-recovery timelock deadline.
     AdminRecoveryNotExpired = 249,
+
+    /// [`LiquifactEscrow::register_callback`] called while
+    /// [`MAX_PENDING_CALLBACKS`] contexts are already pending.
+    CallbackPendingLimitReached = 250,
+    /// [`LiquifactEscrow::execute_callback`] called after the context's
+    /// [`CALLBACK_CONTEXT_TTL_SECS`] window elapsed.
+    CallbackExpired = 251,
+    /// [`LiquifactEscrow::register_callback`] nonce counter overflowed `u64`.
+    CallbackNonceOverflow = 252,
+    /// [`LiquifactEscrow::prune_expired_callback`] called on a context that has not
+    /// yet expired (or does not exist / was already consumed).
+    CallbackNotExpired = 253,
 }
 
 #[inline(always)]
@@ -1185,6 +1211,13 @@ pub enum DataKey {
     /// Stored cross-contract callback context ([`CallbackContext`]) keyed by invocation nonce.
     /// Binds expected origin address, invocation nonce, and lifecycle phase.
     CallbackContext(u64),
+    /// Persistent marker set to `true` once a callback context has been consumed.
+    /// Survives deletion of [`DataKey::CallbackContext`] so replay protection and
+    /// [`LiquifactEscrow::is_callback_consumed`] keep working.
+    CallbackConsumed(u64),
+    /// Instance counter of currently pending (unconsumed, unexpired) callback contexts.
+    /// Absent ⇒ `0`. Incremented on registration, decremented on execution/prune.
+    PendingCallbackCount,
 }
 
 // --- Data types ---
@@ -7625,6 +7658,17 @@ impl LiquifactEscrow {
             EscrowError::CallbackAfterCancellation,
         );
 
+        let pending: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::PendingCallbackCount)
+            .unwrap_or(0);
+        ensure(
+            &env,
+            pending < MAX_PENDING_CALLBACKS,
+            EscrowError::CallbackPendingLimitReached,
+        );
+
         let current_nonce: u64 = env
             .storage()
             .instance()
@@ -7632,7 +7676,7 @@ impl LiquifactEscrow {
             .unwrap_or(0);
         let next_nonce = current_nonce
             .checked_add(1)
-            .unwrap_or_else(|| fail(&env, EscrowError::FundedAmountOverflow));
+            .unwrap_or_else(|| fail(&env, EscrowError::CallbackNonceOverflow));
 
         env.storage()
             .instance()
@@ -7648,8 +7692,11 @@ impl LiquifactEscrow {
         };
 
         env.storage()
-            .instance()
+            .persistent()
             .set(&DataKey::CallbackContext(next_nonce), &context);
+        env.storage()
+            .instance()
+            .set(&DataKey::PendingCallbackCount, &(pending + 1));
 
         CallbackRegisteredEvent {
             name: symbol_short!("cb_reg"),
@@ -7700,10 +7747,7 @@ impl LiquifactEscrow {
 
         origin.require_auth();
 
-        let mut context: CallbackContext = env
-            .storage()
-            .instance()
-            .get(&DataKey::CallbackContext(nonce))
+        let mut context: CallbackContext = Self::load_callback_context(&env, nonce)
             .unwrap_or_else(|| fail(&env, EscrowError::CallbackNotFound));
 
         ensure(&env, !context.consumed, EscrowError::CallbackReplayed);
@@ -7726,10 +7770,26 @@ impl LiquifactEscrow {
             EscrowError::CallbackWrongPhase,
         );
 
+        let now = env.ledger().timestamp();
+        let expires_at = context.created_at.saturating_add(CALLBACK_CONTEXT_TTL_SECS);
+        ensure(&env, now <= expires_at, EscrowError::CallbackExpired);
+
         context.consumed = true;
         env.storage()
+            .persistent()
+            .remove(&DataKey::CallbackContext(nonce));
+        env.storage()
+            .persistent()
+            .set(&DataKey::CallbackConsumed(nonce), &true);
+
+        let pending: u32 = env
+            .storage()
             .instance()
-            .set(&DataKey::CallbackContext(nonce), &context);
+            .get(&DataKey::PendingCallbackCount)
+            .unwrap_or(0);
+        env.storage()
+            .instance()
+            .set(&DataKey::PendingCallbackCount, &pending.saturating_sub(1));
 
         CallbackExecutedEvent {
             name: symbol_short!("cb_exec"),
@@ -7746,9 +7806,7 @@ impl LiquifactEscrow {
     /// Read-only view returning the registered callback context for a given invocation `nonce`.
     /// Returns `None` if no callback was registered with this nonce.
     pub fn get_callback(env: Env, nonce: u64) -> Option<CallbackContext> {
-        env.storage()
-            .instance()
-            .get(&DataKey::CallbackContext(nonce))
+        Self::load_callback_context(&env, nonce)
     }
 
     /// Read-only view returning the current callback invocation nonce counter.
@@ -7763,11 +7821,73 @@ impl LiquifactEscrow {
     /// Read-only view returning whether the callback for `nonce` has been consumed.
     /// Returns `false` if the callback is unconsumed or does not exist.
     pub fn is_callback_consumed(env: Env, nonce: u64) -> bool {
-        let context: Option<CallbackContext> = env
+        if env
+            .storage()
+            .persistent()
+            .get::<_, bool>(&DataKey::CallbackConsumed(nonce))
+            .unwrap_or(false)
+        {
+            return true;
+        }
+        Self::load_callback_context(&env, nonce)
+            .map(|c| c.consumed)
+            .unwrap_or(false)
+    }
+
+    /// Load a callback context, preferring persistent storage and falling back to a
+    /// legacy instance entry written by pre-migration deployments.
+    fn load_callback_context(env: &Env, nonce: u64) -> Option<CallbackContext> {
+        if let Some(ctx) = env
+            .storage()
+            .persistent()
+            .get::<_, CallbackContext>(&DataKey::CallbackContext(nonce))
+        {
+            return Some(ctx);
+        }
+        env.storage()
+            .instance()
+            .get::<_, CallbackContext>(&DataKey::CallbackContext(nonce))
+    }
+
+    /// Permissionless removal of an expired, unconsumed callback context.
+    ///
+    /// Deletes the context, decrements [`DataKey::PendingCallbackCount`], and emits
+    /// [`CallbackPruned`]. Fails with [`EscrowError::CallbackNotExpired`] when the
+    /// context is missing, already consumed, or still within its TTL window.
+    pub fn prune_expired_callback(env: Env, nonce: u64) -> bool {
+        let context: CallbackContext = Self::load_callback_context(&env, nonce)
+            .unwrap_or_else(|| fail(&env, EscrowError::CallbackNotExpired));
+        ensure(&env, !context.consumed, EscrowError::CallbackNotExpired);
+
+        let now = env.ledger().timestamp();
+        let expires_at = context.created_at.saturating_add(CALLBACK_CONTEXT_TTL_SECS);
+        ensure(&env, now > expires_at, EscrowError::CallbackNotExpired);
+
+        env.storage()
+            .persistent()
+            .remove(&DataKey::CallbackContext(nonce));
+        env.storage()
+            .instance()
+            .remove(&DataKey::CallbackContext(nonce));
+
+        let pending: u32 = env
             .storage()
             .instance()
-            .get(&DataKey::CallbackContext(nonce));
-        context.map(|c| c.consumed).unwrap_or(false)
+            .get(&DataKey::PendingCallbackCount)
+            .unwrap_or(0);
+        env.storage()
+            .instance()
+            .set(&DataKey::PendingCallbackCount, &pending.saturating_sub(1));
+
+        let escrow = Self::get_escrow(env.clone());
+        CallbackPruned {
+            name: symbol_short!("cb_prune"),
+            invoice_id: escrow.invoice_id,
+            nonce,
+        }
+        .publish(&env);
+
+        true
     }
 }
 

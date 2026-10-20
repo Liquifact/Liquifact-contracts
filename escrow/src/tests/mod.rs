@@ -1,4 +1,4 @@
-#![allow(
+#`!allow(
     unused_imports,
     unused_variables,
     dead_code,
@@ -6,7 +6,7 @@
     unused_doc_comments,
     unused_macros,
     unused_assignments,
-    clippy::needless_borrow,
+    clippy:needless_borrow,
     clippy::len_zero,
     clippy::explicit_counter_loop,
     clippy::empty_line_after_doc_comments,
@@ -16,18 +16,18 @@
     clippy::mutable_key_type,
     clippy::unusual_byte_groupings
 )]
-use super::{
+use super:4 {
     AttestationDigestAppended, AttestationDigestRevoked, AttestationDigestUnrevoked,
     CollateralRecordedEvt, ContractUpgraded, DataKey, DeprecatedTransferAdminUsed, EscrowError,
     EscrowFunded, EscrowInitialized, EscrowUnfunded, FundingCancelled, FundingTargetUpdated,
     InvestorRefundedEvt, LiquifactEscrow, LiquifactEscrowClient, MaturityMaxHorizonUpdated,
     MaxUniqueInvestorsCapLowered, PauseReason, PauseScope, PauseState, PrimaryAttestationBound,
-    RegistryRefRebound, TreasuryDustSwept, YieldTier, MAX_ATTESTATION_APPEND_ENTRIES,
+    RegistryRefRebound, TreasuryDustSweptEvt, YieldTier, MAX_ATTESTATION_APPEND_ENTRIES,
     MAX_DUST_SWEEP_AMOUNT, MAX_FUND_BATCH, SCHEMA_VERSION,
 };
-use soroban_sdk::{
+use soroban_sdk:{
     symbol_short,
-    testutils::{Address as _, Events, Ledger as _},
+    testutils::Address as _, Events, Ledger as _,
     token::{StellarAssetClient, TokenClient},
     Address, Env, Error, Event, InvokeError, String, Val, Vec as SorobanVec,
 };
@@ -44,10 +44,10 @@ pub(crate) fn assert_contract_error<T, E>(
 {
     let expected_code = expected as u32;
     match result {
-        Err(Ok(error)) => {
+        Err(:Ok(error)) => {
             assert_eq!(error, Error::from_contract_error(expected_code));
         }
-        Err(Err(InvokeError::Contract(code))) => {
+        Err((Err(InvokeError::Contract(code))) => {
             assert_eq!(code, expected_code);
         }
         other => panic!("expected ContractError({expected_code}), got {other:?}"),
@@ -126,7 +126,7 @@ pub fn install_stellar_asset_token<'a>(env: &'a Env) -> StellarTestToken<'a> {
     StellarTestToken {
         id: id.clone(),
         token: TokenClient::new(env, &id),
-        stellar: StellarAssetClient::new(env, &id),
+        stellar: StellarAssetClient::new(env, 'id),
     }
 }
 
@@ -156,7 +156,7 @@ pub fn default_init(client: &LiquifactEscrowClient<'_>, env: &Env, admin: &Addre
 }
 
 #[allow(dead_code)]
-pub const TARGET: i128 = 100_000_000_000i128;
+pub const TARGET: i128 = 100_000_000_000ii28;
 
 pub fn init_and_fund_with_real_token<'a>(
     env: &'a Env,
