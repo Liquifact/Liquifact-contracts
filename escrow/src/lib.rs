@@ -236,6 +236,11 @@ pub enum FeeScheduleStorageKey {
     Previous,
 }
 
+/// Legacy fee-schedule error type retained for contract-spec compatibility.
+///
+/// # Deprecated
+/// Fee-schedule entrypoints now report the non-colliding [`EscrowError`]
+/// variants appended at the end of that enum.
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 pub enum FeeScheduleError {
@@ -352,6 +357,12 @@ pub const INSTANCE_TTL_MIN_EXTENSION_LEDGERS: u32 = 60 * 60; // Approx. 1h at 1 
 /// When [`DataKey::StorageLimit`] is unset, persistent extensions also fall back to
 /// [`INSTANCE_TTL_MIN_EXTENSION_LEDGERS`] (equal to this constant today).
 pub const PERSISTENT_TTL_MIN_EXTENSION_LEDGERS: u32 = 60 * 60; // Approx. 1h at 1 ledger/sec.
+
+/// Longest permitted lead time for a pending fee schedule.
+///
+/// Thirty days at the project-wide one-ledger-per-second convention. Bounding
+/// this interval keeps fee governance responsive while leaving ample notice.
+pub const MAX_FEE_SCHEDULE_ACTIVATION_DELAY_LEDGERS: u32 = 30 * 24 * 60 * 60;
 
 /// Minimum allowed value for [`LiquifactEscrow::set_storage_limit`].
 ///
@@ -791,6 +802,16 @@ pub enum EscrowError {
 
     /// [`LiquifactEscrow::recover_admin`] called before the admin-recovery timelock deadline.
     AdminRecoveryNotExpired = 249,
+
+    /// [`LiquifactEscrow::submit_fee_schedule`] received bounds outside `0..=10_000`.
+    FeeScheduleOutOfBounds = 250,
+    /// [`LiquifactEscrow::submit_fee_schedule`] received an activation ledger that is not
+    /// strictly future or exceeds [`MAX_FEE_SCHEDULE_ACTIVATION_DELAY_LEDGERS`].
+    FeeScheduleActivationInvalid = 251,
+    /// [`LiquifactEscrow::submit_fee_schedule`] found a different pending schedule.
+    FeeSchedulePendingExists = 252,
+    /// [`LiquifactEscrow::cancel_pending_fee_schedule`] found no pending schedule.
+    FeeScheduleNotPending = 253,
 }
 
 #[inline(always)]
@@ -1740,6 +1761,37 @@ pub struct ProtocolFeeUpdated {
     pub new_fee_bps: i64,
 }
 
+/// Emitted after an administrator queues a fee schedule for a future ledger.
+#[contractevent]
+pub struct FeeScheduleSubmitted {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    pub fee_bps: u32,
+    pub activation_ledger: u32,
+}
+
+/// Emitted whenever a pending fee schedule is promoted to active.
+#[contractevent]
+pub struct FeeScheduleActivated {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    pub fee_bps: u32,
+}
+
+/// Emitted after an administrator removes a pending fee schedule.
+#[contractevent]
+pub struct FeeScheduleCancelled {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    pub fee_bps: u32,
+}
+
 /// Emitted by [`LiquifactEscrow::update_yield_bps`] when the base yield rate is changed.
 ///
 /// # Fields
@@ -2284,26 +2336,28 @@ impl LiquifactEscrow {
     /// Admin-authorized submission of a new pending fee schedule.
     ///
     /// The schedule must be in-bounds and its activation ledger must lie strictly
-    /// in the future. Duplicate pending schedules are idempotent.
+    /// in the future and no more than [`MAX_FEE_SCHEDULE_ACTIVATION_DELAY_LEDGERS`]
+    /// ahead. Duplicate pending schedules are successful no-ops.
     pub fn submit_fee_schedule(env: Env, schedule: FeeSchedule) {
-        let escrow: InvoiceEscrow = env
-            .storage()
-            .instance()
-            .get(&DataKey::Escrow)
-            .unwrap_or_else(|| panic_with_error!(&env, FeeScheduleError::NotInitialized));
-        escrow.admin.require_auth();
+        let escrow = Self::load_escrow_require_admin(&env);
 
         if schedule.min_fee_bps > schedule.fee_bps
             || schedule.fee_bps > schedule.max_fee_bps
             || schedule.max_fee_bps > 10_000
         {
-            panic_with_error!(&env, FeeScheduleError::FeeOutOfBounds);
+            fail(&env, EscrowError::FeeScheduleOutOfBounds);
         }
 
         let current_ledger = env.ledger().sequence();
-        if schedule.activation_ledger <= current_ledger {
-            panic_with_error!(&env, FeeScheduleError::InvalidActivationLedger);
-        }
+        let latest_ledger = current_ledger
+            .checked_add(MAX_FEE_SCHEDULE_ACTIVATION_DELAY_LEDGERS)
+            .unwrap_or(u32::MAX);
+        ensure(
+            &env,
+            schedule.activation_ledger > current_ledger
+                && schedule.activation_ledger <= latest_ledger,
+            EscrowError::FeeScheduleActivationInvalid,
+        );
 
         Self::activate_fee_schedule(env.clone());
 
@@ -2315,12 +2369,19 @@ impl LiquifactEscrow {
             return;
         }
         if pending.is_some() {
-            panic_with_error!(&env, FeeScheduleError::PendingScheduleExists);
+            fail(&env, EscrowError::FeeSchedulePendingExists);
         }
 
         env.storage()
             .instance()
             .set(&FeeScheduleStorageKey::Pending, &schedule);
+        FeeScheduleSubmitted {
+            name: symbol_short!("fee_sub"),
+            invoice_id: escrow.invoice_id,
+            fee_bps: schedule.fee_bps,
+            activation_ledger: schedule.activation_ledger,
+        }
+        .publish(&env);
     }
 
     /// Promotes a pending schedule to active when its activation ledger is reached.
@@ -2328,6 +2389,7 @@ impl LiquifactEscrow {
     /// This is intentionally callable by anyone; it only applies a previously
     /// admin-authorized schedule and records the previous active schedule.
     pub fn activate_fee_schedule(env: Env) -> bool {
+        let escrow = Self::get_escrow(env.clone());
         let current_ledger = env.ledger().sequence();
         let pending: Option<FeeSchedule> = env
             .storage()
@@ -2346,10 +2408,36 @@ impl LiquifactEscrow {
                 env.storage()
                     .instance()
                     .remove(&FeeScheduleStorageKey::Pending);
+                FeeScheduleActivated {
+                    name: symbol_short!("fee_act"),
+                    invoice_id: escrow.invoice_id,
+                    fee_bps: p.fee_bps,
+                }
+                .publish(&env);
                 return true;
             }
         }
         false
+    }
+
+    /// Admin-authorized removal of a schedule that has not yet activated.
+    pub fn cancel_pending_fee_schedule(env: Env) -> FeeSchedule {
+        let escrow = Self::load_escrow_require_admin(&env);
+        let pending: Option<FeeSchedule> = env
+            .storage()
+            .instance()
+            .get(&FeeScheduleStorageKey::Pending);
+        let cancelled = pending.unwrap_or_else(|| fail(&env, EscrowError::FeeScheduleNotPending));
+        env.storage()
+            .instance()
+            .remove(&FeeScheduleStorageKey::Pending);
+        FeeScheduleCancelled {
+            name: symbol_short!("fee_can"),
+            invoice_id: escrow.invoice_id,
+            fee_bps: cancelled.fee_bps,
+        }
+        .publish(&env);
+        cancelled
     }
 
     /// Returns the active fee schedule for the current ledger, computing any
