@@ -99,3 +99,10 @@ pub(crate) fn callback_nonce() -> DataKey {
 pub(crate) fn callback_context(nonce: u64) -> DataKey {
     DataKey::CallbackContext(nonce)
 }
+
+/// Instance-storage optional opening timestamp (absent = immediately open).
+/// Set by [`crate::LiquifactEscrow::set_funding_opens_at`]; cleared by
+/// [`crate::LiquifactEscrow::clear_funding_opens_at`].
+pub(crate) fn funding_opens_at() -> DataKey {
+    DataKey::FundingOpensAt
+}

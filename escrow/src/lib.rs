@@ -791,6 +791,16 @@ pub enum EscrowError {
 
     /// [`LiquifactEscrow::recover_admin`] called before the admin-recovery timelock deadline.
     AdminRecoveryNotExpired = 249,
+
+    /// [`LiquifactEscrow::fund`] / [`LiquifactEscrow::fund_with_commitment`] /
+    /// [`LiquifactEscrow::fund_batch`] called before the scheduled opening timestamp
+    /// ([`DataKey::FundingOpensAt`]) has been reached. Wait until ledger time >= `opens_at`.
+    FundingNotYetOpen = 250,
+
+    /// [`LiquifactEscrow::set_funding_opens_at`] rejected the provided timestamp because it
+    /// is not strictly in the future, is at or beyond the funding deadline (when set), or is at
+    /// or beyond maturity (when maturity > 0).
+    FundingOpenTimeInvalid = 251,
 }
 
 #[inline(always)]
@@ -1185,6 +1195,15 @@ pub enum DataKey {
     /// Stored cross-contract callback context ([`CallbackContext`]) keyed by invocation nonce.
     /// Binds expected origin address, invocation nonce, and lifecycle phase.
     CallbackContext(u64),
+    /// Optional scheduled opening timestamp (seconds since Unix epoch) before which
+    /// primary funding is blocked. Absent ⇒ no opening gate (funding is immediately open).
+    /// Written by [`LiquifactEscrow::set_funding_opens_at`]; cleared by
+    /// [`LiquifactEscrow::clear_funding_opens_at`]. Checked during [`LiquifactEscrow::fund`],
+    /// [`LiquifactEscrow::fund_with_commitment`], and [`LiquifactEscrow::fund_batch`].
+    ///
+    /// **Additive key (ADR-007):** absent on instances predating this key ⇒ no gate applied
+    /// (funding is open as soon as `init` completes), preserving all legacy semantics.
+    FundingOpensAt,
 }
 
 // --- Data types ---
@@ -1868,6 +1887,19 @@ pub struct FundingDeadlineExtended {
     pub invoice_id: Symbol,
     pub old_deadline: u64,
     pub new_deadline: u64,
+}
+
+/// Emitted by [`LiquifactEscrow::set_funding_opens_at`] when the admin schedules
+/// the opening timestamp. `opens_at == 0` signals that the gate was cleared via
+/// [`LiquifactEscrow::clear_funding_opens_at`].
+#[contractevent]
+pub struct FundingOpensAtSet {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    /// The new opening timestamp, or `0` when the gate has been cleared.
+    pub opens_at: u64,
 }
 
 #[contractevent]
@@ -5720,6 +5752,19 @@ impl LiquifactEscrow {
                 &env,
                 env.ledger().timestamp() <= deadline,
                 EscrowError::FundingDeadlinePassed,
+            );
+        }
+
+        // Check scheduled opening time: if FundingOpensAt is set, reject calls before it.
+        if let Some(opens_at) = env
+            .storage()
+            .instance()
+            .get::<DataKey, u64>(&keys::funding_opens_at())
+        {
+            ensure(
+                &env,
+                env.ledger().timestamp() >= opens_at,
+                EscrowError::FundingNotYetOpen,
             );
         }
 
