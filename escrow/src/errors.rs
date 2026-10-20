@@ -112,4 +112,18 @@ pub enum EscrowError {
     FeeCheduleInvalidActivation = 242,
     /// `LiquifactEscrow::set_fee_schedule` attempted to submit a schedule identical to the active schedule.
     FeeScheduleSameAsActive = 243,
+
+    // ------------------------------------------------------------------------------
+    // Position Transfer Errors (250..259)
+    // ------------------------------------------------------------------------------
+    /// `LiquifactEscrow::transfer_position` blocked because a legal hold is active.
+    LegalHoldBlocksPositionTransfer = 250,
+    /// `LiquifactEscrow::transfer_position` blocked because the Claims pause scope is active.
+    PausedBlocksPositionTransfer = 251,
+    /// `LiquifactEscrow::transfer_position` received an amount outside `0 < amount <= contribution(from)`.
+    PositionTransferAmountInvalid = 252,
+    /// `LiquifactEscrow::transfer_position` blocked because `from` has already claimed.
+    PositionAlreadyClaimed = 253,
+    /// `LiquifactEscrow::transfer_position` blocked because `to`'s effective yield or claim lock differs from `from`'s.
+    PositionTermsMismatch = 254,
 }

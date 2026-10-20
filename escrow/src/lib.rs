@@ -791,6 +791,17 @@ pub enum EscrowError {
 
     /// [`LiquifactEscrow::recover_admin`] called before the admin-recovery timelock deadline.
     AdminRecoveryNotExpired = 249,
+
+    /// [`LiquifactEscrow::transfer_position`] blocked while a legal hold is active.
+    LegalHoldBlocksPositionTransfer = 250,
+    /// [`LiquifactEscrow::transfer_position`] blocked while the Claims pause scope is active.
+    PausedBlocksPositionTransfer = 251,
+    /// [`LiquifactEscrow::transfer_position`] received an invalid `amount` (must be `0 < amount <= contribution(from)`).
+    PositionTransferAmountInvalid = 252,
+    /// [`LiquifactEscrow::transfer_position`] called for a `from` address that has already claimed.
+    PositionAlreadyClaimed = 253,
+    /// [`LiquifactEscrow::transfer_position`] found `to`'s existing position terms differ from `from`'s.
+    PositionTermsMismatch = 254,
 }
 
 #[inline(always)]
