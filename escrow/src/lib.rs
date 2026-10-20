@@ -2273,6 +2273,15 @@ pub struct CallbackExecutedEvent {
     pub nonce: u64,
     pub phase: u32,
 }
+/// Emitted when an expired callback context is pruned.
+#[contractevent]
+pub struct CallbackPruned {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    pub nonce: u64,
+}
 
 // ---------------------------------------------------------------------------
 // Contract
