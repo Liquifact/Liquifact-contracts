@@ -1,5 +1,8 @@
 # Fees: authorization and access rules
 
+> **Treasury rotation:** The treasury address is no longer fixed for the life of
+> an escrow. See [Treasury rotation](#treasury-rotation) below.
+
 > **Compatibility contract:** The behavior documented in this file is a public
 > compatibility surface. Entrypoint names, error codes, event shapes, field
 > semantics, and the "no update path" invariant for `protocol_fee_bps` are
@@ -22,7 +25,7 @@ rejection** — for auditors, integrators, and reviewers. Verified directly agai
 |------|------------------------|
 | **Admin** | Sets `protocol_fee_bps` once, at `init`, as part of creating the escrow. No other fee-related power. |
 | **SME** (`sme_address`) | Triggers fee *realization* by calling `withdraw`. Does not choose or see the fee rate change — it was fixed at `init`. |
-| **Treasury** | Passive recipient of the fee transfer inside `withdraw`. **Does not authorize anything on this path** — see [Treasury is not authorized here](#treasury-is-not-authorized-on-the-withdraw-path). |
+| **Treasury** | Passive recipient of the fee transfer inside `withdraw`. **Does not authorize anything on this path** — see [Treasury is not authorized here](#treasury-is-not-authorized-on-the-withdraw-path). Can be rotated by the admin via a two-step, time-delayed proposal that the new treasury must accept. |
 | **Investor** | No interaction with fees at all. Settlement (`settle`), claims (`claim_investor_payout`), and refunds (`refund`) never apply or reference `protocol_fee_bps`. |
 
 **Invariant (roles):** No role other than `admin` (at `init`) may write
@@ -117,6 +120,61 @@ this contract that validated the parameter at `init`.
 
 ---
 
+## Treasury rotation
+
+The treasury address — the fee destination in `withdraw` and the sole
+authorizer of `sweep_terminal_dust` — is rotatable through a **two-step,
+time-delayed** proposal. This lets the admin cut off a compromised treasury or
+replace a lost key without being able to redirect fees instantly.
+
+### `propose_treasury` — admin proposes a new treasury
+
+- **Auth:** `admin.require_auth()`.
+- **Parameter:** `new_treasury: Address`.
+- **Validation:** rejects the current treasury with
+  `EscrowError::NewTreasurySameAsCurrent` and the contract's own address with
+  `EscrowError::TreasuryInvalid`.
+- **Effect:** writes `DataKey::PendingTreasury = (new_treasury, eta)` where
+  `eta = now + TREASURY_ROTATION_DELAY_SECS` (`86_400`). A second proposal
+  **overwrites** the first pending entry (documented choice). Emits
+  `TreasuryProposed { name, invoice_id, current, proposed, eta }`.
+- **Returns:** `eta`.
+
+### `accept_treasury` — new treasury accepts after the delay
+
+- **Auth:** `new_treasury.require_auth()` — the pending address, not the admin.
+- **Guard:** `now >= eta`, else `EscrowError::TreasuryRotationNotReady`.
+- **Effect:** swaps `DataKey::Treasury` to the pending address, clears
+  `DataKey::PendingTreasury`, emits
+  `TreasuryRotated { name, invoice_id, prior, new }`.
+
+### `cancel_treasury_rotation` — admin cancels a pending proposal
+
+- **Auth:** `admin.require_auth()`.
+- **Rejection:** with nothing pending, fails with
+  `EscrowError::NoPendingTreasury`.
+- **Effect:** clears `DataKey::PendingTreasury`.
+
+### `get_pending_treasury` — reads the pending proposal (unauthenticated)
+
+- **Auth:** none — pure read.
+- **Returns:** `Option<(Address, u64)>` — the pending treasury and its `eta`,
+  or `None` when no rotation is pending.
+
+**Invariant (rotation):** The admin alone cannot redirect fees; the new
+treasury must sign `accept_treasury`, and only after `eta`. After a successful
+rotation, `withdraw` routes the fee to the new treasury and
+`sweep_terminal_dust` requires the new treasury's auth. Rotation is not gated
+on legal hold or pause — it only changes the fee destination and dust
+authorizer, not balances, so it is safe to run during a hold.
+
+**Compatibility contract:** `DataKey::PendingTreasury` is appended at the end
+of `DataKey` per [ADR-007](adr/ADR-007-storage-key-evolution.md). The new
+error variants are appended to the end of `EscrowError` with fresh codes; no
+existing variant is renumbered, removed, or reused.
+
+---
+
 ## No update path (by design)
 
 Unlike `MaxUniqueInvestorsCap`, `MaxPerInvestorCap`, and `MinContributionFloor` — each of which has
@@ -200,6 +258,10 @@ created or destroyed by the split.
 
 - [ADR-002: Authorization Boundaries](adr/ADR-002-auth-boundaries.md) — the general
   canonical-sequence rule (`guard_not_legal_hold` → `require_auth` → writes) that `withdraw`
+  follows; this document is the fee-specific instance of that pattern. `accept_treasury`
+  follows the same rule with the pending treasury as the authorizer.
+- [ADR-002: Authorization Boundaries](adr/ADR-002-auth-boundaries.md) — the general
+  canonical-sequence rule (`guard_not_legal_hold` → `require_auth` → writes) that `withdraw`
   follows; this document is the fee-specific instance of that pattern.
 - [ADR-007: Storage Key Evolution](adr/ADR-007-storage-key-evolution.md) — why
   `get_protocol_fee_bps` defaults to `0` for pre-existing escrow instances.
@@ -212,5 +274,7 @@ The invariants above are exercised by `escrow/src/tests/fees.rs`. That suite is
 the executable contract for this document: success paths, rejection paths
 (out-of-range `init`, unauthorized `withdraw`, unfunded `withdraw`), boundary
 values (`0`, `10_000`, rounding), and regression cases for the zero-fee gas
-profile and the `SmeWithdrew` event shape. Any change to fee behavior must
-update both this document and that suite together.
+profile and the `SmeWithdrew` event shape. Treasury rotation is covered by
+`escrow/src/tests/treasury_rotation.rs` (delay boundary, wrong signer,
+overwrite, cancel, post-rotation fee routing and sweep auth). Any change to fee
+or treasury behavior must update both this document and those suites together.

@@ -112,4 +112,16 @@ pub enum EscrowError {
     FeeCheduleInvalidActivation = 242,
     /// `LiquifactEscrow::set_fee_schedule` attempted to submit a schedule identical to the active schedule.
     FeeScheduleSameAsActive = 243,
+
+    // ------------------------------------------------------------------------------
+    // Treasury Rotation Errors (250..259)
+    // ------------------------------------------------------------------------------
+    /// `LiquifactEscrow::propose_treasury` received the current treasury address.
+    NewTreasurySameAsCurrent = 250,
+    /// `LiquifactEscrow::propose_treasury` received the contract's own address.
+    TreasuryInvalid = 251,
+    /// `LiquifactEscrow::accept_treasury` called before the rotation delay elapsed.
+    TreasuryRotationNotReady = 252,
+    /// `LiquifactEscrow::cancel_treasury_rotation` called with no pending rotation.
+    NoPendingTreasury = 253,
 }

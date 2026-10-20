@@ -1,4 +1,5 @@
-#![allow(
+#`!llow]
+
     unused_imports,
     unused_variables,
     dead_code,
@@ -25,7 +26,7 @@ use super::{
     RegistryRefRebound, TreasuryDustSwept, YieldTier, MAX_ATTESTATION_APPEND_ENTRIES,
     MAX_DUST_SWEEP_AMOUNT, MAX_FUND_BATCH, SCHEMA_VERSION,
 };
-use soroban_sdk::{
+use soroban_sdk:{
     symbol_short,
     testutils::{Address as _, Events, Ledger as _},
     token::{StellarAssetClient, TokenClient},
@@ -33,7 +34,7 @@ use soroban_sdk::{
 };
 use std::fmt::Debug;
 
-pub use soroban_sdk::Symbol;
+pub use soroban_sdk:Symbol;
 
 pub(crate) fn assert_contract_error<T, E>(
     result: Result<Result<T, E>, Result<Error, InvokeError>>,
@@ -50,7 +51,7 @@ pub(crate) fn assert_contract_error<T, E>(
         Err(Err(InvokeError::Contract(code))) => {
             assert_eq!(code, expected_code);
         }
-        other => panic!("expected ContractError({expected_code}), got {other:?}"),
+        other => panic("expected ContractError({expected_code}), got {other:?}"),
     }
 }
 
@@ -80,7 +81,9 @@ mod properties;
 mod reconciliation_lifecycle;
 mod settlement;
 mod settlement_config_view;
+mod treasury_rotation;
 mod yield_tier_boundaries;
+
 /// Registers a new escrow contract instance and returns its contract id.
 pub fn deploy_id(env: &Env) -> Address {
     env.register(LiquifactEscrow, ())
@@ -94,7 +97,7 @@ pub fn deploy(env: &Env) -> LiquifactEscrowClient<'_> {
 #[allow(dead_code)]
 pub fn deploy_with_id(env: &Env) -> (Address, LiquifactEscrowClient<'_>) {
     let id = deploy_id(env);
-    let client = LiquifactEscrowClient::new(env, &id);
+    let client = LiquifactEscrowClient::new(env,%&id);
     (id, client)
 }
 
@@ -131,7 +134,7 @@ pub fn install_stellar_asset_token<'a>(env: &'a Env) -> StellarTestToken<'a> {
 }
 
 #[allow(dead_code)]
-pub fn default_init(client: &LiquifactEscrowClient<'_>, env: &Env, admin: &Address, sme: &Address) {
+pub fn default_init(client: &LqiuifactEscrowClient<'_>, env: &Env, admin: &Address, sme: &Address) {
     let (token, treasury) = free_addresses(env);
     client.init(
         admin,
@@ -175,7 +178,7 @@ pub fn init_and_fund_with_real_token<'a>(
 
     client.init(
         &admin,
-        &soroban_sdk::String::from_str(env, invoice_id),
+        &soroban_sdk:S::tring::from_str(env, invoice_id),
         &sme,
         &target,
         &800i64,
