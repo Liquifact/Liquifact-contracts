@@ -23,10 +23,10 @@ use super::{
     FundingCancelled, FundingDeadlineExtensionStats, FundingTargetUpdated, InvestorRefundedEvt,
     LiquifactEscrow, LiquifactEscrowClient, MaturityMaxHorizonUpdated,
     MaxUniqueInvestorsCapLowered, PauseReason, PauseScope, PauseState, PrimaryAttestationBound,
-    RegistryRefRebound, TreasuryDustSwept, UpgradeCancelled, UpgradeProposed, YieldTier,
-    MAX_ATTESTATION_APPEND_ENTRIES, MAX_DUST_SWEEP_AMOUNT, MAX_FUNDING_DEADLINE_EXTENSIONS,
-    MAX_FUNDING_DEADLINE_TOTAL_EXTENSION_SECS, MAX_FUND_BATCH, SCHEMA_VERSION,
-    UPGRADE_EXECUTION_WINDOW_SECS, UPGRADE_TIMELOCK_SECS,
+    RegistryRefRebound, SettleBatchProcessed, TreasuryDustSwept, UpgradeCancelled, UpgradeProposed,
+    YieldTier, MAX_ATTESTATION_APPEND_ENTRIES, MAX_DUST_SWEEP_AMOUNT,
+    MAX_FUNDING_DEADLINE_EXTENSIONS, MAX_FUNDING_DEADLINE_TOTAL_EXTENSION_SECS, MAX_FUND_BATCH,
+    MAX_SETTLE_BATCH, SCHEMA_VERSION, UPGRADE_EXECUTION_WINDOW_SECS, UPGRADE_TIMELOCK_SECS,
 };
 use soroban_sdk::{
     symbol_short,
@@ -82,6 +82,7 @@ mod pause;
 mod pauser_boundary_tests;
 mod properties;
 mod reconciliation_lifecycle;
+mod settle_batch_results;
 mod settlement;
 mod settlement_config_view;
 mod timelocked_upgrade;
