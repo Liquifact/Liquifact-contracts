@@ -791,6 +791,10 @@ pub enum EscrowError {
 
     /// [`LiquifactEscrow::recover_admin`] called before the admin-recovery timelock deadline.
     AdminRecoveryNotExpired = 249,
+    /// [`LiquifactEscrow::set_investor_allowlist_expiry`] was given an expiry that is in the past.
+    AllowlistExpiryInPast = 250,
+    /// An investor attempted an action but their allowlist entry had expired.
+    InvestorAllowlistExpired = 251,
 }
 
 #[inline(always)]
@@ -1185,6 +1189,8 @@ pub enum DataKey {
     /// Stored cross-contract callback context ([`CallbackContext`]) keyed by invocation nonce.
     /// Binds expected origin address, invocation nonce, and lifecycle phase.
     CallbackContext(u64),
+    /// Per-investor allowlist expiry timestamp (persistent storage). Absent ⇒ no expiry set.
+    InvestorAllowlistExpiry(Address),
 }
 
 // --- Data types ---
@@ -2176,6 +2182,16 @@ pub struct InvestorAllowlistChanged {
     pub investor: Address,
     /// `1` = allowed, `0` = blocked.
     pub allowed: u32,
+}
+
+#[contractevent]
+pub struct InvestorAllowlistExpirySet {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: u64,
+    pub investor: Address,
+    pub expires_at: u64,
 }
 
 #[contractevent]
@@ -5032,6 +5048,93 @@ impl LiquifactEscrow {
         count
     }
 
+    /// Set an investor-specific expiry timestamp for the allowlist gate.
+    ///
+    /// `expires_at == 0` disables the expiry check for that investor. Otherwise, the value must be
+    /// strictly in the future relative to the current ledger timestamp.
+    pub fn set_investor_allowlist_expiry(env: Env, investor: Address, expires_at: u64) {
+        let _escrow = Self::load_escrow_require_admin(&env);
+        if expires_at != 0 {
+            let now = env.ledger().timestamp();
+            ensure(&env, expires_at > now, EscrowError::AllowlistExpiryInPast);
+        }
+
+        env.storage().persistent().set(
+            &DataKey::InvestorAllowlistExpiry(investor.clone()),
+            &expires_at,
+        );
+
+        let ttl = Self::get_storage_limit(env.clone());
+        env.storage().persistent().extend_ttl(
+            &DataKey::InvestorAllowlistExpiry(investor.clone()),
+            ttl,
+            ttl,
+        );
+
+        InvestorAllowlistExpirySet {
+            name: symbol_short!("al_exp"),
+            invoice_id: 0,
+            investor,
+            expires_at,
+        }
+        .publish(&env);
+    }
+
+    /// Batch set an investor-specific expiry timestamp for the allowlist gate.
+    pub fn set_investors_allowlist_expiry(env: Env, investors: Vec<Address>, expires_at: u64) {
+        let escrow = Self::load_escrow_require_admin(&env);
+
+        let n = investors.len();
+        ensure(&env, n > 0, EscrowError::InvestorBatchEmpty);
+        ensure(
+            &env,
+            n <= MAX_INVESTOR_ALLOWLIST_BATCH,
+            EscrowError::InvestorBatchTooLarge,
+        );
+
+        if expires_at != 0 {
+            let now = env.ledger().timestamp();
+            ensure(&env, expires_at > now, EscrowError::AllowlistExpiryInPast);
+        }
+
+        let ttl = Self::get_storage_limit(env.clone());
+        for i in 0..n {
+            let inv = investors.get(i).unwrap();
+            env.storage()
+                .persistent()
+                .set(&DataKey::InvestorAllowlistExpiry(inv.clone()), &expires_at);
+            env.storage().persistent().extend_ttl(
+                &DataKey::InvestorAllowlistExpiry(inv.clone()),
+                ttl,
+                ttl,
+            );
+
+            InvestorAllowlistExpirySet {
+                name: symbol_short!("al_exp"),
+                invoice_id: 0,
+                investor: inv.clone(),
+                expires_at,
+            }
+            .publish(&env);
+        }
+        let _ = escrow;
+    }
+
+    pub fn get_investor_allowlist_expiry(env: Env, investor: Address) -> u64 {
+        env.storage()
+            .persistent()
+            .get(&DataKey::InvestorAllowlistExpiry(investor))
+            .unwrap_or(0)
+    }
+
+    pub fn is_investor_allowlist_valid(env: Env, investor: Address) -> bool {
+        if !Self::is_investor_allowlisted(env.clone(), investor.clone()) {
+            return false;
+        }
+        let expiry = Self::get_investor_allowlist_expiry(env.clone(), investor);
+        expiry == 0 || env.ledger().timestamp() < expiry
+    }
+
     /// Convenience alias for [`LiquifactEscrow::set_legal_hold`] with `active = false`.
     pub fn clear_legal_hold(env: Env) {
         Self::set_legal_hold(env, false);
@@ -5724,11 +5827,17 @@ impl LiquifactEscrow {
         }
 
         if Self::is_allowlist_active(env.clone()) {
-            ensure(
-                &env,
-                Self::is_investor_allowlisted(env.clone(), investor.clone()),
-                EscrowError::InvestorNotAllowlisted,
-            );
+            let is_allowlisted = Self::is_investor_allowlisted(env.clone(), investor.clone());
+            ensure(&env, is_allowlisted, EscrowError::InvestorNotAllowlisted);
+
+            let expiry = Self::get_investor_allowlist_expiry(env.clone(), investor.clone());
+            if expiry != 0 {
+                ensure(
+                    &env,
+                    env.ledger().timestamp() < expiry,
+                    EscrowError::InvestorAllowlistExpired,
+                );
+            }
         }
 
         let prev: i128 = Self::get_persistent_investor_contribution(&env, investor.clone());
