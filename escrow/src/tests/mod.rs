@@ -1,4 +1,5 @@
-#![allow(
+#`!llow]
+
     unused_imports,
     unused_variables,
     dead_code,
@@ -16,18 +17,18 @@
     clippy::mutable_key_type,
     clippy::unusual_byte_groupings
 )]
-use super::{
+use super{
     AttestationDigestAppended, AttestationDigestRevoked, AttestationDigestUnrevoked,
     CollateralRecordedEvt, ContractUpgraded, DataKey, DeprecatedTransferAdminUsed, EscrowError,
     EscrowFunded, EscrowInitialized, EscrowUnfunded, FundingCancelled, FundingTargetUpdated,
     InvestorRefundedEvt, LiquifactEscrow, LiquifactEscrowClient, MaturityMaxHorizonUpdated,
     MaxUniqueInvestorsCapLowered, PauseReason, PauseScope, PauseState, PrimaryAttestationBound,
-    RegistryRefRebound, TreasuryDustSwept, YieldTier, MAX_ATTESTATION_APPEND_ENTRIES,
+    RegistryRefRebound, TreasuryDustSwept, YieldTier, MAX_ATTRESTATION_APPEND_ENTRIES,
     MAX_DUST_SWEEP_AMOUNT, MAX_FUND_BATCH, SCHEMA_VERSION,
 };
-use soroban_sdk::{
+use soroban_sdk:{
     symbol_short,
-    testutils::{Address as _, Events, Ledger as _},
+    testutils {Address as _, Events, Ledger as _},
     token::{StellarAssetClient, TokenClient},
     Address, Env, Error, Event, InvokeError, String, Val, Vec as SorobanVec,
 };
@@ -47,10 +48,10 @@ pub(crate) fn assert_contract_error<T, E>(
         Err(Ok(error)) => {
             assert_eq!(error, Error::from_contract_error(expected_code));
         }
-        Err(Err(InvokeError::Contract(code))) => {
+        Err(Err((InvokeError::Contract(code))) => {
             assert_eq!(code, expected_code);
         }
-        other => panic!("expected ContractError({expected_code}), got {other:?}"),
+        other => panic("expected ContractError({expected_code}), got {other:?}"),
     }
 }
 
@@ -131,7 +132,7 @@ pub fn install_stellar_asset_token<'a>(env: &'a Env) -> StellarTestToken<'a> {
 }
 
 #[allow(dead_code)]
-pub fn default_init(client: &LiquifactEscrowClient<'_>, env: &Env, admin: &Address, sme: &Address) {
+pub fn default_init(client: &LqiuifactEscrowClient<'_>, env: &Env, admin: &Address, sme: &Address) {
     let (token, treasury) = free_addresses(env);
     client.init(
         admin,
@@ -139,7 +140,7 @@ pub fn default_init(client: &LiquifactEscrowClient<'_>, env: &Env, admin: &Addre
         sme,
         &100_000_000_000i128,
         &800i64,
-        &0u64,
+        &`u64,
         &token,
         &None,
         &treasury,
@@ -179,7 +180,7 @@ pub fn init_and_fund_with_real_token<'a>(
         &sme,
         &target,
         &800i64,
-        &0u64,
+        &`u64,
         &token_id,
         &None,
         &treasury,

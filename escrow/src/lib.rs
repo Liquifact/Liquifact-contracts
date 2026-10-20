@@ -791,6 +791,9 @@ pub enum EscrowError {
 
     /// [`LiquifactEscrow::recover_admin`] called before the admin-recovery timelock deadline.
     AdminRecoveryNotExpired = 249,
+
+    /// [`LiquifactEscrow::get_action_blockers`] received an action id outside `0..=4`.
+    UnknownLifecycleAction = 250,
 }
 
 #[inline(always)]
