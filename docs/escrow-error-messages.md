@@ -46,6 +46,24 @@ Codes raised by cross-contract callback entrypoints (`register_callback`, `execu
 | `CallbackAfterCancellation` | 244 | Callback registration or execution attempted on a cancelled escrow (`status == 4`). |
 | `CallbackNotFound` | 245 | Callback execution attempted with a nonce that has no registered context in storage. |
 
+## Fee-Schedule Errors
+
+| Error Name | Code | Description |
+|---|---:|---|
+| `FeeScheduleOutOfBounds` | 250 | `submit_fee_schedule` received bounds that do not contain `fee_bps`, or a maximum above 10,000 basis points. |
+| `FeeScheduleActivationInvalid` | 251 | The activation ledger is not strictly future or is more than 2,592,000 ledgers (about 30 days at one ledger/second) ahead. |
+| `FeeSchedulePendingExists` | 252 | A different pending schedule already exists. An identical submission is a successful no-op. |
+| `FeeScheduleNotPending` | 253 | `cancel_pending_fee_schedule` was called without a pending schedule. |
+
+`cancel_pending_fee_schedule` is administrator-only and returns the removed schedule. Fee-schedule
+events are `FeeScheduleSubmitted` (`name`, `invoice_id`, `fee_bps`, `activation_ledger`),
+`FeeScheduleActivated` (`name`, `invoice_id`, `fee_bps`), and `FeeScheduleCancelled` (`name`,
+`invoice_id`, `fee_bps`). Activation is lazy when a later submission encounters a matured pending
+schedule, as well as explicit through `activate_fee_schedule`. `FeeScheduleError` remains in the
+contract specification only for compatibility and is deprecated; fee-schedule entrypoints now use
+the `EscrowError` codes above. Scheduled fees are not used by `withdraw`, which continues to use
+`ProtocolFeeBps`.
+
 Codes 36–41 (SEP-41 transfer-wrapper guards, also raised by `withdraw` and
 `claim_investor_payout`) are documented in
-[`docs/escrow-token-safety.md`](escrow-token-safety.md).
+[`docs/escrow-token-safety.md`](escrow-token-safety.md).

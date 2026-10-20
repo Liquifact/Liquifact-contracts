@@ -64,6 +64,7 @@ mod cap_validation;
 mod coverage;
 mod external_calls;
 mod external_calls_mocked;
+mod fee_schedule;
 mod funding;
 mod init;
 // `integration` (integration.rs) is disabled: it was written against a contract
