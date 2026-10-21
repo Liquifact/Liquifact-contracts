@@ -58,30 +58,44 @@ If instance storage expires and is not extended, `AllowlistActive` returns `fals
 `unwrap_or`), silently disabling the allowlist gate even if persistent allowlist entries remain.
 Operators must extend instance storage TTL together with persistent storage TTL.
 
-### Write-time TTL extension for persistent keys
+### Write-time TTL extension for per-investor keys
 
-Per-investor persistent keys (`InvestorContribution`, `InvestorEffectiveYield`, `InvestorClaimNotBefore`, `InvestorClaimed`) are automatically extended at write time inside the fund and claim flows using the `PERSISTENT_TTL_MIN_EXTENSION_LEDGERS` horizon. This provides defense-in-depth against silent expiry of live positions prior to settlement.
+Per-investor persistent keys (`InvestorContribution`, `InvestorEffectiveYield`, `InvestorClaimNotBefore`, `InvestorClaimed`, `InvestorAllowlisted`) are automatically extended at write time using the `extend_investor_ttl()` helper function in the following flows:
+
+- **`fund_impl`**: extends all investor keys after recording contribution and yields; also extends instance TTL once at the end
+- **`unfund`**: extends all investor keys after reducing/clearing contribution
+- **`claim_investor_payout`**: extends all investor keys after marking investor as claimed
+- **`refund_impl`**: extends all investor keys after zeroing contribution in cancelled escrows
+
+This provides defense-in-depth against silent expiry of live positions prior to settlement. Positions with maturity dates years in the future are kept alive by the configured storage horizon (see **Admin-configurable storage limit** below).
+
+**Instance TTL extension**: `fund_impl` and `settle` each extend instance TTL once (contract-wide, not per-investor) to keep time-sensitive keys alive: `Escrow`, `Version`, `LegalHold`, `FundingCloseSnapshot`, and other state markers.
 
 ### Permissionless TTL extension
 
 The contract includes a permissionless `bump_ttl` entrypoint that extends TTLs for:
 
-- **Instance storage** keys that affect settlement/claim readiness:
+- **Instance storage** (contract-wide, single call covers all instance keys):
   - `DataKey::Escrow`
   - `DataKey::Version`
   - `DataKey::LegalHold`
   - `DataKey::AllowlistActive`
   - `DataKey::FundingCloseSnapshot`
-  - per-investor instance keys passed in via the `allowlisted: Vec<Address>` argument
-    (`DataKey::InvestorContribution(addr)` and `DataKey::InvestorClaimNotBefore(addr)`)
+  - and all other instance keys
 
-- **Persistent storage** allowlist entries:
-  - `DataKey::InvestorAllowlisted(addr)` for each address provided by the caller.
+- **Persistent storage per-investor keys** (one set per investor address in the allowlist):
+  - `DataKey::InvestorAllowlisted(addr)` 
+  - `DataKey::InvestorContribution(addr)`
+  - `DataKey::InvestorEffectiveYield(addr)`
+  - `DataKey::InvestorClaimNotBefore(addr)`
+  - `DataKey::InvestorClaimed(addr)`
 
 Key properties (invariant):
 
 - **Extension never shortens** an existing TTL.
 - **No state mutation beyond TTL extension**: `bump_ttl` only calls `extend_ttl(...)`.
+- **Efficient**: instance TTL is extended once (contract-wide), and each persistent investor key is extended once per investor address (checked via `has()` first to avoid trapping on missing keys).
+- **Idempotent**: calling with the same addresses multiple times is safe and harmless.
 
 ### Thresholds
 
@@ -90,17 +104,23 @@ Thresholds are defined as **named constants** in `escrow/src/lib.rs`:
 - `INSTANCE_TTL_MIN_EXTENSION_LEDGERS` (default ≈ 1h)
 - `PERSISTENT_TTL_MIN_EXTENSION_LEDGERS` (default ≈ 1h; kept equal to the instance default)
 
+These are used as **fallback defaults** when no admin-configured storage limit is set (see next section).
+
 ### Admin-configurable storage limit
 
 Operators may override the TTL extension horizon via:
 
-- `get_storage_limit` — returns the configured ledger count, or the compile-time default when unset
+- `get_storage_limit` — returns the admin-configured ledger count, or the compile-time default when unset
 - `set_storage_limit` — admin-only; accepts values in `MIN_STORAGE_LIMIT_LEDGERS..=MAX_STORAGE_LIMIT_LEDGERS`
 
 Unset storage preserves historical behaviour (`INSTANCE_TTL_MIN_EXTENSION_LEDGERS`). Out-of-range
 values revert with typed `EscrowError::StorageLimitOutOfRange` (223). The configured limit is
-applied uniformly to instance and persistent `extend_ttl` calls inside `bump_ttl` and funding-
-deadline TTL top-ups.
+applied uniformly to:
+
+- **Write-time extensions**: `extend_investor_ttl()` helper and instance TTL extension in `fund_impl` and `settle`
+- **Permissionless `bump_ttl`**: both instance and persistent key extensions
+- **Admin `batch_bump_ttl`**: both instance and persistent key extensions, with instance TTL extended at most once per call
+- **Funding-deadline top-ups** (existing behaviour, preserved)
 
 ### Why permissionless is acceptable
 
