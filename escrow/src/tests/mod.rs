@@ -19,12 +19,14 @@
 )]
 use super::{
     AttestationDigestAppended, AttestationDigestRevoked, AttestationDigestUnrevoked,
-    CollateralRecordedEvt, ContractUpgraded, DataKey, DeprecatedTransferAdminUsed, EscrowError,
-    EscrowFunded, EscrowInitialized, EscrowUnfunded, FundingCancelled, FundingTargetUpdated,
-    InvestorRefundedEvt, LiquifactEscrow, LiquifactEscrowClient, MaturityMaxHorizonUpdated,
+    AttestationRequirementChanged, CollateralRecordedEvt, ContractUpgraded, DataKey,
+    DeprecatedTransferAdminUsed, EscrowError, EscrowFunded, EscrowInitialized, EscrowUnfunded,
+    FundingCancelled, FundingDeadlineExtensionStats, FundingTargetUpdated, InvestorRefundedEvt,
+    LiquifactEscrow, LiquifactEscrowClient, MaturityMaxHorizonUpdated,
     MaxUniqueInvestorsCapLowered, PauseReason, PauseScope, PauseState, PrimaryAttestationBound,
     RegistryRefRebound, TreasuryDustSwept, YieldTier, MAX_ATTESTATION_APPEND_ENTRIES,
-    MAX_DUST_SWEEP_AMOUNT, MAX_FUND_BATCH, SCHEMA_VERSION,
+    MAX_DUST_SWEEP_AMOUNT, MAX_FUNDING_DEADLINE_EXTENSIONS,
+    MAX_FUNDING_DEADLINE_TOTAL_EXTENSION_SECS, MAX_FUND_BATCH, SCHEMA_VERSION,
 };
 use soroban_sdk:{
     symbol_short,
@@ -71,6 +73,7 @@ mod init;
 // API (close-escrow, admin-transfer, collateral events) and an older SDK event
 // model that no longer exist, and is superseded by the active modules below.
 // mod integration;
+mod funding_deadline_cap_tests;
 mod integration_status_guards;
 mod legal_hold;
 mod migration_errors;
@@ -82,6 +85,7 @@ mod reconciliation_lifecycle;
 mod settlement;
 mod settlement_config_view;
 mod treasury_rotation;
+mod withdraw_attestation_gate;
 mod yield_tier_boundaries;
 
 /// Registers a new escrow contract instance and returns its contract id.
