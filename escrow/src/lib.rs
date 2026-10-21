@@ -821,6 +821,17 @@ pub enum EscrowError {
     /// (`new_deadline - original_deadline`) would exceed
     /// [`MAX_FUNDING_DEADLINE_TOTAL_EXTENSION_SECS`]. Use a smaller extension.
     FundingDeadlineExtensionTooLong = 253,
+
+    /// [`LiquifactEscrow::request_clear_legal_hold`] or
+    /// [`LiquifactEscrow::clear_legal_hold_after_delay`] was called when no legal hold
+    /// is currently active. The hold lifecycle requires `LegalHold = true` before either
+    /// of these transitions is valid.
+    LegalHoldNotActive = 254,
+
+    /// [`LiquifactEscrow::set_legal_hold(true)`] was called while a legal hold is already
+    /// active. Re-asserting an active hold is rejected to prevent a pending clear request
+    /// from being silently discarded without emitting [`LegalHoldClearCancelled`] first.
+    LegalHoldAlreadyActive = 255,
 }
 
 #[inline(always)]
@@ -3717,9 +3728,7 @@ impl LiquifactEscrow {
 
         for key in keys_to_check.iter() {
             if env.storage().persistent().has(key) {
-                env.storage()
-                    .persistent()
-                    .extend_ttl(key, ttl, ttl);
+                env.storage().persistent().extend_ttl(key, ttl, ttl);
             }
         }
     }
@@ -4921,7 +4930,21 @@ impl LiquifactEscrow {
     pub fn set_legal_hold(env: Env, active: bool) {
         let escrow = Self::load_escrow_require_admin(&env);
 
-        if !active && Self::legal_hold_active(&env) {
+        let currently_active = Self::legal_hold_active(&env);
+
+        // Setting false when no hold is active is a documented no-op with no event.
+        if !active && !currently_active {
+            return;
+        }
+
+        // Setting true while already active fails — prevents silently discarding a
+        // pending clear request. The caller must cancel the pending request first via
+        // cancel_clear_legal_hold, then re-assert if needed.
+        if active && currently_active {
+            fail(&env, EscrowError::LegalHoldAlreadyActive);
+        }
+
+        if !active && currently_active {
             let delay = Self::get_legal_hold_clear_delay(env.clone());
             if delay > 0 {
                 let clearable_at: Option<u64> =
@@ -4940,9 +4963,27 @@ impl LiquifactEscrow {
             }
         }
 
-        env.storage()
-            .instance()
-            .remove(&DataKey::LegalHoldClearableAt);
+        // If re-asserting the hold (active=true) while a pending clear exists, cancel it
+        // and emit LegalHoldClearCancelled before updating state.
+        // (This path is now unreachable due to the LegalHoldAlreadyActive guard above,
+        // but kept defensively for any future state where this could be reached.)
+        if active {
+            if env.storage().instance().has(&DataKey::LegalHoldClearableAt) {
+                env.storage()
+                    .instance()
+                    .remove(&DataKey::LegalHoldClearableAt);
+
+                LegalHoldClearCancelled {
+                    name: symbol_short!("lh_cancel"),
+                    invoice_id: escrow.invoice_id.clone(),
+                }
+                .publish(&env);
+            }
+        } else {
+            env.storage()
+                .instance()
+                .remove(&DataKey::LegalHoldClearableAt);
+        }
 
         env.storage().instance().set(&DataKey::LegalHold, &active);
 
@@ -4966,6 +5007,13 @@ impl LiquifactEscrow {
     /// | `timestamp + delay` overflows | [`EscrowError::LegalHoldClearDelayOverflow`] |
     pub fn request_clear_legal_hold(env: Env) {
         let escrow = Self::load_escrow_require_admin(&env);
+
+        // Cannot request a clear when no hold is active — there is nothing to clear.
+        ensure(
+            &env,
+            Self::legal_hold_active(&env),
+            EscrowError::LegalHoldNotActive,
+        );
 
         let now = env.ledger().timestamp();
         let delay = Self::get_legal_hold_clear_delay(env.clone());
@@ -5214,6 +5262,13 @@ impl LiquifactEscrow {
         let escrow = Self::get_escrow(env.clone());
         escrow.admin.require_auth();
 
+        // Cannot clear when no hold is active.
+        ensure(
+            &env,
+            Self::legal_hold_active(&env),
+            EscrowError::LegalHoldNotActive,
+        );
+
         ensure(
             &env,
             env.storage().instance().has(&DataKey::LegalHoldClearableAt),
@@ -5238,8 +5293,10 @@ impl LiquifactEscrow {
 
         env.storage().instance().set(&DataKey::LegalHold, &false);
 
+        // Use the unified "legalhld" topic — previously emitted "legal_h" which caused
+        // indexers routing on topic[0] to miss half of the hold transitions.
         LegalHoldChanged {
-            name: symbol_short!("legal_h"),
+            name: symbol_short!("legalhld"),
             invoice_id: escrow.invoice_id,
             active: 0,
         }
@@ -7154,9 +7211,7 @@ impl LiquifactEscrow {
 
             for key in keys_to_check.iter() {
                 if env.storage().persistent().has(key) {
-                    env.storage()
-                        .persistent()
-                        .extend_ttl(key, ttl, ttl);
+                    env.storage().persistent().extend_ttl(key, ttl, ttl);
                 }
             }
         }
@@ -7267,21 +7322,14 @@ impl LiquifactEscrow {
                     // five per-investor keys written yet. Skipping absent keys is safe:
                     // there is nothing to keep alive if the entry does not exist.
                     if env.storage().persistent().has(&key) {
-                        env.storage().persistent().extend_ttl(
-                            &key,
-                            ttl,
-                            ttl,
-                        );
+                        env.storage().persistent().extend_ttl(&key, ttl, ttl);
                     }
                 }
                 // ── All other keys live in instance storage ───────────────────
                 // Instance TTL is contract-wide; one call covers all instance keys.
                 _ => {
                     if !extended_instance {
-                        env.storage().instance().extend_ttl(
-                            ttl,
-                            ttl,
-                        );
+                        env.storage().instance().extend_ttl(ttl, ttl);
                         extended_instance = true;
                     }
                 }
