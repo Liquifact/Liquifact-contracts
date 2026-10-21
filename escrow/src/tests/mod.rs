@@ -63,6 +63,7 @@ mod admin;
 mod attestations;
 mod auth_matrix;
 mod cap_validation;
+mod collateral_lock;
 #[rustfmt::skip]
 mod coverage;
 mod external_calls;

@@ -842,6 +842,25 @@ pub enum EscrowError {
     LegalHoldBlocksUpgrade = 257,
     /// Arithmetic overflow computing `now + UPGRADE_TIMELOCK_SECS` in `propose_upgrade`.
     UpgradeEtaOverflow = 258,
+
+    // --- Issue #1563: Collateral lock after funding ---
+    /// [`LiquifactEscrow::clear_sme_collateral_commitment`] blocked because the escrow
+    /// has received investor principal (`funded_amount > 0`) and is not in a terminal state
+    /// (settled / withdrawn / cancelled).
+    CollateralLockedAfterFunding = 259,
+    /// A legal hold blocks modifying the SME collateral commitment (record or clear).
+    LegalHoldBlocksCollateralChange = 260,
+    /// [`LiquifactEscrow::record_sme_collateral_commitment`] / [`LiquifactEscrow::batch_record_collateral`]
+    /// attempted to change the asset after funding. The asset must remain stable once
+    /// principal is recorded.
+    CollateralAssetChangeAfterFunding = 261,
+    /// [`LiquifactEscrow::record_sme_collateral_commitment`] / [`LiquifactEscrow::batch_record_collateral`]
+    /// attempted to decrease the amount after funding. The amount can only stay the same
+    /// or grow once principal is recorded.
+    CollateralDecreaseAfterFunding = 262,
+    /// [`LiquifactEscrow::batch_record_collateral`] received entries with different assets.
+    /// All entries in a batch must reference the same asset.
+    CollateralBatchMixedAssets = 263,
 }
 
 #[inline(always)]
@@ -3782,9 +3801,7 @@ impl LiquifactEscrow {
 
         for key in keys_to_check.iter() {
             if env.storage().persistent().has(key) {
-                env.storage()
-                    .persistent()
-                    .extend_ttl(key, ttl, ttl);
+                env.storage().persistent().extend_ttl(key, ttl, ttl);
             }
         }
     }
@@ -4097,7 +4114,10 @@ impl LiquifactEscrow {
     /// Guard ordering (ADR-002):
     /// 1. Read-only existence check — returns [`EscrowError::NoCollateralToClear`] if absent.
     /// 2. `require_auth` on the SME address (via `load_escrow_require_sme`).
-    /// 3. Remove storage entry and emit [`CollateralClearedEvt`].
+    /// 3. Legal-hold guard — [`EscrowError::LegalHoldBlocksCollateralChange`] if active.
+    /// 4. Funding-lock guard — [`EscrowError::CollateralLockedAfterFunding`] if
+    ///    `funded_amount > 0` and status is not terminal (2, 3, 4).
+    /// 5. Remove storage entry and emit [`CollateralClearedEvt`].
     pub fn clear_sme_collateral_commitment(env: Env) {
         let commitment: SmeCollateralCommitment = env
             .storage()
@@ -4106,6 +4126,16 @@ impl LiquifactEscrow {
             .unwrap_or_else(|| fail(&env, EscrowError::NoCollateralToClear));
 
         let escrow = Self::load_escrow_require_sme(&env);
+
+        // Legal hold blocks any collateral change.
+        guard_not_legal_hold(&env, EscrowError::LegalHoldBlocksCollateralChange);
+
+        // After funding, the pledge may only be cleared in a terminal state.
+        ensure(
+            &env,
+            escrow.funded_amount == 0 || is_terminal_status(escrow.status),
+            EscrowError::CollateralLockedAfterFunding,
+        );
 
         env.storage()
             .instance()
@@ -4500,11 +4530,19 @@ impl LiquifactEscrow {
     /// - **Non-empty Asset Symbol:** The `asset` parameter must be a non-empty Symbol (not equal to `Symbol::new(&env, "")`).
     /// - **Monotonic Timestamp:** When replacing an existing commitment, the current ledger timestamp must not
     ///   be earlier than the prior `recorded_at` value (`now >= prior.recorded_at`).
+    /// - **Post-funding lock:** Once `funded_amount > 0`, the asset must match the existing
+    ///   pledge's asset and the amount must be ≥ the existing amount. A legal hold blocks
+    ///   the call entirely.
     ///
     /// # Errors
     /// - [`EscrowError::CollateralAmountNotPositive`] if `amount <= 0`.
     /// - [`EscrowError::CollateralAssetEmpty`] if `asset` is empty.
     /// - [`EscrowError::CollateralTimestampBackwards`] if the replacement timestamp is in the past.
+    /// - [`EscrowError::LegalHoldBlocksCollateralChange`] if a legal hold is active.
+    /// - [`EscrowError::CollateralAssetChangeAfterFunding`] if the asset differs from the
+    ///   existing pledge after funding.
+    /// - [`EscrowError::CollateralDecreaseAfterFunding`] if the amount is less than the
+    ///   existing pledge amount after funding.
     /// - Standard uninitialized check via `load_escrow_require_sme`.
     pub fn record_sme_collateral_commitment(
         env: Env,
@@ -4521,6 +4559,9 @@ impl LiquifactEscrow {
         // env.clone(): env is used again after this call for storage read/write, timestamp, and publish.
         let escrow = Self::load_escrow_require_sme(&env);
 
+        // Legal hold blocks any collateral change.
+        guard_not_legal_hold(&env, EscrowError::LegalHoldBlocksCollateralChange);
+
         let now = env.ledger().timestamp();
         let prior: Option<SmeCollateralCommitment> =
             env.storage().instance().get(&DataKey::SmeCollateralPledge);
@@ -4532,6 +4573,20 @@ impl LiquifactEscrow {
                 now >= existing.recorded_at,
                 EscrowError::CollateralTimestampBackwards,
             );
+
+            // After funding, asset must stay the same and amount must not decrease.
+            if escrow.funded_amount > 0 {
+                ensure(
+                    &env,
+                    asset == existing.asset,
+                    EscrowError::CollateralAssetChangeAfterFunding,
+                );
+                ensure(
+                    &env,
+                    amount >= existing.amount,
+                    EscrowError::CollateralDecreaseAfterFunding,
+                );
+            }
         }
 
         let commitment = SmeCollateralCommitment {
@@ -4564,6 +4619,12 @@ impl LiquifactEscrow {
     /// - `amount > 0` ([`EscrowError::CollateralAmountNotPositive`])
     /// - `asset` is non-empty ([`EscrowError::CollateralAssetEmpty`])
     /// - Replacement timestamp not backwards ([`EscrowError::CollateralTimestampBackwards`])
+    /// - All entries must reference the same asset ([`EscrowError::CollateralBatchMixedAssets`])
+    /// - After funding, asset must match the existing pledge and amount must not decrease
+    ///   ([`EscrowError::CollateralAssetChangeAfterFunding`],
+    ///   [`EscrowError::CollateralDecreaseAfterFunding`])
+    /// - A legal hold blocks the entire batch
+    ///   ([`EscrowError::LegalHoldBlocksCollateralChange`])
     ///
     /// The stored [`SmeCollateralCommitment`] after a successful batch is the **last** item in
     /// the vector. A [`CollateralRecordedEvt`] is emitted for **each** item, preserving the
@@ -4601,7 +4662,22 @@ impl LiquifactEscrow {
             );
         }
 
+        // Reject batches whose entries name different assets.
+        let first_asset = items.get(0).unwrap().0;
+        for i in 1..n {
+            let (asset, _) = items.get(i).unwrap();
+            ensure(
+                &env,
+                asset == first_asset,
+                EscrowError::CollateralBatchMixedAssets,
+            );
+        }
+
         let escrow = Self::load_escrow_require_sme(&env);
+
+        // Legal hold blocks any collateral change.
+        guard_not_legal_hold(&env, EscrowError::LegalHoldBlocksCollateralChange);
+
         let now = env.ledger().timestamp();
 
         // Check timestamp against the existing stored commitment (if any).
@@ -4615,6 +4691,20 @@ impl LiquifactEscrow {
                 now >= existing.recorded_at,
                 EscrowError::CollateralTimestampBackwards,
             );
+
+            // After funding, asset must stay the same and amount must not decrease.
+            if escrow.funded_amount > 0 {
+                ensure(
+                    &env,
+                    first_asset == existing.asset,
+                    EscrowError::CollateralAssetChangeAfterFunding,
+                );
+                ensure(
+                    &env,
+                    items.get(n - 1).unwrap().1 >= existing.amount,
+                    EscrowError::CollateralDecreaseAfterFunding,
+                );
+            }
         }
 
         let mut last_commitment = SmeCollateralCommitment {
@@ -7339,9 +7429,7 @@ impl LiquifactEscrow {
 
             for key in keys_to_check.iter() {
                 if env.storage().persistent().has(key) {
-                    env.storage()
-                        .persistent()
-                        .extend_ttl(key, ttl, ttl);
+                    env.storage().persistent().extend_ttl(key, ttl, ttl);
                 }
             }
         }
@@ -7452,21 +7540,14 @@ impl LiquifactEscrow {
                     // five per-investor keys written yet. Skipping absent keys is safe:
                     // there is nothing to keep alive if the entry does not exist.
                     if env.storage().persistent().has(&key) {
-                        env.storage().persistent().extend_ttl(
-                            &key,
-                            ttl,
-                            ttl,
-                        );
+                        env.storage().persistent().extend_ttl(&key, ttl, ttl);
                     }
                 }
                 // ── All other keys live in instance storage ───────────────────
                 // Instance TTL is contract-wide; one call covers all instance keys.
                 _ => {
                     if !extended_instance {
-                        env.storage().instance().extend_ttl(
-                            ttl,
-                            ttl,
-                        );
+                        env.storage().instance().extend_ttl(ttl, ttl);
                         extended_instance = true;
                     }
                 }
