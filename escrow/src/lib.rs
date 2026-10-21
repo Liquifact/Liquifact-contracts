@@ -791,6 +791,24 @@ pub enum EscrowError {
 
     /// [`LiquifactEscrow::recover_admin`] called before the admin-recovery timelock deadline.
     AdminRecoveryNotExpired = 249,
+
+    /// [`LiquifactEscrow::init`] rejected a `funding_token`, `treasury`, or `sme_address`
+    /// equal to the escrow contract's own address. A self-referencing token or treasury
+    /// would make every transfer unexecutable (issue #1547).
+    InitAddressInvalid = 250,
+
+    /// [`LiquifactEscrow::init`] rejected `treasury == sme_address`. The protocol treasury
+    /// and the beneficiary must be distinct parties (issue #1547). `admin == sme_address`
+    /// remains allowed for dev-only deployments.
+    InitRoleConflict = 251,
+
+    /// A funding entrypoint ([`LiquifactEscrow::fund`], [`LiquifactEscrow::fund_with_commitment`],
+    /// or [`LiquifactEscrow::fund_batch`]) received an investor equal to the escrow's
+    /// `sme_address`, `admin`, `treasury`, or the contract itself. Role parties must not
+    /// fund their own invoice: a self-funding SME could fake investor demand and dilute
+    /// real investors' pro-rata share (issue #1547). Checked before `require_auth` and
+    /// before any storage write; `fund_batch` inherits the check atomically via `fund_impl`.
+    InvestorRoleConflict = 252,
 }
 
 #[inline(always)]
@@ -2713,6 +2731,21 @@ impl LiquifactEscrow {
         protocol_fee_bps: Option<i64>,
     ) -> InvoiceEscrow {
         admin.require_auth();
+
+        // -- Role separation (issue #1547) --
+        // No role address may be the contract itself: a self-referencing
+        // `funding_token` or `treasury` bricks every transfer, and a
+        // self-referencing `sme_address` would let the contract act as beneficiary.
+        let this = env.current_contract_address();
+        ensure(
+            &env,
+            funding_token != this && treasury != this && sme_address != this,
+            EscrowError::InitAddressInvalid,
+        );
+        // The protocol treasury and the beneficiary must be distinct parties.
+        // `admin == sme_address` stays allowed (dev-only convenience: one key
+        // drives both roles in tests and local sandboxes).
+        ensure(&env, treasury != sme_address, EscrowError::InitRoleConflict);
 
         ensure(&env, amount > 0, EscrowError::AmountMustBePositive);
         ensure(
@@ -5687,6 +5720,29 @@ impl LiquifactEscrow {
             EscrowError::PausedBlocksFunding,
         );
 
+        // -- Role separation (issue #1547) --
+        // Investors must not be a role party of this escrow (SME, admin, treasury) nor
+        // the contract itself: a self-funding SME could push the escrow to funded status
+        // with its own money, faking investor demand and diluting real investors' pro-rata
+        // share. Checked before require_auth and before any storage write so a rejected
+        // call leaves no trace. `fund_batch` inherits this check through `fund_impl`, so a
+        // batch containing a role address reverts atomically.
+        let mut escrow = Self::get_escrow(env.clone());
+        let treasury: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Treasury)
+            .unwrap_or_else(|| fail(&env, EscrowError::TreasuryNotSet));
+        let this = env.current_contract_address();
+        ensure(
+            &env,
+            investor != escrow.sme_address
+                && investor != escrow.admin
+                && investor != treasury
+                && investor != this,
+            EscrowError::InvestorRoleConflict,
+        );
+
         investor.require_auth();
 
         ensure(&env, amount > 0, EscrowError::FundingAmountNotPositive);
@@ -5704,8 +5760,7 @@ impl LiquifactEscrow {
             );
         }
 
-        // env.clone(): env is used again after this call for storage writes and publish.
-        let mut escrow = Self::get_escrow(env.clone());
+        // `escrow` was already read (and role-checked) above, before `require_auth`.
         // Operational pause gate (read-only), independent of the compliance legal hold below.
         guard_not_paused(&env, EscrowError::PausedBlocksFunding, PauseEntry::Funding);
         // Legal hold check is intentionally after the escrow read: the escrow is needed for

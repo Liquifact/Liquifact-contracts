@@ -71,6 +71,24 @@ All `get_*` and `is_*` functions carry no `require_auth`. They expose full escro
 - Optional; written as a hint at `init`.
 - **No on-chain authority.** The contract never reads or verifies this address after storage. Off-chain indexers must not treat its presence as proof of current registry membership.
 
+### 2.6 Role separation matrix (issue #1547)
+
+Every role is bound to a distinct, sensible address. The contract enforces the
+"may occupy" column on-chain; violations revert before any storage write.
+
+| Address | `init` rejects self-reference? | May fund as investor? | Notes |
+|---|---|---|---|
+| Contract itself (`env.current_contract_address()`) | yes — as `funding_token`, `treasury`, or `sme_address` → `InitAddressInvalid` (250) | no → `InvestorRoleConflict` (252) | A self-referencing token or treasury bricks every transfer |
+| SME (`InvoiceEscrow::sme_address`) | no (only `treasury == sme` is rejected → `InitRoleConflict` (251)) | no → `InvestorRoleConflict` (252) | A self-funding SME could fake investor demand and dilute pro-rata share |
+| Treasury (`DataKey::Treasury`) | no (only `treasury == sme` is rejected → `InitRoleConflict` (251)) | no → `InvestorRoleConflict` (252) | Treasury funding its own invoice is a conflicted buy |
+| Admin (`InvoiceEscrow::admin`) | no — `admin == sme` is **allowed, dev-only** (one key drives both roles in tests/sandboxes; production deployments must separate them) | no → `InvestorRoleConflict` (252) | Admin controls the invoice lifecycle and must not appear as demand |
+| Any other address | — | yes | Subject to allowlist, caps, floors, and pause/legal-hold gates |
+
+Enforcement points:
+
+- `init`: checks `funding_token`, `treasury`, `sme_address` against the contract address and `treasury` against `sme_address` after `admin.require_auth()`, before any storage write.
+- `fund_impl` (shared by `fund`, `fund_with_commitment`, and `fund_batch`): checks the investor against `sme_address`, `admin`, `treasury`, and the contract address after the pause gate and **before** `require_auth` and before any storage write. A batch containing a role address therefore reverts atomically with no entry recorded.
+
 ---
 
 ## 3. Invariants

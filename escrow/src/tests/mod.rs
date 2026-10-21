@@ -78,6 +78,7 @@ mod pause;
 mod pauser_boundary_tests;
 mod properties;
 mod reconciliation_lifecycle;
+mod role_separation;
 mod settlement;
 mod settlement_config_view;
 mod yield_tier_boundaries;
