@@ -109,3 +109,8 @@ pub(crate) fn callback_nonce() -> DataKey {
 pub(crate) fn callback_context(nonce: u64) -> DataKey {
     DataKey::CallbackContext(nonce)
 }
+
+/// Instance-storage optional performance fee in basis points taken from investor yield coupon.
+pub(crate) fn performance_fee_bps() -> DataKey {
+    DataKey::PerformanceFeeBps
+}

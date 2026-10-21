@@ -842,6 +842,9 @@ pub enum EscrowError {
     LegalHoldBlocksUpgrade = 257,
     /// Arithmetic overflow computing `now + UPGRADE_TIMELOCK_SECS` in `propose_upgrade`.
     UpgradeEtaOverflow = 258,
+
+    /// [`LiquifactEscrow::set_performance_fee_bps`] received a fee outside `0..=5_000`.
+    PerformanceFeeBpsOutOfRange = 259,
 }
 
 #[inline(always)]
@@ -1261,6 +1264,9 @@ pub enum DataKey {
     ///
     /// Absent ⇒ no proposal is pending.
     PendingUpgrade,
+    /// Performance fee in basis points (0..=5_000) taken from each investor's yield coupon.
+    /// Default `0`. Set via [`LiquifactEscrow::set_performance_fee_bps`].
+    PerformanceFeeBps,
 }
 
 // --- Data types ---
@@ -1814,6 +1820,25 @@ pub struct ProtocolFeeUpdated {
     pub invoice_id: Symbol,
     pub old_fee_bps: i64,
     pub new_fee_bps: i64,
+}
+
+#[contractevent]
+pub struct PerformanceFeeUpdated {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    pub old_fee_bps: u32,
+    pub new_fee_bps: u32,
+}
+
+#[contractevent]
+pub struct PerformanceFeeCollected {
+    pub name: Symbol,
+    #[topic]
+    pub investor: Address,
+    pub invoice_id: Symbol,
+    pub fee: i128,
 }
 
 /// Emitted by [`LiquifactEscrow::update_yield_bps`] when the base yield rate is changed.
@@ -3546,6 +3571,52 @@ impl LiquifactEscrow {
         .publish(&env);
 
         new_fee_bps
+    }
+
+    /// Admin-only setter for the performance fee in basis points.
+    ///
+    /// Callable only by admin while escrow status is 0 and funded_amount == 0.
+    /// Valid range: 0..=5_000, else fails with [`EscrowError::PerformanceFeeBpsOutOfRange`].
+    /// Emits [`PerformanceFeeUpdated`].
+    pub fn set_performance_fee_bps(env: Env, bps: u32) -> u32 {
+        let escrow = Self::load_escrow_require_admin(&env);
+
+        ensure(&env, escrow.status == 0, EscrowError::StatusNotZero);
+        ensure(&env, escrow.funded_amount == 0, EscrowError::StatusNotZero);
+        ensure(&env, bps <= 5_000, EscrowError::PerformanceFeeBpsOutOfRange);
+
+        let old_fee_bps: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::PerformanceFeeBps)
+            .unwrap_or(0);
+
+        if bps == old_fee_bps {
+            return old_fee_bps;
+        }
+
+        env.storage()
+            .instance()
+            .set(&DataKey::PerformanceFeeBps, &bps);
+
+        let invoice_id = escrow.invoice_id.clone();
+        PerformanceFeeUpdated {
+            name: symbol_short!("perf_upd"),
+            invoice_id,
+            old_fee_bps,
+            new_fee_bps: bps,
+        }
+        .publish(&env);
+
+        bps
+    }
+
+    /// Read-only view returning the current performance fee in basis points (default 0).
+    pub fn get_performance_fee_bps(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::PerformanceFeeBps)
+            .unwrap_or(0)
     }
 
     /// Optional cap on **distinct** investor addresses (`prev == 0` at fund time); [`None`] if unlimited.
@@ -6632,6 +6703,30 @@ impl LiquifactEscrow {
     /// # Errors
     /// Emits typed [`EscrowError`] codes for legal hold, missing contribution, unsettled escrow,
     /// or an unexpired commitment lock.
+    fn calculate_claim_split(env: &Env, payout: i128, contribution: i128) -> (i128, i128) {
+        let coupon = payout.checked_sub(contribution).unwrap_or(0).max(0);
+        let bps: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::PerformanceFeeBps)
+            .unwrap_or(0);
+
+        let fee: i128 = coupon
+            .checked_mul(bps as i128)
+            .and_then(|v| v.checked_div(10_000))
+            .unwrap_or(0);
+
+        let net: i128 = payout.checked_sub(fee).unwrap_or(payout);
+        (net, fee)
+    }
+
+    /// Read-only preview of net payout and performance fee for an investor: (net, fee).
+    pub fn preview_claim_split(env: Env, investor: Address) -> (i128, i128) {
+        let payout = Self::compute_investor_payout(env.clone(), investor.clone());
+        let contribution = Self::get_persistent_investor_contribution(&env, investor);
+        Self::calculate_claim_split(&env, payout, contribution)
+    }
+
     pub fn claim_investor_payout(env: Env, investor: Address) {
         // Operational pause gate (read-only), orthogonal to legal hold.
         ensure(
@@ -6682,16 +6777,39 @@ impl LiquifactEscrow {
         // Extend TTL for all per-investor persistent keys written during claim.
         Self::extend_investor_ttl(&env, &investor);
 
-        // Transfer gross payout from this contract to the investor.
+        let (net, fee) = Self::calculate_claim_split(&env, payout, contribution);
+
+        // Transfer net payout from this contract to the investor, and fee to treasury.
         let this = env.current_contract_address();
         let token_addr = Self::funding_token_or_fail(&env);
-        external_calls::transfer_funding_token_with_balance_checks(
-            &env,
-            &token_addr,
-            &this,
-            &investor,
-            payout,
-        );
+
+        if fee > 0 {
+            let treasury = Self::treasury_or_fail(&env);
+            external_calls::transfer_funding_token_with_balance_checks(
+                &env,
+                &token_addr,
+                &this,
+                &treasury,
+                fee,
+            );
+            PerformanceFeeCollected {
+                name: symbol_short!("perf_fee"),
+                investor: investor.clone(),
+                invoice_id: escrow.invoice_id.clone(),
+                fee,
+            }
+            .publish(&env);
+        }
+
+        if net > 0 {
+            external_calls::transfer_funding_token_with_balance_checks(
+                &env,
+                &token_addr,
+                &this,
+                &investor,
+                net,
+            );
+        }
 
         InvestorPayoutClaimed {
             name: symbol_short!("inv_claim"),
@@ -6745,8 +6863,11 @@ impl LiquifactEscrow {
             return 0;
         }
 
-        // All gates passed: return the gross payout
-        Self::compute_investor_payout(env, investor)
+        // All gates passed: return the net claimable payout
+        let payout = Self::compute_investor_payout(env.clone(), investor.clone());
+        let contribution = Self::get_persistent_investor_contribution(&env, investor);
+        let (net, _fee) = Self::calculate_claim_split(&env, payout, contribution);
+        net
     }
 
     /// On-chain read-only pro-rata gross payout for `investor`.
