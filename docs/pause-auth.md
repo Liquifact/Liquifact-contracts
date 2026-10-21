@@ -26,7 +26,7 @@ The pause is **orthogonal** to the compliance/legal hold: each flag blocks its g
 | Investors | No | No | **Yes** — `fund`, `fund_with_commitment`, `fund_batch`, `claim_investor_payout` are pause-gated |
 | `DataKey::PendingAdmin` | No | No | No |
 | Treasury | No | No — may not be installed as pauser | No — `sweep_terminal_dust` is **not** pause-gated |
-| Any other address | No | No — rejected with `NotPauser` (254) | N/A |
+| Any other address | No | No — rejected with `NotPauser` (263) | N/A |
 
 **Key insight:** Only the current `escrow.admin` may call `set_paused`. Admin rotation (`propose_admin` + `accept_admin`) is **not** blocked by pause, so a governance-controlled admin can always rotate authority to clear a stale pause.
 
@@ -115,7 +115,7 @@ escrow/src/lib.rs — set_pauser
 | Step | Detail |
 |---|---|
 | 1. Load escrow + admin auth | `Self::load_escrow_require_admin(&env)` — panics if the caller is not the current admin |
-| 2. Role-conflict check | Reject the SME address and the treasury address with `PauserRoleConflict` (253) |
+| 2. Role-conflict check | Reject the SME address and the treasury address with `PauserRoleConflict` (262) |
 | 3. Storage write | `DataKey::Pauser ← Address`, or `remove` when `None` |
 | 4. Emit event | `PauserChanged { name: "pauser", invoice_id, pauser: Option<Address> }` |
 
@@ -124,7 +124,7 @@ risk-bearing authority) nor the treasury address (which receives protocol fees) 
 single key would wear two hats on the same escrow.
 
 `None` revokes the pauser: the key is removed from storage and every later
-`pause_as_pauser` call fails with `NotPauser` (254).
+`pause_as_pauser` call fails with `NotPauser` (263).
 
 #### 2.4.2 `pause_as_pauser` — guard ordering
 
@@ -135,7 +135,7 @@ escrow/src/lib.rs — pause_as_pauser
 | Step | Detail |
 |---|---|
 | 1. Load escrow | `DataKey::Escrow` — `EscrowNotInitialized` (20) if absent |
-| 2. Verify the caller is the stored pauser | `stored_pauser == pauser` else `NotPauser` (254) |
+| 2. Verify the caller is the stored pauser | `stored_pauser == pauser` else `NotPauser` (263) |
 | 3. Auth | `pauser.require_auth()` — the pauser can never be impersonated |
 | 4. Rate-limit window | `pause_toggle_window(&env)` — **shared** with the admin, one combined count |
 | 5. Activate | `activate_pause(&env, invoice_id, scope, reason)` — identical state write and event as the admin path |
@@ -154,8 +154,8 @@ invocation.
 | Change pause configuration | `escrow.admin` only | `set_pause_max_duration`, `set_pause_cooldown`, `set_pause_rate_limit` are all admin-only |
 | Install / revoke a pauser | `escrow.admin` only | `set_pauser` is admin-only |
 | Extend a pause past its max duration | nobody | `activate_pause` never resets `PausedAt`; a re-pause only changes `scope`/`reason` |
-| Narrow an active pause's scope | nobody | `PauseAlreadyActive` (250) — the pauser may only widen |
-| Pause again during the cooldown | nobody | `PauseCooldownActive` (251) |
+| Narrow an active pause's scope | nobody | `PauseAlreadyActive` (259) — the pauser may only widen |
+| Pause again during the cooldown | nobody | `PauseCooldownActive` (260) |
 
 #### 2.4.4 Shared semantics with the admin path
 
@@ -384,7 +384,7 @@ Topics for indexer filtering:
 - **Type:** `Option<Address>` (stored as a bare `Address`; absence means "no pauser")
 - **Storage class:** Instance
 - **Default when absent:** `None` — no pauser configured, so `pause_as_pauser` always fails with
-  `NotPauser` (254)
+  `NotPauser` (263)
 - **Written by:** `set_pauser` (admin-only)
 - **Additive key (ADR-007):** appended at the end of the `DataKey` enum, so instances deployed
   before this change simply read the default.
@@ -432,7 +432,7 @@ When both flags are simultaneously active, the pause gate fires first in the can
    budget without also consuming its own share of that same budget.
 
 8. **Dedicated key enforced at install time:** `set_pauser` rejects the SME address and the
-   treasury address with `PauserRoleConflict` (253), so the pauser can never be a key that
+   treasury address with `PauserRoleConflict` (262), so the pauser can never be a key that
    already carries risk-bearing or fee-receiving authority on the same escrow.
 
 ---

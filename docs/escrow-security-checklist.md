@@ -269,10 +269,10 @@ Additional guarantees:
 
 - The pauser address must be **the one stored on-chain** and must sign the call
   (`stored_pauser == pauser` **and** `pauser.require_auth()`), so it can never be
-  impersonated. A wrong caller gets the typed `NotPauser` (254) error rather than an
+  impersonated. A wrong caller gets the typed `NotPauser` (263) error rather than an
   opaque auth panic.
 - `set_pauser` rejects the SME address and the treasury address with
-  `PauserRoleConflict` (253), so the pauser can never be a key that already carries
+  `PauserRoleConflict` (262), so the pauser can never be a key that already carries
   risk-bearing or fee-receiving authority on the same escrow.
 - The pauser and the admin share **one** rolling rate-limit window, so a pauser cannot be
   used to bypass a rate limit configured to protect the admin.

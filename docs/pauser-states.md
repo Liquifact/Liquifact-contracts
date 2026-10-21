@@ -48,8 +48,8 @@ The pauser's transitions go through the same `activate_pause` helper as the admi
 
 - `PausedAt` (and therefore the max-duration clock) is **never** reset by a pauser re-pause — the
   pauser cannot extend a pause;
-- a **narrower** scope is rejected with `PauseAlreadyActive` (250) — the pauser can only widen;
-- a re-pause inside the cooldown window is rejected with `PauseCooldownActive` (251);
+- a **narrower** scope is rejected with `PauseAlreadyActive` (259) — the pauser can only widen;
+- a re-pause inside the cooldown window is rejected with `PauseCooldownActive` (260);
 - the state written and the `PausedChanged { active: 1 }` event emitted are byte-identical to
   those of an admin-initiated pause.
 
@@ -72,11 +72,11 @@ When the contract evaluates as `Paused` (via the internal `paused_active` predic
 |---|---|
 | Storage key | `DataKey::Pauser` (Instance) |
 | Type | `Address`, stored as a bare address; absence ⇒ no pauser |
-| Default | `None` — `pause_as_pauser` fails with `NotPauser` (254) |
+| Default | `None` — `pause_as_pauser` fails with `NotPauser` (263) |
 | Setter | `set_pauser(pauser: Option<Address>)` — **admin only** |
 | Reader | `get_pauser() -> Option<Address>` — read-only, no auth |
 | Event | `PauserChanged { name: "pauser", invoice_id, pauser: Option<Address> }` |
-| Role conflicts | The SME address and the treasury address are rejected with `PauserRoleConflict` (253) |
+| Role conflicts | The SME address and the treasury address are rejected with `PauserRoleConflict` (262) |
 
 The pauser may **not** change any pause configuration: `set_pause_max_duration`,
 `set_pause_cooldown`, and `set_pause_rate_limit` all remain admin-only, and `set_pauser` itself
