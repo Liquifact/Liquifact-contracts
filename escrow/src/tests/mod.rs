@@ -76,6 +76,7 @@ mod init;
 mod funding_deadline_cap_tests;
 mod integration_status_guards;
 mod legal_hold;
+mod legal_hold_state_machine;
 mod migration_errors;
 mod paginated_views;
 mod pause;
