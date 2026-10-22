@@ -842,6 +842,11 @@ pub enum EscrowError {
     LegalHoldBlocksUpgrade = 257,
     /// Arithmetic overflow computing `now + UPGRADE_TIMELOCK_SECS` in `propose_upgrade`.
     UpgradeEtaOverflow = 258,
+
+    // --- Issue #1539: Persistent allowlist index ---
+    /// [`LiquifactEscrow::set_investor_allowlisted`] or migration encountered a corrupt
+    /// allowlist slot state (e.g., SlotOf points to a slot that contains a different address).
+    AllowlistSlotCorrupted = 259,
 }
 
 #[inline(always)]
@@ -1261,6 +1266,20 @@ pub enum DataKey {
     ///
     /// Absent ⇒ no proposal is pending.
     PendingUpgrade,
+
+    // --- Issue #1539: Persistent allowlist index ---
+    /// Per-slot allowlist entry mapping slot index to investor address.
+    /// **Persistent** storage. Used for O(1) enumeration. Slots are densely packed
+    /// via swap-remove: when an investor is removed, the last slot is moved into the
+    /// freed position and the count is decremented.
+    AllowlistSlot(u32),
+    /// Reverse mapping from investor address to their slot index.
+    /// **Persistent** storage. Used for O(1) membership lookup and removal.
+    /// Absent ⇒ investor is not in the allowlist.
+    AllowlistSlotOf(Address),
+    /// Total count of allowlisted investors.
+    /// **Instance** storage. Maintained as an O(1) counter. Absent ⇒ `0`.
+    AllowlistCount,
 }
 
 // --- Data types ---
@@ -3423,6 +3442,89 @@ impl LiquifactEscrow {
             .unwrap_or_else(|| Vec::new(env))
     }
 
+    /// Migrate legacy AllowlistIndex to persistent slot-based storage if present.
+    ///
+    /// Migrates up to MAX_INVESTOR_ALLOWLIST_BATCH entries per call. Once the index is empty,
+    /// it is deleted. This is called at the start of every allowlist write and read operation,
+    /// making migration lazy and bounded per call.
+    ///
+    /// # Migration strategy
+    /// - Read the legacy Vec<Address> from DataKey::AllowlistIndex (instance storage)
+    /// - For each address (up to MAX_INVESTOR_ALLOWLIST_BATCH), create a persistent slot
+    /// - Remove migrated entries from the vec
+    /// - If vec is now empty, delete the AllowlistIndex key
+    /// - Idempotent: safe to call multiple times
+    fn migrate_allowlist_index_if_needed(env: &Env) {
+        let legacy_index: Option<Vec<Address>> = env.storage().instance().get(&DataKey::AllowlistIndex);
+        
+        if let Some(mut index) = legacy_index {
+            if index.is_empty() {
+                // Empty legacy index, just remove it
+                env.storage().instance().remove(&DataKey::AllowlistIndex);
+                return;
+            }
+
+            let mut count: u32 = env
+                .storage()
+                .instance()
+                .get(&DataKey::AllowlistCount)
+                .unwrap_or(0);
+
+            let batch_size = index.len().min(MAX_INVESTOR_ALLOWLIST_BATCH);
+            let ttl = Self::get_storage_limit(env.clone());
+
+            // Migrate from the end to avoid shifting remaining elements
+            for _ in 0..batch_size {
+                if index.is_empty() {
+                    break;
+                }
+                
+                let addr = index.pop_back().unwrap();
+                
+                // Only migrate if the address is still allowlisted
+                let is_allowlisted: bool = env
+                    .storage()
+                    .persistent()
+                    .get(&DataKey::InvestorAllowlisted(addr.clone()))
+                    .unwrap_or(false);
+
+                if is_allowlisted {
+                    // Check if not already migrated (avoid duplicates)
+                    let already_has_slot = env.storage().persistent().has(&DataKey::AllowlistSlotOf(addr.clone()));
+                    
+                    if !already_has_slot {
+                        let slot_idx = count;
+                        env.storage()
+                            .persistent()
+                            .set(&DataKey::AllowlistSlot(slot_idx), &addr);
+                        env.storage()
+                            .persistent()
+                            .set(&DataKey::AllowlistSlotOf(addr.clone()), &slot_idx);
+
+                        env.storage()
+                            .persistent()
+                            .extend_ttl(&DataKey::AllowlistSlot(slot_idx), ttl, ttl);
+                        env.storage()
+                            .persistent()
+                            .extend_ttl(&DataKey::AllowlistSlotOf(addr), ttl, ttl);
+
+                        count += 1;
+                    }
+                }
+            }
+
+            env.storage().instance().set(&DataKey::AllowlistCount, &count);
+
+            if index.is_empty() {
+                // Migration complete, remove legacy index
+                env.storage().instance().remove(&DataKey::AllowlistIndex);
+            } else {
+                // More to migrate, save the reduced index
+                env.storage().instance().set(&DataKey::AllowlistIndex, &index);
+            }
+        }
+    }
+
     /// Assert that `index` falls within the current append-log bounds.
     ///
     /// Panics with [`EscrowError::AttestationIndexOutOfRange`] when `index >= log.len()`.
@@ -5076,49 +5178,126 @@ impl LiquifactEscrow {
     }
 
     /// Add or remove an investor from the allowlist.
+    ///
+    /// Uses persistent slot-based storage for O(1) add/remove operations.
+    /// Revoking a non-member (allowed = false on an address that was never allowlisted)
+    /// is a no-op: no persistent write and no event emission.
+    ///
+    /// # Storage layout
+    /// - `AllowlistSlot(slot_index) -> Address`: maps slot index to investor address
+    /// - `AllowlistSlotOf(Address) -> slot_index`: reverse mapping for O(1) lookup
+    /// - `AllowlistCount`: total count of allowlisted investors (instance storage)
+    ///
+    /// Removal uses swap-remove: the last slot is moved into the freed position,
+    /// preserving dense packing. Order is not preserved.
     pub fn set_investor_allowlisted(env: Env, investor: Address, allowed: bool) {
         let escrow = Self::load_escrow_require_admin(&env);
 
-        let was_allowlisted: bool = env
-            .storage()
-            .persistent()
-            .get(&DataKey::InvestorAllowlisted(investor.clone()))
-            .unwrap_or(false);
+        // Migrate legacy AllowlistIndex if present
+        Self::migrate_allowlist_index_if_needed(&env);
 
-        env.storage()
-            .persistent()
-            .set(&DataKey::InvestorAllowlisted(investor.clone()), &allowed);
+        let slot_key = DataKey::AllowlistSlotOf(investor.clone());
+        let existing_slot: Option<u32> = env.storage().persistent().get(&slot_key);
+        let was_allowlisted = existing_slot.is_some();
 
-        // Maintain the allowlist index
-        let mut index: Vec<Address> = env
-            .storage()
-            .instance()
-            .get(&DataKey::AllowlistIndex)
-            .unwrap_or_else(|| Vec::new(&env));
+        if allowed {
+            if !was_allowlisted {
+                // Add: write new slot, set reverse mapping, increment count
+                let count: u32 = env
+                    .storage()
+                    .instance()
+                    .get(&DataKey::AllowlistCount)
+                    .unwrap_or(0);
 
-        if allowed && !was_allowlisted {
-            index.push_back(investor.clone());
-        } else if !allowed && was_allowlisted {
-            // Remove from index by position
-            for i in 0..index.len() {
-                if index.get(i).unwrap() == investor {
-                    index.remove(i);
-                    break;
+                let slot_idx = count;
+                env.storage()
+                    .persistent()
+                    .set(&DataKey::AllowlistSlot(slot_idx), &investor);
+                env.storage().persistent().set(&slot_key, &slot_idx);
+                env.storage()
+                    .instance()
+                    .set(&DataKey::AllowlistCount, &(count + 1));
+
+                // Extend TTL for new persistent entries
+                let ttl = Self::get_storage_limit(env.clone());
+                env.storage()
+                    .persistent()
+                    .extend_ttl(&DataKey::AllowlistSlot(slot_idx), ttl, ttl);
+                env.storage().persistent().extend_ttl(&slot_key, ttl, ttl);
+
+                // Keep the flag for backwards compatibility
+                env.storage()
+                    .persistent()
+                    .set(&DataKey::InvestorAllowlisted(investor.clone()), &true);
+                env.storage()
+                    .persistent()
+                    .extend_ttl(&DataKey::InvestorAllowlisted(investor.clone()), ttl, ttl);
+
+                InvestorAllowlistChanged {
+                    name: symbol_short!("al_set"),
+                    invoice_id: escrow.invoice_id.clone(),
+                    investor,
+                    allowed: 1,
                 }
+                .publish(&env);
             }
-        }
+            // else: already allowlisted, no-op (idempotent)
+        } else {
+            if was_allowlisted {
+                // Remove: swap-remove pattern
+                let slot_to_remove = existing_slot.unwrap();
+                let count: u32 = env
+                    .storage()
+                    .instance()
+                    .get(&DataKey::AllowlistCount)
+                    .unwrap_or(0);
 
-        env.storage()
-            .instance()
-            .set(&DataKey::AllowlistIndex, &index);
+                ensure(&env, count > 0, EscrowError::AllowlistSlotCorrupted);
 
-        InvestorAllowlistChanged {
-            name: symbol_short!("al_set"),
-            invoice_id: escrow.invoice_id.clone(),
-            investor,
-            allowed: if allowed { 1 } else { 0 },
+                let last_slot = count - 1;
+
+                if slot_to_remove != last_slot {
+                    // Move last slot into the freed position
+                    let last_addr: Address = env
+                        .storage()
+                        .persistent()
+                        .get(&DataKey::AllowlistSlot(last_slot))
+                        .unwrap_or_else(|| fail(&env, EscrowError::AllowlistSlotCorrupted));
+
+                    env.storage()
+                        .persistent()
+                        .set(&DataKey::AllowlistSlot(slot_to_remove), &last_addr);
+                    env.storage()
+                        .persistent()
+                        .set(&DataKey::AllowlistSlotOf(last_addr), &slot_to_remove);
+                }
+
+                // Delete the last slot and reverse mapping
+                env.storage()
+                    .persistent()
+                    .remove(&DataKey::AllowlistSlot(last_slot));
+                env.storage().persistent().remove(&slot_key);
+
+                // Decrement count
+                env.storage()
+                    .instance()
+                    .set(&DataKey::AllowlistCount, &last_slot);
+
+                // Remove the flag entry (not write false)
+                env.storage()
+                    .persistent()
+                    .remove(&DataKey::InvestorAllowlisted(investor.clone()));
+
+                InvestorAllowlistChanged {
+                    name: symbol_short!("al_set"),
+                    invoice_id: escrow.invoice_id.clone(),
+                    investor,
+                    allowed: 0,
+                }
+                .publish(&env);
+            }
+            // else: not a member, no-op (no write, no event)
         }
-        .publish(&env);
     }
 
     /// Batch add or remove investors from the allowlist.
@@ -5144,48 +5323,118 @@ impl LiquifactEscrow {
             EscrowError::InvestorBatchTooLarge,
         );
 
-        // Load index once for the entire batch
-        let mut index: Vec<Address> = env
-            .storage()
-            .instance()
-            .get(&DataKey::AllowlistIndex)
-            .unwrap_or_else(|| Vec::new(&env));
+        // Migrate legacy AllowlistIndex if present
+        Self::migrate_allowlist_index_if_needed(&env);
+
+        let ttl = Self::get_storage_limit(env.clone());
 
         for i in 0..n {
             let inv = investors.get(i).unwrap();
 
-            let was_allowlisted: bool = env
-                .storage()
-                .persistent()
-                .get(&DataKey::InvestorAllowlisted(inv.clone()))
-                .unwrap_or(false);
+            let slot_key = DataKey::AllowlistSlotOf(inv.clone());
+            let existing_slot: Option<u32> = env.storage().persistent().get(&slot_key);
+            let was_allowlisted = existing_slot.is_some();
 
-            env.storage()
-                .persistent()
-                .set(&DataKey::InvestorAllowlisted(inv.clone()), &allowed);
+            if allowed {
+                if !was_allowlisted {
+                    let count: u32 = env
+                        .storage()
+                        .instance()
+                        .get(&DataKey::AllowlistCount)
+                        .unwrap_or(0);
 
-            if allowed && !was_allowlisted {
-                index.push_back(inv.clone());
-            } else if !allowed && was_allowlisted {
-                for j in 0..index.len() {
-                    if index.get(j).unwrap() == inv {
-                        index.remove(j);
-                        break;
+                    let slot_idx = count;
+                    env.storage()
+                        .persistent()
+                        .set(&DataKey::AllowlistSlot(slot_idx), &inv);
+                    env.storage().persistent().set(&slot_key, &slot_idx);
+                    env.storage()
+                        .instance()
+                        .set(&DataKey::AllowlistCount, &(count + 1));
+
+                    env.storage()
+                        .persistent()
+                        .extend_ttl(&DataKey::AllowlistSlot(slot_idx), ttl, ttl);
+                    env.storage().persistent().extend_ttl(&slot_key, ttl, ttl);
+
+                    env.storage()
+                        .persistent()
+                        .set(&DataKey::InvestorAllowlisted(inv.clone()), &true);
+                    env.storage()
+                        .persistent()
+                        .extend_ttl(&DataKey::InvestorAllowlisted(inv.clone()), ttl, ttl);
+
+                    InvestorAllowlistChanged {
+                        name: symbol_short!("al_set"),
+                        invoice_id: escrow.invoice_id.clone(),
+                        investor: inv.clone(),
+                        allowed: 1,
                     }
+                    .publish(&env);
+                }
+            } else {
+                if was_allowlisted {
+                    let slot_to_remove = existing_slot.unwrap();
+                    let count: u32 = env
+                        .storage()
+                        .instance()
+                        .get(&DataKey::AllowlistCount)
+                        .unwrap_or(0);
+
+                    ensure(&env, count > 0, EscrowError::AllowlistSlotCorrupted);
+
+                    let last_slot = count - 1;
+
+                    if slot_to_remove != last_slot {
+                        let last_addr: Address = env
+                            .storage()
+                            .persistent()
+                            .get(&DataKey::AllowlistSlot(last_slot))
+                            .unwrap_or_else(|| fail(&env, EscrowError::AllowlistSlotCorrupted));
+
+                        env.storage()
+                            .persistent()
+                            .set(&DataKey::AllowlistSlot(slot_to_remove), &last_addr);
+                        env.storage()
+                            .persistent()
+                            .set(&DataKey::AllowlistSlotOf(last_addr), &slot_to_remove);
+                    }
+
+                    env.storage()
+                        .persistent()
+                        .remove(&DataKey::AllowlistSlot(last_slot));
+                    env.storage().persistent().remove(&slot_key);
+                    env.storage()
+                        .instance()
+                        .set(&DataKey::AllowlistCount, &last_slot);
+
+                    env.storage()
+                        .persistent()
+                        .remove(&DataKey::InvestorAllowlisted(inv.clone()));
+
+                    InvestorAllowlistChanged {
+                        name: symbol_short!("al_set"),
+                        invoice_id: escrow.invoice_id.clone(),
+                        investor: inv.clone(),
+                        allowed: 0,
+                    }
+                    .publish(&env);
                 }
             }
-
-            InvestorAllowlistChanged {
-                name: symbol_short!("al_set"),
-                invoice_id: escrow.invoice_id.clone(),
-                investor: inv.clone(),
-                allowed: if allowed { 1 } else { 0 },
-            }
-            .publish(&env);
         }
     }
 
     pub fn is_investor_allowlisted(env: Env, investor: Address) -> bool {
+        // Check new slot-based structure first
+        let has_slot = env
+            .storage()
+            .persistent()
+            .has(&DataKey::AllowlistSlotOf(investor.clone()));
+        if has_slot {
+            return true;
+        }
+
+        // Fallback to legacy flag for migration compatibility
         env.storage()
             .persistent()
             .get(&DataKey::InvestorAllowlisted(investor))
@@ -5194,38 +5443,37 @@ impl LiquifactEscrow {
 
     /// Returns a paginated list of allowlisted investor addresses.
     ///
-    /// Reads the allowlist index and filters by live `InvestorAllowlisted` status
-    /// so revoked addresses never appear in the result.
+    /// Pages over persistent slot storage for efficient enumeration.
     ///
     /// # Arguments
     /// * `start` - The starting index (0-based) of the pagination.
-    /// * `limit` - The maximum number of addresses to return (capped at a hard limit of 50).
+    /// * `limit` - The maximum number of addresses to return (capped at MAX_INVESTOR_READ_BATCH).
     ///
     /// # Returns
     /// A `Vec<Address>` containing the allowlisted addresses within the requested page.
     pub fn get_allowlisted_investors(env: Env, start: u32, limit: u32) -> Vec<Address> {
-        let index: Vec<Address> = env
+        // Migrate legacy index if needed
+        Self::migrate_allowlist_index_if_needed(&env);
+
+        let count: u32 = env
             .storage()
             .instance()
-            .get(&DataKey::AllowlistIndex)
-            .unwrap_or_else(|| Vec::new(&env));
+            .get(&DataKey::AllowlistCount)
+            .unwrap_or(0);
 
         let (start, end) =
-            match Self::paginate_window(start, limit, MAX_INVESTOR_READ_BATCH, index.len()) {
+            match Self::paginate_window(start, limit, MAX_INVESTOR_READ_BATCH, count) {
                 Some(w) => w,
                 None => return Vec::new(&env),
             };
 
         let mut result = Vec::new(&env);
-        for i in start..end {
-            let addr = index.get(i).unwrap();
-            // Only include addresses that are still allowlisted
-            let is_al: bool = env
+        for slot_idx in start..end {
+            if let Some(addr) = env
                 .storage()
                 .persistent()
-                .get(&DataKey::InvestorAllowlisted(addr.clone()))
-                .unwrap_or(false);
-            if is_al {
+                .get::<DataKey, Address>(&DataKey::AllowlistSlot(slot_idx))
+            {
                 result.push_back(addr);
             }
         }
@@ -5234,28 +5482,15 @@ impl LiquifactEscrow {
 
     /// Returns the total number of currently-allowlisted addresses.
     ///
-    /// Reads the allowlist index and counts entries where the live
-    /// `InvestorAllowlisted` flag is still `true`.
+    /// Returns the O(1) counter stored in instance storage.
     pub fn get_allowlisted_investors_count(env: Env) -> u32 {
-        let index: Vec<Address> = env
-            .storage()
-            .instance()
-            .get(&DataKey::AllowlistIndex)
-            .unwrap_or_else(|| Vec::new(&env));
+        // Migrate legacy index if needed
+        Self::migrate_allowlist_index_if_needed(&env);
 
-        let mut count: u32 = 0;
-        for i in 0..index.len() {
-            let addr = index.get(i).unwrap();
-            let is_al: bool = env
-                .storage()
-                .persistent()
-                .get(&DataKey::InvestorAllowlisted(addr.clone()))
-                .unwrap_or(false);
-            if is_al {
-                count += 1;
-            }
-        }
-        count
+        env.storage()
+            .instance()
+            .get(&DataKey::AllowlistCount)
+            .unwrap_or(0)
     }
 
     /// Convenience alias for [`LiquifactEscrow::set_legal_hold`] with `active = false`.
