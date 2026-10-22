@@ -20,8 +20,8 @@ use super::{
     AttestationDigestAppended, AttestationDigestRevoked, AttestationDigestUnrevoked,
     AttestationRequirementChanged, CollateralRecordedEvt, ContractUpgraded, DataKey,
     DeprecatedTransferAdminUsed, EscrowError, EscrowFunded, EscrowInitialized, EscrowUnfunded,
-    FundingCancelled, FundingDeadlineExtensionStats, FundingTargetUpdated, InvestorRefundedEvt,
-    LiquifactEscrow, LiquifactEscrowClient, MaturityMaxHorizonUpdated,
+    FundingCancelled, FundingDeadlineExtensionStats, FundingTargetUpdated, InvestorFreezeChanged,
+    InvestorRefundedEvt, LiquifactEscrow, LiquifactEscrowClient, MaturityMaxHorizonUpdated,
     MaxUniqueInvestorsCapLowered, PauseReason, PauseScope, PauseState, PrimaryAttestationBound,
     RegistryRefRebound, TreasuryDustSwept, UpgradeCancelled, UpgradeProposed, YieldTier,
     MAX_ATTESTATION_APPEND_ENTRIES, MAX_DUST_SWEEP_AMOUNT, MAX_FUNDING_DEADLINE_EXTENSIONS,
@@ -75,6 +75,7 @@ mod init;
 // mod integration;
 mod funding_deadline_cap_tests;
 mod integration_status_guards;
+mod investor_freeze;
 mod legal_hold;
 mod migration_errors;
 mod paginated_views;
