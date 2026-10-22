@@ -810,38 +810,11 @@ pub enum EscrowError {
     /// [`LiquifactEscrow::recover_admin`] called before the admin-recovery timelock deadline.
     AdminRecoveryNotExpired = 249,
 
-    /// [`LiquifactEscrow::set_require_attestation_for_withdraw`] called while the escrow is
-    /// already funded (`status != 0`).  The requirement flag may only be configured while the
-    /// escrow is still open.
-    AttestationRequirementNotOpen = 250,
-
-    /// [`LiquifactEscrow::withdraw`] blocked because `RequireAttestationForWithdraw` is `true`
-    /// and no primary attestation hash has been bound yet.  Bind one via
-    /// [`LiquifactEscrow::bind_primary_attestation_hash`] before retrying.
-    AttestationRequiredForWithdraw = 251,
-
-    /// [`LiquifactEscrow::extend_funding_deadline`] rejected because the escrow has already
-    /// been extended [`MAX_FUNDING_DEADLINE_EXTENSIONS`] times. No further extensions are
-    /// permitted regardless of total added time.
-    FundingDeadlineExtensionLimitReached = 252,
-
-    /// [`LiquifactEscrow::extend_funding_deadline`] rejected because the total added time
-    /// (`new_deadline - original_deadline`) would exceed
-    /// [`MAX_FUNDING_DEADLINE_TOTAL_EXTENSION_SECS`]. Use a smaller extension.
-    FundingDeadlineExtensionTooLong = 253,
-
-    // --- Issue #1544: Timelocked upgrade ---
-    /// [`LiquifactEscrow::execute_upgrade`] called before the timelock ETA has elapsed.
-    UpgradeTimelockActive = 254,
-    /// [`LiquifactEscrow::execute_upgrade`] called after the execution window has expired.
-    UpgradeProposalExpired = 255,
-    /// [`LiquifactEscrow::execute_upgrade`] or [`LiquifactEscrow::cancel_upgrade`] called
-    /// when no upgrade proposal is pending.
-    NoPendingUpgrade = 256,
-    /// [`LiquifactEscrow::execute_upgrade`] blocked because a compliance legal hold is active.
-    LegalHoldBlocksUpgrade = 257,
-    /// Arithmetic overflow computing `now + UPGRADE_TIMELOCK_SECS` in `propose_upgrade`.
-    UpgradeEtaOverflow = 258,
+    /// [`LiquifactEscrow::fund_with_reference`] was called with a `reference` that has already
+    /// been used to record a prior contribution. Each 32-byte reference must be globally unique
+    /// within the escrow. Derive references from `investor ++ payment_id` off-chain to avoid
+    /// collisions.
+    ContributionReferenceReused = 250,
 }
 
 #[inline(always)]
@@ -1236,31 +1209,11 @@ pub enum DataKey {
     /// Stored cross-contract callback context ([`CallbackContext`]) keyed by invocation nonce.
     /// Binds expected origin address, invocation nonce, and lifecycle phase.
     CallbackContext(u64),
-    /// When `true`, [`LiquifactEscrow::withdraw`] requires a primary attestation hash to be
-    /// bound before the SME may pull liquidity.  Absent ⇒ `false` (no requirement).
-    /// Set by admin via [`LiquifactEscrow::set_require_attestation_for_withdraw`];
-    /// only mutable while the escrow is open (`status == 0`).
-    RequireAttestationForWithdraw,
-    /// The original funding deadline captured the first time
-    /// [`LiquifactEscrow::extend_funding_deadline`] is called.  Absent ⇒ no baseline recorded
-    /// yet.  Read by the extension guard to compute total elapsed extension time.
-    /// **Additive key (ADR-007):** absent on instances that predate this key — treated as
-    /// though no baseline exists and the first extension sets it.
-    OriginalFundingDeadline,
-    /// How many times [`LiquifactEscrow::extend_funding_deadline`] has been called on this
-    /// instance.  Absent ⇒ `0`.  Incremented atomically with each accepted extension.
-    /// **Additive key (ADR-007):** absent on instances predating this key — reads as `0`.
-    FundingDeadlineExtensionCount,
-
-    // --- Issue #1544: Timelocked upgrade ---
-    /// Pending WASM upgrade proposal `(new_wasm_hash: BytesN<32>, eta: u64)`.
-    ///
-    /// Written by [`LiquifactEscrow::propose_upgrade`]; cleared atomically by
-    /// [`LiquifactEscrow::execute_upgrade`] (before the deployer call) or by
-    /// [`LiquifactEscrow::cancel_upgrade`].
-    ///
-    /// Absent ⇒ no proposal is pending.
-    PendingUpgrade,
+    /// Persistent deduplication marker for [`LiquifactEscrow::fund_with_reference`].
+    /// Key: the 32-byte off-chain payment reference.  Value: the investor [`Address`] that
+    /// first used this reference.  Written once; absent ⇒ the reference is available.
+    /// Additive key (ADR-007): absence returns `None` for `get_reference_owner`.
+    ContributionReference(BytesN<32>),
 }
 
 // --- Data types ---
@@ -1744,6 +1697,22 @@ pub struct EscrowFunded {
     /// The `min_lock_secs` of the matched [`YieldTier`] (0 when base yield applies — no tier,
     /// no lock commitment, or simple fund). See [`LiquifactEscrow::effective_yield_for_commitment`].
     pub tier_lock_secs: u64,
+}
+
+/// Emitted by [`LiquifactEscrow::fund_with_reference`] immediately after [`EscrowFunded`],
+/// tying the on-chain contribution to an off-chain payment reference.
+///
+/// Indexers can use this to reconcile fiat payments from anchors or payment processors with
+/// on-chain contributions without relying on timestamps or amounts alone.
+#[contractevent]
+pub struct ContributionReferenced {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub investor: Address,
+    pub invoice_id: Symbol,
+    pub amount: i128,
+    pub reference: BytesN<32>,
 }
 
 /// Emitted by [`LiquifactEscrow::rotate_beneficiary`] when the SME (beneficiary)
@@ -5927,6 +5896,92 @@ impl LiquifactEscrow {
         committed_lock_secs: u64,
     ) -> InvoiceEscrow {
         Self::fund_impl(env, investor, amount, false, committed_lock_secs)
+    }
+
+    /// Identical to [`LiquifactEscrow::fund`] but also records a 32-byte off-chain payment
+    /// `reference` that binds the contribution to an external payment record.
+    ///
+    /// # Purpose
+    /// Platforms routing fiat through an anchor or a payment processor need to tie each
+    /// on-chain contribution to an off-chain payment ID. This entrypoint rejects duplicate
+    /// references, preventing a retried payment from being credited twice.
+    ///
+    /// # Reference uniqueness
+    /// The `reference` is stored under `DataKey::ContributionReference(reference)` in
+    /// **persistent** storage and must be globally unique within this escrow instance.
+    /// A reused reference fails with [`EscrowError::ContributionReferenceReused`] (250)
+    /// **before** any state mutation.
+    ///
+    /// # Security note
+    /// Because the reference is public and checked before the contribution write, a
+    /// front-runner observing the mempool could submit the same reference first.
+    /// Callers should derive the reference from data only the legitimate investor
+    /// knows (e.g. `SHA-256(investor_address ++ payment_id ++ nonce)`) so that
+    /// squatting the reference without possessing the investor auth is useless —
+    /// the squatter's call would pass the reference check but fail `require_auth`.
+    ///
+    /// # Funding gates
+    /// All gates from [`LiquifactEscrow::fund`] apply (pause, legal hold, allowlist,
+    /// caps, deadline, amount positivity, status).
+    ///
+    /// # Events
+    /// Emits [`EscrowFunded`] (identical to `fund`) followed by [`ContributionReferenced`].
+    ///
+    /// # Arguments
+    /// * `investor` — The funding address (requires auth).
+    /// * `amount`   — Principal to contribute (must be > 0).
+    /// * `reference` — 32-byte off-chain payment reference (must be unique in this escrow).
+    ///
+    /// # Returns
+    /// Updated [`InvoiceEscrow`] snapshot (same as `fund`).
+    pub fn fund_with_reference(
+        env: Env,
+        investor: Address,
+        amount: i128,
+        reference: BytesN<32>,
+    ) -> InvoiceEscrow {
+        // Check reference uniqueness BEFORE any state mutation.
+        ensure(
+            &env,
+            !env.storage()
+                .persistent()
+                .has(&DataKey::ContributionReference(reference.clone())),
+            EscrowError::ContributionReferenceReused,
+        );
+
+        // Delegate to fund_impl — all gates, accounting, and EscrowFunded event happen here.
+        let escrow = Self::fund_impl(env.clone(), investor.clone(), amount, true, 0);
+
+        // Record the reference: persistent storage, TTL bumped to match other investor keys.
+        env.storage()
+            .persistent()
+            .set(&DataKey::ContributionReference(reference.clone()), &investor);
+        env.storage().persistent().extend_ttl(
+            &DataKey::ContributionReference(reference.clone()),
+            PERSISTENT_TTL_MIN_EXTENSION_LEDGERS,
+            PERSISTENT_TTL_MIN_EXTENSION_LEDGERS,
+        );
+
+        // Emit ContributionReferenced after EscrowFunded.
+        ContributionReferenced {
+            name: symbol_short!("fund_ref"),
+            investor,
+            invoice_id: escrow.invoice_id.clone(),
+            amount,
+            reference,
+        }
+        .publish(&env);
+
+        escrow
+    }
+
+    /// Return the investor address that used `reference`, or `None` if it has never been used.
+    ///
+    /// **Authorization:** None — pure read; no state mutation.
+    pub fn get_reference_owner(env: Env, reference: BytesN<32>) -> Option<Address> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::ContributionReference(reference))
     }
 
     /// Batch funding entrypoint: record multiple investor principals in a single call.
