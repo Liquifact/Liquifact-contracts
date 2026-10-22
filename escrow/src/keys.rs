@@ -80,6 +80,16 @@ pub(crate) fn funding_deadline() -> DataKey {
     DataKey::FundingDeadline
 }
 
+/// Instance-storage original funding deadline baseline (set on first extension, absent = no extension yet).
+pub(crate) fn original_funding_deadline() -> DataKey {
+    DataKey::OriginalFundingDeadline
+}
+
+/// Instance-storage counter of accepted funding-deadline extensions.
+pub(crate) fn funding_deadline_extension_count() -> DataKey {
+    DataKey::FundingDeadlineExtensionCount
+}
+
 /// Instance-storage write-once prorata snapshot captured at the first funded transition.
 pub(crate) fn funding_close_snapshot() -> DataKey {
     DataKey::FundingCloseSnapshot
