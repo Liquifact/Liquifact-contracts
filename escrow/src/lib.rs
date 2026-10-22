@@ -205,6 +205,16 @@ pub const MAX_BUMP_TTL_BATCH: u32 = 32;
 /// Default maximum maturity horizon in seconds (~5 years) when no explicit horizon is configured.
 pub const DEFAULT_MATURITY_MAX_HORIZON_SECS: u64 = 157_680_000; // ~5 years (365.25 * 24 * 3600 * 5)
 
+/// Maximum number of times [`LiquifactEscrow::extend_funding_deadline`] may be called on a
+/// single escrow instance.  The third call succeeds; the fourth is rejected with
+/// [`EscrowError::FundingDeadlineExtensionLimitReached`].
+pub const MAX_FUNDING_DEADLINE_EXTENSIONS: u32 = 3;
+
+/// Maximum cumulative seconds that may be added to the original funding deadline across all
+/// extension calls combined.  Equal to 30 days (30 × 24 × 3600).
+/// Rejected with [`EscrowError::FundingDeadlineExtensionTooLong`] when exceeded.
+pub const MAX_FUNDING_DEADLINE_TOTAL_EXTENSION_SECS: u64 = 2_592_000; // 30 days
+
 // ---------------------------------------------------------------------------
 // Bounded fee schedule
 // ---------------------------------------------------------------------------
@@ -396,6 +406,14 @@ pub const MIN_PAUSE_TOGGLE_WINDOW_SECS: u64 = 60; // 1 minute
 
 /// Maximum rate-limit window (seconds) accepted by [`LiquifactEscrow::set_pause_rate_limit`].
 pub const MAX_PAUSE_TOGGLE_WINDOW_SECS: u64 = 7_776_000; // 90 days
+
+/// Minimum delay (seconds) between a `propose_upgrade` call and the earliest
+/// `execute_upgrade` call. 48 hours gives investors and indexers advance notice.
+pub const UPGRADE_TIMELOCK_SECS: u64 = 172_800; // 48 hours
+
+/// Maximum window (seconds) after the timelock ETA during which `execute_upgrade` is valid.
+/// After `eta + UPGRADE_EXECUTION_WINDOW_SECS` the proposal expires and must be re-proposed.
+pub const UPGRADE_EXECUTION_WINDOW_SECS: u64 = 604_800; // 7 days
 
 /// Stable typed errors emitted by LiquiFact escrow entrypoints.
 ///
@@ -792,12 +810,38 @@ pub enum EscrowError {
     /// [`LiquifactEscrow::recover_admin`] called before the admin-recovery timelock deadline.
     AdminRecoveryNotExpired = 249,
 
-    /// [`LiquifactEscrow::partial_settle`] called when funded_amount is zero.
-    PartialSettleNothingFunded = 250,
-    /// [`LiquifactEscrow::set_partial_close_min_bps`] received bps > 10_000.
-    PartialCloseMinBpsOutOfRange = 251,
-    /// [`LiquifactEscrow::partial_settle`] called when funded_amount is below the minimum threshold.
-    PartialSettleBelowThreshold = 252,
+    /// [`LiquifactEscrow::set_require_attestation_for_withdraw`] called while the escrow is
+    /// already funded (`status != 0`).  The requirement flag may only be configured while the
+    /// escrow is still open.
+    AttestationRequirementNotOpen = 250,
+
+    /// [`LiquifactEscrow::withdraw`] blocked because `RequireAttestationForWithdraw` is `true`
+    /// and no primary attestation hash has been bound yet.  Bind one via
+    /// [`LiquifactEscrow::bind_primary_attestation_hash`] before retrying.
+    AttestationRequiredForWithdraw = 251,
+
+    /// [`LiquifactEscrow::extend_funding_deadline`] rejected because the escrow has already
+    /// been extended [`MAX_FUNDING_DEADLINE_EXTENSIONS`] times. No further extensions are
+    /// permitted regardless of total added time.
+    FundingDeadlineExtensionLimitReached = 252,
+
+    /// [`LiquifactEscrow::extend_funding_deadline`] rejected because the total added time
+    /// (`new_deadline - original_deadline`) would exceed
+    /// [`MAX_FUNDING_DEADLINE_TOTAL_EXTENSION_SECS`]. Use a smaller extension.
+    FundingDeadlineExtensionTooLong = 253,
+
+    // --- Issue #1544: Timelocked upgrade ---
+    /// [`LiquifactEscrow::execute_upgrade`] called before the timelock ETA has elapsed.
+    UpgradeTimelockActive = 254,
+    /// [`LiquifactEscrow::execute_upgrade`] called after the execution window has expired.
+    UpgradeProposalExpired = 255,
+    /// [`LiquifactEscrow::execute_upgrade`] or [`LiquifactEscrow::cancel_upgrade`] called
+    /// when no upgrade proposal is pending.
+    NoPendingUpgrade = 256,
+    /// [`LiquifactEscrow::execute_upgrade`] blocked because a compliance legal hold is active.
+    LegalHoldBlocksUpgrade = 257,
+    /// Arithmetic overflow computing `now + UPGRADE_TIMELOCK_SECS` in `propose_upgrade`.
+    UpgradeEtaOverflow = 258,
 }
 
 #[inline(always)]
@@ -1192,9 +1236,31 @@ pub enum DataKey {
     /// Stored cross-contract callback context ([`CallbackContext`]) keyed by invocation nonce.
     /// Binds expected origin address, invocation nonce, and lifecycle phase.
     CallbackContext(u64),
-    /// Minimum funded threshold in basis points of target required for partial settlement.
-    /// Default `0` = no threshold beyond `funded_amount > 0`.
-    PartialCloseMinBps,
+    /// When `true`, [`LiquifactEscrow::withdraw`] requires a primary attestation hash to be
+    /// bound before the SME may pull liquidity.  Absent ⇒ `false` (no requirement).
+    /// Set by admin via [`LiquifactEscrow::set_require_attestation_for_withdraw`];
+    /// only mutable while the escrow is open (`status == 0`).
+    RequireAttestationForWithdraw,
+    /// The original funding deadline captured the first time
+    /// [`LiquifactEscrow::extend_funding_deadline`] is called.  Absent ⇒ no baseline recorded
+    /// yet.  Read by the extension guard to compute total elapsed extension time.
+    /// **Additive key (ADR-007):** absent on instances that predate this key — treated as
+    /// though no baseline exists and the first extension sets it.
+    OriginalFundingDeadline,
+    /// How many times [`LiquifactEscrow::extend_funding_deadline`] has been called on this
+    /// instance.  Absent ⇒ `0`.  Incremented atomically with each accepted extension.
+    /// **Additive key (ADR-007):** absent on instances predating this key — reads as `0`.
+    FundingDeadlineExtensionCount,
+
+    // --- Issue #1544: Timelocked upgrade ---
+    /// Pending WASM upgrade proposal `(new_wasm_hash: BytesN<32>, eta: u64)`.
+    ///
+    /// Written by [`LiquifactEscrow::propose_upgrade`]; cleared atomically by
+    /// [`LiquifactEscrow::execute_upgrade`] (before the deployer call) or by
+    /// [`LiquifactEscrow::cancel_upgrade`].
+    ///
+    /// Absent ⇒ no proposal is pending.
+    PendingUpgrade,
 }
 
 // --- Data types ---
@@ -1880,6 +1946,21 @@ pub struct FundingDeadlineExtended {
     pub new_deadline: u64,
 }
 
+/// Emitted alongside [`FundingDeadlineExtended`] to carry the updated extension counter and
+/// original deadline.  Separate event so the [`FundingDeadlineExtended`] payload remains
+/// unchanged for existing consumers.
+#[contractevent]
+pub struct FundingDeadlineExtensionStats {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    /// Number of extensions used **after** this call (1 on the first extension, etc.).
+    pub extensions_used: u32,
+    /// The original deadline before any extension was applied.
+    pub original_deadline: u64,
+}
+
 #[contractevent]
 pub struct LegalHoldChanged {
     #[topic]
@@ -2112,6 +2193,18 @@ pub struct PrimaryAttestationBound {
     pub digest: BytesN<32>,
 }
 
+/// Emitted by [`LiquifactEscrow::set_require_attestation_for_withdraw`] whenever the
+/// withdraw-attestation-gate flag changes.  `required` is `1` when the gate is enabled,
+/// `0` when disabled, matching the convention used by other boolean event fields in this
+/// contract.
+#[contractevent]
+pub struct AttestationRequirementChanged {
+    #[topic]
+    pub name: Symbol,
+    pub invoice_id: Symbol,
+    pub required: u32,
+}
+
 #[contractevent]
 pub struct AttestationDigestAppended {
     #[topic]
@@ -2218,6 +2311,40 @@ pub struct LegalHoldClearCancelled {
 /// - `new_wasm_hash`: the 32-byte hash of the incoming WASM binary.
 #[contractevent]
 pub struct ContractUpgraded {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    pub new_wasm_hash: BytesN<32>,
+}
+
+/// Emitted by [`LiquifactEscrow::propose_upgrade`] when a new WASM upgrade is proposed.
+#[contractevent]
+pub struct UpgradeProposed {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    pub new_wasm_hash: BytesN<32>,
+    pub eta: u64,
+}
+
+/// Emitted by [`LiquifactEscrow::cancel_upgrade`] when a pending upgrade is cancelled.
+#[contractevent]
+pub struct UpgradeCancelled {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    pub cancelled_wasm_hash: BytesN<32>,
+}
+
+/// Emitted by the legacy [`LiquifactEscrow::upgrade`] entrypoint (alias for `propose_upgrade`).
+///
+/// Signals that the caller used the deprecated `upgrade` entrypoint and should migrate
+/// to `propose_upgrade` + `execute_upgrade`.
+#[contractevent]
+pub struct DeprecatedUpgradeUsed {
     #[topic]
     pub name: Symbol,
     #[topic]
@@ -3535,6 +3662,64 @@ impl LiquifactEscrow {
             .get(&DataKey::PrimaryAttestationHash)
     }
 
+    /// Enable or disable the requirement that a primary attestation hash must be bound
+    /// before [`LiquifactEscrow::withdraw`] may proceed.
+    ///
+    /// **Authorization:** [`InvoiceEscrow::admin`].
+    ///
+    /// **Status gate:** only callable while the escrow is **open** (`status == 0`).
+    /// After funding closes the requirement is immutable so investors can rely on the
+    /// disbursement rule that was in force when they committed principal.
+    ///
+    /// **Idempotent:** setting the same value twice is allowed (no error, but the event
+    /// is still emitted so off-chain indexers can replay the full history).
+    ///
+    /// Emits [`AttestationRequirementChanged`] (topic: `att_req`).
+    ///
+    /// # Errors
+    /// - [`EscrowError::AttestationRequirementNotOpen`] — called after funding has closed
+    ///   (`status != 0`).
+    pub fn set_require_attest_withdraw(env: Env, required: bool) -> bool {
+        let escrow = Self::load_escrow_require_admin(&env);
+        ensure(
+            &env,
+            escrow.status == 0,
+            EscrowError::AttestationRequirementNotOpen,
+        );
+        env.storage()
+            .instance()
+            .set(&DataKey::RequireAttestationForWithdraw, &required);
+        AttestationRequirementChanged {
+            name: symbol_short!("att_req"),
+            invoice_id: escrow.invoice_id.clone(),
+            required: if required { 1 } else { 0 },
+        }
+        .publish(&env);
+        required
+    }
+
+    /// Read-only bundled view of withdraw requirements.
+    ///
+    /// Returns `(attestation_required, attestation_bound)` where:
+    /// - `attestation_required` — `true` when the admin has enabled the attestation gate
+    ///   via [`LiquifactEscrow::set_require_attestation_for_withdraw`].
+    /// - `attestation_bound` — `true` when a primary attestation hash has already been
+    ///   bound via [`LiquifactEscrow::bind_primary_attestation_hash`].
+    ///
+    /// No auth required.  Returns `(false, false)` before `init`.
+    pub fn get_withdraw_requirements(env: Env) -> (bool, bool) {
+        let attestation_required: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::RequireAttestationForWithdraw)
+            .unwrap_or(false);
+        let attestation_bound: bool = env
+            .storage()
+            .instance()
+            .has(&DataKey::PrimaryAttestationHash);
+        (attestation_required, attestation_bound)
+    }
+
     /// Append a digest to a bounded on-chain log (see [`MAX_ATTESTATION_APPEND_ENTRIES`]) for **versioned**
     /// or incremental attestation updates. Does not replace [`LiquifactEscrow::bind_primary_attestation_hash`].
     ///
@@ -3585,6 +3770,37 @@ impl LiquifactEscrow {
     }
 
     // --- Persistent per-investor storage helpers ---
+
+    /// Extend TTL for all per-investor persistent keys that exist.
+    ///
+    /// Called after every per-investor write (fund, unfund, claim, refund) to keep
+    /// investor positions alive for the configured storage horizon. Only extends keys
+    /// that actually exist in persistent storage (checked via `has()` before extend).
+    ///
+    /// This prevents silent expiry of time-sensitive investor data (contributions,
+    /// effective yields, claim locks) when maturity dates are far in the future.
+    fn extend_investor_ttl(env: &Env, investor: &Address) {
+        let ttl = Self::get_storage_limit(env.clone());
+
+        // Extend each per-investor persistent key that exists.
+        // Check before extend to avoid trapping on missing keys.
+        let keys_to_check = [
+            DataKey::InvestorContribution(investor.clone()),
+            DataKey::InvestorEffectiveYield(investor.clone()),
+            DataKey::InvestorClaimNotBefore(investor.clone()),
+            DataKey::InvestorClaimed(investor.clone()),
+            DataKey::InvestorAllowlisted(investor.clone()),
+        ];
+
+        for key in keys_to_check.iter() {
+            if env.storage().persistent().has(key) {
+                env.storage()
+                    .persistent()
+                    .extend_ttl(key, ttl, ttl);
+            }
+        }
+    }
+
     fn get_persistent_investor_contribution(env: &Env, investor: Address) -> i128 {
         env.storage()
             .persistent()
@@ -5526,16 +5742,16 @@ impl LiquifactEscrow {
     /// 3. Upload to the network: `stellar contract upload --wasm ...` → captures `NEW_WASM_HASH`.
     /// 4. Diff the new `DataKey` enum against the deployed version: verify only additive changes.
     /// 5. Test on Testnet with a mirror instance before Mainnet.
-    /// 6. Call `upgrade(NEW_WASM_HASH)` with admin credentials.
-    /// 7. Verify `get_version()` and `get_escrow()` return expected values.
-    /// 8. Clear legal hold: `clear_legal_hold()`.
+    /// 6. Call `propose_upgrade(NEW_WASM_HASH)` with admin credentials.
+    /// 7. After the 48 h timelock, call `execute_upgrade()` within the 7-day execution window.
+    /// 8. Verify `get_version()` and `get_escrow()` return expected values.
+    /// 9. Clear legal hold: `clear_legal_hold()`.
     /// See `docs/OPERATOR_RUNBOOK.md` §§3–7 for the complete procedure.
     ///
     /// ## Rollback
     ///
-    /// Re-upload the previous WASM (already recorded on-chain) and call `upgrade(PREV_WASM_HASH)`.
-    /// This works only when stored data is still compatible with old WASM types. If stored data
-    /// was already rewritten by a `migrate` call, rollback requires a redeploy.
+    /// Cancel a pending proposal with `cancel_upgrade()` before the ETA. After execution,
+    /// re-upload the previous WASM and call `propose_upgrade(PREV_WASM_HASH)`.
     ///
     /// ## Risks
     ///
@@ -5543,12 +5759,80 @@ impl LiquifactEscrow {
     /// or changes a stored struct's XDR shape) will silently corrupt stored state on the next read.
     /// There is no on-chain undo once `update_current_contract_wasm` completes. Test thoroughly
     /// on Testnet before upgrading production contracts.
-    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
-        // Auth first — matches migrate() ordering
+
+    /// Propose a WASM upgrade with a 48-hour timelock.
+    ///
+    /// Stores `(new_wasm_hash, eta)` under [`DataKey::PendingUpgrade`] where
+    /// `eta = now + UPGRADE_TIMELOCK_SECS`. Replaces any earlier pending proposal.
+    /// Emits [`UpgradeProposed`].
+    ///
+    /// After `eta`, call [`LiquifactEscrow::execute_upgrade`] within the
+    /// [`UPGRADE_EXECUTION_WINDOW_SECS`] window to apply the WASM swap.
+    ///
+    /// # Authorization
+    /// The current escrow admin must authorize this call.
+    ///
+    /// # Errors
+    /// - [`EscrowError::UpgradeEtaOverflow`] if `now + UPGRADE_TIMELOCK_SECS` overflows.
+    pub fn propose_upgrade(env: Env, new_wasm_hash: BytesN<32>) -> u64 {
+        let escrow = Self::load_escrow_require_admin(&env);
+        let now = env.ledger().timestamp();
+        let eta = now
+            .checked_add(UPGRADE_TIMELOCK_SECS)
+            .unwrap_or_else(|| fail(&env, EscrowError::UpgradeEtaOverflow));
+
+        // Store as a (BytesN<32>, u64) tuple; replaces any prior proposal atomically.
+        env.storage()
+            .instance()
+            .set(&DataKey::PendingUpgrade, &(new_wasm_hash.clone(), eta));
+
+        UpgradeProposed {
+            name: symbol_short!("upg_prop"),
+            invoice_id: escrow.invoice_id,
+            new_wasm_hash,
+            eta,
+        }
+        .publish(&env);
+
+        eta
+    }
+
+    /// Execute a pending upgrade after the timelock has elapsed.
+    ///
+    /// Requires a pending proposal written by [`LiquifactEscrow::propose_upgrade`],
+    /// `now >= eta` (else [`EscrowError::UpgradeTimelockActive`]),
+    /// `now <= eta + UPGRADE_EXECUTION_WINDOW_SECS` (else [`EscrowError::UpgradeProposalExpired`]),
+    /// and no active legal hold (else [`EscrowError::LegalHoldBlocksUpgrade`]).
+    ///
+    /// Clears the proposal **before** calling `update_current_contract_wasm` to prevent replay.
+    /// Emits [`ContractUpgraded`] before the deployer call (defensive ordering).
+    ///
+    /// # Authorization
+    /// The current escrow admin must authorize this call.
+    pub fn execute_upgrade(env: Env) {
         let escrow = Self::load_escrow_require_admin(&env);
 
-        // Emit event before the deployer call so the event is recorded even if
-        // the deployer call somehow reverts (defensive ordering)
+        let pending: Option<(BytesN<32>, u64)> =
+            env.storage().instance().get(&DataKey::PendingUpgrade);
+        let (new_wasm_hash, eta) =
+            pending.unwrap_or_else(|| fail(&env, EscrowError::NoPendingUpgrade));
+
+        let now = env.ledger().timestamp();
+
+        // Timelock must have elapsed.
+        ensure(&env, now >= eta, EscrowError::UpgradeTimelockActive);
+
+        // Execution window must not have passed.
+        let window_end = eta.saturating_add(UPGRADE_EXECUTION_WINDOW_SECS);
+        ensure(&env, now <= window_end, EscrowError::UpgradeProposalExpired);
+
+        // Legal hold blocks upgrade execution (but not proposal or cancellation).
+        guard_not_legal_hold(&env, EscrowError::LegalHoldBlocksUpgrade);
+
+        // Clear proposal before deployer call — prevents replay if deployer somehow reverts.
+        env.storage().instance().remove(&DataKey::PendingUpgrade);
+
+        // Emit event before the deployer call (defensive ordering).
         ContractUpgraded {
             name: symbol_short!("upgrade"),
             invoice_id: escrow.invoice_id,
@@ -5556,8 +5840,60 @@ impl LiquifactEscrow {
         }
         .publish(&env);
 
-        // Replace contract WASM — no state is modified
         env.deployer().update_current_contract_wasm(new_wasm_hash);
+    }
+
+    /// Cancel a pending upgrade proposal.
+    ///
+    /// Removes [`DataKey::PendingUpgrade`] and emits [`UpgradeCancelled`].
+    /// Fails with [`EscrowError::NoPendingUpgrade`] if no proposal exists.
+    ///
+    /// A legal hold does **not** block cancellation — operators should be able to cancel
+    /// any pending upgrade at any time for safety.
+    ///
+    /// # Authorization
+    /// The current escrow admin must authorize this call.
+    pub fn cancel_upgrade(env: Env) {
+        let escrow = Self::load_escrow_require_admin(&env);
+
+        let pending: Option<(BytesN<32>, u64)> =
+            env.storage().instance().get(&DataKey::PendingUpgrade);
+        let (cancelled_wasm_hash, _eta) =
+            pending.unwrap_or_else(|| fail(&env, EscrowError::NoPendingUpgrade));
+
+        env.storage().instance().remove(&DataKey::PendingUpgrade);
+
+        UpgradeCancelled {
+            name: symbol_short!("upg_cncl"),
+            invoice_id: escrow.invoice_id,
+            cancelled_wasm_hash,
+        }
+        .publish(&env);
+    }
+
+    /// Return the current pending upgrade proposal, or `None` if no proposal is pending.
+    pub fn get_pending_upgrade(env: Env) -> Option<(BytesN<32>, u64)> {
+        env.storage().instance().get(&DataKey::PendingUpgrade)
+    }
+
+    /// Legacy alias for [`LiquifactEscrow::propose_upgrade`].
+    ///
+    /// Existing callers that invoke `upgrade(hash)` will now create a time-delayed proposal
+    /// instead of swapping code immediately. Use [`LiquifactEscrow::execute_upgrade`] after
+    /// the 48-hour timelock to complete the swap.
+    ///
+    /// Emits [`DeprecatedUpgradeUsed`] in addition to [`UpgradeProposed`] so integrators
+    /// can detect and migrate away from the legacy entrypoint.
+    #[deprecated(note = "use propose_upgrade followed by execute_upgrade")]
+    pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {
+        let invoice_id = Self::get_escrow(env.clone()).invoice_id;
+        Self::propose_upgrade(env.clone(), new_wasm_hash.clone());
+        DeprecatedUpgradeUsed {
+            name: symbol_short!("depr_upg"),
+            invoice_id,
+            new_wasm_hash,
+        }
+        .publish(&env);
     }
 
     /// Record investor deposit: transfer tokens from investor to escrow.
@@ -5881,6 +6217,9 @@ impl LiquifactEscrow {
 
         Self::set_persistent_investor_contribution(&env, investor.clone(), new_contribution);
 
+        // Extend TTL for all per-investor persistent keys written during funding.
+        Self::extend_investor_ttl(&env, &investor);
+
         if prev == 0 {
             env.storage().instance().set(
                 &DataKey::UniqueFunderCount,
@@ -5899,6 +6238,10 @@ impl LiquifactEscrow {
         }
 
         env.storage().instance().set(&DataKey::Escrow, &escrow);
+
+        // Extend instance TTL once after all writes in fund_impl.
+        let ttl = Self::get_storage_limit(env.clone());
+        env.storage().instance().extend_ttl(ttl, ttl);
 
         // 4. Token transfer
         let token_addr = Self::funding_token_or_fail(&env);
@@ -6129,6 +6472,10 @@ impl LiquifactEscrow {
         env.storage().instance().set(&DataKey::SettledAt, &now);
         env.storage().instance().set(&DataKey::Escrow, &escrow);
 
+        // Extend instance TTL once at settlement.
+        let ttl = Self::get_storage_limit(env.clone());
+        env.storage().instance().extend_ttl(ttl, ttl);
+
         EscrowSettled {
             name: symbol_short!("escrow_sd"),
             invoice_id: escrow.invoice_id.clone(),
@@ -6204,17 +6551,21 @@ impl LiquifactEscrow {
     /// # Guard ordering
     ///
     /// 1. Operational pause + legal-hold gates (read-only).
-    /// 2. `sme_address.require_auth()` (via `load_escrow_require_sme`).
-    /// 3. Status == 1 (funded) check.
-    /// 4. Contract balance sufficiency check ([`EscrowError::InsufficientContractBalance`]).
-    /// 5. Checked fee/net computation.
-    /// 6. Status transition to 3, `DistributedPrincipal` update (by the full gross
+    /// 2. Attestation gate (read-only): if `RequireAttestationForWithdraw` is `true`, a
+    ///    primary attestation hash must be bound ([`EscrowError::AttestationRequiredForWithdraw`]).
+    /// 3. `sme_address.require_auth()` (via `load_escrow_require_sme`).
+    /// 4. Status == 1 (funded) check.
+    /// 5. Contract balance sufficiency check ([`EscrowError::InsufficientContractBalance`]).
+    /// 6. Checked fee/net computation.
+    /// 7. Status transition to 3, `DistributedPrincipal` update (by the full gross
     ///    `funded_amount`), storage write.
-    /// 7. SEP-41 token transfers (fee → treasury, net → SME) with balance-delta verification.
-    /// 8. Event emission ([`SmeWithdrew`], carrying `amount = sme_payout` and `fee`).
+    /// 8. SEP-41 token transfers (fee → treasury, net → SME) with balance-delta verification.
+    /// 9. Event emission ([`SmeWithdrew`], carrying `amount = sme_payout` and `fee`).
     ///
     /// # Errors
     /// - [`EscrowError::LegalHoldBlocksWithdrawal`] — hold is active.
+    /// - [`EscrowError::AttestationRequiredForWithdraw`] — attestation gate enabled but no
+    ///   primary hash bound.
     /// - [`EscrowError::WithdrawalNotFunded`] — escrow not in funded state.
     /// - [`EscrowError::InsufficientContractBalance`] — contract holds less than `funded_amount`.
     /// - [`EscrowError::WithdrawFeeArithmeticOverflow`] — `funded_amount * fee_bps` overflowed `i128`.
@@ -6233,6 +6584,23 @@ impl LiquifactEscrow {
             PauseEntry::Withdrawal,
         );
         guard_not_legal_hold(&env, EscrowError::LegalHoldBlocksWithdrawal);
+
+        // Attestation gate (read-only, before require_auth).  If the admin has enabled the
+        // requirement, a primary attestation hash must already be bound.
+        let attestation_required: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::RequireAttestationForWithdraw)
+            .unwrap_or(false);
+        if attestation_required {
+            ensure(
+                &env,
+                env.storage()
+                    .instance()
+                    .has(&DataKey::PrimaryAttestationHash),
+                EscrowError::AttestationRequiredForWithdraw,
+            );
+        }
 
         let mut escrow = Self::load_escrow_require_sme(&env);
 
@@ -6397,6 +6765,9 @@ impl LiquifactEscrow {
 
         // Mark before transfer — prevents double-pay on any re-entrant path.
         Self::set_persistent_investor_claimed(&env, investor.clone(), true);
+
+        // Extend TTL for all per-investor persistent keys written during claim.
+        Self::extend_investor_ttl(&env, &investor);
 
         // Transfer gross payout from this contract to the investor.
         let this = env.current_contract_address();
@@ -6723,6 +7094,14 @@ impl LiquifactEscrow {
     /// current funding window has already closed, and never allows the funding
     /// window to reach or pass a non-zero maturity timestamp.
     ///
+    /// # Extension caps
+    /// Extensions are bounded by two independent limits:
+    /// - **Count cap**: at most [`MAX_FUNDING_DEADLINE_EXTENSIONS`] calls are allowed.
+    ///   The fourth call fails with [`EscrowError::FundingDeadlineExtensionLimitReached`].
+    /// - **Total-time cap**: `new_deadline - original_deadline` must not exceed
+    ///   [`MAX_FUNDING_DEADLINE_TOTAL_EXTENSION_SECS`].  Exceeding it fails with
+    ///   [`EscrowError::FundingDeadlineExtensionTooLong`].
+    ///
     /// # Authorization
     /// Requires the signature of the current [`InvoiceEscrow::admin`].
     ///
@@ -6733,9 +7112,16 @@ impl LiquifactEscrow {
     ///   is not strictly greater than the current deadline.
     /// - [`EscrowError::FundingDeadlineAtOrAfterMaturity`] if a non-zero maturity exists and
     ///   `new_deadline >= maturity`.
+    /// - [`EscrowError::FundingDeadlineExtensionLimitReached`] if the extension count cap is
+    ///   already reached.
+    /// - [`EscrowError::FundingDeadlineExtensionTooLong`] if total added time would exceed
+    ///   [`MAX_FUNDING_DEADLINE_TOTAL_EXTENSION_SECS`].
     ///
     /// # Events
     /// Emits [`FundingDeadlineExtended`] with `invoice_id`, `old_deadline`, and `new_deadline`.
+    /// Also emits [`FundingDeadlineExtensionStats`] with `extensions_used` and
+    /// `original_deadline` (separate event so existing [`FundingDeadlineExtended`] consumers
+    /// are unaffected).
     pub fn extend_funding_deadline(env: Env, new_deadline: u64) -> u64 {
         let escrow = Self::load_escrow_require_admin(&env);
 
@@ -6770,21 +7156,96 @@ impl LiquifactEscrow {
             );
         }
 
+        // --- Extension-cap enforcement ---
+
+        // Read (or initialise) the original deadline baseline.
+        let original_deadline: u64 = env
+            .storage()
+            .instance()
+            .get::<DataKey, u64>(&DataKey::OriginalFundingDeadline)
+            .unwrap_or(old_deadline);
+
+        // Count cap: reject if we've already used all allowed extensions.
+        let ext_count: u32 = env
+            .storage()
+            .instance()
+            .get::<DataKey, u32>(&DataKey::FundingDeadlineExtensionCount)
+            .unwrap_or(0);
+
+        ensure(
+            &env,
+            ext_count < MAX_FUNDING_DEADLINE_EXTENSIONS,
+            EscrowError::FundingDeadlineExtensionLimitReached,
+        );
+
+        // Total-time cap: new_deadline - original_deadline <= MAX_FUNDING_DEADLINE_TOTAL_EXTENSION_SECS.
+        let total_added = new_deadline.saturating_sub(original_deadline);
+        ensure(
+            &env,
+            total_added <= MAX_FUNDING_DEADLINE_TOTAL_EXTENSION_SECS,
+            EscrowError::FundingDeadlineExtensionTooLong,
+        );
+
+        // --- Storage writes ---
+
+        // Persist the original baseline on the very first extension.
+        if ext_count == 0 {
+            env.storage()
+                .instance()
+                .set(&DataKey::OriginalFundingDeadline, &original_deadline);
+        }
+
+        let new_ext_count = ext_count + 1;
+        env.storage()
+            .instance()
+            .set(&DataKey::FundingDeadlineExtensionCount, &new_ext_count);
+
         env.storage()
             .instance()
             .set(&DataKey::FundingDeadline, &new_deadline);
+
         let ttl = Self::get_storage_limit(env.clone());
         env.storage().instance().extend_ttl(ttl, ttl);
 
         FundingDeadlineExtended {
             name: symbol_short!("fund_ext"),
-            invoice_id: escrow.invoice_id,
+            invoice_id: escrow.invoice_id.clone(),
             old_deadline,
             new_deadline,
         }
         .publish(&env);
 
+        FundingDeadlineExtensionStats {
+            name: symbol_short!("ext_stat"),
+            invoice_id: escrow.invoice_id,
+            extensions_used: new_ext_count,
+            original_deadline,
+        }
+        .publish(&env);
+
         new_deadline
+    }
+
+    /// Return the current funding-deadline extension count and the original (pre-extension)
+    /// deadline for this escrow instance.
+    ///
+    /// Returns `(count, original)` where:
+    /// - `count` is the number of accepted extensions so far (0 if none have been made).
+    /// - `original` is the deadline value that was current when the first extension was
+    ///   accepted, or `None` if no extension has ever been accepted.
+    ///
+    /// Available before `init` (returns `(0, None)` in that case).
+    pub fn get_funding_deadline_extensions(env: Env) -> (u32, Option<u64>) {
+        let count: u32 = env
+            .storage()
+            .instance()
+            .get::<DataKey, u32>(&DataKey::FundingDeadlineExtensionCount)
+            .unwrap_or(0);
+        let original: Option<u64> = env
+            .storage()
+            .instance()
+            .get::<DataKey, u64>(&DataKey::OriginalFundingDeadline);
+        (count, original)
     }
 
     /// Update the configured maximum maturity horizon for this escrow instance.
@@ -6949,46 +7410,27 @@ impl LiquifactEscrow {
         // Admin-configurable horizon (default = INSTANCE_TTL_MIN_EXTENSION_LEDGERS).
         let ttl = Self::get_storage_limit(env.clone());
 
-        // Extend persistent TTL for allowlisted investor entries.
-        for addr in allowlisted.iter() {
-            // Persistent allowlist entry.
-            env.storage().persistent().extend_ttl(
-                &DataKey::InvestorAllowlisted(addr.clone()),
-                ttl,
-                ttl,
-            );
-            // Instance keys that may be per‑investor (contribution & claim lock).
-            env.storage().instance().extend_ttl(ttl, ttl);
-        }
+        // Extend instance storage TTL once at the beginning (contract-wide TTL).
+        env.storage().instance().extend_ttl(ttl, ttl);
 
-        // Instance storage TTL is contract-wide under Soroban SDK 25. The call above covers
-        // Escrow, Version, LegalHold, snapshots, caps, and other instance keys.
-
-        // Persistent per-investor keys and allowlist entries (independent TTL per address).
+        // Extend persistent TTL for per-investor entries once per investor.
         for addr in allowlisted.iter() {
-            let k = DataKey::InvestorAllowlisted(addr.clone());
-            env.storage().persistent().extend_ttl(&k, ttl, ttl);
-            // Extend persistent TTL for per-investor persistent keys used by this contract.
-            env.storage().persistent().extend_ttl(
-                &DataKey::InvestorContribution(addr.clone()),
-                ttl,
-                ttl,
-            );
-            env.storage().persistent().extend_ttl(
-                &DataKey::InvestorEffectiveYield(addr.clone()),
-                ttl,
-                ttl,
-            );
-            env.storage().persistent().extend_ttl(
-                &DataKey::InvestorClaimNotBefore(addr.clone()),
-                ttl,
-                ttl,
-            );
-            env.storage().persistent().extend_ttl(
-                &DataKey::InvestorClaimed(addr.clone()),
-                ttl,
-                ttl,
-            );
+            // Extend each persistent key only if it exists.
+            let keys_to_check = [
+                DataKey::InvestorAllowlisted(addr.clone()),
+                DataKey::InvestorContribution(addr.clone()),
+                DataKey::InvestorEffectiveYield(addr.clone()),
+                DataKey::InvestorClaimNotBefore(addr.clone()),
+                DataKey::InvestorClaimed(addr.clone()),
+            ];
+
+            for key in keys_to_check.iter() {
+                if env.storage().persistent().has(key) {
+                    env.storage()
+                        .persistent()
+                        .extend_ttl(key, ttl, ttl);
+                }
+            }
         }
     }
 
@@ -7073,6 +7515,13 @@ impl LiquifactEscrow {
         // Per-investor persistent keys have independent TTL from the contract instance.
         // Instance-storage TTL is contract-wide, so a single extend_ttl call covers all
         // non-persistent keys regardless of which instance key was requested.
+
+        // Admin-configurable storage limit (default = INSTANCE_TTL_MIN_EXTENSION_LEDGERS).
+        let ttl = Self::get_storage_limit(env.clone());
+
+        // Extend instance storage TTL once (covers all instance keys).
+        let mut extended_instance = false;
+
         for i in 0..n {
             let key = keys.get(i).unwrap();
             match key {
@@ -7092,18 +7541,21 @@ impl LiquifactEscrow {
                     if env.storage().persistent().has(&key) {
                         env.storage().persistent().extend_ttl(
                             &key,
-                            PERSISTENT_TTL_MIN_EXTENSION_LEDGERS,
-                            PERSISTENT_TTL_MIN_EXTENSION_LEDGERS,
+                            ttl,
+                            ttl,
                         );
                     }
                 }
                 // ── All other keys live in instance storage ───────────────────
                 // Instance TTL is contract-wide; one call covers all instance keys.
                 _ => {
-                    env.storage().instance().extend_ttl(
-                        INSTANCE_TTL_MIN_EXTENSION_LEDGERS,
-                        INSTANCE_TTL_MIN_EXTENSION_LEDGERS,
-                    );
+                    if !extended_instance {
+                        env.storage().instance().extend_ttl(
+                            ttl,
+                            ttl,
+                        );
+                        extended_instance = true;
+                    }
                 }
             }
         }
@@ -7433,6 +7885,10 @@ impl LiquifactEscrow {
 
         // Zero out contribution before transfer (checks-effects-interactions).
         Self::set_persistent_investor_contribution(env, investor.clone(), 0i128);
+
+        // Extend TTL for all per-investor persistent keys written during refund.
+        Self::extend_investor_ttl(env, &investor);
+
         env.storage()
             .instance()
             .set(&DataKey::InvestorRefunded(investor.clone()), &true);
@@ -7583,6 +8039,9 @@ impl LiquifactEscrow {
 
         // 6. Effects — update contribution (checks-effects-interactions).
         Self::set_persistent_investor_contribution(&env, investor.clone(), remaining_contribution);
+
+        // Extend TTL for all per-investor persistent keys written during unfund.
+        Self::extend_investor_ttl(&env, &investor);
 
         // 7. Decrement UniqueFunderCount when contribution reaches zero.
         if remaining_contribution == 0 {
