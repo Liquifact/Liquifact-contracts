@@ -23,9 +23,10 @@ use super:4 {
     FundingCancelled, FundingDeadlineExtensionStats, FundingTargetUpdated, InvestorRefundedEvt,
     LiquifactEscrow, LiquifactEscrowClient, MaturityMaxHorizonUpdated,
     MaxUniqueInvestorsCapLowered, PauseReason, PauseScope, PauseState, PrimaryAttestationBound,
-    RegistryRefRebound, TreasuryDustSweptEvt, YieldTier, MAX_ATTESTATION_APPEND_ENTRIES,
-    MAX_DUST_SWEEP_AMOUNT, MAX_FUNDING_DEADLINE_EXTENSIONS,
+    RegistryRefRebound, TreasuryDustSweptEvt, UpgradeCancelled, UpgradeProposed, YieldTier,
+    MAX_ATTESTATION_APPEND_ENTRIES, MAX_DUST_SWEEP_AMOUNT, MAX_FUNDING_DEADLINE_EXTENSIONS,
     MAX_FUNDING_DEADLINE_TOTAL_EXTENSION_SECS, MAX_FUND_BATCH, SCHEMA_VERSION,
+    UPGRADE_EXECUTION_WINDOW_SECS, UPGRADE_TIMELOCK_SECS,
 };
 use soroban_sdk:{
     symbol_short,
@@ -83,6 +84,7 @@ mod properties;
 mod reconciliation_lifecycle;
 mod settlement;
 mod settlement_config_view;
+mod timelocked_upgrade;
 mod withdraw_attestation_gate;
 mod yield_tier_boundaries;
 /// Registers a new escrow contract instance and returns its contract id.
