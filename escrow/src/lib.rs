@@ -330,6 +330,45 @@ pub const MAX_COLLATERAL_BATCH: u32 = 50;
 /// Upper bound on attestation digest read page size.
 pub const MAX_ATTESTATION_READ_PAGE: u32 = 20;
 
+// ---------------------------------------------------------------------------
+// Invariant audit bit constants
+// ---------------------------------------------------------------------------
+//
+// Each bit in the bitmask returned by [`LiquifactEscrow::check_core_invariants`]
+// corresponds to one accounting invariant.  A set bit means the invariant is
+// **violated**.  Zero means all checked invariants hold.
+//
+// Bits are assigned in the order they are checked inside `check_core_invariants`
+// so the mapping is stable across contract upgrades (new bits are appended).
+
+/// Bit 0 — `status` is outside the valid range `0..=4`.
+pub const INV_STATUS_RANGE: u32 = 1 << 0;
+
+/// Bit 1 — `funded_amount` is negative.
+pub const INV_FUNDED_AMOUNT_NEGATIVE: u32 = 1 << 1;
+
+/// Bit 2 — `FundingCloseSnapshot.total_principal != funded_amount` when
+/// `status ∈ {1, 2, 3}`.  The snapshot is write-once at the funded transition
+/// and must equal `funded_amount` for the lifetime of those states.
+pub const INV_SNAPSHOT_PRINCIPAL_MISMATCH: u32 = 1 << 2;
+
+/// Bit 3 — `DistributedPrincipal > funded_amount`.  More principal has been
+/// distributed than was ever received (implies a double-refund or accounting bug).
+pub const INV_DISTRIBUTED_EXCEEDS_FUNDED: u32 = 1 << 3;
+
+/// Bit 4 — `ProtocolFeeBps` is outside `0..=10_000`.
+pub const INV_FEE_BPS_OUT_OF_RANGE: u32 = 1 << 4;
+
+/// Bit 5 — The funding-token balance held by the contract is less than
+/// `funded_amount - DistributedPrincipal` when `status ∈ {0, 1, 4}`.
+/// In those states the contract still owes at least that amount to investors,
+/// so a deficit indicates a token leak.
+pub const INV_BALANCE_BELOW_LIABILITY: u32 = 1 << 5;
+
+/// Bit 6 — `UniqueFunderCount > MaxUniqueInvestorsCap` when a cap is configured.
+/// Implies the cap enforcement was bypassed at some point.
+pub const INV_FUNDER_COUNT_EXCEEDS_CAP: u32 = 1 << 6;
+
 /// Upper bound on [`LiquifactEscrow::sweep_terminal_dust`] per call (base units of the funding token).
 ///
 /// Caps blast radius if instrumentation mis-estimates “dust”; tune per asset decimals off-chain.
@@ -8069,6 +8108,194 @@ impl LiquifactEscrow {
             outstanding_liability,
             surplus,
         }
+    }
+
+    /// Check non-iterating accounting invariants and return a violation bitmask.
+    ///
+    /// Each bit corresponds to one invariant; a set bit indicates a violation.
+    /// Zero means all checked invariants hold.  The bit assignments are the
+    /// `INV_*` constants exported from this crate (`INV_STATUS_RANGE`,
+    /// `INV_FUNDED_AMOUNT_NEGATIVE`, etc.).
+    ///
+    /// **Read-only:** no storage writes, no TTL bumps.  Safe for simulation.
+    ///
+    /// # Invariants checked (in bit order)
+    ///
+    /// | Bit | Constant | Condition |
+    /// |-----|----------|-----------|
+    /// | 0 | `INV_STATUS_RANGE` | `status ∈ 0..=4` |
+    /// | 1 | `INV_FUNDED_AMOUNT_NEGATIVE` | `funded_amount >= 0` |
+    /// | 2 | `INV_SNAPSHOT_PRINCIPAL_MISMATCH` | `snapshot.total_principal == funded_amount` when `status ∈ {1,2,3}` |
+    /// | 3 | `INV_DISTRIBUTED_EXCEEDS_FUNDED` | `distributed_principal <= funded_amount` |
+    /// | 4 | `INV_FEE_BPS_OUT_OF_RANGE` | `protocol_fee_bps ∈ 0..=10_000` |
+    /// | 5 | `INV_BALANCE_BELOW_LIABILITY` | `token_balance >= funded_amount - distributed_principal` when `status ∈ {0,1,4}` |
+    /// | 6 | `INV_FUNDER_COUNT_EXCEEDS_CAP` | `unique_funder_count <= cap` when a cap is set |
+    ///
+    /// # Returns
+    /// `u32` bitmask — `0` means all invariants hold.
+    pub fn check_core_invariants(env: Env) -> u32 {
+        let mut bits: u32 = 0;
+
+        // Load escrow; if absent return the status-range bit so callers know
+        // something is wrong without panicking.
+        let escrow: InvoiceEscrow = match env
+            .storage()
+            .instance()
+            .get(&DataKey::Escrow)
+        {
+            Some(e) => e,
+            None => return INV_STATUS_RANGE,
+        };
+
+        // Bit 0: status must be in 0..=4
+        if escrow.status > 4 {
+            bits |= INV_STATUS_RANGE;
+        }
+
+        // Bit 1: funded_amount must be non-negative
+        if escrow.funded_amount < 0 {
+            bits |= INV_FUNDED_AMOUNT_NEGATIVE;
+        }
+
+        // Bit 2: snapshot.total_principal == funded_amount when status ∈ {1,2,3}
+        if escrow.status == 1 || escrow.status == 2 || escrow.status == 3 {
+            let snapshot: Option<FundingCloseSnapshot> = env
+                .storage()
+                .instance()
+                .get(&DataKey::FundingCloseSnapshot);
+            match snapshot {
+                Some(s) => {
+                    if s.total_principal != escrow.funded_amount {
+                        bits |= INV_SNAPSHOT_PRINCIPAL_MISMATCH;
+                    }
+                }
+                None => {
+                    // Snapshot absent in funded/settled/withdrawn state is itself a violation.
+                    bits |= INV_SNAPSHOT_PRINCIPAL_MISMATCH;
+                }
+            }
+        }
+
+        // Bit 3: distributed_principal <= funded_amount
+        let distributed: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::DistributedPrincipal)
+            .unwrap_or(0);
+        if distributed > escrow.funded_amount {
+            bits |= INV_DISTRIBUTED_EXCEEDS_FUNDED;
+        }
+
+        // Bit 4: protocol_fee_bps ∈ 0..=10_000
+        let fee_bps: i64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::ProtocolFeeBps)
+            .unwrap_or(0);
+        if !(0..=10_000).contains(&fee_bps) {
+            bits |= INV_FEE_BPS_OUT_OF_RANGE;
+        }
+
+        // Bit 5: token_balance >= liability when status ∈ {0,1,4}
+        // (In states 2/3 the SME or investors have already pulled funds, so a
+        // deficit there is expected and is NOT a violation of this invariant.)
+        if escrow.status == 0 || escrow.status == 1 || escrow.status == 4 {
+            if let Some(token_addr) = env
+                .storage()
+                .instance()
+                .get(&keys::funding_token())
+            {
+                let this = env.current_contract_address();
+                let balance: i128 = TokenClient::new(&env, &token_addr).balance(&this);
+                let liability = escrow.funded_amount.saturating_sub(distributed).max(0);
+                if balance < liability {
+                    bits |= INV_BALANCE_BELOW_LIABILITY;
+                }
+            }
+            // If the token key is absent (uninitialized), skip the balance check —
+            // the escrow isn't funded so no liability exists.
+        }
+
+        // Bit 6: unique_funder_count <= cap when cap is set
+        if let Some(cap) = env
+            .storage()
+            .instance()
+            .get(&keys::max_unique_investors_cap())
+        {
+            let count: u32 = env
+                .storage()
+                .instance()
+                .get(&keys::unique_funder_count())
+                .unwrap_or(0);
+            if count > cap {
+                bits |= INV_FUNDER_COUNT_EXCEEDS_CAP;
+            }
+        }
+
+        bits
+    }
+
+    /// Paginated investor audit helper: iterate a window of the investor index and
+    /// return `(sum_contributions, nonzero_count, duplicate_count_in_page)`.
+    ///
+    /// Off-chain callers aggregate successive pages and compare:
+    /// - `sum_contributions` against `funded_amount` (should equal after a full
+    ///   iteration, assuming no unfunded investors remain).
+    /// - `nonzero_count` against `unique_funder_count`.
+    /// - `duplicate_count_in_page` against `0` (any non-zero value flags an index
+    ///   integrity problem, e.g. duplication introduced by a buggy `unfund` path).
+    ///
+    /// # Arguments
+    /// * `start` — 0-based index of the first investor in this page.
+    /// * `limit` — requested page size; silently clamped to [`MAX_INVESTOR_READ_BATCH`] (50).
+    ///
+    /// # Returns
+    /// `(sum_contributions: i128, nonzero_count: u32, duplicate_count_in_page: u32)`
+    ///
+    /// **Read-only:** no storage writes, no TTL bumps.  Safe for simulation.
+    pub fn audit_investor_page(env: Env, start: u32, limit: u32) -> (i128, u32, u32) {
+        let index: Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&DataKey::InvestorIndex)
+            .unwrap_or_else(|| Vec::new(&env));
+
+        let (start, end) =
+            match Self::paginate_window(start, limit, MAX_INVESTOR_READ_BATCH, index.len()) {
+                Some(w) => w,
+                None => return (0, 0, 0),
+            };
+
+        let mut sum: i128 = 0;
+        let mut nonzero: u32 = 0;
+        let mut duplicates: u32 = 0;
+
+        // Use a soroban Map to detect duplicates within this page.
+        let mut seen: soroban_sdk::Map<Address, bool> = soroban_sdk::Map::new(&env);
+
+        for i in start..end {
+            let investor = index.get(i).unwrap();
+
+            // Duplicate detection within page.
+            if seen.get(investor.clone()).unwrap_or(false) {
+                duplicates = duplicates.saturating_add(1);
+            } else {
+                seen.set(investor.clone(), true);
+            }
+
+            let contrib: i128 = env
+                .storage()
+                .persistent()
+                .get(&keys::investor_contribution(investor))
+                .unwrap_or(0);
+
+            sum = sum.saturating_add(contrib);
+            if contrib > 0 {
+                nonzero = nonzero.saturating_add(1);
+            }
+        }
+
+        (sum, nonzero, duplicates)
     }
 
     /// Register a pending cross-contract callback with an authorized origin contract and expected phase.

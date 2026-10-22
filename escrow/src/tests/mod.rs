@@ -78,6 +78,7 @@ mod integration_status_guards;
 mod legal_hold;
 mod migration_errors;
 mod paginated_views;
+mod invariant_audit;
 mod pause;
 mod pauser_boundary_tests;
 mod properties;
