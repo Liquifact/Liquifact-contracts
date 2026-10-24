@@ -1,4 +1,4 @@
-#`!llow(dead_code)]
+#![allow(dead_code)]
 /// Centralized constructors for funding-related storage keys.
 ///
 /// #Purpose
@@ -48,11 +48,6 @@ pub(crate) fn investor_claim_not_before(investor: Address) -> DataKey {
 /// Per-investor persistent claimed-payout marker.
 pub(crate) fn investor_claimed(investor: Address) -> DataKey {
     DataKey::InvestorClaimed(investor)
-}
-
-/// Per-investor persistent optional payout recipient override (absent = pay the investor).
-pub(crate) fn investor_payout_recipient(investor: Address) -> DataKey {
-    DataKey::InvestorPayoutRecipient(investor)
 }
 
 /// Instance-storage minimum per-call contribution floor (`0` = no floor).
@@ -108,6 +103,11 @@ pub(crate) fn funding_token() -> DataKey {
 /// Instance-storage invocation nonce for cross-contract callbacks.
 pub(crate) fn callback_nonce() -> DataKey {
     DataKey::CallbackNonce
+}
+
+/// Per-investor persistent payout recipient override (absent = pay the investor directly).
+pub(crate) fn investor_payout_recipient(investor: Address) -> DataKey {
+    DataKey::InvestorPayoutRecipient(investor)
 }
 
 /// Instance-storage pending callback context keyed by invocation nonce.
