@@ -395,8 +395,8 @@ fn full_repayment_claims_sum_to_pool_minus_rounding_residue() {
 
 #[test]
 fn new_repayment_error_codes_are_appended() {
-    assert_eq!(EscrowError::LegalHoldBlocksRepayment as u32, 260);
-    assert_eq!(EscrowError::RepaymentNotOpen as u32, 261);
-    assert_eq!(EscrowError::RepaymentAmountNotPositive as u32, 262);
-    assert_eq!(EscrowError::RepaymentExceedsOutstanding as u32, 263);
+    assert_eq!(EscrowError::LegalHoldBlocksRepayment as u32, 271);
+    assert_eq!(EscrowError::RepaymentNotOpen as u32, 272);
+    assert_eq!(EscrowError::RepaymentAmountNotPositive as u32, 273);
+    assert_eq!(EscrowError::RepaymentExceedsOutstanding as u32, 274);
 }

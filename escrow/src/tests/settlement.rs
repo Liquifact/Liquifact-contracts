@@ -22,8 +22,9 @@ use super::{
     install_stellar_asset_token, setup, StellarTestToken, MAX_DUST_SWEEP_AMOUNT, TARGET,
 };
 use crate::{
-    EscrowError, EscrowSettled, InvoiceEscrow, LiquifactEscrow, SettlementConfig,
-    SettlementReadiness, SettlementResult, SmeWithdrew, YieldTier,
+    EscrowError, EscrowSettled, InvoiceEscrow, LiquifactEscrow, PartialCloseMinBpsUpdated,
+    PauseReason, PauseScope, SettlementConfig, SettlementReadiness, SettlementResult, SmeWithdrew,
+    YieldTier,
 };
 use soroban_sdk::{
     symbol_short,
@@ -1575,6 +1576,10 @@ fn test_partial_settle_admin_happy_path() {
     let (client, admin, sme) = setup(&env);
     default_init(&client, &env, &admin, &sme);
 
+    // Fund partially
+    let investor = Address::generate(&env);
+    client.fund(&investor, &(TARGET / 2));
+
     // Admin settles early
     client.partial_settle(&admin);
 
@@ -1641,6 +1646,10 @@ fn test_funding_blocked_after_partial_settle() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
     default_init(&client, &env, &admin, &sme);
+
+    // Fund partially so partial_settle succeeds
+    let investor = Address::generate(&env);
+    client.fund(&investor, &(TARGET / 2));
 
     client.partial_settle(&sme);
 
@@ -3684,3 +3693,178 @@ fn update_yield_bps_reflected_in_settlement_config() {
     let config = client.get_settlement_config();
     assert_eq!(config.yield_bps, 750i64);
 }
+
+// ── Partial settle threshold & pause tests (#1532) ───────────────────────────
+
+#[test]
+fn test_partial_settle_with_nothing_funded_fails() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    // partial_settle with nothing funded fails with PartialSettleNothingFunded
+    assert_contract_error(
+        client.try_partial_settle(&sme),
+        EscrowError::PartialSettleNothingFunded,
+    );
+}
+
+#[test]
+fn test_partial_settle_threshold_boundary() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let token = Address::generate(&env);
+    let treasury = Address::generate(&env);
+
+    // Initialize with target 1_000
+    let target = 1_000i128;
+    client.init(
+        &admin,
+        &String::from_str(&env, "THRESH01"),
+        &sme,
+        &target,
+        &500i64,
+        &0u64,
+        &token,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    // Set min_bps = 5_000 (50%)
+    client.set_partial_close_min_bps(&5_000u32);
+    assert_eq!(client.get_partial_close_min_bps(), 5_000u32);
+
+    // Fund 499 (below 500 threshold)
+    let investor1 = Address::generate(&env);
+    client.fund(&investor1, &499i128);
+
+    // Close at 499 fails with PartialSettleBelowThreshold
+    assert_contract_error(
+        client.try_partial_settle(&sme),
+        EscrowError::PartialSettleBelowThreshold,
+    );
+
+    // Fund 1 more -> funded_amount = 500 (meets 50% threshold)
+    let investor2 = Address::generate(&env);
+    client.fund(&investor2, &1i128);
+
+    // Close at 500 succeeds
+    let escrow = client.partial_settle(&sme);
+    assert_eq!(escrow.status, 1u32);
+    assert_eq!(escrow.funded_amount, 500i128);
+
+    // Assert snapshot fields
+    let snapshot = client
+        .get_funding_close_snapshot()
+        .expect("Snapshot must exist");
+    assert_eq!(snapshot.total_principal, 500i128);
+    assert_eq!(snapshot.funding_target, 1_000i128);
+    assert_eq!(snapshot.closed_at_ledger_timestamp, env.ledger().timestamp());
+    assert_eq!(snapshot.closed_at_ledger_sequence, env.ledger().sequence());
+}
+
+#[test]
+fn test_set_partial_close_min_bps_admin_and_validation() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    // Default min_bps is 0
+    assert_eq!(client.get_partial_close_min_bps(), 0u32);
+
+    // Admin succeeds
+    let new_bps = client.set_partial_close_min_bps(&2_500u32);
+    assert_eq!(new_bps, 2_500u32);
+
+    // Assert event payload (snapshot immediately before subsequent invocations overwrite event buffer)
+    let all_events = env.events().all();
+    let contract_id = client.address.clone();
+    let expected = PartialCloseMinBpsUpdated {
+        name: symbol_short!("part_bps"),
+        invoice_id: client.get_escrow().invoice_id,
+        old_bps: 0u32,
+        new_bps: 2_500u32,
+    }
+    .to_xdr(&env, &contract_id);
+    assert_eq!(all_events.events().last().unwrap().clone(), expected);
+
+    assert_eq!(client.get_partial_close_min_bps(), 2_500u32);
+
+    // Out of range (bps > 10_000)
+    assert_contract_error(
+        client.try_set_partial_close_min_bps(&10_001u32),
+        EscrowError::PartialCloseMinBpsOutOfRange,
+    );
+
+    // Status != 0 rejects setter
+    let investor = Address::generate(&env);
+    client.fund(&investor, &(TARGET / 2));
+    client.partial_settle(&sme);
+    assert_eq!(client.get_escrow().status, 1u32);
+
+    assert_contract_error(
+        client.try_set_partial_close_min_bps(&3_000u32),
+        EscrowError::PartialSettleNotOpen,
+    );
+}
+
+#[test]
+#[should_panic]
+fn test_set_partial_close_min_bps_requires_admin_auth() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    env.mock_auths(&[]);
+    client.set_partial_close_min_bps(&2_500u32);
+}
+
+#[test]
+fn test_partial_settle_pause_gates() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    let investor = Address::generate(&env);
+    client.fund(&investor, &(TARGET / 2));
+
+    // Pause with Settlement scope alone - should NOT block partial_settle
+    client.set_paused(&true, &PauseScope::Settlement, &PauseReason::Incident);
+    assert!(client.is_paused());
+
+    // Settlement scope alone does not block funding/partial_settle
+    // (We test try_partial_settle succeeds or without panic)
+    // Wait, let's unpause first after testing or test on fresh env
+    client.set_paused(&false, &PauseScope::Settlement, &PauseReason::Incident);
+
+    // Pause with Funding scope - blocks partial_settle
+    client.set_paused(&true, &PauseScope::Funding, &PauseReason::Incident);
+    assert_contract_error(
+        client.try_partial_settle(&sme),
+        EscrowError::PausedBlocksFunding,
+    );
+    client.set_paused(&false, &PauseScope::Funding, &PauseReason::Incident);
+
+    // Pause with All scope - blocks partial_settle
+    client.set_paused(&true, &PauseScope::All, &PauseReason::Security);
+    assert_contract_error(
+        client.try_partial_settle(&sme),
+        EscrowError::PausedBlocksFunding,
+    );
+    client.set_paused(&false, &PauseScope::All, &PauseReason::Security);
+
+    // Settlement scope alone does not block partial_settle:
+    client.set_paused(&true, &PauseScope::Settlement, &PauseReason::Incident);
+    let escrow = client.partial_settle(&sme);
+    assert_eq!(escrow.status, 1u32);
+}
+

@@ -505,6 +505,24 @@ Repeat deposits by the same investor must not decrement remaining slots.
 
 ---
 
+## 25. InvestorIndex Consistency and Non-Zero Contribution
+
+**Invariant:** `InvestorIndex.len() == UniqueFunderCount` and every indexed address has a contribution > 0 while status == 0.
+
+```
+InvestorIndex.len() == UniqueFunderCount
+∀ addr ∈ InvestorIndex: get_contribution(addr) > 0  (while status == 0)
+```
+
+Each distinct investor appears at most once in `InvestorIndex`. When an investor contributes for the first time or re-funds after a full exit, the address is pushed to `InvestorIndex` guarded by an O(1) persistent marker `DataKey::InvestorIndexed(Address)`. When an investor fully unfunds (`remaining_contribution == 0`), the address is removed from `InvestorIndex` (preserving the relative order of the remaining investors), its `DataKey::InvestorIndexed` marker is cleared, and stale per-investor yield (`DataKey::InvestorEffectiveYield`) and commitment lock (`DataKey::InvestorClaimNotBefore`) entries are removed from persistent storage.
+
+**Where enforced:**
+- `fund_impl` in `escrow/src/lib.rs` — pushes to `InvestorIndex` and sets `InvestorIndexed` only when not already indexed; increments `UniqueFunderCount` when `prev == 0`.
+- `unfund` in `escrow/src/lib.rs` — when `remaining_contribution == 0`, decrements `UniqueFunderCount`, removes the address from `InvestorIndex` with `Vec::remove`, clears `InvestorIndexed`, and deletes `InvestorEffectiveYield` and `InvestorClaimNotBefore`.
+- Property test: asserts `index uniqueness`, `index.len() == UniqueFunderCount`, and `Σ get_funding_records == funded_amount` across random sequences of `fund`, `unfund`, and re-`fund`.
+
+---
+
 ## Entrypoint Cross-Reference
 
 | Invariant | Primary entrypoints |
@@ -533,3 +551,4 @@ Repeat deposits by the same investor must not decrement remaining slots.
 | Refund conservation (#22) | `refund`, `refund_batch`, `sweep_terminal_dust` |
 | Status never regresses (#23) | all state-mutating entrypoints |
 | Remaining slots conservation (#24) | `fund`, `fund_with_commitment`, `fund_batch`, `unfund` *(planned)*, `lower_max_unique_investors`, `raise_max_unique_investors` |
+| InvestorIndex consistency (#25) | `fund`, `fund_with_commitment`, `fund_batch`, `unfund` |
