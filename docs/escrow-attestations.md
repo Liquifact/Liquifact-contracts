@@ -150,8 +150,8 @@ full; the next append will fail with `AttestationAppendLogCapacityReached` (51).
   deterministically even to unauthenticated callers.
 - **Digest content is opaque.** No entrypoint inspects, normalizes, or rejects a digest
   based on its bytes. Zero-filled and all-ones digests are valid.
-- **Duplicates are a policy choice, not a bug.** Append paths accept duplicates; revoke
-  paths reject them. This asymmetry is intentional and documented above.
+- **Append digests are unique.** Both admin and attestor append reject the primary hash
+  and all historical log digests, including revoked entries, without consuming capacity.
 - **Concurrency.** All entrypoints are single-transaction; the Soroban host serializes
   execution per contract instance, so concurrent submissions cannot interleave state
   transitions. The first transaction to land determines the outcome; later ones observe
@@ -190,11 +190,19 @@ admin key is compromised.
 Appends a digest to a bounded audit log. Intended for incremental compliance updates: re-KYC
 cycles, updated KYB documents, AML screening refreshes, or legal hold evidence bundles.
 
-The log is an ordered sequence, not a set — duplicate digests are allowed (e.g. re-confirming
-an unchanged document at a new ledger timestamp via the event).
+Both append paths reject an existing or primary digest with `AttestationDigestDuplicate`
+(270). Revoked digests remain present: revocation must not allow replaying the same evidence
+as a fresh, unrevoked entry or consuming another slot.
 
-Duplicate digests are accepted by design: the log is an audit trail, and re-confirming an
-unchanged document at a new ledger sequence is a legitimate operational event.
+The admin can assign an optional append-only attestor with `set_attestor(Some(address))`,
+rotate it, or disable it with `set_attestor(None)`. The designated address must authorize
+`append_attestation_digest_as(address, digest)`; a different or unset role fails with
+`NotAttestor` (269). Binding, revocation, and unrevocation remain admin-only.
+
+Each append records its author in persistent storage. `get_attestation_author(index)`
+returns that address, or `None` for legacy entries and out-of-range indices. The new
+`AttestationAuthored { name, invoice_id, index, author }` event accompanies the unchanged
+`AttestationDigestAppended` event. See [authorization rules](attestation-auth.md).
 
 The 33rd append panics with `"attestation append log capacity reached"`. If more than 32
 incremental anchors are needed, deploy a new escrow instance or extend the log off-chain using
@@ -549,8 +557,8 @@ storage key; the digest at index N is unchanged.
 - **Collision resistance:** SHA-256 is assumed collision-resistant for operational purposes.
   If a weaker hash is used off-chain, the on-chain anchor provides no stronger guarantee.
 
-- **Append log is not a set:** duplicate digests are accepted. Off-chain consumers should
-  deduplicate by digest value if uniqueness matters for their use case.
+- **Append digests are unique:** primary and historical digests, including revoked ones,
+  cannot be appended again. Pre-upgrade duplicate entries remain readable.
 
 - **Zero and all-ones digests are valid anchors:** the contract treats the 32-byte digest as
   opaque. There is no sentinel value; callers must not assume `[0u8; 32]` means "unset".
@@ -621,7 +629,7 @@ Attestation behavior is covered in [`escrow/src/tests/attestations.rs`](../escro
 | `test_append_exactly_max_entries_succeeds` | 32nd entry succeeds (boundary inclusive) |
 | `test_append_beyond_max_panics` | 33rd entry panics |
 | `test_append_beyond_max_typed_error` | `try_append_attestation_digest` returns typed error code 51 (`AttestationAppendLogCapacityReached`) on 33rd call |
-| `test_append_duplicate_digest_allowed` | Duplicate digests accepted (log is audit trail, not a set) |
+| `test_append_duplicate_digest_rejected` | Duplicate rejection leaves the log unchanged |
 | `test_append_non_admin_panics` | Non-admin append is rejected |
 | `test_append_emits_event_with_correct_index` | Emits `AttestationDigestAppended` with correct `index` (0-based) and `digest` for each call |
 | `test_append_zero_digest_accepted` | Boundary: `[0u8; 32]` is accepted and stored verbatim |
