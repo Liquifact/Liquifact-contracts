@@ -350,3 +350,31 @@ Both `init` and `update_maturity` enforce that non-zero maturity timestamps sati
 A maturity of `0` always passes validation — it means "no maturity lock".
 
 See `EscrowError::MaturityInPast` and `EscrowError::MaturityExceedsMaxHorizon`.
+
+### Updating the maturity horizon
+
+Both `update_maturity_max_horizon` and `raise_maturity_max_horizon` require admin
+authorization and an **Open** escrow (`status == 0`). Statuses 1–4 fail with
+`MaturityHorizonUpdateNotOpen` (260). Both setters accept only the inclusive range
+`MIN_MATURITY_MAX_HORIZON_SECS = 86_400` (one day) through
+`MAX_MATURITY_MAX_HORIZON_SECS = 315_360_000` (ten years); values outside it fail
+with `MaturityHorizonOutOfRange` (259).
+
+The new horizon must still include the configured maturity:
+`maturity <= ledger_timestamp + new_horizon`, with saturating addition to avoid
+overflow. A maturity of zero imposes no lock. Lowering below the remaining time
+to maturity fails with `MaturityHorizonBelowMaturity` (262); lowering exactly to
+that remaining time succeeds if it is within the allowed range. This consistency
+check also applies to raises from a legacy configuration.
+
+The general update rejects an unchanged value with `MaturityHorizonUnchanged`
+(261). The raise-only setter retains `HorizonNotRaised` for equal or lower values.
+Validation happens before storage writes or success events. Successful updates
+retain their existing `MaturityMaxHorizonUpdated` / `MaturityMaxHorizonRaised`
+events and return the new horizon.
+
+These operations change only the horizon used by later maturity updates. They
+do not rewrite the escrow's maturity, investor contributions, or
+`InvestorClaimNotBefore` commitment locks, including commitments made while
+funding is still open. Initialization's maturity validation and optional horizon
+parameter are unchanged; the one-day-to-ten-year bounds apply to these setters.

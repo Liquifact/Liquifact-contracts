@@ -260,5 +260,5 @@ fn claims_leave_less_than_one_unit_per_investor_as_rounding_residue() {
 
 #[test]
 fn settlement_pool_underfunded_error_code_is_appended() {
-    assert_eq!(EscrowError::SettlementPoolUnderfunded as u32, 259);
+    assert_eq!(EscrowError::SettlementPoolUnderfunded as u32, 275);
 }

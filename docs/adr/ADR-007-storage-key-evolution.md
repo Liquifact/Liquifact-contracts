@@ -61,10 +61,20 @@ independent TTL and the contract instance entry does not grow with investor card
 - `DataKey::InvestorEffectiveYield(Address)`
 - `DataKey::InvestorClaimNotBefore(Address)`
 - `DataKey::InvestorClaimed(Address)`
+- `DataKey::InvestorRefunded(Address)` — _additive, issue #1541; no schema bump_
 
 Read/write semantics are unchanged: absent keys still default to `0`, base `yield_bps`, `0`, and
 `false` respectively. Per-investor persistent keys have their TTL extended at write time using `PERSISTENT_TTL_MIN_EXTENSION_LEDGERS`. See `docs/escrow-gas-storage-notes.md` for additional TTL extension via
 [`LiquifactEscrow::bump_ttl`](../../escrow/src/lib.rs).
+
+**`InvestorRefunded` migration note (issue #1541, additive — no schema bump):**
+Pre-#1541 WASM wrote `DataKey::InvestorRefunded(Address)` to instance storage.  The private
+`investor_refunded(env, investor)` helper (used by `is_investor_refunded` and `refund_batch`)
+checks persistent storage first and falls back to the legacy instance entry.  When a legacy
+instance entry is found, it is migrated in place: the persistent entry is written (if absent),
+its TTL is extended via `get_storage_limit`, and the instance entry is removed.  Migration is
+atomic within the host call.  Operators do not need to call `migrate` for this change; the
+migration runs transparently on the first read of each affected investor's refund flag.
 
 **Migration:** relocating storage type is not enumerable on-chain (no iteration over instance keys
 by address). `migrate` returns [`EscrowError::NoMigrationPath`]; operators must **redeploy** fresh
