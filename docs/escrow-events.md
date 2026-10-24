@@ -16,6 +16,14 @@ All events follow the Soroban `contractevent` format. Key fields like `invoice_i
 
 ## 📋 Event Catalog
 
+### `RefundBatchProcessed`
+
+Emitted once after a successful `refund_batch`, after the existing per-investor
+`InvestorRefundedEvt` events. Its topic fields are `name` (`refund_bt`) and
+`invoice_id`; its data fields are `count` (`u32`) and `total` (`i128`). Both data
+fields are zero when every entry is ineligible. Rejected batches emit no committed
+refund events. Existing per-investor event fields are unchanged.
+
 ### `EscrowInitialized`
 Emitted once by `init()`. Carries the escrow snapshot plus immutable bound references so
 indexers can register `funding_token`, `treasury`, and optional `registry` without follow-up reads.

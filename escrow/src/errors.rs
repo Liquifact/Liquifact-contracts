@@ -112,4 +112,8 @@ pub enum EscrowError {
     FeeCheduleInvalidActivation = 242,
     /// `LiquifactEscrow::set_fee_schedule` attempted to submit a schedule identical to the active schedule.
     FeeScheduleSameAsActive = 243,
+    /// `LiquifactEscrow::set_payout_recipient` received a recipient equal to the escrow contract itself.
+    PayoutRecipientInvalid = 250,
+    /// `LiquifactEscrow::set_payout_recipient` blocked because a legal hold is active.
+    LegalHoldBlocksRecipientChange = 251,
 }

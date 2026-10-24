@@ -15,22 +15,35 @@ rejection** -- for auditors, integrators, and reviewers. Verified directly again
 
 | Role | Attestation capability |
 |------|------------------------|
-| **Admin** (`InvoiceEscrow::admin`) | Sole authority over all state-mutating attestation entrypoints: bind, append (single and batch), revoke (single and batch), and unrevoke. |
+| **Admin** (`InvoiceEscrow::admin`) | Controls attestor assignment, primary binding, admin append, revoke (single and batch), and unrevoke. |
+| **Designated attestor** (`DataKey::Attestor`) | May only append through `append_attestation_digest_as`; cannot bind, revoke, unrevoke, or change the role. |
 | **SME** (`InvoiceEscrow::sme_address`) | No attestation capability. |
 | **Investor** | No attestation capability. |
 | **Treasury** (`DataKey::Treasury`) | No attestation capability. |
 | **Anyone** | All read-only attestation views are callable without authorization. |
 
-**No separate attestation operator role exists.** The single `admin` key gates every
-write. Production deployments should use a multisig or governed contract as admin so no
-single key can bind an arbitrary digest. See
-[`docs/adr/ADR-002-auth-boundaries.md`](adr/ADR-002-auth-boundaries.md).
+The admin assigns, rotates, or clears the optional role with `set_attestor(Option<Address>)`.
+The attestor path checks the supplied address against the stored role (`NotAttestor`, 269)
+and then requires that address's authorization. Clearing the role leaves the admin path
+available and preserves historical authors. A role holder that is also the admin retains
+its separate admin powers.
+
+Both append paths reject the primary digest and any digest already in the log
+(`AttestationDigestDuplicate`, 270), including revoked entries. Revocation changes validity,
+not history: accepting the same digest again would bypass revocation and waste bounded capacity.
+
+Each successful append stores the author under persistent `AttestationAuthor(index)` and
+extends its TTL using the persistent minimum-extension policy. `get_attestation_author`
+requires no authorization and returns `None` for legacy entries and out-of-range indices.
+Role rotation never rewrites authors. Persistent author entries remain subject to normal
+Soroban archival/restoration. `AttestationAuthored` (`att_by`) is emitted before the unchanged
+`AttestationDigestAppended` (`att_app`) event. Role changes emit `AttestorChanged` (`att_role`).
 
 ---
 
 ## Authorization Mechanism
 
-All mutating attestation entrypoints use **Soroban `Address::require_auth()`** on the
+Admin-only attestation entrypoints use **Soroban `Address::require_auth()`** on the
 `admin` address, enforced through one of two patterns:
 
 ### Pattern 1 -- `load_escrow_require_admin` helper
@@ -68,12 +81,14 @@ size checks in `revoke_attestation_digests` and `append_attestation_digests`).
 
 ## Access Control Matrix
 
-### Mutating Entrypoints (admin-only)
+### Mutating Entrypoints
 
 | Entrypoint | Required Auth | Legal Hold Gate | Pause Gate | State Precondition | Atomicity |
 |------------|---------------|-----------------|------------|-------------------|-----------|
 | `bind_primary_attestation_hash` | `admin` | No | No | Uninitialized (write-once) | Single write |
-| `append_attestation_digest` | `admin` | No | No | `log.len() < 32` | Single write |
+| `set_attestor` | `admin` | No | No | Initialized escrow | Atomic role change |
+| `append_attestation_digest` | `admin` | No | No | Unique digest, `log.len() < 32` | Atomic log and author writes |
+| `append_attestation_digest_as` | Stored attestor | No | No | Unique digest, `log.len() < 32` | Atomic log and author writes |
 | `append_attestation_digests` | `admin` | No | No | `log.len() + n <= 32` | All-or-nothing batch |
 | `revoke_attestation_digest` | `admin` | No | No | `index < log.len()`, not yet revoked | Single write |
 | `revoke_attestation_digests` | `admin` | No | No | All indices valid and unrevoked | Full batch rollback on any failure |
@@ -121,9 +136,10 @@ follow two distinct patterns depending on whether batch-bound checks precede aut
 
 ```
 1. Load escrow + admin auth    -> load_escrow_require_admin
-2. Capacity check              -> AttestationAppendLogCapacityReached (51) if log.len() >= 32
-3. Storage write               -> push_back(digest) to AttestationAppendLog
-4. Event emission              -> AttestationDigestAppended { att_app, invoice_id, index, digest }
+2. Duplicate check             -> AttestationDigestDuplicate (270), including primary/revoked digests
+3. Capacity check              -> AttestationAppendLogCapacityReached (51) if log.len() >= 32
+4. Storage writes              -> append digest and persist author
+5. Events                      -> AttestationAuthored, then unchanged AttestationDigestAppended
 ```
 
 ### `append_attestation_digests` (line 3372) -- batch
@@ -224,9 +240,8 @@ try {
 
 ## Key Observations
 
-1. **Single admin key gates everything.** All five mutating entrypoints (plus batch
-   variants) require the same `InvoiceEscrow::admin` auth. No separate attestation
-   operator role exists.
+1. **The attestor has append-only authority.** The admin controls assignment, binding,
+   revocation, and unrevocation. Both append paths require their respective signer.
 
 2. **No legal-hold or pause gate on attestation.** Unlike financial entrypoints
    (`settle`, `withdraw`, `fund`), attestation entrypoints are never blocked by
@@ -243,9 +258,8 @@ try {
    follows ADR-002 ordering (range check -> state check -> auth -> mutation), while
    `revoke_attestation_digest` checks auth first. Both patterns are intentional.
 
-6. **Duplicate digests are allowed.** The append log is an ordered audit trail, not a
-   set. Duplicate digests are accepted and may represent re-confirmations of unchanged
-   documents at new ledger timestamps.
+6. **Duplicate appends are rejected.** Both paths check the primary hash and the entire
+   bounded log, including revoked entries. Pre-upgrade entries remain unchanged.
 
 7. **Revocation does not delete history.** The original digest persists in the append
    log; only the revocation marker (`DataKey::AttestationRevoked(index)`) changes.

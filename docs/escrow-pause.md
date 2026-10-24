@@ -160,7 +160,7 @@ second `set_paused(true, scope, reason)` call while a pause is still effective:
 - May only **widen** the scope (e.g. `Funding` → `All`). Re-pausing with the same
   scope is accepted as an idempotent no-op (the timestamp is still preserved).
   A **narrower** scope — including a switch between two different single-family
-  scopes — is rejected with `EscrowError::PauseAlreadyActive` (code 259) and the
+  scopes — is rejected with `EscrowError::PauseAlreadyActive` (code 276) and the
   active pause is left untouched.
 - A widening re-pause emits `PausedChanged` with the new scope.
 
@@ -179,7 +179,7 @@ now >= PausedAt + max_duration + cooldown
 
 where `cooldown` is configured via `set_pause_cooldown` (defaults to `0`).
 Before the cooldown elapses, activation fails with
-`EscrowError::PauseCooldownActive` (code 260) and nothing is written; after it
+`EscrowError::PauseCooldownActive` (code 277) and nothing is written; after it
 elapses the pause activates with a fresh timestamp.
 
 An explicit `set_paused(false, ...)` is a *deliberate* un-pause, not an expiry:
@@ -206,7 +206,7 @@ stateDiagram-v2
 set_pause_cooldown(secs: u64) -> u64
   ├─ 0                     → no cooldown (default)
   ├─ 1 ..= MAX_PAUSE_MAX_DURATION_SECS → cooldown applied after a pause expires
-  └─ above the ceiling     → EscrowError::PauseCooldownOutOfRange (261)
+  └─ above the ceiling     → EscrowError::PauseCooldownOutOfRange (278)
 ```
 
 The cooldown is bounded by the same ceiling as the pause max duration
@@ -241,10 +241,10 @@ ledger timestamp exceeds `PauseToggleWindowStart + window_secs`.
 
 | Function | Effect | Error if |
 |---|---|---|
-| `set_paused(active, scope, reason)` | Activate/clear a typed, scoped pause | Rate limit exceeded; re-pause narrow → `PauseAlreadyActive` (259); cooldown active → `PauseCooldownActive` (260); wrong-scope unpause → `PauseScopeMismatch` (246) |
+| `set_paused(active, scope, reason)` | Activate/clear a typed, scoped pause | Rate limit exceeded; re-pause narrow → `PauseAlreadyActive` (276); cooldown active → `PauseCooldownActive` (277); wrong-scope unpause → `PauseScopeMismatch` (246) |
 | `set_pause_max_duration(duration)` | Set auto-expiry window | Duration out of bounds |
 | `get_pause_max_duration()` | Read current auto-expiry | — |
-| `set_pause_cooldown(secs)` | Set cooldown after expiry before re-activation | Cooldown out of bounds → `PauseCooldownOutOfRange` (261) |
+| `set_pause_cooldown(secs)` | Set cooldown after expiry before re-activation | Cooldown out of bounds → `PauseCooldownOutOfRange` (278) |
 | `get_pause_cooldown()` | Read current cooldown | — |
 | `set_pause_rate_limit(limit, window)` | Set toggle rate limit | Invalid combination or out of bounds |
 | `is_paused()` | Read current pause boolean (effective) | — |
