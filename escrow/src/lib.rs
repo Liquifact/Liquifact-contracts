@@ -419,6 +419,8 @@ pub const MAX_PAUSE_TOGGLE_WINDOW_SECS: u64 = 7_776_000; // 90 days
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
 pub enum EscrowError {
+    AttestationRequiredForWithdraw = 251,
+    AttestationRequirementNotOpen = 250,
     /// [`LiquifactEscrow::init`] rejected a non-positive invoice amount.
     AmountMustBePositive = 1,
     /// [`LiquifactEscrow::init`] rejected `yield_bps` outside `0..=10_000`.
@@ -809,8 +811,6 @@ pub enum EscrowError {
     /// [`LiquifactEscrow::register_callback`] called while
     /// [`MAX_PENDING_CALLBACKS`] contexts are already pending.
     CallbackPendingLimitReached = 250,
-    /// [`LiquifactEscrow::execute_callback`] called after the context's
-    /// [`CALLBACK_CONTEXT_TTL_SECS`] window elapsed.
     CallbackExpired = 251,
     /// [`LiquifactEscrow::register_callback`] nonce counter overflowed `u64`.
     CallbackNonceOverflow = 252,

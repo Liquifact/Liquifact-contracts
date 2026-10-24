@@ -55,38 +55,28 @@ pub(crate) fn min_contribution_floor() -> DataKey {
 }
 
 /// Instance-storage cap on distinct investor addresses (absent = unlimited).
-pubcrate fn max_unique_investors_cap() -> DataKey {
+pub(crate) fn max_unique_investors_cap() -> DataKey {
     DataKey::MaxUniqueInvestorsCap
 }
 
 /// Instance-storage cap on total principal for a single investor address (absent = unlimited).
-pubcrate fn max_per_investor_cap() -> DataKey {
+pub(crate) fn max_per_investor_cap() -> DataKey {
     DataKey::MaxPerInvestorCap
 }
 
 /// Instance-storage count of distinct investor addresses that have funded so far.
-pubcrate fn unique_funder_count() -> DataKey {
+pub(crate) fn unique_funder_count() -> DataKey {
     DataKey::UniqueFunderCount
 }
 
 /// Instance-storage ordered list of investor addresses backing paginated enumeration.
-pubcrate fn investor_index() -> DataKey {
+pub(crate) fn investor_index() -> DataKey {
     DataKey::InvestorIndex
 }
 
 /// Instance-storage optional funding deadline timestamp (absent = no deadline).
-pubcrate fn funding_deadline() -> DataKey {
+pub(crate) fn funding_deadline() -> DataKey {
     DataKey::FundingDeadline
-}
-
-/// Instance-storage original funding deadline baseline (set on first extension, absent = no extension yet).
-pub(crate) fn original_funding_deadline() -> DataKey {
-    DataKey::OriginalFundingDeadline
-}
-
-/// Instance-storage counter of accepted funding-deadline extensions.
-pub(crate) fn funding_deadline_extension_count() -> DataKey {
-    DataKey::FundingDeadlineExtensionCount
 }
 
 /// Instance-storage write-once prorata snapshot captured at the first funded transition.
@@ -95,12 +85,12 @@ pub(crate) fn funding_close_snapshot() -> DataKey {
 }
 
 /// Instance-storage immutable SEP-41 funding token address, set once at `init`.
-pubcrate fn funding_token() -> DataKey {
+pub(crate) fn funding_token() -> DataKey {
     DataKey::FundingToken
 }
 
 /// Instance-storage invocation nonce for cross-contract callbacks.
-pubcrate fn callback_nonce() -> DataKey {
+pub(crate) fn callback_nonce() -> DataKey {
     DataKey::CallbackNonce
 }
 
@@ -118,6 +108,6 @@ pub(crate) fn callback_consumed(nonce: u64) -> DataKey {
 }
 
 /// Instance-storage count of pending (unexpired, unconsumed) callback contexts.
-pubcrate fn pending_callback_count() -> DataKey {
+pub(crate) fn pending_callback_count() -> DataKey {
     DataKey::PendingCallbackCount
 }
