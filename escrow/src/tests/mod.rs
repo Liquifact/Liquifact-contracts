@@ -23,7 +23,7 @@ use super::{
     FundingCancelled, FundingDeadlineExtensionStats, FundingTargetUpdated, InvestorRefundedEvt,
     LiquifactEscrow, LiquifactEscrowClient, MaturityMaxHorizonUpdated,
     MaxUniqueInvestorsCapLowered, PauseReason, PauseScope, PauseState, PrimaryAttestationBound,
-    RegistryRefRebound, TreasuryDustSwept, UpgradeCancelled, UpgradeProposed, YieldTier,
+    RegistryRefRebound, TreasuryDustSweptEvt, UpgradeCancelled, UpgradeProposed, YieldTier,
     MAX_ATTESTATION_APPEND_ENTRIES, MAX_DUST_SWEEP_AMOUNT, MAX_FUNDING_DEADLINE_EXTENSIONS,
     MAX_FUNDING_DEADLINE_TOTAL_EXTENSION_SECS, MAX_FUND_BATCH, SCHEMA_VERSION,
     UPGRADE_EXECUTION_WINDOW_SECS, UPGRADE_TIMELOCK_SECS,
@@ -41,7 +41,8 @@ pub use soroban_sdk::Symbol;
 pub(crate) fn assert_contract_error<T, E>(
     result: Result<Result<T, E>, Result<Error, InvokeError>>,
     expected: EscrowError,
-) where
+)
+where
     T: Debug,
     E: Debug,
 {
@@ -80,6 +81,7 @@ mod migration_errors;
 mod paginated_views;
 mod pause;
 mod pauser_boundary_tests;
+mod position_transfer;
 mod properties;
 mod reconciliation_lifecycle;
 mod settlement;
