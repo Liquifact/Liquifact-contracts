@@ -1076,6 +1076,7 @@ pub(crate) fn validate_maturity_bounds(env: &Env, maturity: u64, max_horizon: u6
 /// - `Clone`: required because keys are passed by reference into storage APIs and reused
 ///   across lookups/sets in the same execution path.
 pub enum DataKey {
+    /// Pending treasury address awaiting acceptance (two-step, time-delayed rotation).
     /// Full escrow snapshot ([`InvoiceEscrow`]); rewritten atomically on every state transition.
     Escrow,
     /// Stored schema version; written once by [`LiquifactEscrow::init`] to [`SCHEMA_VERSION`]

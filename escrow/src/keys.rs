@@ -1,4 +1,4 @@
-#allow(dead_code)
+#![allow(dead_code)]
 /// Centralized constructors for funding-related storage keys.
 ///
 /// #Purpose
@@ -110,9 +110,7 @@ pub(crate) fn callback_context(nonce: u64) -> DataKey {
     DataKey::CallbackContext(nonce)
 }
 
-/// Instance-storage pending treasury rotation proposal (addressed as `(new_treasury, eta)`).
-///
-/// Added under ADR-007 additive-key policy; absence means no rotation is pending.
+/// Instance-storage pending treasury rotation (two-step, time-delayed).
 pub(crate) fn pending_treasury() -> DataKey {
     DataKey::PendingTreasury
 }
