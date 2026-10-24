@@ -53,7 +53,7 @@ pub(crate) fn assert_contract_error<T, E>(
         Err(Err(InvokeError::Contract(code))) => {
             assert_eq!(code, expected_code);
         }
-        other => panic!("expected ContractError({expected_code}), got {other:?}"),
+        other => panic("expected ContractError({expected_code}), got {other:?}"),
     }
 }
 
@@ -84,9 +84,11 @@ mod properties;
 mod reconciliation_lifecycle;
 mod settlement;
 mod settlement_config_view;
+mod treasury_rotation;
 mod timelocked_upgrade;
 mod withdraw_attestation_gate;
 mod yield_tier_boundaries;
+
 /// Registers a new escrow contract instance and returns its contract id.
 pub fn deploy_id(env: &Env) -> Address {
     env.register(LiquifactEscrow, ())
