@@ -58,7 +58,6 @@ fn setup_upgrade_escrow(env: &Env) -> (crate::LiquifactEscrowClient<'_>, Address
         &None,
         &None,
         &None,
-        &None::<i64>,
     );
     (client, admin)
 }
