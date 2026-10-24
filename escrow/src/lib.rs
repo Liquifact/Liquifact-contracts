@@ -334,6 +334,9 @@ pub const MAX_COLLATERAL_BATCH: u32 = 50;
 /// Upper bound on attestation digest read page size.
 pub const MAX_ATTESTATION_READ_PAGE: u32 = 20;
 
+/// Upper bound on [`LiquifactEscrow::get_investor_positions`] page size.
+pub const MAX_POSITION_READ_PAGE: u32 = 20;
+
 /// Upper bound on [`LiquifactEscrow::sweep_terminal_dust`] per call (base units of the funding token).
 ///
 /// Caps blast radius if instrumentation mis-estimates “dust”; tune per asset decimals off-chain.
@@ -2297,6 +2300,42 @@ pub struct AttestationDigestInfo {
     pub revoked: bool,
 }
 
+/// Composite read-only view of one investor's position in the escrow.
+///
+/// Aggregates the six per-investor storage reads that indexers and frontends
+/// previously had to make individually.  All fields are sourced from the same
+/// helpers used by `claim_investor_payout`, `refund`, and `get_claimable_payout`
+/// so the values are always consistent with on-chain behaviour.
+///
+/// # Read-only guarantee
+/// `get_investor_position` and `get_investor_positions` never write to storage
+/// or bump TTLs.  They are safe for simulation and do not count toward the
+/// contract's write-budget.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct InvestorPosition {
+    /// The investor's address.
+    pub investor: Address,
+    /// Cumulative principal contributed by this investor (base units of the funding token).
+    /// Zero for addresses that have not funded or have been fully refunded.
+    pub contribution: i128,
+    /// Effective yield in basis points selected at first deposit.
+    /// Falls back to the escrow base `yield_bps` when no per-investor tier was recorded
+    /// (legacy / non-tiered deposits).
+    pub effective_yield_bps: i64,
+    /// Earliest ledger timestamp at which the investor may claim their payout.
+    /// `0` means no extra claim gate (claimable as soon as the escrow is settled).
+    pub claim_not_before: u64,
+    /// Whether this investor has already claimed their payout.
+    pub claimed: bool,
+    /// Whether this investor's principal has been refunded in a cancelled escrow.
+    pub refunded: bool,
+    /// Claimable payout at query time (identical to `get_claimable_payout`).
+    /// `0` when the escrow is not yet settled, a legal hold is active, the investor
+    /// has already claimed, or the claim gate has not opened.
+    pub claimable_payout: i128,
+}
+
 #[contractevent]
 pub struct AllowlistEnabledChanged {
     #[topic]
@@ -4003,12 +4042,11 @@ impl LiquifactEscrow {
             .unwrap_or_else(|| Vec::new(&env));
 
         let len = index.len();
-        if start >= len || limit == 0 {
-            return Vec::new(&env);
-        }
-
-        let actual_limit = limit.min(MAX_INVESTOR_READ_BATCH);
-        let end = (start + actual_limit).min(len);
+        let (start, end) =
+            match Self::paginate_window(start, limit, MAX_INVESTOR_READ_BATCH, len) {
+                Some(w) => w,
+                None => return Vec::new(&env),
+            };
 
         let mut result = Vec::new(&env);
         for i in start..end {
@@ -4084,12 +4122,11 @@ impl LiquifactEscrow {
     pub fn get_yield_tiers_page(env: Env, start: u32, limit: u32) -> Vec<YieldTier> {
         let tiers = Self::get_yield_tiers(env.clone());
         let len = tiers.len();
-        if start >= len || limit == 0 {
-            return Vec::new(&env);
-        }
-
-        let actual_limit = limit.min(MAX_INVESTOR_READ_BATCH);
-        let end = (start + actual_limit).min(len);
+        let (start, end) =
+            match Self::paginate_window(start, limit, MAX_INVESTOR_READ_BATCH, len) {
+                Some(w) => w,
+                None => return Vec::new(&env),
+            };
 
         let mut result = Vec::new(&env);
         for i in start..end {
@@ -4346,12 +4383,11 @@ impl LiquifactEscrow {
     pub fn get_attestation_digests(env: Env, start: u32, limit: u32) -> Vec<AttestationDigestInfo> {
         let log = Self::get_attestation_append_log(env.clone());
         let len = log.len();
-        if start >= len || limit == 0 {
-            return Vec::new(&env);
-        }
-
-        let actual_limit = limit.min(MAX_ATTESTATION_READ_PAGE);
-        let end = (start + actual_limit).min(len);
+        let (start, end) =
+            match Self::paginate_window(start, limit, MAX_ATTESTATION_READ_PAGE, len) {
+                Some(w) => w,
+                None => return Vec::new(&env),
+            };
 
         let mut result = Vec::new(&env);
         for i in start..end {
@@ -6804,6 +6840,89 @@ impl LiquifactEscrow {
 
         // All gates passed: return the gross payout
         Self::compute_investor_payout(env, investor)
+    }
+
+    /// Composite read-only view of a single investor's position.
+    ///
+    /// Aggregates contribution, effective yield, claim gate, claimed flag, refunded flag,
+    /// and current claimable payout into one call so indexers and frontends no longer need
+    /// to make six separate reads per investor.
+    ///
+    /// # Authorization
+    /// None — pure read; no auth required and no state mutation.
+    ///
+    /// # Returns
+    /// An [`InvestorPosition`] with all fields sourced from the same helpers used by the
+    /// write-path entrypoints (`claim_investor_payout`, `refund`, `get_claimable_payout`).
+    pub fn get_investor_position(env: Env, investor: Address) -> InvestorPosition {
+        let contribution =
+            Self::get_persistent_investor_contribution(&env, investor.clone());
+        let effective_yield_bps = Self::get_persistent_investor_effective_yield(&env, investor.clone())
+            .unwrap_or_else(|| {
+                // Fall back to the escrow base yield when no per-investor tier was stored
+                // (legacy / non-tiered positions).
+                env.storage()
+                    .instance()
+                    .get(&DataKey::Escrow)
+                    .map(|e: InvoiceEscrow| e.yield_bps)
+                    .unwrap_or(0)
+            });
+        let claim_not_before =
+            Self::get_persistent_investor_claim_not_before(&env, investor.clone());
+        let claimed = Self::get_persistent_investor_claimed(&env, investor.clone());
+        let refunded = env
+            .storage()
+            .instance()
+            .get(&DataKey::InvestorRefunded(investor.clone()))
+            .unwrap_or(false);
+        let claimable_payout = Self::get_claimable_payout(env.clone(), investor.clone());
+        InvestorPosition {
+            investor,
+            contribution,
+            effective_yield_bps,
+            claim_not_before,
+            claimed,
+            refunded,
+            claimable_payout,
+        }
+    }
+
+    /// Paginated view over the investor index, returning one [`InvestorPosition`] per entry.
+    ///
+    /// Iterates the same `InvestorIndex` used by `get_investors` and `get_funding_records`,
+    /// capped at [`MAX_POSITION_READ_PAGE`] (20) entries per call.
+    ///
+    /// # Arguments
+    /// * `start` — 0-based index of the first investor to include.
+    /// * `limit` — requested page size; silently clamped to [`MAX_POSITION_READ_PAGE`].
+    ///
+    /// # Returns
+    /// A `Vec<InvestorPosition>`.  Returns an empty vector when:
+    /// - The investor index is empty.
+    /// - `start >= len`.
+    /// - `limit == 0`.
+    ///
+    /// # Authorization
+    /// None — pure read; no auth required and no state mutation.
+    pub fn get_investor_positions(env: Env, start: u32, limit: u32) -> Vec<InvestorPosition> {
+        let index: Vec<Address> = env
+            .storage()
+            .instance()
+            .get(&DataKey::InvestorIndex)
+            .unwrap_or_else(|| Vec::new(&env));
+
+        let (start, end) =
+            match Self::paginate_window(start, limit, MAX_POSITION_READ_PAGE, index.len()) {
+                Some(w) => w,
+                None => return Vec::new(&env),
+            };
+
+        let mut result = Vec::new(&env);
+        for i in start..end {
+            let investor = index.get(i).unwrap();
+            result.push_back(Self::get_investor_position(env.clone(), investor));
+        }
+        result
     }
 
     /// On-chain read-only pro-rata gross payout for `investor`.
