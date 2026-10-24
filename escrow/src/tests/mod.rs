@@ -54,7 +54,7 @@ where
         Err(Err(InvokeError::Contract(code))) => {
             assert_eq!(code, expected_code);
         }
-        other => panic("expected ContractError({expected_code}), got {other:?}"),
+        other => panic!("expected ContractError({expected_code}), got {other:?}"),
     }
 }
 
@@ -128,13 +128,13 @@ pub struct StellarTestToken<'a> {
     pub stellar: StellarAssetClient<'a>,
 }
 
-pub fn install_stellar_asset_token<'a>(env: '&a Env) -> StellarTestToken<'a> {
+pub fn install_stellar_asset_token<'a>(env: &'a Env) -> StellarTestToken<'a> {
     let sac = env.register_stellar_asset_contract_v2(Address::generate(env));
     let id = sac.address();
     StellarTestToken {
         id: id.clone(),
         token: TokenClient::new(env, &id),
-        stellar: StellarAssetClient::new(env, 'id),
+        stellar: StellarAssetClient::new(env, &id),
     }
 }
 
@@ -159,7 +159,7 @@ pub fn default_init(client: &LiquifactEscrowClient<'_>, env: &Env, admin: &Addre
         &None, // No funding deadline
         &None,
         &None,
-        &None:<i64>,
+        &None::<i64>,
     );
 }
 
@@ -167,7 +167,7 @@ pub fn default_init(client: &LiquifactEscrowClient<'_>, env: &Env, admin: &Addre
 pub const TARGET: i128 = 100_000_000_000i128;
 
 pub fn init_and_fund_with_real_token<'a>(
-    env: '&a Env,
+    env: &'a Env,
     target: i128,
     invoice_id: &str,
 ) -> (LiquifactEscrowClient<'a>, Address, Address) {
@@ -199,7 +199,7 @@ pub fn init_and_fund_with_real_token<'a>(
         &None,
         &None,
         &None,
-        &None:<i64>,
+        &None::<i64>,
     );
 
     let investor = Address::generate(env);

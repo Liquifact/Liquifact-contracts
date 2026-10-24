@@ -194,6 +194,10 @@ pub const MAX_ATTESTATION_APPEND_ENTRIES: u32 = 32;
 /// Maximum number of indices that can be revoked in a single batch call.
 pub const MAX_ATTESTATION_REVOKE_BATCH: u32 = 32;
 
+/// Error returned when a withdrawal is attempted while the attestation gate is required but not satisfied.
+// NOTE: the variants below are referenced by escrow/src/tests/withdraw_attestation_gate.rs.
+// The enum itself (EscrowError) must gain these variants; see the matching edit below.
+
 /// Upper bound on [`LiquifactEscrow::batch_bump_ttl`] entries per call.
 ///
 /// Mirrors [`MAX_INVESTOR_ALLOWLIST_BATCH`] — both operations iterate over a
