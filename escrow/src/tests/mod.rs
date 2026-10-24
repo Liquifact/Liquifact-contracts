@@ -145,7 +145,7 @@ pub fn default_init(client: &LiquifactEscrowClient<'_>, env: &Env, admin: &Addre
         sme,
         &100_000_000_000i128,
         &800i64,
-        &0u64,
+        &1_000u64,
         &token,
         &None,
         &treasury,
@@ -154,10 +154,10 @@ pub fn default_init(client: &LiquifactEscrowClient<'_>, env: &Env, admin: &Addre
         &None,
         &None,
         &None,
+        &None,
         &None, // No funding deadline
         &None,
         &None,
-        &None::<i64>,
     );
 }
 
@@ -185,7 +185,7 @@ pub fn init_and_fund_with_real_token<'a>(
         &sme,
         &target,
         &800i64,
-        &0u64,
+        &1_000u64,
         &token_id,
         &None,
         &treasury,
@@ -197,7 +197,6 @@ pub fn init_and_fund_with_real_token<'a>(
         &None,
         &None,
         &None,
-        &None::<i64>,
     );
 
     let investor = Address::generate(env);

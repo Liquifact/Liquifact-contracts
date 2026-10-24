@@ -62,7 +62,6 @@ fn setup_with_deadline(
         &None::<u64>, // maturity_max_horizon
         &Some(original_deadline),
         &None,        // allowlist_active
-        &None::<i64>, // protocol_fee_bps
     );
     (client, admin, original_deadline)
 }
