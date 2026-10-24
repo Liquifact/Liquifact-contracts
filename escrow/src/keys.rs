@@ -1,27 +1,27 @@
 #![allow(dead_code)]
-//! Centralized constructors for funding-related storage keys.
-//!
-//! #Purpose
-//!
-//! All persistent and instance-storage keys are defined here as variants of `DataKey`.
-//! Typed constructor functions are provided for every key family so that call sites never
-//! build a `DataKey` inline -- reducing the risk of typos, discriminant drift between
-//! modules, and copy-paste errors when a new key needs to be added.
-//!
-//! ##Collateral keys
-//!
-//! The collateral pledge key family is managed by `collateral_pledge_key`. All three
-//! collateral entrypoints (`record_sme_collateral_commitment`, clear_sme_collateral_commitment`,
-//! `get_sme_collateral_commitment`) call this function instead of constructing
-//! `DataKey::SmeCollateralPledge` inline. This ensures any future rename or split of the
-//! collateral key cannot diverge across call sites.
-//!
-//! ##Additive-key policy (ADR-007)
-//!
-//! Adding a new variant is **backward-compatible** when the new key is read with
-//! `.unwrap_or(default)` and its absence does not change existing entrypoint semantics.
-//! Renaming a variant, changing its XDR discriminant, or altering the stored type of
-//! an existing key is **breaking** and requires a `migrate` path or a full redeploy.
+/// Centralized constructors for funding-related storage keys.
+///
+/// #Purpose
+///
+/// All persistent and instance-storage keys are defined here as variants of `DataKey`.
+/// Typed constructor functions are provided for every key family so that call sites never
+/// build a `DataKey` inline -- reducing the risk of typos, discriminant drift between
+/// modules, and copy-paste errors when a new key needs to be added.
+///
+/// ##Collateral keyt
+///
+/// The collateral pledge key family is managed by `collateral_pledge_key`. All three
+/// collateral entrypoints (`record_sme_collateral_commitment`, clear_sme_collateral_commitment`,
+/// `get_sme_collateral_commitment`) call this function instead of constructing
+/// `DataKey::SmeCollateralPledge` inline. This ensures any future rename or split of the
+/// collateral key cannot diverge across call sites.
+///
+/// ##Additive-key policy (ADR-007)
+///
+/// Adding a new variant is **Backward-compatible** when the new key is read with
+/// `.unwrap_or(default)` and its absence does not change existing entrypoint semantics.
+/// Renaming a variant, changing its XDR discriminant, or altering the stored type of
+/// an existing key is **breaking** and requires a `migrate` path or a full redeploy.
 
 // Key-builder helpers are part of the crate's public API for symmetry. Call
 // sites currently use `DataKey::Variant` literals inline; the helpers are kept so the
@@ -105,9 +105,24 @@ pub(crate) fn callback_nonce() -> DataKey {
     DataKey::CallbackNonce
 }
 
+/// Per-investor persistent payout recipient override (absent = pay the investor directly).
+pub(crate) fn investor_payout_recipient(investor: Address) -> DataKey {
+    DataKey::InvestorPayoutRecipient(investor)
+}
+
 /// Instance-storage pending callback context keyed by invocation nonce.
 pub(crate) fn callback_context(nonce: u64) -> DataKey {
     DataKey::CallbackContext(nonce)
+}
+
+/// Instance-storage minimum funded share of target in basis points required for partial settle (0 = no threshold beyond > 0).
+pub(crate) fn partial_close_min_bps() -> DataKey {
+    DataKey::PartialCloseMinBps
+}
+
+/// Per-investor persistent marker indicating membership in `DataKey::InvestorIndex`.
+pub(crate) fn investor_indexed(investor: Address) -> DataKey {
+    DataKey::InvestorIndexed(investor)
 }
 
 /// Per-investor **persistent** refund marker, written once when a cancelled-escrow

@@ -3,9 +3,9 @@
 //! Verifies the two new guards that keep every value feeding the payout math
 //! inside the documented envelope:
 //!   - `update_funding_target` rejects `new_target > escrow.amount`
-//!     (`TargetExceedsInvoiceAmount` = 250).
+//!     (`TargetExceedsInvoiceAmount` = 267).
 //!   - `fund_impl` rejects `funded_amount > MAX_INVOICE_AMOUNT`
-//!     (`FundedAmountExceedsSafeEnvelope` = 251).
+//!     (`FundedAmountExceedsSafeEnvelope` = 268).
 //!
 //! Together with the existing `init` cap (`amount ≤ MAX_INVOICE_AMOUNT`), this
 //! establishes the chain `target ≤ amount ≤ MAX_INVOICE_AMOUNT` and
@@ -50,7 +50,7 @@ fn setup_no_token<'a>(env: &'a Env, invoice_id: &str, amount: i128) -> Liquifact
 }
 
 // ===========================================================================
-// Error 250 — TargetExceedsInvoiceAmount
+// Error 267 — TargetExceedsInvoiceAmount
 // ===========================================================================
 
 /// `update_funding_target(amount + 1)` fails on the branch (acceptance criterion).
@@ -106,7 +106,7 @@ fn update_funding_target_lower_to_funded_promotes_to_funded() {
 }
 
 // ===========================================================================
-// Error 251 — FundedAmountExceedsSafeEnvelope
+// Error 268 — FundedAmountExceedsSafeEnvelope
 // ===========================================================================
 
 /// Fund up to `MAX_INVOICE_AMOUNT` exactly (succeeds), then by one more unit
@@ -116,7 +116,7 @@ fn update_funding_target_lower_to_funded_promotes_to_funded() {
 /// We use a two-investor split: investor_a funds MAX_INVOICE_AMOUNT - 1 (stays
 /// open), investor_b funds 1 (exact boundary, succeeds), investor_c tries to
 /// fund 1 more but the escrow is now in status 1 so the guard is
-/// `EscrowNotOpenForFunding`.  To exercise 251 directly, we need the final
+/// `EscrowNotOpenForFunding`.  To exercise 268 directly, we need the final
 /// `funded_amount` to exceed MAX_INVOICE_AMOUNT while status is still 0.
 /// The test achieves this by setting `funding_target = MAX_INVOICE_AMOUNT`
 /// and using two investors where total = MAX_INVOICE_AMOUNT (exactly at target)
@@ -161,7 +161,7 @@ fn fund_at_max_invoice_amount_boundary_then_reject() {
     );
 
     // Inject funded_amount = MAX_INVOICE_AMOUNT while keeping status = 0 by
-    // using a target above MAX_INVOICE_AMOUNT... blocked by 250.
+    // using a target above MAX_INVOICE_AMOUNT... blocked by 267.
     // Use env.as_contract to directly mutate the stored escrow.
     env.as_contract(&id, || {
         let mut escrow: InvoiceEscrow = env.storage().instance().get(&DataKey::Escrow).unwrap();
@@ -176,7 +176,7 @@ fn fund_at_max_invoice_amount_boundary_then_reject() {
     let investor_c = Address::generate(&env);
     sac.stellar.mint(&investor_c, &1i128);
 
-    // funded_amount would become MAX_INVOICE_AMOUNT + 1 — must fail with 251.
+    // funded_amount would become MAX_INVOICE_AMOUNT + 1 — must fail with 268.
     let funded_before = client.get_escrow().funded_amount;
     assert_contract_error(
         client.try_fund(&investor_c, &1i128),
@@ -230,7 +230,7 @@ fn fund_with_commitment_at_envelope_boundary_rejected() {
     let investor_b = Address::generate(&env);
     sac.stellar.mint(&investor_b, &1i128);
 
-    // fund_with_commitment for 1 more must fail with 251.
+    // fund_with_commitment for 1 more must fail with 268.
     assert_contract_error(
         client.try_fund_with_commitment(&investor_b, &1i128, &0u64),
         EscrowError::FundedAmountExceedsSafeEnvelope,
