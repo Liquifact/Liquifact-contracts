@@ -1418,7 +1418,7 @@ fn test_update_funding_target_by_admin_succeeds() {
         &admin,
         &soroban_sdk::String::from_str(&env, "INV001"),
         &sme,
-        &5_000i128,
+        &10_000i128,
         &800i64,
         &3000u64,
         &token,
@@ -1603,7 +1603,7 @@ fn test_update_funding_target_event_fields() {
         &admin,
         &soroban_sdk::String::from_str(&env, "EVT001"),
         &sme,
-        &5_000i128,
+        &10_000i128,
         &800i64,
         &0u64,
         &token,
@@ -1627,7 +1627,7 @@ fn test_update_funding_target_event_fields() {
         std::vec![FundingTargetUpdated {
             name: symbol_short!("fund_tgt"),
             invoice_id: client.get_escrow().invoice_id,
-            old_target: 5_000i128,
+            old_target: 10_000i128,
             new_target: 9_000i128,
         }
         .to_xdr(&env, &contract_id)]
@@ -3000,7 +3000,7 @@ fn test_update_maturity_max_horizon_unauthorized() {
         &None::<i64>,
     );
     env.mock_auths(&[]);
-    client.update_maturity_max_horizon(&3_600u64);
+    client.update_maturity_max_horizon(&86_400u64);
 }
 
 /// `update_maturity_max_horizon` must emit a `MaturityMaxHorizonUpdated` event
@@ -3033,7 +3033,7 @@ fn test_update_maturity_max_horizon_emits_event() {
         &None::<i64>,
     );
 
-    let new_horizon = 3_600u64;
+    let new_horizon = 86_400u64;
     client.update_maturity_max_horizon(&new_horizon);
 
     let all_events = env.events().all();
@@ -3078,7 +3078,7 @@ fn test_lowered_horizon_existing_maturity_untouched_and_far_update_rejected() {
         &sme,
         &1_000i128,
         &500i64,
-        &2_000u64, // maturity within the default 5-year horizon
+        &101_000u64, // maturity within the default 5-year horizon
         &token,
         &None,
         &treasury,
@@ -3093,30 +3093,35 @@ fn test_lowered_horizon_existing_maturity_untouched_and_far_update_rejected() {
         &None::<i64>,
     );
 
-    assert_eq!(client.get_escrow().maturity, 2_000u64);
+    assert_eq!(client.get_escrow().maturity, 101_000u64);
 
-    // Lower the horizon to 500 s: new ceiling = now(1_000) + 500 = 1_500.
-    // The existing maturity (2_000) is beyond that ceiling but must survive unchanged.
-    client.update_maturity_max_horizon(&500u64);
-    assert_eq!(
-        client.get_escrow().maturity,
-        2_000u64,
-        "lowering the horizon must not retroactively invalidate an already-set maturity"
+    // Reject a ceiling below maturity, preserving both configuration and maturity.
+    assert_contract_error(
+        client.try_update_maturity_max_horizon(&99_999u64),
+        EscrowError::MaturityHorizonBelowMaturity,
     );
+    assert_eq!(
+        client.get_maturity_max_horizon(),
+        DEFAULT_MATURITY_MAX_HORIZON_SECS
+    );
+    assert_eq!(client.get_escrow().maturity, 101_000u64);
+    // Lowering exactly to the existing maturity remains valid.
+    client.update_maturity_max_horizon(&100_000u64);
+    assert_eq!(client.get_escrow().maturity, 101_000u64);
 
-    // A subsequent update to 1_501 (one second beyond the new ceiling) must fail.
+    // A subsequent update to 101_001 (one second beyond the new ceiling) must fail.
     assert!(
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            client.update_maturity(&1_501u64);
+            client.update_maturity(&101_001u64);
         }))
         .is_err(),
         "update_maturity beyond the new horizon must be rejected"
     );
 
-    // The stored maturity must remain 2_000 after the failed update attempt.
+    // The stored maturity must remain 101_000 after the failed update attempt.
     assert_eq!(
         client.get_escrow().maturity,
-        2_000u64,
+        101_000u64,
         "a rejected update_maturity call must not alter the stored maturity"
     );
 }
@@ -3151,11 +3156,11 @@ fn test_lowered_horizon_allows_within_horizon_maturity_update() {
         &None::<i64>,
     );
 
-    // Lower the horizon to 2 hours.
-    client.update_maturity_max_horizon(&7_200u64);
-    assert_eq!(client.get_maturity_max_horizon(), 7_200u64);
+    // Lower the horizon to 1 day.
+    client.update_maturity_max_horizon(&86_400u64);
+    assert_eq!(client.get_maturity_max_horizon(), 86_400u64);
 
-    // 1 hour from now (3_600 s) is within the new 2-hour horizon.
+    // 1 hour from now (3_600 s) is within the new 1-day horizon.
     let near_maturity = 1_000u64 + 3_600u64;
     let updated = client.update_maturity(&near_maturity);
     assert_eq!(
