@@ -231,8 +231,8 @@ fn escrow_error_discriminants_match_canonical_table() {
         (EscrowError::FloorLowerNotOpen, 173),
         (EscrowError::NewFloorNotLower, 174),
         (EscrowError::NewFloorNotPositive, 175),
-        (EscrowError::TargetExceedsInvoiceAmount, 250),
-        (EscrowError::FundedAmountExceedsSafeEnvelope, 251),
+        (EscrowError::TargetExceedsInvoiceAmount, 267),
+        (EscrowError::FundedAmountExceedsSafeEnvelope, 268),
     ];
     assert_eq!(TABLE.len(), 91);
     for (variant, code) in TABLE {
