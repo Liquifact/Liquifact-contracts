@@ -356,6 +356,10 @@ pub const MAX_INVOICE_ID_STRING_LEN: u32 = 32;
 /// After `ledger.timestamp() + DEFAULT_ADMIN_PROPOSAL_VALIDITY_SECS`, [`LiquifactEscrow::accept_admin`]
 /// rejects the stale proposal with [`EscrowError::AdminProposalExpired`].
 pub const DEFAULT_ADMIN_PROPOSAL_VALIDITY_SECS: u64 = 604_800; // 7 days
+/// Minimum explicit validity window for an admin proposal (1 hour).
+pub const MIN_ADMIN_PROPOSAL_VALIDITY_SECS: u64 = 3_600;
+/// Maximum explicit validity window for an admin proposal (30 days).
+pub const MAX_ADMIN_PROPOSAL_VALIDITY_SECS: u64 = 2_592_000;
 
 /// Minimum instance storage TTL extension horizon for time-sensitive escrow entries.
 ///
@@ -958,6 +962,15 @@ pub enum EscrowError {
     /// Self-reference would cause the batch caller to attempt to settle itself, which is
     /// always invalid. The entire call is rejected atomically before any state mutation.
     SettlementBatchSelfReference = 285,
+    /// [`LiquifactEscrow::propose_admin`] received a validity window outside the allowed range.
+    AdminProposalWindowOutOfRange = 286,
+
+    /// [`LiquifactEscrow::propose_admin`] or [`LiquifactEscrow::accept_admin`] selected an
+    /// address that must remain separate from the admin role.
+    AdminCandidateConflictsWithRole = 287,
+
+    /// [`LiquifactEscrow::propose_admin`] could not compute an expiry without overflowing.
+    AdminProposalExpiryOverflow = 288,
 }
 
 #[inline(always)]
@@ -2981,6 +2994,21 @@ impl LiquifactEscrow {
             .instance()
             .get(&DataKey::Treasury)
             .unwrap_or_else(|| fail(env, EscrowError::TreasuryNotSet))
+    }
+
+    #[inline(always)]
+    fn ensure_admin_candidate_role_separated(
+        env: &Env,
+        escrow: &InvoiceEscrow,
+        candidate: &Address,
+    ) {
+        ensure(
+            env,
+            candidate != &escrow.sme_address
+                && candidate != &Self::treasury_or_fail(env)
+                && candidate != &env.current_contract_address(),
+            EscrowError::AdminCandidateConflictsWithRole,
+        );
     }
     /// Validates the optional yield-tier table supplied at `init`.
     ///
@@ -8716,14 +8744,16 @@ impl LiquifactEscrow {
 
     /// Propose a new admin (`PendingAdmin`) — step 1 of a two-step handover.
     ///
-    /// Requires current admin authorization. The destination must differ from the current admin.
+    /// Requires current admin authorization. The destination must differ from the current admin,
+    /// SME, treasury, and contract address.
     /// If a pending proposal already exists, re-proposing the same address is rejected while
     /// replacing it with a different address emits [`AdminProposalSuperseded`].
     ///
     /// Persists [`DataKey::PendingAdmin`] as the proposed successor address and
     /// [`DataKey::PendingAdminExpiry`] as `ledger.timestamp() + window`, where `window`
-    /// is `validity_window_secs` when supplied or [`DEFAULT_ADMIN_PROPOSAL_VALIDITY_SECS`] when
-    /// `None`.
+    /// is `validity_window_secs` when supplied (between
+    /// [`MIN_ADMIN_PROPOSAL_VALIDITY_SECS`] and [`MAX_ADMIN_PROPOSAL_VALIDITY_SECS`], inclusive)
+    /// or [`DEFAULT_ADMIN_PROPOSAL_VALIDITY_SECS`] when `None`.
     ///
     /// The successor must then call [`LiquifactEscrow::accept_admin`] before the expiry timestamp
     /// to complete the handover. If the proposal is not accepted by the expiry, or if the current
@@ -8732,7 +8762,10 @@ impl LiquifactEscrow {
     /// # Errors
     /// Emits typed [`EscrowError`] codes when the escrow is uninitialized, the caller is not the
     /// current admin, `new_admin` is the current admin ([`EscrowError::NewAdminSameAsCurrent`]),
-    /// or `new_admin` is already pending ([`EscrowError::PendingAdminUnchanged`]).
+    /// conflicts with another role ([`EscrowError::AdminCandidateConflictsWithRole`]), has an
+    /// out-of-range window ([`EscrowError::AdminProposalWindowOutOfRange`]), causes expiry
+    /// overflow ([`EscrowError::AdminProposalExpiryOverflow`]), or is already pending
+    /// ([`EscrowError::PendingAdminUnchanged`]).
     ///
     /// # Events
     /// Emits [`AdminProposedEvent`] (topic: `adm_prop`) containing the `invoice_id`, the `current_admin`,
@@ -8749,6 +8782,19 @@ impl LiquifactEscrow {
             escrow.admin != new_admin,
             EscrowError::NewAdminSameAsCurrent,
         );
+        Self::ensure_admin_candidate_role_separated(&env, &escrow, &new_admin);
+
+        let window = validity_window_secs.unwrap_or(DEFAULT_ADMIN_PROPOSAL_VALIDITY_SECS);
+        ensure(
+            &env,
+            (MIN_ADMIN_PROPOSAL_VALIDITY_SECS..=MAX_ADMIN_PROPOSAL_VALIDITY_SECS).contains(&window),
+            EscrowError::AdminProposalWindowOutOfRange,
+        );
+        let expiry = env
+            .ledger()
+            .timestamp()
+            .checked_add(window)
+            .unwrap_or_else(|| fail(&env, EscrowError::AdminProposalExpiryOverflow));
 
         let previous_pending: Option<Address> =
             env.storage().instance().get(&DataKey::PendingAdmin);
@@ -8766,9 +8812,6 @@ impl LiquifactEscrow {
             }
             .publish(&env);
         }
-
-        let window = validity_window_secs.unwrap_or(DEFAULT_ADMIN_PROPOSAL_VALIDITY_SECS);
-        let expiry = env.ledger().timestamp().saturating_add(window);
 
         env.storage()
             .instance()
@@ -8793,6 +8836,8 @@ impl LiquifactEscrow {
     /// The address stored in [`DataKey::PendingAdmin`] must authorize this call. On success, the
     /// successor is promoted into [`InvoiceEscrow::admin`], and the pending proposal keys
     /// ([`DataKey::PendingAdmin`] and [`DataKey::PendingAdminExpiry`]) are cleared from storage.
+    /// The successor is re-checked against the current SME, treasury, and contract address so a
+    /// beneficiary rotation after proposal cannot merge those roles.
     ///
     /// Once accepted, the new admin gains exclusive authority over all admin-gated functions,
     /// including the critical legal-hold recovery path (clearing active holds via
@@ -8807,6 +8852,8 @@ impl LiquifactEscrow {
     /// Emits typed [`EscrowError`] codes:
     /// - [`EscrowError::NoPendingAdmin`] if no admin proposal is currently active.
     /// - [`EscrowError::AdminProposalExpired`] if the proposal's validity window has passed.
+    /// - [`EscrowError::AdminCandidateConflictsWithRole`] if the pending address now conflicts
+    ///   with the SME, treasury, or contract address.
     ///
     /// # Events
     /// Emits [`AdminTransferredEvent`] (topic: `admin`) containing the `invoice_id` and the `new_admin` address.
@@ -8827,6 +8874,8 @@ impl LiquifactEscrow {
         pending.require_auth();
 
         let mut escrow = Self::get_escrow(env.clone());
+        Self::ensure_admin_candidate_role_separated(&env, &escrow, &pending);
+
         let prior_admin = escrow.admin.clone();
         escrow.admin = pending.clone();
 
