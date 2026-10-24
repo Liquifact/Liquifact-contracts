@@ -157,6 +157,23 @@ and after every individual payout call and asserts identity.
 | `snapshot_denominator_consistent_across_all_payout_reads` | Snapshot immutable across all reads |
 | `fuzz_payout_conservation_multi_investor` | 64-case fuzz, 1–8 investors, full yield range |
 
+## 💰 Settlement Pre-Funding: `settle`
+
+A settled escrow must hold the whole settlement pool before claims open. `settle`:
+
+1. Computes `settle_pool` from the base `yield_bps`.
+2. Reads the contract's funding-token balance. If it is below `settle_pool`, transfers the
+   shortfall from the SME into the escrow using the balance-checked inbound transfer.
+3. Re-reads the balance and asserts it is at least `settle_pool`
+   (`SettlementPoolUnderfunded`).
+4. Sets `status = 2`, writes `SettledAt`, and emits `EscrowSettled` (plus
+   `SettlementFunded` when a shortfall was collected).
+
+`get_settlement_shortfall()` exposes the SME top-up required while the escrow is still
+funded (`status == 1`); it returns `0` in every other state. Because the pool is
+pre-funded, the only balance left after all claims is the floor-rounding residue described
+above.
+
 ## 🔗 On-Chain Payout Transfer: `claim_investor_payout`
 
 When a settled investor calls `claim_investor_payout`, the contract:
