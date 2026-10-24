@@ -7603,3 +7603,23 @@ fn test_unfund_event_emitted() {
 
     assert_eq!(*last, expected.to_xdr(&env, &contract_id));
 }
+
+#[test]
+fn test_unfund_investor_index_repro_in_funding() {
+    super::unfund_investor_index::test_unfund_and_refund_deduplication_repro();
+}
+
+#[test]
+fn test_unfund_investor_index_middle_removal_pagination_in_funding() {
+    super::unfund_investor_index::test_unfund_middle_investor_preserves_order_and_pagination();
+}
+
+#[test]
+fn test_unfund_investor_index_commitment_reentry_in_funding() {
+    super::unfund_investor_index::test_refund_with_commitment_after_full_unfund_gets_new_tier();
+}
+
+#[test]
+fn test_unfund_investor_index_partial_unfund_in_funding() {
+    super::unfund_investor_index::test_partial_unfund_retains_index_and_unique_count();
+}

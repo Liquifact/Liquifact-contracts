@@ -282,7 +282,7 @@ fn test_reinit_during_another_call_rejected() {
     // Touch a distinct config field (maturity-max-horizon) so the escrow is in
     // a non-fresh, initialized state; directly setting maturity to its current
     // value (0) would trip `MaturityUnchanged`.
-    client.update_maturity_max_horizon(&100u64);
+    client.update_maturity_max_horizon(&crate::MIN_MATURITY_MAX_HORIZON_SECS);
     let escrow = client.get_escrow();
     let token = client.get_funding_token();
     let treasury = client.get_treasury();
@@ -1800,12 +1800,12 @@ fn test_update_maturity_max_horizon_by_admin() {
         DEFAULT_MATURITY_MAX_HORIZON_SECS
     );
     // Update to a shorter horizon
-    let new_horizon = 7200u64; // 2 hours
+    let new_horizon = 86_400u64; // 1 day
     let result = client.update_maturity_max_horizon(&new_horizon);
     assert_eq!(result, new_horizon);
     assert_eq!(client.get_maturity_max_horizon(), new_horizon);
     // Update_maturity now uses the new tighter horizon
-    client.update_maturity(&(1000u64 + 3600u64)); // 1h from now — within 2h horizon
+    client.update_maturity(&(1000u64 + 3600u64)); // 1h from now — within 1-day horizon
 }
 
 #[test]
@@ -1834,9 +1834,9 @@ fn test_update_maturity_honors_reduced_horizon() {
         &None,
         &None::<i64>,
     );
-    client.update_maturity_max_horizon(&3600u64); // 1 hour
+    client.update_maturity_max_horizon(&86_400u64); // 1 day
     assert_contract_error(
-        client.try_update_maturity(&(1000u64 + 7200u64)), // 2 hours — exceeds new 1h horizon
+        client.try_update_maturity(&(1000u64 + 86_401u64)), // 1 day + 1 second — exceeds new 1-day horizon
         EscrowError::MaturityExceedsMaxHorizon,
     );
 }
