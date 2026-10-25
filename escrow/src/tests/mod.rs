@@ -94,6 +94,7 @@ mod invariant_audit;
 mod investor_position;
 mod pause;
 mod pause_bypass;
+mod payout_batch;
 mod pauser_boundary_tests;
 mod pauser_role;
 mod persistent_refund_flags;

@@ -336,6 +336,9 @@ pub const MAX_SETTLE_BATCH: u32 = 50;
 /// Upper bound on [`LiquifactEscrow::refund_batch`] entries to keep storage/CPU bounded.
 pub const MAX_REFUND_BATCH: u32 = 50;
 
+/// Upper bound on [`LiquifactEscrow::push_investor_payouts`] entries to keep storage/CPU bounded.
+pub const MAX_CLAIM_PUSH_BATCH: u32 = 50;
+
 /// Upper bound on [`LiquifactEscrow::set_investors_allowlisted`] batch size.
 pub const MAX_INVESTOR_ALLOWLIST_BATCH: u32 = 32;
 
@@ -1102,6 +1105,12 @@ pub enum EscrowError {
     /// [`LiquifactEscrow::set_investor_allowlisted`] or migration encountered a corrupt
     /// allowlist slot state (e.g., SlotOf points to a slot that contains a different address).
     AllowlistSlotCorrupted = 308,
+    /// [`LiquifactEscrow::push_investor_payouts`] received an empty investors vector.
+    ClaimPushBatchEmpty = 309,
+    /// [`LiquifactEscrow::push_investor_payouts`] exceeded [`MAX_CLAIM_PUSH_BATCH`].
+    ClaimPushBatchTooLarge = 310,
+    /// [`LiquifactEscrow::push_investor_payouts`] received the same investor more than once.
+    ClaimPushBatchDuplicate = 311,
 }
 
 #[inline(always)]
@@ -2609,6 +2618,16 @@ pub struct InvestorPayoutClaimed {
     pub investor: Address,
     #[topic]
     pub invoice_id: Symbol,
+}
+
+#[contractevent]
+pub struct PayoutBatchProcessed {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    pub count: u32,
+    pub total: i128,
 }
 
 #[contractevent]
@@ -8764,12 +8783,6 @@ impl LiquifactEscrow {
     }
 
     pub fn claim_investor_payout(env: Env, investor: Address) {
-        // Operational pause gate (read-only), orthogonal to legal hold.
-        ensure(
-            &env,
-            !Self::paused_blocks(&env, PauseEntry::Claims),
-            EscrowError::PausedBlocksInvestorClaims,
-        );
         // Operational pause gate (read-only), before require_auth and orthogonal to legal hold.
         guard_not_paused(
             &env,
@@ -8782,49 +8795,142 @@ impl LiquifactEscrow {
 
         investor.require_auth();
 
-        // Single fetch: consolidates the previous two reads of InvestorContribution.
-        // Retains the participation guard without a redundant second storage access.
-        let contribution: i128 = Self::get_persistent_investor_contribution(&env, investor.clone());
-        ensure(&env, contribution > 0, EscrowError::NoContributionToClaim);
+        Self::claim_core(&env, investor, false);
+    }
 
-        // env.clone(): env is used again after this call for storage reads, ledger timestamp, and publish.
+    /// Permissionlessly push settled payouts to a bounded set of investors.
+    ///
+    /// Pause, legal-hold, and settlement-state gates apply to the entire call. Investors
+    /// without a contribution, who already claimed, or whose commitment lock has not
+    /// expired are skipped. The recipient and amount are derived on-chain for each investor.
+    ///
+    /// # Returns
+    /// `(paid_count, total_paid)` for investors newly paid by this call.
+    ///
+    /// # Errors
+    /// Fails the whole call for an empty/oversized batch, duplicate investors, an active
+    /// claims pause, legal hold, or an escrow that is not settled. Transfers and per-investor
+    /// claim events are atomic with the batch event.
+    pub fn push_investor_payouts(env: Env, investors: Vec<Address>) -> (u32, i128) {
+        let n = investors.len();
+        ensure(&env, n > 0, EscrowError::ClaimPushBatchEmpty);
+        ensure(
+            &env,
+            n <= MAX_CLAIM_PUSH_BATCH,
+            EscrowError::ClaimPushBatchTooLarge,
+        );
+
+        for i in 0..n {
+            let investor = investors.get(i).unwrap();
+            for j in 0..i {
+                ensure(
+                    &env,
+                    investor != investors.get(j).unwrap(),
+                    EscrowError::ClaimPushBatchDuplicate,
+                );
+            }
+        }
+
+        guard_not_paused(
+            &env,
+            EscrowError::PausedBlocksInvestorClaims,
+            PauseEntry::Claims,
+        );
+        guard_not_legal_hold(&env, EscrowError::LegalHoldBlocksInvestorClaims);
+
         let escrow = Self::get_escrow(env.clone());
         guard_status_eq(&env, escrow.status, 2, EscrowError::InvestorClaimNotSettled);
 
-        let not_before: u64 =
-            Self::get_persistent_investor_claim_not_before(&env, investor.clone());
+        let mut paid_count = 0u32;
+        let mut total_paid = 0i128;
+        for i in 0..n {
+            let investor = investors.get(i).unwrap();
+            let payout = Self::claim_core(&env, investor, true);
+            if payout > 0 {
+                paid_count += 1;
+                total_paid = total_paid
+                    .checked_add(payout)
+                    .unwrap_or_else(|| fail(&env, EscrowError::ComputePayoutArithmeticOverflow));
+            }
+        }
+
+        PayoutBatchProcessed {
+            name: symbol_short!("pay_batch"),
+            invoice_id: escrow.invoice_id,
+            count: paid_count,
+            total: total_paid,
+        }
+        .publish(&env);
+
+        (paid_count, total_paid)
+    }
+
+    /// Shared claim logic for [`LiquifactEscrow::claim_investor_payout`] and
+    /// [`LiquifactEscrow::push_investor_payouts`]. Returns the gross payout disbursed
+    /// (`0` when skipped or already claimed). In batch mode (`skip_ineligible`), investors
+    /// without a contribution, already claimed, still commitment-locked, or frozen are skipped.
+    fn claim_core(env: &Env, investor: Address, skip_ineligible: bool) -> i128 {
+        // Single fetch: consolidates the previous two reads of InvestorContribution.
+        let contribution = Self::get_persistent_investor_contribution(env, investor.clone());
+        if skip_ineligible {
+            if contribution <= 0 || Self::get_persistent_investor_claimed(env, investor.clone()) {
+                return 0;
+            }
+            // Frozen investors are skipped in push mode (issue #1551 semantics).
+            let (investor_frozen, _): (bool, u32) = env
+                .storage()
+                .persistent()
+                .get(&DataKey::InvestorFrozen(investor.clone()))
+                .unwrap_or((false, 0u32));
+            if investor_frozen {
+                return 0;
+            }
+        } else {
+            ensure(env, contribution > 0, EscrowError::NoContributionToClaim);
+        }
+
+        let escrow = Self::get_escrow(env.clone());
+        guard_status_eq(env, escrow.status, 2, EscrowError::InvestorClaimNotSettled);
+
+        let not_before = Self::get_persistent_investor_claim_not_before(env, investor.clone());
         let now = env.ledger().timestamp();
-        ensure(
-            &env,
-            now >= not_before,
-            EscrowError::InvestorCommitmentLockNotExpired,
-        );
+        if skip_ineligible {
+            if now < not_before {
+                return 0;
+            }
+        } else {
+            ensure(
+                env,
+                now >= not_before,
+                EscrowError::InvestorCommitmentLockNotExpired,
+            );
+        }
 
         // Idempotent early-return: a second claim is a no-op (no re-emit).
-        if Self::get_persistent_investor_claimed(&env, investor.clone()) {
-            return;
+        if Self::get_persistent_investor_claimed(env, investor.clone()) {
+            return 0;
         }
 
         // Compute on-chain gross payout via pro-rata math.
         let payout = Self::compute_investor_payout(env.clone(), investor.clone());
-        ensure(&env, payout > 0, EscrowError::PayoutZero);
+        ensure(env, payout > 0, EscrowError::PayoutZero);
 
         // Mark before transfer — prevents double-pay on any re-entrant path.
-        Self::set_persistent_investor_claimed(&env, investor.clone(), true);
+        Self::set_persistent_investor_claimed(env, investor.clone(), true);
 
         // Extend TTL for all per-investor persistent keys written during claim.
-        Self::extend_investor_ttl(&env, &investor);
+        Self::extend_investor_ttl(env, &investor);
 
-        let (net, fee) = Self::calculate_claim_split(&env, payout, contribution);
+        let (net, fee) = Self::calculate_claim_split(env, payout, contribution);
 
         // Transfer net payout from this contract to the investor, and fee to treasury.
         let this = env.current_contract_address();
-        let token_addr = Self::funding_token_or_fail(&env);
+        let token_addr = Self::funding_token_or_fail(env);
 
         if fee > 0 {
-            let treasury = Self::treasury_or_fail(&env);
+            let treasury = Self::treasury_or_fail(env);
             external_calls::transfer_funding_token_with_balance_checks(
-                &env,
+                env,
                 &token_addr,
                 &this,
                 &treasury,
@@ -8836,12 +8942,12 @@ impl LiquifactEscrow {
                 invoice_id: escrow.invoice_id.clone(),
                 fee,
             }
-            .publish(&env);
+            .publish(env);
         }
 
         if net > 0 {
             external_calls::transfer_funding_token_with_balance_checks(
-                &env,
+                env,
                 &token_addr,
                 &this,
                 &investor,
@@ -8852,9 +8958,10 @@ impl LiquifactEscrow {
         InvestorPayoutClaimed {
             name: symbol_short!("inv_claim"),
             investor,
-            invoice_id: escrow.invoice_id.clone(),
+            invoice_id: escrow.invoice_id,
         }
-        .publish(&env);
+        .publish(env);
+        payout
     }
 
     /// On-chain read-only view that returns the **claimable payout** for an investor, applying
