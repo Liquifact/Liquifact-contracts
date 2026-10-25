@@ -189,7 +189,8 @@ fn unrelated_escrow_unaffected_by_another_settlement() {
 
 /// Edge case for the technical guidance “**make the guard total across all settlement
 /// entrypoints**”: [`LiquifactEscrow::settle_batch`] settles a batch of **distinct** escrows,
-/// each exactly once. A well-formed batch of unrelated targets is fully applied.
+/// each exactly once. A well-formed batch returns `[0, 0]` and both targets are settled.
+/// Changed from issue #1571: `settle_batch` now returns `Vec<u32>` per-entry codes.
 #[test]
 fn settle_batch_settles_distinct_targets_once() {
     let env = Env::default();
@@ -201,7 +202,12 @@ fn settle_batch_settles_distinct_targets_once() {
     assert_eq!(client_b.get_escrow().status, 1u32, "precondition");
     assert_eq!(client_c.get_escrow().status, 1u32, "precondition");
 
-    client_a.settle_batch(&soroban_sdk::vec![&env, addr_b, addr_c]);
+    let results = client_a.settle_batch(&soroban_sdk::vec![&env, addr_b, addr_c]);
+
+    // Both entries should report success (0).
+    assert_eq!(results.len(), 2, "two results for two inputs");
+    assert_eq!(results.get(0).unwrap(), 0u32, "B: settled");
+    assert_eq!(results.get(1).unwrap(), 0u32, "C: settled");
 
     assert_eq!(client_b.get_escrow().status, 2u32, "B settled via batch");
     assert_eq!(client_c.get_escrow().status, 2u32, "C settled via batch");
@@ -212,11 +218,11 @@ fn settle_batch_settles_distinct_targets_once() {
     );
 }
 
-/// Edge case for “make the guard total across all settlement entrypoints”: a
-/// [`LiquifactEscrow::settle_batch`] that lists the **same escrow address twice** must be
-/// rejected atomically. The once-only guard fires on the second entry, and because the batch
-/// is atomic the *entire* call reverts — the target is left untouched (still funded, no settled
-/// marker), not double-applied.
+/// Edge case for duplicate detection in [`LiquifactEscrow::settle_batch`]: a batch that lists
+/// the **same escrow address twice** is rejected atomically with
+/// [`crate::EscrowError::SettlementBatchDuplicate`] before any `try_settle` is called.
+/// Changed from issue #1571: rejection now happens in the up-front duplicate check rather
+/// than via `EscrowAlreadySettled` on the second entry.
 #[test]
 fn settle_batch_duplicate_address_rejected_atomically() {
     let env = Env::default();
@@ -225,7 +231,7 @@ fn settle_batch_duplicate_address_rejected_atomically() {
 
     assert_eq!(client_b.get_escrow().status, 1u32, "precondition: funded");
 
-    // Identical address twice in one batch: the second settle hits EscrowAlreadySettled.
+    // Identical address twice in one batch: up-front guard fires SettlementBatchDuplicate.
     let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         client_a.settle_batch(&soroban_sdk::vec![&env, addr_b.clone(), addr_b]);
     }));

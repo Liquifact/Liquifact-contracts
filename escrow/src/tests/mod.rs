@@ -20,13 +20,14 @@ use super::{
     AttestationDigestAppended, AttestationDigestRevoked, AttestationDigestUnrevoked,
     AttestationRequirementChanged, CollateralRecordedEvt, ContractUpgraded, DataKey,
     DeprecatedTransferAdminUsed, EscrowError, EscrowFunded, EscrowInitialized, EscrowUnfunded,
-    FundingCancelled, FundingDeadlineExtensionStats, FundingTargetUpdated, InvestorRefundedEvt,
-    LiquifactEscrow, LiquifactEscrowClient, MaturityMaxHorizonUpdated,
-    MaxUniqueInvestorsCapLowered, PauseReason, PauseScope, PauseState, PrimaryAttestationBound,
-    RegistryRefRebound, TreasuryDustSwept, UpgradeCancelled, UpgradeProposed, YieldTier,
-    MAX_ATTESTATION_APPEND_ENTRIES, MAX_DUST_SWEEP_AMOUNT, MAX_FUNDING_DEADLINE_EXTENSIONS,
-    MAX_FUNDING_DEADLINE_TOTAL_EXTENSION_SECS, MAX_FUND_BATCH, SCHEMA_VERSION,
-    UPGRADE_EXECUTION_WINDOW_SECS, UPGRADE_TIMELOCK_SECS,
+    FundingCancelled, FundingDeadlineExtensionStats, FundingTargetUpdated, InvestorFreezeChanged,
+    InvestorRefundedEvt, LiquifactEscrow, LiquifactEscrowClient, MaturityMaxHorizonUpdated,
+    MaxUniqueInvestorsCapLowered, PauseReason, PauseScope, PauseState, PerformanceFeeCollected,
+    PerformanceFeeUpdated, PrimaryAttestationBound,
+    RegistryRefRebound, SettleBatchProcessed, TreasuryDustSwept, UpgradeCancelled, UpgradeProposed,
+    YieldTier, MAX_ATTESTATION_APPEND_ENTRIES, MAX_DUST_SWEEP_AMOUNT,
+    MAX_FUNDING_DEADLINE_EXTENSIONS, MAX_FUNDING_DEADLINE_TOTAL_EXTENSION_SECS, MAX_FUND_BATCH,
+    MAX_SETTLE_BATCH, SCHEMA_VERSION, UPGRADE_EXECUTION_WINDOW_SECS, UPGRADE_TIMELOCK_SECS,
 };
 use soroban_sdk::{
     symbol_short,
@@ -60,32 +61,52 @@ pub(crate) fn assert_contract_error<T, E>(
 // Focused test tree for escrow behavior. Shared helpers live here so feature
 // modules stay assertion-focused and each test still owns a fresh Env.
 mod admin;
+mod allowlist_expiry;
 mod attestations;
+mod attestor;
 mod auth_matrix;
 mod cap_validation;
 mod collateral_lock;
 #[rustfmt::skip]
 mod coverage;
+mod envelope_bounds;
 mod external_calls;
 mod external_calls_mocked;
+mod fee_schedule;
 mod funding;
 mod init;
 // `integration` (integration.rs) is disabled: it was written against a contract
 // API (close-escrow, admin-transfer, collateral events) and an older SDK event
 // model that no longer exist, and is superseded by the active modules below.
 // mod integration;
+mod fees;
 mod funding_deadline_cap_tests;
 mod integration_status_guards;
+mod investor_freeze;
 mod legal_hold;
+mod legal_hold_state_machine;
+mod maturity_horizon;
 mod migration_errors;
 mod paginated_views;
+mod contribution_reference;
+mod invariant_audit;
+mod investor_position;
 mod pause;
+mod pause_bypass;
 mod pauser_boundary_tests;
+mod pauser_role;
+mod persistent_refund_flags;
 mod properties;
 mod reconciliation_lifecycle;
+mod refund_batch;
+mod repayment;
+mod role_separation;
+mod settle_batch_results;
 mod settlement;
 mod settlement_config_view;
+mod settlement_funding;
 mod timelocked_upgrade;
+mod unfund_investor_index;
 mod withdraw_attestation_gate;
 mod yield_tier_boundaries;
 /// Registers a new escrow contract instance and returns its contract id.
@@ -155,10 +176,10 @@ pub fn default_init(client: &LiquifactEscrowClient<'_>, env: &Env, admin: &Addre
         &None,
         &None,
         &None,
+        &None,
         &None, // No funding deadline
         &None,
         &None,
-        &None::<i64>,
     );
 }
 
@@ -198,7 +219,7 @@ pub fn init_and_fund_with_real_token<'a>(
         &None,
         &None,
         &None,
-        &None::<i64>,
+        &None,
     );
 
     let investor = Address::generate(env);
