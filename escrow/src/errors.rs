@@ -119,4 +119,12 @@ pub enum EscrowError {
     CallbackPendingLimitReached = 250,
     CallbackExpired = 251,
     CallbackNonceOverflow = 252,
+
+    // ------------------------------------------------------------------------------
+    // Payout Recipient Errors
+    // ------------------------------------------------------------------------------
+    /// `LiquifactEscrow::set_payout_recipient` received a recipient equal to the escrow contract itself.
+    PayoutRecipientInvalid = 253,
+    /// `LiquifactEscrow::set_payout_recipient` blocked because a legal hold is active.
+    LegalHoldBlocksRecipientChange = 254,
 }

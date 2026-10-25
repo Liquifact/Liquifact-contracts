@@ -311,3 +311,233 @@ fn setter_rejected_after_funding_closes() {
     let result = client.try_set_require_attest_withdraw(&true);
     assert_contract_error(result, EscrowError::AttestationRequirementNotOpen);
 }
+
+/// `set_require_attest_withdraw` must also fail after settle (status 2).
+#[test]
+fn setter_rejected_after_settle() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let sac = env.register_stellar_asset_contract_v2(Address::generate(&env));
+    let token_id = sac.address();
+    let sac_admin = StellarAssetClient::new(&env, &token_id);
+    let escrow_id = env.register(LiquifactEscrow, ());
+    let client = LiquifactEscrowClient::new(&env, &escrow_id);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let treasury = Address::generate(&env);
+
+    // Set maturity far in the future so `settle` passes the maturity check.
+    let mut li = env.ledger().get();
+    li.timestamp = 0;
+    env.ledger().set(li);
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "INV_S2"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &1u64, // maturity = 1 second — set ledger past it below
+        &token_id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    let investor = Address::generate(&env);
+    sac_admin.mint(&investor, &TARGET);
+    client.fund(&investor, &TARGET);
+
+    // Advance ledger past maturity.
+    let mut li2 = env.ledger().get();
+    li2.timestamp = 100;
+    env.ledger().set(li2);
+
+    // Settle now collects the coupon shortfall from the SME (#1527).
+    sac_admin.mint(&sme, &(TARGET * 800 / 10_000));
+    client.settle();
+    assert_eq!(client.get_escrow().status, 2u32);
+
+    let result = client.try_set_require_attest_withdraw(&true);
+    assert_contract_error(result, EscrowError::AttestationRequirementNotOpen);
+}
+
+// ---------------------------------------------------------------------------
+// AC-4: event payload
+// ---------------------------------------------------------------------------
+
+/// Enabling the gate must emit `AttestationRequirementChanged` with `required == 1`
+/// and the correct invoice id.
+#[test]
+fn setter_emits_event_enable() {
+    let env = Env::default();
+    let (client, _admin) = setup_open(&env);
+    let contract_id = client.address.clone();
+    let invoice_id = client.get_escrow().invoice_id.clone();
+
+    client.set_require_attest_withdraw(&true);
+
+    let events = env.events().all();
+    let last = events.events().last().unwrap().clone();
+    assert_eq!(
+        last,
+        AttestationRequirementChanged {
+            name: symbol_short!("att_req"),
+            invoice_id,
+            required: 1,
+        }
+        .to_xdr(&env, &contract_id)
+    );
+}
+
+/// Disabling the gate must emit `AttestationRequirementChanged` with `required == 0`.
+#[test]
+fn setter_emits_event_disable() {
+    let env = Env::default();
+    let (client, _admin) = setup_open(&env);
+    let contract_id = client.address.clone();
+    let invoice_id = client.get_escrow().invoice_id.clone();
+
+    // Enable first, then disable.
+    client.set_require_attest_withdraw(&true);
+    client.set_require_attest_withdraw(&false);
+
+    let events = env.events().all();
+    let last = events.events().last().unwrap().clone();
+    assert_eq!(
+        last,
+        AttestationRequirementChanged {
+            name: symbol_short!("att_req"),
+            invoice_id,
+            required: 0,
+        }
+        .to_xdr(&env, &contract_id)
+    );
+}
+
+// ---------------------------------------------------------------------------
+// AC-5: `get_withdraw_requirements` view
+// ---------------------------------------------------------------------------
+
+/// Before any configuration the view returns `(false, false)`.
+#[test]
+fn get_withdraw_requirements_default_is_false_false() {
+    let env = Env::default();
+    let (client, _admin) = setup_open(&env);
+    let (req, bound) = client.get_withdraw_requirements();
+    assert!(!req, "attestation_required must default to false");
+    assert!(
+        !bound,
+        "attestation_bound must be false before any hash is set"
+    );
+}
+
+/// After enabling the gate, `attestation_required` is `true`; `attestation_bound`
+/// reflects whether a hash has been bound.
+#[test]
+fn get_withdraw_requirements_reflects_state() {
+    let env = Env::default();
+    let (client, admin) = setup_open(&env);
+
+    // Enable requirement.
+    client.set_require_attest_withdraw(&true);
+    let (req, bound) = client.get_withdraw_requirements();
+    assert!(req, "attestation_required must be true after enabling gate");
+    assert!(
+        !bound,
+        "attestation_bound must still be false — no hash bound yet"
+    );
+
+    // Bind a hash.
+    client.bind_primary_attestation_hash(&digest32(&env, 0x01));
+    let (req2, bound2) = client.get_withdraw_requirements();
+    assert!(req2, "attestation_required must still be true");
+    assert!(bound2, "attestation_bound must be true after binding hash");
+}
+
+/// Disabling the requirement flips `attestation_required` back to `false`.
+#[test]
+fn get_withdraw_requirements_reflects_disable() {
+    let env = Env::default();
+    let (client, _admin) = setup_open(&env);
+
+    client.set_require_attest_withdraw(&true);
+    client.set_require_attest_withdraw(&false);
+
+    let (req, _bound) = client.get_withdraw_requirements();
+    assert!(
+        !req,
+        "attestation_required must be false after disabling gate"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Orthogonality: attestation gate is independent of pause and legal hold
+// ---------------------------------------------------------------------------
+
+/// The attestation error fires BEFORE the pause error in guard ordering.
+/// (Pause fires before attestation per the doc comment — attestation fires
+/// after legal-hold but before auth.  This test checks the read-only error
+/// fires before auth, not that it precedes pause.)
+/// Verify the error code is specifically `AttestationRequiredForWithdraw`.
+#[test]
+fn attestation_gate_fires_typed_error_code_251() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let sac = env.register_stellar_asset_contract_v2(Address::generate(&env));
+    let token_id = sac.address();
+    let sac_admin = StellarAssetClient::new(&env, &token_id);
+    let escrow_id = env.register(LiquifactEscrow, ());
+    let client = LiquifactEscrowClient::new(&env, &escrow_id);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let treasury = Address::generate(&env);
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "INV_251"),
+        &sme,
+        &TARGET,
+        &800i64,
+        &0u64,
+        &token_id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    client.set_require_attest_withdraw(&true);
+
+    let investor = Address::generate(&env);
+    sac_admin.mint(&investor, &TARGET);
+    client.fund(&investor, &TARGET);
+
+    // Verify numeric code is 251.
+    let result = client.try_withdraw();
+    assert_contract_error(result, EscrowError::AttestationRequiredForWithdraw);
+    // Also verify the numeric value matches the spec.
+    assert_eq!(EscrowError::AttestationRequiredForWithdraw as u32, 251);
+}
+
+/// `AttestationRequirementNotOpen` must have numeric code 250.
+#[test]
+fn error_code_250_is_attestation_requirement_not_open() {
+    assert_eq!(EscrowError::AttestationRequirementNotOpen as u32, 250);
+}

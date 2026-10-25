@@ -111,3 +111,29 @@ pub(crate) fn callback_consumed(nonce: u64) -> DataKey {
 pub(crate) fn pending_callback_count() -> DataKey {
     DataKey::PendingCallbackCount
 }
+
+/// Per-investor persistent payout recipient override (absent = pay the investor directly).
+pub(crate) fn investor_payout_recipient(investor: Address) -> DataKey {
+    DataKey::InvestorPayoutRecipient(investor)
+}
+
+/// Instance-storage minimum funded share of target in basis points required for partial settle (0 = no threshold beyond > 0).
+pub(crate) fn partial_close_min_bps() -> DataKey {
+    DataKey::PartialCloseMinBps
+}
+
+/// Per-investor persistent marker indicating membership in `DataKey::InvestorIndex`.
+pub(crate) fn investor_indexed(investor: Address) -> DataKey {
+    DataKey::InvestorIndexed(investor)
+}
+
+/// Per-investor **persistent** refund marker, written once when a cancelled-escrow
+/// refund succeeds.  Absent ⇒ `false`.  Independent TTL from the contract instance.
+pub(crate) fn investor_refunded(investor: Address) -> DataKey {
+    DataKey::InvestorRefunded(investor)
+}
+
+/// Instance-storage optional performance fee in basis points taken from investor yield coupon.
+pub(crate) fn performance_fee_bps() -> DataKey {
+    DataKey::PerformanceFeeBps
+}
