@@ -87,13 +87,13 @@ pub enum EscrowError {
     // Pause Configuration & Rate-Limit Errors (230..239)
     // ------------------------------------------------------------------------------
     /// `LiquifactEscrow::set_pause_max_duration` received a duration outside
-    /// `MIN_PAUSE_MAX_DURATION_SECS`..=[`MAX_PAUSE_MAX_DURATION_SECS`. Zero is always allowed.
+    /// `MIN_PAUSE_MAX_DURATION_SECS`..=[`MAX_PAUSE_MAX_DURATION_SECS`]. Zero is always allowed.
     PauseMaxDurationOutOfRange = 230,
     /// `LiquifactEscrow::set_pause_rate_limit` received a toggle limit outside
-    /// `MIN_PAUSE_TOGGLE_LIMIT`..=[`@MAX_PAUSE_TOGGLE_LIMIT`. Zero is allowed only with zero window.
+    /// `MIN_PAUSE_TOGGLE_LIMIT`..=[`MAX_PAUSE_TOGGLE_LIMIT`]. Zero is allowed only with zero window.
     PauseToggleLimitOutOfRange = 231,
     /// `LiquifactEscrow::set_pause_rate_limit` received a window outside
-    /// `MIN_PAUSE_TOGGLE_WINDOW_SECS`..=[`MAX_PAUSE_TOGGLE_WINDOW_SECS`. Zero is allowed only with zero toggles.
+    /// `MIN_PAUSE_TOGGLE_WINDOW_SECS`..=[`MAX_PAUSE_TOGGLE_WINDOW_SECS`]. Zero is allowed only with zero toggles.
     PauseToggleWindowOutOfRange = 232,
     /// `LiquifactEscrow::set_pause_rate_limit` received an inconsistent configuration:
     /// nonzero toggles must have a nonzero window, and nonzero window must have nonzero toggles.
@@ -112,8 +112,10 @@ pub enum EscrowError {
     FeeCheduleInvalidActivation = 242,
     /// `LiquifactEscrow::set_fee_schedule` attempted to submit a schedule identical to the active schedule.
     FeeScheduleSameAsActive = 243,
+    /// `LiquifactEscrow::get_action_blockers` received an action code outside the known lifecycle actions.
+    UnknownLifecycleAction = 250,
     /// `LiquifactEscrow::set_payout_recipient` received a recipient equal to the escrow contract itself.
-    PayoutRecipientInvalid = 250,
+    PayoutRecipientInvalid = 251,
     /// `LiquifactEscrow::set_payout_recipient` blocked because a legal hold is active.
-    LegalHoldBlocksRecipientChange = 251,
+    LegalHoldBlocksRecipientChange = 252,
 }

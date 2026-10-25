@@ -41,6 +41,10 @@ re-implementing storage reads to guarantee identical semantics.
 - [has_maturity_lock](#has_maturity_lock--bool)
 - [get_funding_close_snapshot](#get_funding_close_snapshot--optionfundingclosesnapshot)
 
+**Lifecycle Readiness:**
+- [get_settlement_readiness](#get_settlement_readiness--settlementreadiness)
+- [get_action_blockers](#get_action_blockersenv-action-u32--u32)
+
 **Tier Lookup:**
 - [preview_yield_tier](#preview_yield_tieramount-i128-lock-u64--yieldresolution)
 
@@ -466,6 +470,66 @@ return get_escrow().maturity > 0
 **Return value:**
 - `true` — settlement requires `Env::ledger().timestamp() >= maturity`.
 - `false` — `maturity == 0`; no time lock, funded escrow can settle immediately.
+
+---
+
+## Lifecycle Readiness
+
+These views are the single source of truth for "can action X run right now". They mirror the
+read-only guards of the corresponding entrypoints exactly, so off-chain tooling never has to
+re-implement the guard logic and drift from the contract.
+
+### Blocker bits
+
+`get_action_blockers` returns a `u32` bitmask. Each bit corresponds to a condition that would make
+the entrypoint fail. A result of `0` means no blockers are present and the entrypoint would succeed
+(subject only to the out-of-scope investor-specific checks noted below).
+
+| Constant | Bit | Value | Entrypoint error it maps to |
+|---|---|---|---|
+| `BLOCKER_LEGAL_HOLD` | `1 << 0` | `1` | `LegalHoldActive` |
+| `BLOCKER_PAUSED` | `1 << 1` | `2` | `PausedBlocksSettlement` (settle) / `PausedBlocksWithdraw` (withdraw) / `PausedBlocksClaim` (claim) / `PausedBlocksRefund` (refund) / `PausedBlocksFunding` (fund) |
+| `BLOCKER_WRONG_STATUS` | `1 << 2` | `4` | `InvalidStatus` |
+| `BLOCKER_MATURITY_NOT_REACHED` | `1 << 3` | `8` | `MaturityNotReached` |
+| `BLOCKER_DEADLINE_PASSED` | `1 << 4` | `16` | `FundingDeadlinePassed` |
+| `BLOCKER_NOT_OPEN_YET` | `1 << 5` | `32` | Reserved — no current entrypoint emits this |
+| `BLOCKER_INSUFFICIENT_BALANCE` | `1 << 6` | `64` | `InsufficientBalance` |
+
+The pause bit is scope-specific: `get_action_blockers` checks the `PauseEntry` scope that the
+entrypoint itself checks, so the same bit value maps to a different concrete error per action.
+
+### `get_action_blockers(env, action: u32) → u32`
+
+**Signature:** `pub fn get_action_blockers(env: Env, action: u32) -> u32`
+
+Returns the bitmask of blockers that would cause the entrypoint for `action` to fail right now.
+
+| `action` | Entrypoint | Guards mirrored |
+|---|---|---|
+| `0` | `fund` | legal hold, funding pause, status open, funding deadline |
+| `1` | `settle` | legal hold, settlement pause, status funded, maturity |
+| `2` | `withdraw` | legal hold, withdraw pause, status settled, balance |
+| `3` | `claim` | legal hold, claim pause, status settled |
+| `4` | `refund` | legal hold, refund pause, status cancelled, balance |
+
+**Unknown action:** fails with `EscrowError::UnknownLifecycleAction`.
+
+**Out of scope:** investor-specific blockers (claim lock, per-investor contribution) are not
+reported here; callers must still check those per-investor views.
+
+**Pure read** — no authorization required, no state mutation.
+
+### `get_settlement_readiness() → SettlementReadiness`
+
+**Signature:** `pub fn get_settlement_readiness(env: Env) -> SettlementReadiness`
+
+Convenience wrapper over `get_action_blockers(env, 1)` (settle). `ready_now` is `true` exactly when
+the blocker mask is `0`, which is exactly when `settle` would succeed (ignoring per-investor state).
+
+**Note:** `settleable_now` / `is_settleable` also honour the settlement pause scope, so
+`ready_now` can never be `true` while `settle` would fail with `PausedBlocksSettlement`.
+
+**Pure read** — no authorization required, no state mutation.
 
 ---
 
