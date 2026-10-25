@@ -12,41 +12,24 @@ forbidden regressions, and interaction rules between `withdraw` vs `settle` path
 | `0` | `open` | Escrow is initialized; funding is active |
 | `1` | `funded` | At least one investor reached or exceeded the funding target |
 | `2` | `settled` | SME has finalized settlement after legal/financial review |
-| `3` | `withdrawn` | SME has withdrawn liquidity (pull model, off-chain settlement) |
+| `3` | `withdrawn` | SME has withdrawn liquidity; the SME may repay on-chain, and full repayment transitions to `2` |
 | `4` | `cancelled` | Admin cancelled the escrow before it was funded; investors may reclaim principal via `refund()` |
 
 ---
 
 ## State diagram
 
-```text
-  unfund(investor, amount) [investor]
-  (partial or full; status stays 0)
-         │
-         ▼
-                ┌─────────────┐
-                │   (init)    │
-                │  status = 0 │◄────┐
-                │    open      │     │
-                └──────┬──────┘─────┘
-                       │
-         ┌─────────────┼──────────────────────┐
-         │             │                      │
-         │ fund(amount >= funding_target)      │ cancel_funding() [admin]
-         ▼             │                      ▼
-  ┌─────────────┐      │               ┌─────────────┐
-  │  funded     │      │               │  cancelled  │
-  │ status = 1  │      │               │  status = 4 │
-  └──────┬──────┘      │               └──────┬──────┘
-         │             │                      │
-  ┌──────┼──────┐      │ (more funding        │ refund(investor) [investor]
-  │      │      │      │  if target not met)  │ → returns InvestorContribution
-  ▼      ▼      │      │                      ▼
-┌────┐ ┌────┐   │      │               (principal returned)
-│ 2  │ │ 3  │   └──────┘
-│set │ │wd  │
-└────┘ └────┘
-(terminal)  (terminal)
+```mermaid
+stateDiagram-v2
+    [*] --> Open
+    Open --> Open: unfund()
+    Open --> Funded: fund() reaches funding target
+    Open --> Cancelled: cancel_funding() [admin]
+    Funded --> Settled: settle() [SME]
+    Funded --> Withdrawn: withdraw() [SME]
+    Withdrawn --> Settled: repay() reaches settlement pool
+    Settled --> [*]
+    Cancelled --> [*]
 ```
 
 ## Token Custody during Funding
@@ -147,6 +130,7 @@ let result = fund_batch(entries); // All three processed; status = 1
 | `0` (open) | `0` (open) | `unfund(investor, amount)` | Investor auth; legal hold must be inactive | Partial unfund: `funded_amount` decreases, status stays 0. Full unfund (contribution → 0): `UniqueFunderCount` decrements, status stays 0 |
 | `1` (funded) | `2` (settled) | `settle()` | SME auth; legal hold must be inactive; if `maturity > 0`, ledger timestamp must be >= maturity |
 | `1` (funded) | `3` (withdrawn) | `withdraw()` | SME auth; legal hold must be inactive |
+| `3` (withdrawn) | `2` (settled) | `repay()` when cumulative repayment reaches the settlement pool | Payer auth; legal hold and Settlement/All pause must be inactive |
 
 ---
 
@@ -160,21 +144,40 @@ let result = fund_batch(entries); // All three processed; status = 1
 | `1` (funded) | `0` (open) | Status never regresses |
 | `1` (funded) | `4` (cancelled) | `cancel_funding` only allowed in Open state |
 | `2` (settled) | any | Status never regresses from terminal |
-| `3` (withdrawn) | any | Status never regresses from terminal |
+| `3` (withdrawn) | `0`, `1`, `3`, `4` | Only `repay()` may move `3 -> 2`; all other transitions are rejected |
 | `4` (cancelled) | any | Status never regresses from terminal |
 
 ---
 
 ## Mutual exclusivity: `withdraw` vs `settle`
 
-`withdraw` and `settle` are **mutually exclusive** terminal paths. Both require:
+`withdraw` and `settle` are **mutually exclusive entrypoints**. Both require:
 - `status == 1` (funded)
 - No active legal hold
 - SME authentication
 
-Once one path is taken, the other is unreachable:
-- After `withdraw()` → status is `3`; `settle()` panics
+Once one path is taken, the other entrypoint is unreachable:
+- After `withdraw()` → status is `3`; `settle()` panics. The escrow can still reach
+  settled through `repay()` once the full settlement pool has been repaid on-chain.
 - After `settle()` → status is `2`; `withdraw()` panics
+
+---
+
+## Repayment path (3 → 2)
+
+A withdrawn escrow can be repaid on-chain in one or more instalments:
+
+1. The payer calls `repay(payer, amount)`. The payer must authorize the call.
+2. Guards run in canonical order: Settlement/All pause, legal hold, `status == 3`,
+   `amount > 0`, then the outstanding check. Overpayment is rejected.
+3. The funding token is transferred into the escrow and `RepaidAmount` increases.
+4. Each call emits `EscrowRepaid`. When `RepaidAmount` reaches the settlement pool,
+   `status` becomes `2`, `SettledAt` is written, and `EscrowSettled` is emitted.
+5. `get_repayment_status()` returns `(repaid_total, outstanding)` while the escrow is
+   withdrawn or settled.
+
+While `status == 3` and `RepaidAmount > 0`, `sweep_terminal_dust()` cannot reduce the
+contract balance below `RepaidAmount`.
 
 ---
 
@@ -322,7 +325,9 @@ this entrypoint.
 | `4` (cancelled) | Yes | Yes |
 
 This allows the treasury to recover any rounding residue left after all investors
-have been refunded.
+have been refunded. In a withdrawn escrow with recorded repayment, the sweep is
+additionally bounded by `RepaidAmount` so treasury recovery cannot consume funds
+committed to the settlement pool.
 
 ---
 
