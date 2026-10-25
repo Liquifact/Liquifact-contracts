@@ -80,10 +80,10 @@ Every role is bound to a distinct, sensible address. The contract enforces the
 
 | Address | `init` rejects self-reference? | May fund as investor? | Notes |
 |---|---|---|---|
-| Contract itself (`env.current_contract_address()`) | yes — as `funding_token`, `treasury`, or `sme_address` → `InitAddressInvalid` (250) | no → `InvestorRoleConflict` (252) | A self-referencing token or treasury bricks every transfer |
-| SME (`InvoiceEscrow::sme_address`) | no (only `treasury == sme` is rejected → `InitRoleConflict` (251)) | no → `InvestorRoleConflict` (252) | A self-funding SME could fake investor demand and dilute pro-rata share |
-| Treasury (`DataKey::Treasury`) | no (only `treasury == sme` is rejected → `InitRoleConflict` (251)) | no → `InvestorRoleConflict` (252) | Treasury funding its own invoice is a conflicted buy |
-| Admin (`InvoiceEscrow::admin`) | no — `admin == sme` is **allowed, dev-only** (one key drives both roles in tests/sandboxes; production deployments must separate them) | no → `InvestorRoleConflict` (252) | Admin controls the invoice lifecycle and must not appear as demand |
+| Contract itself (`env.current_contract_address()`) | yes — as `funding_token`, `treasury`, or `sme_address` → `InitAddressInvalid` (294) | no → `InvestorRoleConflict` (296) | A self-referencing token or treasury bricks every transfer |
+| SME (`InvoiceEscrow::sme_address`) | no (only `treasury == sme` is rejected → `InitRoleConflict` (295)) | no → `InvestorRoleConflict` (296) | A self-funding SME could fake investor demand and dilute pro-rata share |
+| Treasury (`DataKey::Treasury`) | no (only `treasury == sme` is rejected → `InitRoleConflict` (295)) | no → `InvestorRoleConflict` (296) | Treasury funding its own invoice is a conflicted buy |
+| Admin (`InvoiceEscrow::admin`) | no — `admin == sme` is **allowed, dev-only** (one key drives both roles in tests/sandboxes; production deployments must separate them) | no → `InvestorRoleConflict` (296) | Admin controls the invoice lifecycle and must not appear as demand |
 | Any other address | — | yes | Subject to allowlist, caps, floors, and pause/legal-hold gates |
 
 Enforcement points:
