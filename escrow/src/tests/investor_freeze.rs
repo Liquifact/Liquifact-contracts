@@ -1,4 +1,5 @@
 use super::*;
+use soroban_sdk::IntoVal;
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -133,42 +134,19 @@ fn freeze_emits_correct_event() {
 
     client.set_investor_frozen(&investor_a, &true, &99u32);
 
-    let events = env.events().all();
-    // find the inv_frz event
-    let freeze_event = events.iter().find(|(_, topics, _)| {
-        if let soroban_sdk::Val::from(topics) = topics {
-            // topics is a Vec<Val>; check first topic is the symbol
-            true
-        } else {
-            false
+    // The freeze event is the last event emitted by the call.
+    let all_events = env.events().all();
+    assert_eq!(
+        all_events.events().last().unwrap().clone(),
+        InvestorFreezeChanged {
+            name: symbol_short!("inv_frz"),
+            investor: investor_a.clone(),
+            invoice_id: client.get_escrow().invoice_id,
+            frozen: 1u32,
+            reason_code: 99u32,
         }
-    });
-
-    // Simpler: check that the last event data contains frozen=1 and reason_code=99
-    // The contractevent macro encodes non-topic fields as the data Val.
-    let all: soroban_sdk::Vec<(
-        soroban_sdk::Address,
-        soroban_sdk::Vec<soroban_sdk::Val>,
-        soroban_sdk::Val,
-    )> = env.events().all();
-    let mut found = false;
-    for i in 0..all.len() {
-        let (_contract, topics, data) = all.get(i).unwrap();
-        // topics[0] should be symbol_short!("inv_frz")
-        if topics.len() >= 1 {
-            let t0: Result<soroban_sdk::Symbol, _> = topics.get(0).unwrap().try_into_val(&env);
-            if let Ok(sym) = t0 {
-                if sym == soroban_sdk::symbol_short!("inv_frz") {
-                    // decode data as (frozen: u32, reason_code: u32)
-                    let (frozen_val, reason_val): (u32, u32) = data.try_into_val(&env).unwrap();
-                    assert_eq!(frozen_val, 1u32);
-                    assert_eq!(reason_val, 99u32);
-                    found = true;
-                }
-            }
-        }
-    }
-    assert!(found, "inv_frz event not found");
+        .to_xdr(&env, &client.address)
+    );
 }
 
 // ── claim_investor_payout blocked for frozen ──────────────────────────────────
@@ -219,11 +197,11 @@ fn frozen_investor_cannot_claim_unfrozen_can() {
     client.fund(&investor_a, &amount);
     client.fund(&investor_b, &amount);
 
-    // settle
-    client.settle(&sme);
-    // mint payout tokens to the escrow so transfers can succeed
+    // mint payout tokens to the escrow so settle is pre-funded and transfers can succeed
     let total_payout = amount * 2 + (amount * 2 * 800 / 10_000);
     sac_admin.mint(&escrow_id, &total_payout);
+    // settle
+    client.settle();
 
     // freeze investor_a
     client.set_investor_frozen(&investor_a, &true, &1u32);
@@ -334,7 +312,7 @@ fn frozen_investor_cannot_refund_unfrozen_can() {
         setup_two_investors(&env, 1_000_000);
 
     // cancel the escrow
-    client.cancel(&client.get_escrow().admin);
+    client.cancel_funding();
 
     client.set_investor_frozen(&investor_a, &true, &5u32);
 
@@ -395,7 +373,7 @@ fn refund_batch_skips_frozen_refunds_unfrozen() {
     client.fund(&investor_b, &amount);
 
     // cancel escrow
-    client.cancel(&admin);
+    client.cancel_funding();
 
     // freeze investor_a
     client.set_investor_frozen(&investor_a, &true, &9u32);
