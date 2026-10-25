@@ -335,7 +335,11 @@ fn test_legal_hold_midflow_blocks_and_resumes_with_ordered_events() {
     assert!(!client.get_legal_hold());
 
     // --- Phase 3: fund (hold is off) ---
-    client.fund(&admin, &100_000_000i128);
+    // Funded from a fresh investor address: role parties (admin/sme/treasury) can no
+    // longer fund (issue #1547), so `fund(&admin, ..)` would revert with
+    // `InvestorRoleConflict`.
+    let investor = Address::generate(&env);
+    client.fund(&investor, &100_000_000i128);
     assert_eq!(client.get_escrow().funded_amount, 100_000_000);
 
     // --- Phase 4: enable hold mid-stream (post-fund, pre-settle) ---

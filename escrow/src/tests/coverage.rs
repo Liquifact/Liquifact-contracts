@@ -231,8 +231,10 @@ fn escrow_error_discriminants_match_canonical_table() {
         (EscrowError::FloorLowerNotOpen, 173),
         (EscrowError::NewFloorNotLower, 174),
         (EscrowError::NewFloorNotPositive, 175),
+        (EscrowError::TargetExceedsInvoiceAmount, 267),
+        (EscrowError::FundedAmountExceedsSafeEnvelope, 268),
     ];
-    assert_eq!(TABLE.len(), 89);
+    assert_eq!(TABLE.len(), 91);
     for (variant, code) in TABLE {
         assert_eq!(*variant as u32, *code, "discriminant drift for code {code}");
     }
@@ -1776,7 +1778,7 @@ fn test_update_funding_target_happy_path() {
         &admin,
         &soroban_sdk::String::from_str(&env, "T"),
         &sme,
-        &100,
+        &200,
         &10,
         &10,
         &token,
@@ -3268,6 +3270,7 @@ fn read_view_distributed_principal_after_refund() {
     &None::<i64>,);
     tok.stellar.mint(&investor, &200);
     client.fund(&investor, &200);
+    tok.stellar.mint(&client.address, &2);
     client.settle();
 
     // The settled escrow status confirms the event was emitted

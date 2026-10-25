@@ -505,6 +505,24 @@ Repeat deposits by the same investor must not decrement remaining slots.
 
 ---
 
+## 25. InvestorIndex Consistency and Non-Zero Contribution
+
+**Invariant:** `InvestorIndex.len() == UniqueFunderCount` and every indexed address has a contribution > 0 while status == 0.
+
+```
+InvestorIndex.len() == UniqueFunderCount
+∀ addr ∈ InvestorIndex: get_contribution(addr) > 0  (while status == 0)
+```
+
+Each distinct investor appears at most once in `InvestorIndex`. When an investor contributes for the first time or re-funds after a full exit, the address is pushed to `InvestorIndex` guarded by an O(1) persistent marker `DataKey::InvestorIndexed(Address)`. When an investor fully unfunds (`remaining_contribution == 0`), the address is removed from `InvestorIndex` (preserving the relative order of the remaining investors), its `DataKey::InvestorIndexed` marker is cleared, and stale per-investor yield (`DataKey::InvestorEffectiveYield`) and commitment lock (`DataKey::InvestorClaimNotBefore`) entries are removed from persistent storage.
+
+**Where enforced:**
+- `fund_impl` in `escrow/src/lib.rs` — pushes to `InvestorIndex` and sets `InvestorIndexed` only when not already indexed; increments `UniqueFunderCount` when `prev == 0`.
+- `unfund` in `escrow/src/lib.rs` — when `remaining_contribution == 0`, decrements `UniqueFunderCount`, removes the address from `InvestorIndex` with `Vec::remove`, clears `InvestorIndexed`, and deletes `InvestorEffectiveYield` and `InvestorClaimNotBefore`.
+- Property test: asserts `index uniqueness`, `index.len() == UniqueFunderCount`, and `Σ get_funding_records == funded_amount` across random sequences of `fund`, `unfund`, and re-`fund`.
+
+---
+
 ## Entrypoint Cross-Reference
 
 | Invariant | Primary entrypoints |
@@ -533,3 +551,62 @@ Repeat deposits by the same investor must not decrement remaining slots.
 | Refund conservation (#22) | `refund`, `refund_batch`, `sweep_terminal_dust` |
 | Status never regresses (#23) | all state-mutating entrypoints |
 | Remaining slots conservation (#24) | `fund`, `fund_with_commitment`, `fund_batch`, `unfund` *(planned)*, `lower_max_unique_investors`, `raise_max_unique_investors` |
+| InvestorIndex consistency (#25) | `fund`, `fund_with_commitment`, `fund_batch`, `unfund` |
+
+---
+
+## On-Chain Audit API
+
+The `check_core_invariants` and `audit_investor_page` entrypoints expose a subset of the above
+invariants as a **read-only on-chain audit API** so operators and smart-contract auditors can
+verify live state without off-chain reconstruction.
+
+### `check_core_invariants(env) → u32` — bitmask of violated invariants
+
+Returns `0` when all checked invariants hold.  Each set bit identifies one violation.
+The bit constants are exported as `INV_*` `pub const` values from the crate.
+
+| Bit | Constant | Invariant checked | Related doc invariant |
+|-----|----------|-------------------|-----------------------|
+| 0 | `INV_STATUS_RANGE` | `status ∈ 0..=4` | #23 (status never regresses / valid range) |
+| 1 | `INV_FUNDED_AMOUNT_NEGATIVE` | `funded_amount >= 0` | #1, #3 |
+| 2 | `INV_SNAPSHOT_PRINCIPAL_MISMATCH` | `FundingCloseSnapshot.total_principal == funded_amount` when `status ∈ {1,2,3}` | #15 (snapshot immutability) |
+| 3 | `INV_DISTRIBUTED_EXCEEDS_FUNDED` | `DistributedPrincipal <= funded_amount` | #22 (refund conservation) |
+| 4 | `INV_FEE_BPS_OUT_OF_RANGE` | `ProtocolFeeBps ∈ 0..=10_000` | #20 (protocol fee conservation) |
+| 5 | `INV_BALANCE_BELOW_LIABILITY` | `token_balance >= funded_amount − DistributedPrincipal` when `status ∈ {0,1,4}` | #18 (SEP-41 balance-delta) |
+| 6 | `INV_FUNDER_COUNT_EXCEEDS_CAP` | `UniqueFunderCount <= MaxUniqueInvestorsCap` when a cap is set | #7, #8 |
+
+**Read-only guarantee:** `check_core_invariants` never writes to storage or bumps TTLs.
+
+### `audit_investor_page(env, start: u32, limit: u32) → (i128, u32, u32)` — paginated investor audit
+
+Returns `(sum_contributions, nonzero_count, duplicate_count_in_page)` over a window of
+`DataKey::InvestorIndex`, capped at `MAX_INVESTOR_READ_BATCH` (50) entries per call.
+
+| Return field | Type | Meaning |
+|---|---|---|
+| `sum_contributions` | `i128` | Sum of all `InvestorContribution` values in this page |
+| `nonzero_count` | `u32` | Number of investors in this page with a positive contribution |
+| `duplicate_count_in_page` | `u32` | Number of duplicate addresses detected within this page |
+
+**Off-chain aggregation pattern:**
+
+```
+start = 0
+total_sum = 0
+total_nonzero = 0
+total_dups = 0
+loop:
+  (sum, nonzero, dups) = audit_investor_page(start, 50)
+  if nonzero == 0 and sum == 0: break
+  total_sum    += sum
+  total_nonzero += nonzero
+  total_dups   += dups
+  start        += 50
+
+assert total_sum    == funded_amount      # conservation
+assert total_nonzero == unique_funder_count  # count accuracy
+assert total_dups   == 0                 # index integrity
+```
+
+**Read-only guarantee:** `audit_investor_page` never writes to storage or bumps TTLs.
