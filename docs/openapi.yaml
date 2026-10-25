@@ -64,6 +64,52 @@ components:
 
     # -- Domain objects ------------------------------------------------------
 
+    InvestorPosition:
+      type: object
+      description: |
+        Composite read-only view of one investor's position in the escrow.
+        Aggregates contribution, effective yield, claim gate, claimed flag,
+        refunded flag, and current claimable payout into a single response.
+      required:
+        - investor
+        - contribution
+        - effective_yield_bps
+        - claim_not_before
+        - claimed
+        - refunded
+        - claimable_payout
+      properties:
+        investor:
+          $ref: "#/components/schemas/StellarAddress"
+        contribution:
+          type: integer
+          format: int64
+          description: Cumulative principal contributed (base units of the funding token). 0 after full refund.
+          example: 50000000000
+        effective_yield_bps:
+          type: integer
+          format: int32
+          description: Per-investor yield in basis points. Falls back to escrow base yield for legacy positions.
+          example: 800
+        claim_not_before:
+          type: integer
+          format: int64
+          description: Earliest ledger timestamp at which the investor may claim. 0 = no extra gate.
+          example: 0
+        claimed:
+          type: boolean
+          description: Whether the investor has already claimed their payout.
+          example: false
+        refunded:
+          type: boolean
+          description: Whether the investor's principal has been refunded (cancelled escrow).
+          example: false
+        claimable_payout:
+          type: integer
+          format: int64
+          description: Current claimable payout. 0 when any claim gate is closed.
+          example: 54000000000
+
     InvoiceEscrow:
       type: object
       required:
@@ -559,6 +605,86 @@ paths:
               example:
                 error: INVALID_STATE
                 message: "Escrow must be funded before settlement."
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /escrow/{invoiceId}/investors/{investorAddress}/position:
+    get:
+      operationId: getInvestorPosition
+      summary: Get a single investor's position
+      description: |
+        Returns a composite `InvestorPosition` view for one investor via
+        `LiquifactEscrow.get_investor_position`.  Aggregates contribution,
+        effective yield, claim gate, claimed flag, refunded flag, and current
+        claimable payout in a single on-chain read.  Pure read — no auth required.
+      tags: [Invoices]
+      parameters:
+        - name: invoiceId
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/InvoiceId"
+        - name: investorAddress
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/StellarAddress"
+      responses:
+        "200":
+          description: Investor position view.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvestorPosition"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalServerError"
+
+  /escrow/{invoiceId}/investors/positions:
+    get:
+      operationId: listInvestorPositions
+      summary: Paginated investor position list
+      description: |
+        Returns a page of `InvestorPosition` records via
+        `LiquifactEscrow.get_investor_positions`.  Iterates the on-chain
+        investor index.  Page size is capped at `MAX_POSITION_READ_PAGE = 20`.
+        Pure read — no auth required.
+      tags: [Invoices]
+      parameters:
+        - name: invoiceId
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/InvoiceId"
+        - name: start
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+          description: 0-based index of the first investor to return.
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 20
+            default: 20
+          description: Maximum number of positions to return (capped at 20).
+      responses:
+        "200":
+          description: Page of investor positions.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/InvestorPosition"
+        "404":
+          $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalServerError"
 

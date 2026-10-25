@@ -182,6 +182,8 @@ fn init_settled<'a>(
     let sac_admin = StellarAssetClient::new(env, &token);
     sac_admin.mint(investor, &TARGET);
     client.fund(investor, &TARGET);
+    // Pre-fund the 800 bps coupon so settle does not need to charge the SME.
+    sac_admin.mint(&escrow_id, &(TARGET * 800 / 10_000));
     client.settle();
     (client, escrow_id, token, treasury)
 }
@@ -795,7 +797,14 @@ fn single_hold_blocks_all_gated_ops() {
         let env = Env::default();
         let (client, admin, sme) = setup(&env);
         let investor = Address::generate(&env);
-        init_funded(&client, &env, &admin, &sme, &investor, "LHG003");
+        let (token, _treasury) = init_funded(&client, &env, &admin, &sme, &investor, "LHG003");
+        // Pre-fund the 800 bps coupon through the mock token so settle is solvent.
+        let coupon_payer = Address::generate(&env);
+        soroban_sdk::token::TokenClient::new(&env, &token).transfer(
+            &coupon_payer,
+            soroban_sdk::MuxedAddress::from(client.address.clone()),
+            &(TARGET * 800 / 10_000),
+        );
         client.settle();
         client.set_legal_hold(&true);
         crate::tests::assert_contract_error(

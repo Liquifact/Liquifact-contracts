@@ -58,6 +58,8 @@ re-implementing storage reads to guarantee identical semantics.
 - [compute_investor_payout](#compute_investor_payoutinvestor-address--i128)
 - [get_claimable_payout](#get_claimable_payoutinvestor-address--i128)
 - [get_settlement_pool](#get_settlement_pool--i128)
+- [get_investor_position](#get_investor_positioninvestor-address--investorposition)
+- [get_investor_positions](#get_investor_positionsstart-u32-limit-u32--vecinvestorposition)
 
 **Attestations:**
 - [get_primary_attestation_hash](#get_primary_attestation_hash--optionbytesn32)
@@ -912,3 +914,77 @@ Single O(1) read view of the current collateral state, so callers never have to 
 | `collateral_limit` | `i128` | Admin-configured ceiling on `record_sme_collateral_commitment` | `MAX_INVOICE_AMOUNT` |
 
 Note that `collateral_limit` is independent of `is_set`: it reflects the stored limit (or the `MAX_INVOICE_AMOUNT` default) even when no commitment exists.
+
+---
+
+## `get_investor_position(investor: Address) → InvestorPosition`
+
+**Signature:** `pub fn get_investor_position(env: Env, investor: Address) -> InvestorPosition`
+
+Composite read-only view that aggregates all six per-investor storage reads into a single call.
+Indexers and frontends previously had to call `get_contribution`, `get_investor_yield_bps`,
+`get_investor_claim_not_before`, `is_investor_claimed`, `is_investor_refunded`, and
+`get_claimable_payout` separately. This view makes one call sufficient.
+
+**Authorization:** None — pure read; no state mutation; no TTL bumps.
+
+### `InvestorPosition` fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `investor` | `Address` | The investor's address (echoed back for convenience) |
+| `contribution` | `i128` | Cumulative principal contributed (base units of the funding token). `0` after a full refund |
+| `effective_yield_bps` | `i64` | Per-investor yield selected at first deposit. Falls back to the escrow base `yield_bps` for legacy / non-tiered positions |
+| `claim_not_before` | `u64` | Earliest ledger timestamp at which the investor may claim. `0` = no extra gate |
+| `claimed` | `bool` | Whether the investor has already claimed their payout |
+| `refunded` | `bool` | Whether the investor's principal has been refunded (cancelled escrow) |
+| `claimable_payout` | `i128` | Current claimable payout — identical to `get_claimable_payout`. `0` when any gate is closed |
+
+### Behaviour for unknown addresses
+
+All per-investor storage keys default gracefully:
+- `contribution` → `0`
+- `effective_yield_bps` → escrow `yield_bps` (or `0` if escrow not initialized)
+- `claim_not_before` → `0`
+- `claimed` → `false`
+- `refunded` → `false`
+- `claimable_payout` → `0`
+
+---
+
+## `get_investor_positions(start: u32, limit: u32) → Vec<InvestorPosition>`
+
+**Signature:** `pub fn get_investor_positions(env: Env, start: u32, limit: u32) -> Vec<InvestorPosition>`
+
+Paginated view over the investor index. Iterates `DataKey::InvestorIndex` (the same backing list
+used by `get_investors` and `get_funding_records`) and returns one `InvestorPosition` per entry.
+
+**Authorization:** None — pure read; no state mutation; no TTL bumps.
+
+**Page size cap:** `MAX_POSITION_READ_PAGE = 20`. Requests above this are silently clamped.
+
+### Pagination contract
+
+| Condition | Result |
+|-----------|--------|
+| Empty investor index | Empty `Vec` |
+| `start >= len` | Empty `Vec` |
+| `limit == 0` | Empty `Vec` |
+| `limit > 20` | Clamped to `20` |
+| Final partial page | `Vec` shorter than `limit` |
+
+### Overflow safety
+
+Uses `paginate_window` (saturating arithmetic) — calling with `start = u32::MAX - 1` and any
+`limit` returns an empty page without panicking, even when the index is non-empty.
+
+### Iteration pattern
+
+```
+start = 0
+loop:
+  page = get_investor_positions(start, 20)
+  if page.is_empty(): break
+  process(page)
+  start += page.len()
+```

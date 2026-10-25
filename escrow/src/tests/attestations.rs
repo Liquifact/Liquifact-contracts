@@ -250,15 +250,19 @@ fn test_append_beyond_max_panics() {
     }
 }
 
-/// Duplicate digests are allowed — the log is an audit trail, not a set.
+/// Duplicate digests must not consume another log entry.
 #[test]
-fn test_append_duplicate_digest_allowed() {
+fn test_append_duplicate_digest_rejected() {
     let env = Env::default();
     let (client, _) = setup_with_init(&env);
     let d = digest(&env, 0x42);
     client.append_attestation_digest(&d);
-    client.append_attestation_digest(&d);
-    assert_eq!(client.get_attestation_append_log().len(), 2);
+    let before = client.get_attestation_append_log();
+    assert_contract_error(
+        client.try_append_attestation_digest(&d),
+        EscrowError::AttestationDigestDuplicate,
+    );
+    assert_eq!(client.get_attestation_append_log(), before);
 }
 
 /// Non-admin caller must not be able to append.

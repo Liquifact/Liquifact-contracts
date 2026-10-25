@@ -17,7 +17,7 @@ This document specifies the core state and behavioral **configuration view** inv
 
 | ID | Invariant Name | Short Description | Primary Enforcement | Error Code / Behavior |
 |---|---|---|---|---|
-| **INV-ATT-1j* | Admin Authorization Boundary | All state-mutating attestation entrypoints require `InvoiceEscrow::admin` auth. | `load_escrow_require_admin` / `admin.require_auth()` | Stellar Auth Rejection |
+| **INV-ATT-1j* | Admin Authorization Boundary | Admin controls the role and existing mutations; designated attestor may only append. | `load_escrow_require_admin` / `admin.require_auth()` | Stellar Auth Rejection |
 | **INV-ATT-2** | Primary Attestation Single-Set Immutability | `PrimaryAttestationHash` is write-once; cannot be overwritten, cleared, or rebound. | `bind_primary_attestation_hash` | `PrimaryAttestationAlreadyBound` (50) |
 | **INV-ATT-3** | Append Log Bounded Capacity | `AttestationAppendLog` is capped at `MAX_ATTESTATION_APPEND_ENTRIES` (32 digests). | `append_attestation_digest` | `AttestationAppendLogCapacityReached` (51) |
 | **INV-ATT-4** | Append Log Positional Stability | Entries in `AttestationAppendLog` maintain 0-based index position and value indefinitely. | Append-only logic (`push_back`) | Immutable log sequence |
@@ -32,14 +32,15 @@ This document specifies the core state and behavioral **configuration view** inv
 
 ## Detailed Invariant Specifications
 
-### INV-ATT-1: Admin Authorization Boundary
+### INV-ATT-1: Admin and Attestor Authorization Boundaries
 
 State-mutating attestation entrypoints--`bind_primary_attestation_hash`, `append_attestation_digest`, `revoke_attestation_digest`, `revoke_attestation_digests`, and `unrevoke_attestation_digest`--must be invoked by or signed with the authority of the escrow instance's `InvoiceEscrow::admin`.
 
 - **Enforcement Location:** 
   - `bind_primary_attestation_hash` and `append_attestation_digest` call `Self::load_escrow_require_admin(&env)`.
   - `revoke_attestation_digest`, `revoke_attestation_digests`, and `unrevoke_attestation_digest` verify `escrow.admin.require_auth()`.
-- **Read-Only Exception:** Read functions (`get_primary_attestation_hash`, `get_attestation_append_log`, `get_attestation_digest_at`, `is_attestation_revoked`, `get_revoked_attestation_digests`, `get_escrow_summary`) require no authorization.
+- **Attestor Exception:** `append_attestation_digest_as` requires the stored attestor address and its authorization. Only admin can assign, rotate, or clear it through `set_attestor`. Both append paths reject primary and historical duplicates, including revoked entries, and persist the author at the appended index.
+- **Read-Only Exception:** `get_attestation_author` and read functions (`get_primary_attestation_hash`, `get_attestation_append_log`, `get_attestation_digest_at`, `is_attestation_revoked`, `get_revoked_attestation_digests`, `get_escrow_summary`) require no authorization.
 
 ---
 

@@ -60,16 +60,16 @@ Operators must extend instance storage TTL together with persistent storage TTL.
 
 ### Write-time TTL extension for per-investor keys
 
-Per-investor persistent keys (`InvestorContribution`, `InvestorEffectiveYield`, `InvestorClaimNotBefore`, `InvestorClaimed`, `InvestorAllowlisted`) are automatically extended at write time using the `extend_investor_ttl()` helper function in the following flows:
+Per-investor persistent keys (`InvestorContribution`, `InvestorEffectiveYield`, `InvestorClaimNotBefore`, `InvestorClaimed`, `InvestorRefunded`) are automatically extended at write time inside the fund, claim, and refund flows using the `PERSISTENT_TTL_MIN_EXTENSION_LEDGERS` horizon. This provides defense-in-depth against silent expiry of live positions prior to settlement.
 
-- **`fund_impl`**: extends all investor keys after recording contribution and yields; also extends instance TTL once at the end
-- **`unfund`**: extends all investor keys after reducing/clearing contribution
-- **`claim_investor_payout`**: extends all investor keys after marking investor as claimed
-- **`refund_impl`**: extends all investor keys after zeroing contribution in cancelled escrows
-
-This provides defense-in-depth against silent expiry of live positions prior to settlement. Positions with maturity dates years in the future are kept alive by the configured storage horizon (see **Admin-configurable storage limit** below).
-
-**Instance TTL extension**: `fund_impl` and `settle` each extend instance TTL once (contract-wide, not per-investor) to keep time-sensitive keys alive: `Escrow`, `Version`, `LegalHold`, `FundingCloseSnapshot`, and other state markers.
+**`InvestorRefunded` storage migration (issue #1541):**
+Prior WASM versions wrote `DataKey::InvestorRefunded(Address)` to instance storage. Each refunded
+investor added a permanent entry to the instance map, so every subsequent invocation loaded those
+stale entries even though they were never updated. As of issue #1541, new refunds are written to
+**persistent** storage with TTL extension via `get_storage_limit`. Legacy instance entries are
+migrated transparently on the first read of each investor's refund flag: the private
+`investor_refunded` helper writes the persistent entry, extends its TTL, and removes the instance
+entry — all atomically within a single host call. No operator intervention is required.
 
 ### Permissionless TTL extension
 

@@ -114,4 +114,8 @@ pub enum EscrowError {
     FeeScheduleSameAsActive = 243,
     /// `LiquifactEscrow::get_action_blockers` received an action code outside the known lifecycle actions.
     UnknownLifecycleAction = 250,
+    /// `LiquifactEscrow::set_payout_recipient` received a recipient equal to the escrow contract itself.
+    PayoutRecipientInvalid = 251,
+    /// `LiquifactEscrow::set_payout_recipient` blocked because a legal hold is active.
+    LegalHoldBlocksRecipientChange = 252,
 }

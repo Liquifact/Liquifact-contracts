@@ -200,6 +200,7 @@ liquifact-contracts/
 | `withdraw` | SME | SME pulls funded liquidity (accounting record). |
 | `cancel_funding` | Admin | Admin cancels an open escrow (transitions status 0 → 4). |
 | `refund` | Investor | Investor pulls contributed liquidity from a cancelled escrow. Increments `DistributedPrincipal` liability. |
+| `refund_batch` | Any | Push up to 50 cancelled refunds to investors themselves without their signatures; skip ineligible entries, reject duplicates, and return `(count, total)`. |
 | `extend_funding_deadline` | Admin | Extend-only push of the funding deadline while the escrow is open. |
 | `claim_investor_payout` | Investor | Investor records a payout claim after settlement. |
 | `claim_payouts_batch` | Investor / Any | Batch-record payout claims for up to `MAX_CLAIM_BATCH` investors in one transaction. |

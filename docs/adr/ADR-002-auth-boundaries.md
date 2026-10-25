@@ -30,6 +30,13 @@ Multiple principals interact with the escrow (admin, SME, investors, treasury). 
 
 There is no superuser that can act as all roles simultaneously unless the same key is used for multiple roles — which is a deployment concern, not a contract concern.
 
+Admin proposals preserve role separation on-chain: the proposed admin may not equal the current
+SME beneficiary, immutable treasury, or escrow contract address. `accept_admin` repeats this
+check because `rotate_beneficiary` can change the SME between proposal and acceptance. Explicit
+proposal windows are bounded to 1 hour through 30 days; omitted windows use the 7-day default.
+The deprecated `transfer_admin` shim delegates to `propose_admin`, so it cannot bypass either
+restriction.
+
 ## Consequences
 
 - A compromised investor key cannot settle or sweep funds.
@@ -48,7 +55,9 @@ There is no superuser that can act as all roles simultaneously unless the same k
 
 Certain administrative entrypoints enforce a no-op guard to reject updates that do not change the existing state, preventing noisy events and wasted storage writes:
 - **`update_maturity`**: Rejects `new_maturity == old_maturity` (`MaturityUnchanged`).
-- **`propose_admin`**: Rejects `new_admin == current_admin` (`NewAdminSameAsCurrent`).
+- **`propose_admin`**: Rejects `new_admin == current_admin` (`NewAdminSameAsCurrent`) and
+  candidates that collide with the SME, treasury, or escrow contract address
+  (`AdminCandidateConflictsWithRole`).
 - **`rotate_beneficiary`**: Rejects `new_sme == current_sme` (`NewSmeSameAsCurrent`).
 
 ## Shared gate helpers (issue #626)

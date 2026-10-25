@@ -19,6 +19,8 @@ Every state-mutating entrypoint and the identity required to authorize it.
 | `update_funding_target` | `escrow.admin` | `escrow.admin.require_auth()` | Only in `status == 0`; `new_target >= funded_amount` |
 | `set_legal_hold` / `clear_legal_hold` | `escrow.admin` | `escrow.admin.require_auth()` | No timelock; no multisig enforced on-chain |
 | `set_paused` | `escrow.admin` | `escrow.admin.require_auth()` | Operational pause, orthogonal to legal hold; single-call toggle, **no** clear delay |
+| `set_pauser` | `escrow.admin` | `escrow.admin.require_auth()` | Installs/revokes the one-way emergency pauser; rejects SME/treasury with `PauserRoleConflict` |
+| `pause_as_pauser` | `DataKey::Pauser` | `pauser.require_auth()` after the stored-pauser check | Activate/widen a pause only — **cannot** un-pause or reconfigure |
 | `set_allowlist_active` | `escrow.admin` | `escrow.admin.require_auth()` | Enables/disables `AllowlistActive` gate |
 | `set_investor_allowlisted` | `escrow.admin` | `escrow.admin.require_auth()` | Writes to **persistent** storage (see §5.4) |
 | `bind_primary_attestation_hash` | `escrow.admin` | `escrow.admin.require_auth()` | Single-set; second call panics |
@@ -70,6 +72,24 @@ All `get_*` and `is_*` functions carry no `require_auth`. They expose full escro
 
 - Optional; written as a hint at `init`.
 - **No on-chain authority.** The contract never reads or verifies this address after storage. Off-chain indexers must not treat its presence as proof of current registry membership.
+
+### 2.6 Role separation matrix (issue #1547)
+
+Every role is bound to a distinct, sensible address. The contract enforces the
+"may occupy" column on-chain; violations revert before any storage write.
+
+| Address | `init` rejects self-reference? | May fund as investor? | Notes |
+|---|---|---|---|
+| Contract itself (`env.current_contract_address()`) | yes — as `funding_token`, `treasury`, or `sme_address` → `InitAddressInvalid` (294) | no → `InvestorRoleConflict` (296) | A self-referencing token or treasury bricks every transfer |
+| SME (`InvoiceEscrow::sme_address`) | no (only `treasury == sme` is rejected → `InitRoleConflict` (295)) | no → `InvestorRoleConflict` (296) | A self-funding SME could fake investor demand and dilute pro-rata share |
+| Treasury (`DataKey::Treasury`) | no (only `treasury == sme` is rejected → `InitRoleConflict` (295)) | no → `InvestorRoleConflict` (296) | Treasury funding its own invoice is a conflicted buy |
+| Admin (`InvoiceEscrow::admin`) | no — `admin == sme` is **allowed, dev-only** (one key drives both roles in tests/sandboxes; production deployments must separate them) | no → `InvestorRoleConflict` (296) | Admin controls the invoice lifecycle and must not appear as demand |
+| Any other address | — | yes | Subject to allowlist, caps, floors, and pause/legal-hold gates |
+
+Enforcement points:
+
+- `init`: checks `funding_token`, `treasury`, `sme_address` against the contract address and `treasury` against `sme_address` after `admin.require_auth()`, before any storage write.
+- `fund_impl` (shared by `fund`, `fund_with_commitment`, and `fund_batch`): checks the investor against `sme_address`, `admin`, `treasury`, and the contract address after the pause gate and **before** `require_auth` and before any storage write. A batch containing a role address therefore reverts atomically with no entry recorded.
 
 ---
 
@@ -247,6 +267,41 @@ It is **independent** of `LegalHold`:
 Same custody caveat as §5.3: a compromised or lost admin can pause indefinitely.
 Production deployments **must** use a governed admin so the pause cannot strand funds.
 
+### 5.11 The emergency pauser is a one-way key
+
+`DataKey::Pauser` holds an optional, dedicated operational key that may activate a scoped
+pause immediately via `pause_as_pauser` without waiting on a governed multisig.
+
+**The pauser can pause. It can do nothing else.** Every lever that could remove, weaken, or
+reconfigure a pause remains admin-only:
+
+| Action | Authorized role |
+|---|---|
+| Activate / widen a pause | `escrow.admin` **or** the stored pauser |
+| Un-pause (`set_paused(false, …)`) | `escrow.admin` only — the pauser has no un-pause entrypoint |
+| Pause max duration, cooldown, rate limit | `escrow.admin` only |
+| Install / revoke a pauser | `escrow.admin` only |
+| Extend a pause past its max duration | **nobody** — `activate_pause` never resets `PausedAt` |
+
+Additional guarantees:
+
+- The pauser address must be **the one stored on-chain** and must sign the call
+  (`stored_pauser == pauser` **and** `pauser.require_auth()`), so it can never be
+  impersonated. A wrong caller gets the typed `NotPauser` (280) error rather than an
+  opaque auth panic.
+- `set_pauser` rejects the SME address and the treasury address with
+  `PauserRoleConflict` (279), so the pauser can never be a key that already carries
+  risk-bearing or fee-receiving authority on the same escrow.
+- The pauser and the admin share **one** rolling rate-limit window, so a pauser cannot be
+  used to bypass a rate limit configured to protect the admin.
+- A pauser-initiated pause is subject to the same max-duration expiry and cooldown as an
+  admin-initiated one.
+
+**Residual risk:** a compromised pauser can force a temporary DoS of the pause-gated
+entrypoints. It cannot steal funds, cannot un-pause, and cannot extend a pause, and the
+admin can revoke the key with `set_pauser(None)` at any time. Deployments that do not need
+a fast-response path should leave the pauser unset (the default).
+
 ---
 
 ## 6. Authorization guard ordering (issue #265)
@@ -279,6 +334,8 @@ and does not weaken the auth boundary. Refactors must not move step 3 above step
 | `update_funding_target` | `escrow.admin` | `get_escrow` | line ~1007 | `DataKey::Escrow` set |
 | `set_legal_hold` / `clear_legal_hold` | current `escrow.admin` | `get_escrow` | line ~940 | `DataKey::LegalHold` set |
 | `set_paused` | current `escrow.admin` | `get_escrow` | `escrow.admin` (via `load_escrow_require_admin`) | `DataKey::Paused` set |
+| `set_pauser` | current `escrow.admin` | `get_escrow` | `escrow.admin` (via `load_escrow_require_admin`) | `DataKey::Pauser` set |
+| `pause_as_pauser` | `DataKey::Pauser` | `get_escrow`, stored-pauser read | `pauser` (after the stored-pauser check) | `DataKey::Paused` set |
 | `set_allowlist_active` | `escrow.admin` | `get_escrow` | line ~956 | `DataKey::AllowlistActive` set |
 | `set_investor_allowlisted` | `escrow.admin` | `get_escrow` | line ~978 | persistent allowlist set |
 | `bind_primary_attestation_hash` | `escrow.admin` | `get_escrow`, `has` check | line ~791 | `PrimaryAttestationHash` set |

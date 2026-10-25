@@ -39,6 +39,27 @@ Once the escrow is cancelled, investors are entitled to claim their contributed 
 
 ---
 
+### Permissionless batches
+
+Anyone may call `refund_batch(investors)` without investor signatures. Funds always
+return to each investor's own address through the same balance-checked transfer
+wrapper as `refund`; callers cannot choose a different recipient. The single
+`refund(investor)` entrypoint still requires that investor's authorization.
+
+Batches contain 1 to 50 distinct addresses and return `(refunded_count,
+total_refunded)`. Zero-contribution and already-refunded entries are skipped.
+Duplicate addresses, including ineligible ones, fail with
+`RefundBatchDuplicateInvestor` (266) before any transfers. Empty and oversized
+batches retain errors 144 and 145. Other refund/token failures revert the whole
+batch. Existing cancellation requirements and liability accounting remain in force.
+
+Each successful transfer emits the existing `InvestorRefundedEvt`. Every successful
+batch, including an all-skipped retry returning `(0, 0)`, emits
+`RefundBatchProcessed` with `name = refund_bt`, `invoice_id`, `count` and `total`.
+Integrators must update their client bindings for the new return tuple.
+
+---
+
 ## 3. Residual Dust Sweeping and the Liability Floor
 
 The [`LiquifactEscrow::sweep_terminal_dust`](file:///c:/Users/enwer/OneDrive/Documents/Code%20Projects/OS%20Contributions/Liquifact-contracts/escrow/src/lib.rs#L1447) entrypoint is designed to allow the protocol treasury to recover rounding residue or accidental transfers. In a cancelled escrow, it enforces a strict **liability floor** to protect un-refunded investor funds.

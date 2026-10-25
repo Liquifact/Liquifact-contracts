@@ -38,6 +38,25 @@ stateDiagram-v2
     Pledged_ --> NoPledge_ : clear_sme_collateral_commitment\n(SME auth, pledge must exist)
 ```
 
+### Post-funding lock (issue #1563)
+
+Once the escrow has received investor principal (`funded_amount > 0`) and is not in a
+terminal state (settled = 2, withdrawn = 3, cancelled = 4), the collateral pledge is
+**locked**:
+
+- **`clear_sme_collateral_commitment`** fails with `CollateralLockedAfterFunding` (303)
+  when `funded_amount > 0` and `status` is not terminal (2, 3, 4).
+- **`record_sme_collateral_commitment`** rejects:
+  - asset change → `CollateralAssetChangeAfterFunding` (305)
+  - amount decrease → `CollateralDecreaseAfterFunding` (306)
+- **`batch_record_collateral`** enforces the same post-funding checks against the
+  existing pledge and also rejects batches whose entries name different assets
+  → `CollateralBatchMixedAssets` (307).
+- A **legal hold** blocks all three entrypoints → `LegalHoldBlocksCollateralChange` (304).
+
+Before funding (`funded_amount == 0`), behaviour is unchanged: the SME may record, replace,
+and clear freely (subject to the pre-existing validation guards).
+
 ---
 
 ## Transition Matrix
@@ -48,8 +67,17 @@ stateDiagram-v2
 | | | | | `asset != ""` | `CollateralAssetEmpty` (61) |
 | | | | | `amount <= get_collateral_limit()` | `CollateralLimitExceeded` (64) |
 | | | | | if replacing: `recorded_at >= prior.recorded_at` | `CollateralTimestampBackwards` (62) |
+| | | | | no legal hold active | `LegalHoldBlocksCollateralChange` (304) |
+| | | | | if `funded_amount > 0` and replacing: `asset == prior.asset` | `CollateralAssetChangeAfterFunding` (305) |
+| | | | | if `funded_amount > 0` and replacing: `amount >= prior.amount` | `CollateralDecreaseAfterFunding` (306) |
 | | | | | escrow must exist | `EscrowNotInitialized` (20) |
 | `clear_sme_collateral_commitment` (line 3457) | Pledged | NoPledge | SME (`require_auth`) | `collateral_pledge_get` must return `Some` | `NoCollateralToClear` (169) |
+| | | | | no legal hold active | `LegalHoldBlocksCollateralChange` (304) |
+| | | | | `funded_amount == 0` or `is_terminal_status(status)` | `CollateralLockedAfterFunding` (303) |
+| `batch_record_collateral` (line 4641) | NoPledge, Pledged | Pledged | SME (`require_auth`) | all entries same asset | `CollateralBatchMixedAssets` (307) |
+| | | | | no legal hold active | `LegalHoldBlocksCollateralChange` (304) |
+| | | | | if `funded_amount > 0` and replacing: `first_asset == prior.asset` | `CollateralAssetChangeAfterFunding` (305) |
+| | | | | if `funded_amount > 0` and replacing: `last_amount >= prior.amount` | `CollateralDecreaseAfterFunding` (306) |
 | `set_collateral_limit` (line 3396) | — (orthogonal) | — (updates config) | Admin (`require_auth`) | `new_limit > 0` | `CollateralLimitNotPositive` (63) |
 | | | | | `new_limit <= MAX_INVOICE_AMOUNT` | `CollateralLimitExceedsMax` (65) |
 
@@ -65,14 +93,28 @@ Within each mutating entrypoint, guards are evaluated in a fixed sequence so tha
 
 1. `amount > 0` — integer check, no I/O
 2. `asset != ""` — symbol comparison, no I/O
-3. `amount <= get_collateral_limit()` — one storage read (`DataKey::CollateralLimit`)
-4. `load_escrow_require_sme` — one storage read + one `require_auth` (SME)
+3. `load_escrow_require_sme` — one storage read + one `require_auth` (SME)
+4. `guard_not_legal_hold` — `LegalHoldBlocksCollateralChange` (304) if active
 5. if prior pledge exists: `recorded_at >= prior.recorded_at` — one storage read (`DataKey::SmeCollateralPledge`)
+6. if `funded_amount > 0` and prior pledge exists: `asset == prior.asset` — `CollateralAssetChangeAfterFunding` (305)
+7. if `funded_amount > 0` and prior pledge exists: `amount >= prior.amount` — `CollateralDecreaseAfterFunding` (306)
 
 ### `clear_sme_collateral_commitment` guard order (line 3457)
 
 1. `collateral_pledge_get` returns `Some` — one storage read, fails early with `NoCollateralToClear` (169)
 2. `load_escrow_require_sme` — one storage read + `require_auth` (SME)
+3. `guard_not_legal_hold` — `LegalHoldBlocksCollateralChange` (304) if active
+4. `funded_amount == 0 || is_terminal_status(status)` — `CollateralLockedAfterFunding` (303)
+
+### `batch_record_collateral` guard order (line 4641)
+
+1. Per-item validation: `amount > 0`, `asset != ""` — no I/O
+2. All entries must reference the same asset — `CollateralBatchMixedAssets` (307)
+3. `load_escrow_require_sme` — one storage read + `require_auth` (SME)
+4. `guard_not_legal_hold` — `LegalHoldBlocksCollateralChange` (304) if active
+5. if prior pledge exists: `recorded_at >= prior.recorded_at` — one storage read
+6. if `funded_amount > 0` and prior pledge exists: `first_asset == prior.asset` — `CollateralAssetChangeAfterFunding` (305)
+7. if `funded_amount > 0` and prior pledge exists: `last_amount >= prior.amount` — `CollateralDecreaseAfterFunding` (306)
 
 ### `set_collateral_limit` guard order (line 3396)
 
