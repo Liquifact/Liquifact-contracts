@@ -32,6 +32,48 @@ The tightest constraint is step (3): with worst-case `yield_bps = 10_000` and a 
 - `test_init_amount_exceeds_max_rejected` — rejecting `MAX_INVOICE_AMOUNT + 1` with `AmountExceedsMax`
 - `test_max_bound_funded_escrow_compute_investor_payout_no_overflow` — full funding + settlement with `yield_bps = 10_000` at the bound
 
+### Funding envelope: target and funded_amount bounds
+
+Two additional guards keep every value feeding the payout math inside the
+`init`-time envelope (issue #1535). Together they establish the chain:
+
+```text
+funding_target ≤ escrow.amount ≤ MAX_INVOICE_AMOUNT   (267 + init)
+escrow.funded_amount ≤ MAX_INVOICE_AMOUNT             (268)
+```
+
+**`update_funding_target` (code 267 — `TargetExceedsInvoiceAmount`):** rejects
+`new_target > escrow.amount`. Because `init` already bounds
+`escrow.amount ≤ MAX_INVOICE_AMOUNT`, the target can never exceed
+`MAX_INVOICE_AMOUNT`, so the payout math (which scales with `total_principal`)
+stays inside its proven overflow-free envelope for every
+`yield_bps ∈ [0, 10_000]`. Without this guard an admin could raise the target
+up to `i128::MAX`, letting investors advance more than the invoice is worth and
+push `funded_amount` past `MAX_INVOICE_AMOUNT`.
+
+**`fund_impl` (code 268 — `FundedAmountExceedsSafeEnvelope`):** after the
+`checked_add` on `funded_amount`, rejects `funded_amount > MAX_INVOICE_AMOUNT`.
+This keeps over-funding (which the contract permits past the target) bounded
+so that `FundingCloseSnapshot.total_principal ≤ MAX_INVOICE_AMOUNT` and
+`compute_investor_payout` can never trap with
+`ComputePayoutArithmeticOverflow` for any `yield_bps ∈ [0, 10_000]`.
+
+**Per-investor contribution:** `fund_impl` also `checked_add`s the investor's
+contribution and rejects `i128` overflow with `InvestorContributionOverflow`
+(code 105). Because an individual investor's contribution is always
+`≤ funded_amount ≤ MAX_INVOICE_AMOUNT`, no extra envelope check is needed on
+`new_contribution` — the `funded_amount` bound (268) is the limiting one.
+
+**Tests:**
+- `tests::envelope_bounds::update_funding_target_above_invoice_amount_rejected` — 267
+- `tests::envelope_bounds::update_funding_target_equal_to_invoice_amount_succeeds` — boundary inclusive
+- `tests::envelope_bounds::update_funding_target_below_invoice_amount_succeeds` — lowering
+- `tests::envelope_bounds::update_funding_target_lower_to_funded_promotes_to_funded` — auto-promotion preserved
+- `tests::envelope_bounds::fund_at_max_invoice_amount_boundary_then_reject` — 268 + state unchanged
+- `tests::envelope_bounds::fund_with_commitment_at_envelope_boundary_rejected` — 268 via commitment path
+- `tests::envelope_bounds::compute_investor_payout_no_overflow_at_max_invoice_amount` — payout at the bound
+- `tests::properties::prop_payout_no_overflow_within_envelope` — proptest sweep
+
 ## Commitment locks: `u64`
 
 - Ledger timestamps and lock durations use `u64` seconds from `Env::ledger().timestamp()`.

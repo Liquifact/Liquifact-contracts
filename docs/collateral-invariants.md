@@ -40,6 +40,11 @@ The collateral subsystem owns exactly one piece of instance storage: `DataKey::S
 | 5 | **Clear Only When Present** | `clear_sme_collateral_commitment` can only be called if a pledge exists. | `clear_sme_collateral_commitment` (`EscrowError::NoCollateralToClear`) |
 | 6 | **Single Source of Truth** | The stored `SmeCollateralPledge` is the authoritative record; reading via `get_sme_collateral_commitment` returns the latest pledge or `None`. | Getter function `get_sme_collateral_commitment` and storage key `DataKey::SmeCollateralPledge`. |
 | 7 | **Event Payload Consistency** | `CollateralRecordedEvt` always contains the prior amount (if any) and the new amount, enabling off‑chain indexers to track changes. | Emitted in `record_sme_collateral_commitment`; tests verify payload (`tests/integration.rs`). |
+| 8 | **Post‑funding Lock** | Once `funded_amount > 0`, `clear_sme_collateral_commitment` is blocked unless the escrow is in a terminal state (settled = 2, withdrawn = 3, cancelled = 4). | `clear_sme_collateral_commitment` (`EscrowError::CollateralLockedAfterFunding`) |
+| 9 | **Post‑funding Asset Stability** | Once `funded_amount > 0`, the asset of an existing pledge may not be changed by `record_sme_collateral_commitment` or `batch_record_collateral`. | `record_sme_collateral_commitment`, `batch_record_collateral` (`EscrowError::CollateralAssetChangeAfterFunding`) |
+| 10 | **Post‑funding Amount Monotonicity** | Once `funded_amount > 0`, the amount of an existing pledge may only stay the same or increase via `record_sme_collateral_commitment` or `batch_record_collateral`. | `record_sme_collateral_commitment`, `batch_record_collateral` (`EscrowError::CollateralDecreaseAfterFunding`) |
+| 11 | **Batch Single‑Asset** | All entries in a `batch_record_collateral` call must reference the same asset. | `batch_record_collateral` (`EscrowError::CollateralBatchMixedAssets`) |
+| 12 | **Legal‑Hold Freeze** | An active legal hold blocks `record_sme_collateral_commitment`, `batch_record_collateral`, and `clear_sme_collateral_commitment`. | All three entrypoints (`EscrowError::LegalHoldBlocksCollateralChange`) |
 
 ---
 
@@ -60,7 +65,7 @@ The following invariants are owned by this subsystem and must be preserved by an
 - **Error Codes** – `EscrowError::CollateralAmountNotPositive` (60), `EscrowError::CollateralAssetEmpty` (61), `EscrowError::CollateralTimestampBackwards` (62).
 - **Clear Function** `clear_sme_collateral_commitment` – validates presence and emits `CollateralClearedEvt` (error 169 if missing).
 - **Getter** `get_sme_collateral_commitment` – safe read‑only accessor.
-- **Tests** – see `escrow/src/tests/admin.rs`, `integration.rs`, and `coverage.rs` for invariant checks.
+- **Tests** – see `escrow/src/tests/admin.rs`, `integration.rs`, `coverage.rs`, and `collateral_lock.rs` for invariant checks.
 
 ---
 
@@ -70,15 +75,16 @@ The following invariants are owned by this subsystem and must be preserved by an
 
 | Entry Point | Purpose | Relevant Invariant Checks |
 |-------------|---------|---------------------------|
-| `record_sme_collateral_commitment` | Store/replace collateral metadata. | 1‑3, 4, 7 |
-| `clear_sme_collateral_commitment` | Remove existing pledge. | 5 |
+| `record_sme_collateral_commitment` | Store/replace collateral metadata. | 1‑3, 4, 7, 9, 10, 12 |
+| `batch_record_collateral` | Batch store/replace collateral metadata. | 1‑3, 7, 9, 10, 11, 12 |
+| `clear_sme_collateral_commitment` | Remove existing pledge. | 5, 8, 12 |
 | `get_sme_collateral_commitment` | Retrieve current pledge. | 6 |
 
 ---
 
 ## Failure Modes & Observability
 
-All rejections surface as typed `EscrowError` variants (`CollateralAmountNotPositive`, `CollateralAssetEmpty`, `CollateralTimestampBackwards`, `NoCollateralToClear`) and abort the call without writing storage, so callers and indexers can distinguish validation failures from success. Successful transitions emit `CollateralRecordedEvt` (with prior and new amounts) or `CollateralClearedEvt`; these events are the primary observability signal for off-chain indexers. No sensitive data is included in errors or events beyond the amounts and asset symbol already supplied by the caller.
+All rejections surface as typed `EscrowError` variants (`CollateralAmountNotPositive`, `CollateralAssetEmpty`, `CollateralTimestampBackwards`, `NoCollateralToClear`, `CollateralLockedAfterFunding`, `LegalHoldBlocksCollateralChange`, `CollateralAssetChangeAfterFunding`, `CollateralDecreaseAfterFunding`, `CollateralBatchMixedAssets`) and abort the call without writing storage, so callers and indexers can distinguish validation failures from success. Successful transitions emit `CollateralRecordedEvt` (with prior and new amounts) or `CollateralClearedEvt`; these events are the primary observability signal for off-chain indexers. No sensitive data is included in errors or events beyond the amounts and asset symbol already supplied by the caller.
 
 ## Security & Design Notes
 
