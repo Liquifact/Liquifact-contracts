@@ -50,10 +50,10 @@ Codes raised by cross-contract callback entrypoints (`register_callback`, `execu
 
 | Error Name | Code | Description |
 |---|---:|---|
-| `FeeScheduleOutOfBounds` | 250 | `submit_fee_schedule` received bounds that do not contain `fee_bps`, or a maximum above 10,000 basis points. |
-| `FeeScheduleActivationInvalid` | 251 | The activation ledger is not strictly future or is more than 2,592,000 ledgers (about 30 days at one ledger/second) ahead. |
-| `FeeSchedulePendingExists` | 252 | A different pending schedule already exists. An identical submission is a successful no-op. |
-| `FeeScheduleNotPending` | 253 | `cancel_pending_fee_schedule` was called without a pending schedule. |
+| `FeeScheduleOutOfBounds` | 289 | `submit_fee_schedule` received bounds that do not contain `fee_bps`, or a maximum above 10,000 basis points. |
+| `FeeScheduleActivationInvalid` | 290 | The activation ledger is not strictly future or is more than 2,592,000 ledgers (about 30 days at one ledger/second) ahead. |
+| `FeeSchedulePendingExists` | 291 | A different pending schedule already exists. An identical submission is a successful no-op. |
+| `FeeScheduleNotPending` | 292 | `cancel_pending_fee_schedule` was called without a pending schedule. |
 
 `cancel_pending_fee_schedule` is administrator-only and returns the removed schedule. Fee-schedule
 events are `FeeScheduleSubmitted` (`name`, `invoice_id`, `fee_bps`, `activation_ledger`),
