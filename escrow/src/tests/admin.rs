@@ -3,7 +3,8 @@ use crate::{
     AdminAcceptedEvent, AdminProposalCancelled, AdminProposalSuperseded, AdminProposedEvent,
     DeprecatedTransferAdminUsed, EscrowCloseSnapshot, FundingTargetUpdated,
     MaturityMaxHorizonRaised, ProtocolFeeUpdated, RegistryRefRebound,
-    DEFAULT_MATURITY_MAX_HORIZON_SECS,
+    DEFAULT_MATURITY_MAX_HORIZON_SECS, MAX_ADMIN_PROPOSAL_VALIDITY_SECS,
+    MIN_ADMIN_PROPOSAL_VALIDITY_SECS,
 };
 
 use soroban_sdk::Event;
@@ -985,12 +986,19 @@ fn test_pending_admin_remaining_secs_reports_positive_window() {
     default_init(&client, &env, &admin, &sme);
 
     env.ledger().set_timestamp(1_000);
-    client.propose_admin(&new_admin, &Some(60));
+    client.propose_admin(&new_admin, &Some(MIN_ADMIN_PROPOSAL_VALIDITY_SECS));
 
-    assert_eq!(client.get_pending_admin_expiry(), Some(1_060));
-    assert_eq!(client.get_pending_admin_remaining_secs(), Some(60));
+    assert_eq!(
+        client.get_pending_admin_expiry(),
+        Some(1_000 + MIN_ADMIN_PROPOSAL_VALIDITY_SECS)
+    );
+    assert_eq!(
+        client.get_pending_admin_remaining_secs(),
+        Some(MIN_ADMIN_PROPOSAL_VALIDITY_SECS)
+    );
 
-    env.ledger().set_timestamp(1_059);
+    env.ledger()
+        .set_timestamp(1_000 + MIN_ADMIN_PROPOSAL_VALIDITY_SECS - 1);
     assert_eq!(client.get_pending_admin_remaining_secs(), Some(1));
 }
 
@@ -1002,8 +1010,9 @@ fn test_pending_admin_remaining_secs_zero_at_expiry_and_accept_still_succeeds() 
     default_init(&client, &env, &admin, &sme);
 
     env.ledger().set_timestamp(2_000);
-    client.propose_admin(&new_admin, &Some(30));
-    env.ledger().set_timestamp(2_030);
+    client.propose_admin(&new_admin, &Some(MIN_ADMIN_PROPOSAL_VALIDITY_SECS));
+    let expiry = client.get_pending_admin_expiry().unwrap();
+    env.ledger().set_timestamp(expiry);
 
     assert_eq!(client.get_pending_admin_remaining_secs(), Some(0));
 
@@ -1021,8 +1030,9 @@ fn test_pending_admin_remaining_secs_zero_after_expiry_and_accept_rejects() {
     default_init(&client, &env, &admin, &sme);
 
     env.ledger().set_timestamp(3_000);
-    client.propose_admin(&new_admin, &Some(15));
-    env.ledger().set_timestamp(3_016);
+    client.propose_admin(&new_admin, &Some(MIN_ADMIN_PROPOSAL_VALIDITY_SECS));
+    let expiry = client.get_pending_admin_expiry().unwrap();
+    env.ledger().set_timestamp(expiry + 1);
 
     assert_eq!(client.get_pending_admin_remaining_secs(), Some(0));
     assert_contract_error(client.try_accept_admin(), EscrowError::AdminProposalExpired);
@@ -1030,17 +1040,99 @@ fn test_pending_admin_remaining_secs_zero_after_expiry_and_accept_rejects() {
 }
 
 #[test]
-fn test_pending_admin_remaining_secs_handles_saturating_far_future_expiry() {
+fn test_pending_admin_expiry_overflow_fails() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
     let new_admin = Address::generate(&env);
     default_init(&client, &env, &admin, &sme);
 
-    env.ledger().set_timestamp(u64::MAX - 5);
-    client.propose_admin(&new_admin, &Some(100));
+    env.ledger()
+        .set_timestamp(u64::MAX - MIN_ADMIN_PROPOSAL_VALIDITY_SECS + 1);
+    assert_contract_error(
+        client.try_propose_admin(&new_admin, &Some(MIN_ADMIN_PROPOSAL_VALIDITY_SECS)),
+        EscrowError::AdminProposalExpiryOverflow,
+    );
+}
 
-    assert_eq!(client.get_pending_admin_expiry(), Some(u64::MAX));
-    assert_eq!(client.get_pending_admin_remaining_secs(), Some(5));
+#[test]
+fn test_admin_proposal_window_bounds() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    for window in [
+        MIN_ADMIN_PROPOSAL_VALIDITY_SECS - 1,
+        MAX_ADMIN_PROPOSAL_VALIDITY_SECS + 1,
+        u64::MAX,
+    ] {
+        let candidate = Address::generate(&env);
+        assert_contract_error(
+            client.try_propose_admin(&candidate, &Some(window)),
+            EscrowError::AdminProposalWindowOutOfRange,
+        );
+    }
+
+    let min_candidate = Address::generate(&env);
+    client.propose_admin(&min_candidate, &Some(MIN_ADMIN_PROPOSAL_VALIDITY_SECS));
+    assert_eq!(
+        client.get_pending_admin_expiry(),
+        Some(MIN_ADMIN_PROPOSAL_VALIDITY_SECS)
+    );
+
+    let max_candidate = Address::generate(&env);
+    client.propose_admin(&max_candidate, &Some(MAX_ADMIN_PROPOSAL_VALIDITY_SECS));
+    assert_eq!(
+        client.get_pending_admin_expiry(),
+        Some(MAX_ADMIN_PROPOSAL_VALIDITY_SECS)
+    );
+}
+
+#[test]
+fn test_admin_proposal_rejects_role_conflicts() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    for candidate in [
+        client.get_escrow().sme_address,
+        client.get_treasury(),
+        client.address.clone(),
+    ] {
+        assert_contract_error(
+            client.try_propose_admin(&candidate, &None),
+            EscrowError::AdminCandidateConflictsWithRole,
+        );
+    }
+}
+
+#[test]
+#[allow(deprecated)]
+fn test_deprecated_transfer_admin_cannot_bypass_role_conflicts() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    assert_contract_error(
+        client.try_transfer_admin(&sme),
+        EscrowError::AdminCandidateConflictsWithRole,
+    );
+}
+
+#[test]
+fn test_accept_admin_rechecks_role_conflict_after_beneficiary_rotation() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    default_init(&client, &env, &admin, &sme);
+    let candidate = Address::generate(&env);
+
+    client.propose_admin(&candidate, &None);
+    client.rotate_beneficiary(&candidate);
+
+    assert_contract_error(
+        client.try_accept_admin(),
+        EscrowError::AdminCandidateConflictsWithRole,
+    );
+    assert_eq!(client.get_pending_admin(), Some(candidate));
 }
 
 #[test]
@@ -1326,7 +1418,7 @@ fn test_update_funding_target_by_admin_succeeds() {
         &admin,
         &soroban_sdk::String::from_str(&env, "INV001"),
         &sme,
-        &5_000i128,
+        &10_000i128,
         &800i64,
         &3000u64,
         &token,
@@ -1511,7 +1603,7 @@ fn test_update_funding_target_event_fields() {
         &admin,
         &soroban_sdk::String::from_str(&env, "EVT001"),
         &sme,
-        &5_000i128,
+        &10_000i128,
         &800i64,
         &0u64,
         &token,
@@ -1535,7 +1627,7 @@ fn test_update_funding_target_event_fields() {
         std::vec![FundingTargetUpdated {
             name: symbol_short!("fund_tgt"),
             invoice_id: client.get_escrow().invoice_id,
-            old_target: 5_000i128,
+            old_target: 10_000i128,
             new_target: 9_000i128,
         }
         .to_xdr(&env, &contract_id)]
@@ -2908,7 +3000,7 @@ fn test_update_maturity_max_horizon_unauthorized() {
         &None::<i64>,
     );
     env.mock_auths(&[]);
-    client.update_maturity_max_horizon(&3_600u64);
+    client.update_maturity_max_horizon(&86_400u64);
 }
 
 /// `update_maturity_max_horizon` must emit a `MaturityMaxHorizonUpdated` event
@@ -2941,7 +3033,7 @@ fn test_update_maturity_max_horizon_emits_event() {
         &None::<i64>,
     );
 
-    let new_horizon = 3_600u64;
+    let new_horizon = 86_400u64;
     client.update_maturity_max_horizon(&new_horizon);
 
     let all_events = env.events().all();
@@ -2986,7 +3078,7 @@ fn test_lowered_horizon_existing_maturity_untouched_and_far_update_rejected() {
         &sme,
         &1_000i128,
         &500i64,
-        &2_000u64, // maturity within the default 5-year horizon
+        &101_000u64, // maturity within the default 5-year horizon
         &token,
         &None,
         &treasury,
@@ -3001,30 +3093,35 @@ fn test_lowered_horizon_existing_maturity_untouched_and_far_update_rejected() {
         &None::<i64>,
     );
 
-    assert_eq!(client.get_escrow().maturity, 2_000u64);
+    assert_eq!(client.get_escrow().maturity, 101_000u64);
 
-    // Lower the horizon to 500 s: new ceiling = now(1_000) + 500 = 1_500.
-    // The existing maturity (2_000) is beyond that ceiling but must survive unchanged.
-    client.update_maturity_max_horizon(&500u64);
-    assert_eq!(
-        client.get_escrow().maturity,
-        2_000u64,
-        "lowering the horizon must not retroactively invalidate an already-set maturity"
+    // Reject a ceiling below maturity, preserving both configuration and maturity.
+    assert_contract_error(
+        client.try_update_maturity_max_horizon(&99_999u64),
+        EscrowError::MaturityHorizonBelowMaturity,
     );
+    assert_eq!(
+        client.get_maturity_max_horizon(),
+        DEFAULT_MATURITY_MAX_HORIZON_SECS
+    );
+    assert_eq!(client.get_escrow().maturity, 101_000u64);
+    // Lowering exactly to the existing maturity remains valid.
+    client.update_maturity_max_horizon(&100_000u64);
+    assert_eq!(client.get_escrow().maturity, 101_000u64);
 
-    // A subsequent update to 1_501 (one second beyond the new ceiling) must fail.
+    // A subsequent update to 101_001 (one second beyond the new ceiling) must fail.
     assert!(
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            client.update_maturity(&1_501u64);
+            client.update_maturity(&101_001u64);
         }))
         .is_err(),
         "update_maturity beyond the new horizon must be rejected"
     );
 
-    // The stored maturity must remain 2_000 after the failed update attempt.
+    // The stored maturity must remain 101_000 after the failed update attempt.
     assert_eq!(
         client.get_escrow().maturity,
-        2_000u64,
+        101_000u64,
         "a rejected update_maturity call must not alter the stored maturity"
     );
 }
@@ -3059,11 +3156,11 @@ fn test_lowered_horizon_allows_within_horizon_maturity_update() {
         &None::<i64>,
     );
 
-    // Lower the horizon to 2 hours.
-    client.update_maturity_max_horizon(&7_200u64);
-    assert_eq!(client.get_maturity_max_horizon(), 7_200u64);
+    // Lower the horizon to 1 day.
+    client.update_maturity_max_horizon(&86_400u64);
+    assert_eq!(client.get_maturity_max_horizon(), 86_400u64);
 
-    // 1 hour from now (3_600 s) is within the new 2-hour horizon.
+    // 1 hour from now (3_600 s) is within the new 1-day horizon.
     let near_maturity = 1_000u64 + 3_600u64;
     let updated = client.update_maturity(&near_maturity);
     assert_eq!(
@@ -3333,7 +3430,7 @@ fn test_pending_admin_remaining_zero_at_and_after_expiry() {
     let (client, admin, sme) = setup(&env);
     default_init(&client, &env, &admin, &sme);
     let new_admin = Address::generate(&env);
-    let window = 100u64;
+    let window = MIN_ADMIN_PROPOSAL_VALIDITY_SECS;
     client.propose_admin(&new_admin, &Some(window));
     let expiry = client.get_pending_admin_expiry().unwrap();
     env.ledger().set_timestamp(expiry);
@@ -3351,7 +3448,7 @@ fn test_pending_admin_remaining_consistent_with_accept_admin() {
     let (client, admin, sme) = setup(&env);
     default_init(&client, &env, &admin, &sme);
     let new_admin = Address::generate(&env);
-    client.propose_admin(&new_admin, &Some(10));
+    client.propose_admin(&new_admin, &Some(MIN_ADMIN_PROPOSAL_VALIDITY_SECS));
     let expiry = client.get_pending_admin_expiry().unwrap();
     env.ledger().set_timestamp(expiry + 1);
     assert_eq!(client.get_pending_admin_remaining_secs(), Some(0));

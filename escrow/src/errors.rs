@@ -126,4 +126,8 @@ pub enum EscrowError {
     PositionAlreadyClaimed = 253,
     /// `LiquifactEscrow::transfer_position` blocked because `to`'s effective yield or claim lock differs from `from`'s.
     PositionTermsMismatch = 254,
+    /// `LiquifactEscrow::set_payout_recipient` received a recipient equal to the escrow contract itself.
+    PayoutRecipientInvalid = 255,
+    /// `LiquifactEscrow::set_payout_recipient` blocked because a legal hold is active.
+    LegalHoldBlocksRecipientChange = 256,
 }
