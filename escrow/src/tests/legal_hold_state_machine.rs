@@ -49,7 +49,7 @@ fn setup_hold_client_with_delay(
         &sme,
         &100_000_000i128,
         &800i64,
-        &delay_secs,
+        &0u64,
         &token,
         &None,
         &treasury,
@@ -57,13 +57,33 @@ fn setup_hold_client_with_delay(
         &None,
         &None,
         &None,
-        &None,
+        &Some(delay_secs),
         &None,
         &None,
         &None,
         &None::<i64>,
     );
     (client, admin)
+}
+
+/// Events emitted by the most recent contract invocation, as XDR.
+fn last_events(env: &Env) -> std::vec::Vec<soroban_sdk::xdr::ContractEvent> {
+    env.events().all().events().iter().cloned().collect()
+}
+
+/// Expected XDR of a `LegalHoldChanged` event (unified `legalhld` topic).
+fn hold_changed(
+    env: &Env,
+    client: &LiquifactEscrowClient<'_>,
+    invoice_id: &Symbol,
+    active: u32,
+) -> soroban_sdk::xdr::ContractEvent {
+    crate::LegalHoldChanged {
+        name: symbol_short!("legalhld"),
+        invoice_id: invoice_id.clone(),
+        active,
+    }
+    .to_xdr(env, &client.address)
 }
 
 /// Advance the ledger timestamp by `secs`.
@@ -81,23 +101,16 @@ fn set_hold_false_when_inactive_is_no_op_no_event() {
     let (client, _admin) = setup_hold_client(&env);
 
     // No hold active — calling false is a no-op; no event emitted.
+    let invoice_id = client.get_escrow().invoice_id;
     client.set_legal_hold(&false);
 
     // No LegalHoldChanged event should have been emitted.
-    let events = env.events().all();
-    for i in 0..events.len() {
-        let (_contract, topics, _data) = events.get(i).unwrap();
-        if topics.len() >= 1 {
-            let t0: Result<Symbol, _> = topics.get(0).unwrap().try_into_val(&env);
-            if let Ok(sym) = t0 {
-                assert_ne!(
-                    sym,
-                    symbol_short!("legalhld"),
-                    "no LegalHoldChanged event should be emitted on no-op"
-                );
-            }
-        }
-    }
+    let events = last_events(&env);
+    assert!(
+        !events.contains(&hold_changed(&env, &client, &invoice_id, 0)),
+        "no LegalHoldChanged event should be emitted on no-op"
+    );
+    assert!(!client.get_legal_hold());
 }
 
 // ── invalid transition: set_legal_hold(true) when already active ─────────────
@@ -123,7 +136,7 @@ fn set_hold_true_already_active_storage_unchanged() {
     let _ = client.try_set_legal_hold(&true);
 
     // Hold is still active.
-    assert!(client.legal_hold_active());
+    assert!(client.get_legal_hold());
 }
 
 // ── invalid transition: request_clear when no hold ───────────────────────────
@@ -145,7 +158,7 @@ fn request_clear_when_no_hold_storage_unchanged() {
     // No hold — request_clear should fail and leave no LegalHoldClearableAt.
     let _ = client.try_request_clear_legal_hold();
     // Hold still inactive.
-    assert!(!client.legal_hold_active());
+    assert!(!client.get_legal_hold());
 }
 
 // ── invalid transition: clear_after_delay when no hold ───────────────────────
@@ -167,32 +180,15 @@ fn clear_after_delay_emits_legalhld_topic() {
     let (client, _admin) = setup_hold_client(&env);
 
     // Set hold, request clear (zero delay → clearable immediately), then clear.
+    let invoice_id = client.get_escrow().invoice_id;
     client.set_legal_hold(&true);
     client.request_clear_legal_hold();
     client.clear_legal_hold_after_delay();
 
-    // Find the LegalHoldChanged event emitted by clear_after_delay (active=0).
-    let events = env.events().all();
-    let mut found_clear_event = false;
-    for i in 0..events.len() {
-        let (_contract, topics, data) = events.get(i).unwrap();
-        if topics.len() >= 1 {
-            let t0: Result<Symbol, _> = topics.get(0).unwrap().try_into_val(&env);
-            if let Ok(sym) = t0 {
-                if sym == symbol_short!("legalhld") {
-                    // Check it's the clear event (active=0).
-                    let active: Result<u32, _> = data.try_into_val(&env);
-                    if let Ok(a) = active {
-                        if a == 0u32 {
-                            found_clear_event = true;
-                        }
-                    }
-                }
-            }
-        }
-    }
+    // The clear must emit LegalHoldChanged with the unified `legalhld` topic and active=0.
+    let events = last_events(&env);
     assert!(
-        found_clear_event,
+        events.contains(&hold_changed(&env, &client, &invoice_id, 0)),
         "clear_legal_hold_after_delay must emit LegalHoldChanged with topic 'legalhld' and active=0"
     );
 }
@@ -204,31 +200,21 @@ fn full_lifecycle_event_sequence_zero_delay() {
     let env = Env::default();
     let (client, _admin) = setup_hold_client(&env);
 
-    // Lifecycle: activate → request clear → clear
+    // Lifecycle: activate → request clear → clear. Each step's events are checked
+    // right after the call that emits them.
+    let invoice_id = client.get_escrow().invoice_id;
+
     client.set_legal_hold(&true);
+    assert!(last_events(&env).contains(&hold_changed(&env, &client, &invoice_id, 1)));
+
     client.request_clear_legal_hold();
+    // Requesting a clear does not clear the hold or emit a `legalhld` clear event.
+    assert!(!last_events(&env).contains(&hold_changed(&env, &client, &invoice_id, 0)));
+    assert!(client.get_legal_hold());
+
     client.clear_legal_hold_after_delay();
-
-    // Collect all events, filter to the legalhld / lh_req topics.
-    let events = env.events().all();
-    let mut sequence: soroban_sdk::Vec<Symbol> = soroban_sdk::Vec::new(&env);
-    for i in 0..events.len() {
-        let (_contract, topics, _data) = events.get(i).unwrap();
-        if topics.len() >= 1 {
-            let t0: Result<Symbol, _> = topics.get(0).unwrap().try_into_val(&env);
-            if let Ok(sym) = t0 {
-                if sym == symbol_short!("legalhld") || sym == symbol_short!("lh_req") {
-                    sequence.push_back(sym);
-                }
-            }
-        }
-    }
-
-    // Expected: legalhld (activate), lh_req (request), legalhld (clear).
-    assert_eq!(sequence.len(), 3);
-    assert_eq!(sequence.get(0).unwrap(), symbol_short!("legalhld"));
-    assert_eq!(sequence.get(1).unwrap(), symbol_short!("lh_req"));
-    assert_eq!(sequence.get(2).unwrap(), symbol_short!("legalhld"));
+    assert!(last_events(&env).contains(&hold_changed(&env, &client, &invoice_id, 0)));
+    assert!(!client.get_legal_hold());
 }
 
 // ── timed lifecycle with delay ────────────────────────────────────────────────
@@ -250,7 +236,7 @@ fn timed_lifecycle_clear_after_delay() {
     // Advance past the delay.
     advance_time(&env, 2);
     client.clear_legal_hold_after_delay();
-    assert!(!client.legal_hold_active());
+    assert!(!client.get_legal_hold());
 }
 
 // ── LegalHoldClearCancelled on cancel_clear_legal_hold ───────────────────────
@@ -261,28 +247,24 @@ fn cancel_clear_emits_lh_cancel_event() {
     let delay = 1000u64;
     let (client, _admin) = setup_hold_client_with_delay(&env, delay);
 
+    let invoice_id = client.get_escrow().invoice_id;
     client.set_legal_hold(&true);
     client.request_clear_legal_hold();
     client.cancel_clear_legal_hold();
 
-    // Find the lh_cancel event.
-    let events = env.events().all();
-    let mut found = false;
-    for i in 0..events.len() {
-        let (_contract, topics, _data) = events.get(i).unwrap();
-        if topics.len() >= 1 {
-            let t0: Result<Symbol, _> = topics.get(0).unwrap().try_into_val(&env);
-            if let Ok(sym) = t0 {
-                if sym == symbol_short!("lh_cancel") {
-                    found = true;
-                }
-            }
-        }
+    // The cancel must emit the lh_cancel event.
+    let expected = crate::LegalHoldClearCancelled {
+        name: symbol_short!("lh_cancel"),
+        invoice_id: invoice_id.clone(),
     }
-    assert!(found, "cancel_clear_legal_hold must emit lh_cancel event");
+    .to_xdr(&env, &client.address);
+    assert!(
+        last_events(&env).contains(&expected),
+        "cancel_clear_legal_hold must emit lh_cancel event"
+    );
 
     // Hold is still active after cancel.
-    assert!(client.legal_hold_active());
+    assert!(client.get_legal_hold());
 }
 
 // ── set_legal_hold(true) while clear pending: LegalHoldAlreadyActive ─────────
@@ -316,7 +298,7 @@ fn clear_without_request_fails() {
     assert_contract_error(result, EscrowError::LegalHoldClearRequestMissing);
 
     // Hold still active, storage unchanged.
-    assert!(client.legal_hold_active());
+    assert!(client.get_legal_hold());
 }
 
 // ── both activation and clear emit identical "legalhld" topic ────────────────
@@ -326,27 +308,27 @@ fn both_activate_and_clear_use_legalhld_topic() {
     let env = Env::default();
     let (client, _admin) = setup_hold_client(&env);
 
-    client.set_legal_hold(&true);
-    client.request_clear_legal_hold();
-    client.clear_legal_hold_after_delay();
+    let invoice_id = client.get_escrow().invoice_id;
 
-    let events = env.events().all();
-    let mut legalhld_count = 0u32;
-    for i in 0..events.len() {
-        let (_contract, topics, _data) = events.get(i).unwrap();
-        if topics.len() >= 1 {
-            let t0: Result<Symbol, _> = topics.get(0).unwrap().try_into_val(&env);
-            if let Ok(sym) = t0 {
-                if sym == symbol_short!("legalhld") {
-                    legalhld_count += 1;
-                }
-                // Verify "legal_h" is NEVER used.
-                if sym == symbol_short!("legal_h") {
-                    panic!("obsolete 'legal_h' topic found — must not be emitted");
-                }
-            }
-        }
-    }
-    // Exactly two legalhld events: one for activate (active=1), one for clear (active=0).
-    assert_eq!(legalhld_count, 2, "expected exactly 2 legalhld events");
+    // Activation emits `legalhld` with active=1 ...
+    client.set_legal_hold(&true);
+    let on = last_events(&env);
+    assert_eq!(
+        on.iter()
+            .filter(|e| **e == hold_changed(&env, &client, &invoice_id, 1))
+            .count(),
+        1
+    );
+
+    client.request_clear_legal_hold();
+
+    // ... and the delayed clear emits the same `legalhld` topic with active=0.
+    client.clear_legal_hold_after_delay();
+    let off = last_events(&env);
+    assert_eq!(
+        off.iter()
+            .filter(|e| **e == hold_changed(&env, &client, &invoice_id, 0))
+            .count(),
+        1
+    );
 }
