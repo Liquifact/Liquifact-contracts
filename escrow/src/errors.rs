@@ -124,4 +124,8 @@ pub enum EscrowError {
     TreasuryRotationNotReady = 252,
     /// `LiquifactEscrow::cancel_treasury_rotation` called with no pending rotation.
     NoPendingTreasury = 253,
+    /// `LiquifactEscrow::set_payout_recipient` received a recipient equal to the escrow contract itself.
+    PayoutRecipientInvalid = 254,
+    /// `LiquifactEscrow::set_payout_recipient` blocked because a legal hold is active.
+    LegalHoldBlocksRecipientChange = 255,
 }

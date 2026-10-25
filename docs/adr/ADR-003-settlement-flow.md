@@ -2,7 +2,7 @@
 
 **Status:** Accepted  
 **Date:** 2026-03-28  
-**Refs:** `escrow/src/lib.rs` — `init`, `settle`, `claim_investor_payout`, `fund_impl` (snapshot write), `get_funding_close_snapshot`; `docs/escrow-ledger-time.md`
+**Refs:** `escrow/src/lib.rs` — `init`, `settle`, `claim_investor_payout`, `fund_impl` (snapshot write), `get_funding_close_snapshot`, `get_settlement_shortfall`; `docs/escrow-ledger-time.md`
 
 ---
 
@@ -18,7 +18,12 @@ Settlement is a two-phase process:
 1. Requires `status == 1` and SME auth.
 2. If `maturity > 0`, requires `ledger.timestamp() >= maturity`.
 3. Blocked while `LegalHold` is active.
-4. Sets `status = 2` and emits `EscrowSettled`.
+4. Computes `settle_pool = funded_amount + coupon` using the base `yield_bps`.
+5. Transfers any shortfall (`settle_pool - contract balance`) from the SME into the escrow
+   using the balance-checked inbound transfer; emits `SettlementFunded` when the shortfall
+   is non-zero.
+6. Asserts the contract balance is at least `settle_pool` (`SettlementPoolUnderfunded`).
+7. Sets `status = 2`, writes `SettledAt`, and emits `EscrowSettled`.
 
 The maturity comparison is an inclusive integer-second boundary against
 validator-observed ledger time. A call at exactly `maturity` succeeds; a call at
@@ -36,7 +41,8 @@ zero for a deferred lock, `EscrowInitialized` and `EscrowSummary` surface
 2. Blocked while `LegalHold` is active.
 3. Checks `InvestorClaimNotBefore` (set by `fund_with_commitment`); rejects if ledger time is too early.
 4. Marks `InvestorClaimed(investor) = true` (idempotency guard — panics on second call).
-5. Emits `InvestorPayoutClaimed`.
+5. Transfers the gross payout to the investor via the balance-checked token transfer.
+6. Emits `InvestorPayoutClaimed`.
 
 **Pro-rata denominator — `FundingCloseSnapshot`**  
 Written once, atomically, on the first transition to `status == 1` inside `fund_impl`. Contains `total_principal` (including overfunding), `funding_target`, ledger timestamp, and sequence. Immutable thereafter. Off-chain payout math uses `get_contribution(investor) / snapshot.total_principal`.
@@ -48,7 +54,8 @@ Written once, atomically, on the first transition to `status == 1` inside `fund_
   as `has_maturity_lock = false`.
 - Overfunding is absorbed into `total_principal` so late investors are not disadvantaged in pro-rata math.
 - The snapshot is written exactly once; a second fund call after `status == 1` cannot shift the denominator (escrow rejects it).
-- Claim is a marker only — no token transfer happens inside the contract. The integration layer handles actual payout using the snapshot and contribution data.
+- Settlement is pre-funded: `settle` collects any coupon shortfall from the SME before claims open, so every claim is solvent. `claim_investor_payout` transfers the gross payout from the escrow; the claimed marker is written before the transfer and rolled back on failure.
+- `get_settlement_shortfall` exposes the SME amount required while the escrow is funded.
 
 ## Rejected alternatives
 

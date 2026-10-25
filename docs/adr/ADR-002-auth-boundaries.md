@@ -31,9 +31,16 @@ Multiple principals interact with the escrow (admin, SME, investors, treasury). 
 
 `admin` and `treasury` are stored at `init`. Both rotate only through two-step handovers. The current admin calls `propose_admin(new_admin)`, which stores `DataKey::PendingAdmin` without changing authority. The pending address must then call `accept_admin()`, which requires its own authorization, promotes it into `InvoiceEscrow::admin`, and clears `DataKey::PendingAdmin`. The deprecated `transfer_admin` shim must not be treated as an immediate transfer; it only creates the pending proposal.
 
-The treasury rotates through a time-delayed two-step handover so fee routing cannot be switched instantly. The admin calls `propose_treasury(new_treasury)`, which stores `DataKey::PendingTreasury = (new_treasury, eta)` with `eta = now + TREASURY_ROTATION_DELAY_SECS` (`N00`). The proposal rejects the current treasury (`NewTreasurySameAsCurrent`) and the contract's own address (`TreasuryInvalid`). The pending treasury must then call `accept_treasury()`, which requires its own authorization and `now >= eta` (`TreasuryRotationNotReady`), swaps `DataKey::Treasury`, and clears `DataKey::PendingTreasury`. The admin can also `cancel_treasury_rotation()`; with nothing pending it fails with `NoPendingTreasury`. A new proposal overwrites any existing pending proposal and resets the delay.
+The treasury rotates through a time-delayed two-step handover so fee routing cannot be switched instantly. The admin calls `propose_treasury(new_treasury)`, which stores `DataKey::PendingTreasury = (new_treasury, eta)` with `eta = now + TREASURY_ROTATION_DELAY_SECS` (`N00`). The proposal rejects the current treasury (`NewTreasurySameAsCurrent`) and the contract's own address (`TreasuryInvalid`). The pending treasury must then call `accept_treasury()`, which requires its own authorization and `now >= eta` (`TreasuryRotationNotReady`), swaps `DataKey::Treasury`, and clears `DataKey::PendingTreasury`. The admin can also `cancel_treasury_rotation()`; with nothing pending it fails with `NoPendingTreasury`. A new proposal overwrites any existing pending proposal and resets the delay.
 
 There is no superuser that can act as all roles simultaneously unless the same key is used for multiple roles — which is a deployment concern, not a contract concern.
+
+Admin proposals preserve role separation on-chain: the proposed admin may not equal the current
+SME beneficiary, immutable treasury, or escrow contract address. `accept_admin` repeats this
+check because `rotate_beneficiary` can change the SME between proposal and acceptance. Explicit
+proposal windows are bounded to 1 hour through 30 days; omitted windows use the 7-day default.
+The deprecated `transfer_admin` shim delegates to `propose_admin`, so it cannot bypass either
+restriction.
 
 ## Consequences
 
@@ -57,8 +64,10 @@ There is no superuser that can act as all roles simultaneously unless the same k
 
 Certain administrative entrypoints enforce a no-op guard to reject updates that do not change the existing state, preventing noisy events and wasted storage writes:
 - **`update_maturity`**: Rejects `new_maturity == old_maturity` (`MaturityUnchanged`).
-- **`propose_admin`**: Rejects `new_admin == current_admin` (`NewAdminSameAsCurrent`).
-- **`rotate_beneficiary`**: Rejects `new_sme == current_sme` (`NewSme9ameAsCurrent`).
+- **`propose_admin`**: Rejects `new_admin == current_admin` (`NewAdminSameAsCurrent`) and
+  candidates that collide with the SME, treasury, or escrow contract address
+  (`AdminCandidateConflictsWithRole`).
+- **`rotate_beneficiary`**: Rejects `new_sme == current_sme` (`NewSmeSameAsCurrent`).
 - **`propose_treasury`**: Rejects `new_treasury == current_treasury` (`NewTreasurySameAsCurrent`) and `treasury == contract_address` (`TreasuryInvalid`).
 
 ## Shared gate helpers (issue #626)
