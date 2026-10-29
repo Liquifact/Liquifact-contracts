@@ -8,7 +8,7 @@
 /// build a `DataKey` inline -- reducing the risk of typos, discriminant drift between
 /// modules, and copy-paste errors when a new key needs to be added.
 ///
-/// ##Collateral keyt
+/// ##Collateral keys
 ///
 /// The collateral pledge key family is managed by `collateral_pledge_key`. All three
 /// collateral entrypoints (`record_sme_collateral_commitment`, clear_sme_collateral_commitment`,
@@ -18,7 +18,7 @@
 ///
 /// ##Additive-key policy (ADR-007)
 ///
-/// Adding a new variant is **Backward-compatible** when the new key is read with
+/// Adding a new variant is **backward-compatible** when the new key is read with
 /// `.unwrap_or(default)` and its absence does not change existing entrypoint semantics.
 /// Renaming a variant, changing its XDR discriminant, or altering the stored type of
 /// an existing key is **breaking** and requires a `migrate` path or a full redeploy.
@@ -105,12 +105,7 @@ pub(crate) fn callback_nonce() -> DataKey {
     DataKey::CallbackNonce
 }
 
-/// Per-investor persistent payout recipient override (absent = pay the investor directly).
-pub(crate) fn investor_payout_recipient(investor: Address) -> DataKey {
-    DataKey::InvestorPayoutRecipient(investor)
-}
-
-/// Instance-storage pending callback context keyed by invocation nonce.
+/// Pending callback context keyed by invocation nonce.
 pub(crate) fn callback_context(nonce: u64) -> DataKey {
     DataKey::CallbackContext(nonce)
 }
