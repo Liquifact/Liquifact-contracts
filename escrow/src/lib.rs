@@ -810,13 +810,13 @@ pub enum EscrowError {
 
     /// [`LiquifactEscrow::register_callback`] called while
     /// [`MAX_PENDING_CALLBACKS`] contexts are already pending.
-    CallbackPendingLimitReached = 250,
-    CallbackExpired = 251,
+    CallbackPendingLimitReached = 253,
     /// [`LiquifactEscrow::register_callback`] nonce counter overflowed `u64`.
     CallbackNonceOverflow = 252,
+    CallbackExpired = 251,
     /// [`LiquifactEscrow::prune_expired_callback`] called on a context that has not
     /// yet expired (or does not exist / was already consumed).
-    CallbackNotExpired = 253,
+    CallbackNotExpired = 254,
 }
 
 #[inline(always)]
