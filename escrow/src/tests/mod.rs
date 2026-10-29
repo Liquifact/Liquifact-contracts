@@ -31,9 +31,9 @@ use super::{
 };
 use soroban_sdk::{
     symbol_short,
-    testutils::{Address as _, Events, Ledger as _},
+    testutils::{Address as _, Ledger as _},
     token::{StellarAssetClient, TokenClient},
-    Address, Env, Error, Event, InvokeError, String, Val, Vec as SorobanVec,
+    Address, Env, Error, Event, Events, InvokeError, String, Val, Vec as SorobanVec,
 };
 use std::fmt::Debug;
 

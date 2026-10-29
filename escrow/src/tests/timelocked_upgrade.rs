@@ -17,6 +17,8 @@ use soroban_sdk::{
     testutils::{Address as _, Events, Ledger as _},
     Address, Bytes, BytesN, Env, Event,
 };
+#[allow(unused_imports)]
+use soroban_sdk::testutils::Ledger;
 
 /// Minimal valid WASM binary (magic + version). Accepted by the soroban mock host
 /// as a wasm upload target and produces a deterministic 32-byte hash.
@@ -36,10 +38,8 @@ fn setup_upgrade_escrow(env: &Env) -> (crate::LiquifactEscrowClient<'_>, Address
     let sme = Address::generate(env);
     let token = Address::generate(env);
     let treasury = Address::generate(env);
-    let mut li = env.ledger().get();
-    li.timestamp = 1_000_000;
-    li.sequence_number = 1000;
-    env.ledger().set(li);
+    env.ledger().set_timestamp(1_000_000);
+    env.ledger().set_sequence_number(1000);
     client.init(
         &admin,
         &soroban_sdk::String::from_str(env, "UPG_TST"),

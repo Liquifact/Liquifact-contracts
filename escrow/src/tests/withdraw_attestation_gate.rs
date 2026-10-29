@@ -100,35 +100,26 @@ fn setup_open<'a>(env: &'a Env) -> (LiquifactEscrowClient<'a>, Address) {
 #[test]
 fn withdraw_blocked_when_required_and_hash_absent() {
     let env = Env::default();
-    let (client, admin, escrow_id, sac_admin) = setup_funded(&env);
+    env.mock_all_auths();
+    let sac = env.register_stellar_asset_contract_v2(Address::generate(&env));
+    let token_id = sac.address();
+    let sac_admin = StellarAssetClient::new(&env, &token_id);
+    let escrow_id = env.register(LiquifactEscrow, ());
+    let client = LiquifactEscrowClient::new(&env, &escrow_id);
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let treasury = Address::generate(&env);
 
-    // Status must be 0 (open) to configure the requirement — capture token
-    // balance before the admin enables the gate.  We enable it BEFORE funding
-    // closes so the escrow is still open.  To test the gate on a funded escrow
-    // we must set the flag first (in a fresh open escrow), then fund.
-    //
-    // Recreate: open escrow → enable gate → fund → attempt withdraw.
-    let env2 = Env::default();
-    env2.mock_all_auths();
-    let sac2 = env2.register_stellar_asset_contract_v2(Address::generate(&env2));
-    let token_id2 = sac2.address();
-    let sac_admin2 = StellarAssetClient::new(&env2, &token_id2);
-    let escrow_id2 = env2.register(LiquifactEscrow, ());
-    let client2 = LiquifactEscrowClient::new(&env2, &escrow_id2);
-    let admin2 = Address::generate(&env2);
-    let sme2 = Address::generate(&env2);
-    let treasury2 = Address::generate(&env2);
-
-    client2.init(
-        &admin2,
-        &soroban_sdk::String::from_str(&env2, "INV_GATE"),
-        &sme2,
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "INV_GATE"),
+        &sme,
         &TARGET,
         &800i64,
         &0u64,
-        &token_id2,
+        &token_id,
         &None,
-        &treasury2,
+        &treasury,
         &None,
         &None,
         &None,
@@ -141,28 +132,28 @@ fn withdraw_blocked_when_required_and_hash_absent() {
     );
 
     // Enable attestation gate while escrow is open (status 0).
-    client2.set_require_attest_withdraw(&true);
+    client.set_require_attest_withdraw(&true);
 
     // Fund so withdraw becomes callable (status 1).
-    let investor2 = Address::generate(&env2);
-    sac_admin2.mint(&investor2, &TARGET);
-    client2.fund(&investor2, &TARGET);
+    let investor = Address::generate(&env);
+    sac_admin.mint(&investor, &TARGET);
+    client.fund(&investor, &TARGET);
 
     // Record token balance before the failed attempt.
-    let token_client2 = soroban_sdk::token::TokenClient::new(&env2, &token_id2);
-    let balance_before = token_client2.balance(&escrow_id2);
+    let token_client = soroban_sdk::token::TokenClient::new(&env, &token_id);
+    let balance_before = token_client.balance(&escrow_id);
 
     // `withdraw` must fail.
-    let result = client2.try_withdraw();
+    let result = client.try_withdraw();
     assert_contract_error(result, EscrowError::AttestationRequiredForWithdraw);
 
     // Escrow status and balance are unchanged.
     assert_eq!(
-        client2.get_escrow().status,
+        client.get_escrow().status,
         1u32,
         "status must remain funded (1) after blocked withdraw"
     );
-    let balance_after = token_client2.balance(&escrow_id2);
+    let balance_after = token_client.balance(&escrow_id);
     assert_eq!(
         balance_after, balance_before,
         "contract balance must be unchanged after blocked withdraw"
@@ -252,7 +243,7 @@ fn withdraw_succeeds_after_binding_hash_when_required() {
 #[test]
 fn withdraw_not_blocked_when_requirement_not_set() {
     let env = Env::default();
-    let (client, _admin, escrow_id, _sac_admin) = setup_funded(&env);
+    let (client, _admin, _escrow_id, _sac_admin) = setup_funded(&env);
 
     // No call to `set_require_attest_withdraw` — default is false.
     let escrow = client.withdraw();
