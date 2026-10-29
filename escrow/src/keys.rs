@@ -8,7 +8,7 @@
 /// build a `DataKey` inline -- reducing the risk of typos, discriminant drift between
 /// modules, and copy-paste errors when a new key needs to be added.
 ///
-/// ##Collateral keyt
+/// ##Collateral keys
 ///
 /// The collateral pledge key family is managed by `collateral_pledge_key`. All three
 /// collateral entrypoints (`record_sme_collateral_commitment`, clear_sme_collateral_commitment`,
@@ -18,7 +18,7 @@
 ///
 /// ##Additive-key policy (ADR-007)
 ///
-/// Adding a new variant is **Backward-compatible** when the new key is read with
+/// Adding a new variant is **backward-compatible** when the new key is read with
 /// `.unwrap_or(default)` and its absence does not change existing entrypoint semantics.
 /// Renaming a variant, changing its XDR discriminant, or altering the stored type of
 /// an existing key is **breaking** and requires a `migrate` path or a full redeploy.
@@ -80,16 +80,6 @@ pub(crate) fn funding_deadline() -> DataKey {
     DataKey::FundingDeadline
 }
 
-/// Instance-storage original funding deadline baseline (set on first extension, absent = no extension yet).
-pub(crate) fn original_funding_deadline() -> DataKey {
-    DataKey::OriginalFundingDeadline
-}
-
-/// Instance-storage counter of accepted funding-deadline extensions.
-pub(crate) fn funding_deadline_extension_count() -> DataKey {
-    DataKey::FundingDeadlineExtensionCount
-}
-
 /// Instance-storage write-once prorata snapshot captured at the first funded transition.
 pub(crate) fn funding_close_snapshot() -> DataKey {
     DataKey::FundingCloseSnapshot
@@ -105,33 +95,13 @@ pub(crate) fn callback_nonce() -> DataKey {
     DataKey::CallbackNonce
 }
 
-/// Per-investor persistent payout recipient override (absent = pay the investor directly).
-pub(crate) fn investor_payout_recipient(investor: Address) -> DataKey {
-    DataKey::InvestorPayoutRecipient(investor)
-}
-
 /// Instance-storage pending callback context keyed by invocation nonce.
 pub(crate) fn callback_context(nonce: u64) -> DataKey {
     DataKey::CallbackContext(nonce)
-}
-
-/// Instance-storage minimum funded share of target in basis points required for partial settle (0 = no threshold beyond > 0).
-pub(crate) fn partial_close_min_bps() -> DataKey {
-    DataKey::PartialCloseMinBps
-}
-
-/// Per-investor persistent marker indicating membership in `DataKey::InvestorIndex`.
-pub(crate) fn investor_indexed(investor: Address) -> DataKey {
-    DataKey::InvestorIndexed(investor)
 }
 
 /// Per-investor **persistent** refund marker, written once when a cancelled-escrow
 /// refund succeeds.  Absent ⇒ `false`.  Independent TTL from the contract instance.
 pub(crate) fn investor_refunded(investor: Address) -> DataKey {
     DataKey::InvestorRefunded(investor)
-}
-
-/// Instance-storage optional performance fee in basis points taken from investor yield coupon.
-pub(crate) fn performance_fee_bps() -> DataKey {
-    DataKey::PerformanceFeeBps
 }

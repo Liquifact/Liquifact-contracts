@@ -42,7 +42,8 @@ pub use soroban_sdk::Symbol;
 pub(crate) fn assert_contract_error<T, E>(
     result: Result<Result<T, E>, Result<Error, InvokeError>>,
     expected: EscrowError,
-) where
+)
+where
     T: Debug,
     E: Debug,
 {
@@ -96,6 +97,7 @@ mod pause;
 mod pause_bypass;
 mod payout_batch;
 mod pauser_boundary_tests;
+mod position_transfer;
 mod pauser_role;
 mod persistent_refund_flags;
 mod properties;
