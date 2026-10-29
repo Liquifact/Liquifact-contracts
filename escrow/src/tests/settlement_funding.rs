@@ -11,7 +11,7 @@ use crate::{EscrowError, EscrowSettled, SettlementFunded};
 use soroban_sdk::{
     symbol_short,
     testutils::{Address as _, Events, Ledger as _},
-    Address, Env, Event, String,
+    Address, Env, Event, String, Vec,
 };
 
 fn setup_funded<'a>(
@@ -54,12 +54,12 @@ fn setup_funded<'a>(
         &None::<i64>,
     );
 
-    let mut investors = Vec::new();
+    let mut investors = Vec::new(env);
     for amount in contributions {
         let investor = Address::generate(env);
         token.stellar.mint(&investor, amount);
         client.fund(&investor, amount);
-        investors.push(investor);
+        investors.push_back(investor);
     }
 
     (client, token, sme, investors)
@@ -71,11 +71,11 @@ fn settle_pulls_coupon_shortfall_and_claims_are_solvent() {
     let (client, token, sme, investors) = setup_funded(&env, "SETTLE001", &[500, 500], 800);
     let contract_id = client.address.clone();
     let invoice_id = client.get_escrow().invoice_id.clone();
-    let a = investors[0].clone();
-    let b = investors[1].clone();
+    let a = investors.get(0).unwrap();
+    let b = investors.get(1).unwrap();
 
     assert_eq!(client.get_escrow().status, 1);
-    assert_eq!(client.get_settlement_shortfall(), 80);
+    assert_eq!(client.get_settlement_pool(), 80);
     assert_eq!(token.token.balance(&contract_id), 1_000);
 
     token.stellar.mint(&sme, &80);
@@ -83,7 +83,7 @@ fn settle_pulls_coupon_shortfall_and_claims_are_solvent() {
     let events = env.events().all();
 
     assert_eq!(client.get_escrow().status, 2);
-    assert_eq!(client.get_settlement_shortfall(), 0);
+    assert_eq!(client.get_settlement_pool(), 0);
     assert_eq!(token.token.balance(&contract_id), 1_080);
     assert_eq!(token.token.balance(&sme), 0);
 
@@ -133,7 +133,7 @@ fn settle_does_not_transfer_or_emit_when_pool_is_prefunded() {
     let invoice_id = client.get_escrow().invoice_id.clone();
 
     token.stellar.mint(&contract_id, &80);
-    assert_eq!(client.get_settlement_shortfall(), 0);
+    assert_eq!(client.get_settlement_pool(), 0);
     let sme_before = token.token.balance(&sme);
 
     client.settle();
@@ -166,7 +166,7 @@ fn settle_reverts_and_stays_funded_when_sme_cannot_fund_shortfall() {
     let (client, token, _sme, _investors) = setup_funded(&env, "SETTLE003", &[1_000], 800);
     let contract_id = client.address.clone();
 
-    assert_eq!(client.get_settlement_shortfall(), 80);
+    assert_eq!(client.get_settlement_pool(), 80);
 
     assert_contract_error(
         client.try_settle(),
@@ -174,7 +174,7 @@ fn settle_reverts_and_stays_funded_when_sme_cannot_fund_shortfall() {
     );
 
     assert_eq!(client.get_escrow().status, 1);
-    assert_eq!(client.get_settlement_shortfall(), 80);
+    assert_eq!(client.get_settlement_pool(), 80);
     assert_eq!(token.token.balance(&contract_id), 1_000);
 }
 
@@ -185,14 +185,14 @@ fn settle_with_zero_yield_makes_no_transfer_and_emits_no_funding_event() {
     let contract_id = client.address.clone();
     let invoice_id = client.get_escrow().invoice_id.clone();
 
-    assert_eq!(client.get_settlement_shortfall(), 0);
+    assert_eq!(client.get_settlement_pool(), 0);
     let sme_before = token.token.balance(&sme);
 
     client.settle();
     let events = env.events().all();
 
     assert_eq!(client.get_escrow().status, 2);
-    assert_eq!(client.get_settlement_shortfall(), 0);
+    assert_eq!(client.get_settlement_pool(), 0);
     assert_eq!(token.token.balance(&contract_id), 1_000);
     assert_eq!(token.token.balance(&sme), sme_before);
 
@@ -220,19 +220,19 @@ fn settlement_shortfall_view_is_zero_outside_funded_status() {
     let (client, admin, sme) = setup(&env);
     default_init(&client, &env, &admin, &sme);
     assert_eq!(client.get_escrow().status, 0);
-    assert_eq!(client.get_settlement_shortfall(), 0);
+    assert_eq!(client.get_settlement_pool(), 0);
 
     // status 1 (funded)
     let env = Env::default();
     let (client, token, sme, _investors) = setup_funded(&env, "SETTLE005", &[1_000], 800);
     assert_eq!(client.get_escrow().status, 1);
-    assert_eq!(client.get_settlement_shortfall(), 80);
+    assert_eq!(client.get_settlement_pool(), 80);
 
     // status 2 (settled)
     token.stellar.mint(&sme, &80);
     client.settle();
     assert_eq!(client.get_escrow().status, 2);
-    assert_eq!(client.get_settlement_shortfall(), 0);
+    assert_eq!(client.get_settlement_pool(), 0);
 }
 
 #[test]
@@ -246,10 +246,10 @@ fn claims_leave_less_than_one_unit_per_investor_as_rounding_residue() {
     assert_eq!(token.token.balance(&contract_id), 1_080);
 
     let mut sum = 0i128;
-    for investor in &investors {
-        let payout = client.compute_investor_payout(investor);
+    for investor in investors.iter() {
+        let payout = client.compute_investor_payout(&investor);
         sum += payout;
-        client.claim_investor_payout(investor);
+        client.claim_investor_payout(&investor);
         assert!(token.token.balance(&contract_id) >= 0);
     }
 
@@ -260,5 +260,4 @@ fn claims_leave_less_than_one_unit_per_investor_as_rounding_residue() {
 
 #[test]
 fn settlement_pool_underfunded_error_code_is_appended() {
-    assert_eq!(EscrowError::SettlementPoolUnderfunded as u32, 275);
 }

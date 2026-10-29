@@ -5,6 +5,7 @@ use soroban_sdk::{
     testutils::{MockAuth, MockAuthInvoke},
     BytesN, IntoVal,
 };
+use soroban_sdk::{testutils::Events as _, xdr::ToXdr as _};
 
 fn initialized(env: &Env) -> (LiquifactEscrowClient<'_>, Address, Address) {
     let (client, admin, sme) = setup(env);

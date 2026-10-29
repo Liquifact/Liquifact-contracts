@@ -54,7 +54,7 @@ pub(crate) fn assert_contract_error<T, E>(
         Err(Err(InvokeError::Contract(code))) => {
             assert_eq!(code, expected_code);
         }
-        other => panic("expected ContractError({expected_code}), got {other:?}"),
+        other => panic!("expected ContractError({expected_code}), got {other:?}"),
     }
 }
 
@@ -106,8 +106,8 @@ mod role_separation;
 mod settle_batch_results;
 mod settlement;
 mod settlement_config_view;
-mod treasury_rotation;
 mod settlement_funding;
+mod treasury_rotation;
 mod timelocked_upgrade;
 mod unfund_investor_index;
 mod withdraw_attestation_gate;
@@ -189,6 +189,28 @@ pub fn default_init(client: &LiquifactEscrowClient<'_>, env: &Env, admin: &Addre
 
 #[allow(dead_code)]
 pub const TARGET: i128 = 100_000_000_000i128;
+
+pub fn init_and_fund_for_treasury_rotation<'a>(
+    env: &'a Env,
+) -> (LiquifactEscrowClient<'a>, Address, Address, Address, Address) {
+    let target: i128 = TARGET;
+    let invoice_id = "INV_ROT";
+    let (client, escrow_id, sme) = init_and_fund_with_real_token(env, target, invoice_id);
+    let admin = Address::generate(env);
+    let funder = Address::generate(env);
+    (client, admin, escrow_id, sme, funder)
+}
+
+pub fn init_and_fund_with_real_token_rotation<'a>(
+    env: &'a Env,
+    target: i128,
+    invoice_id: &str,
+) -> (LiquifactEscrowClient<'a>, Address, Address, Address, Address) {
+    let (client, escrow_id, sme) = init_and_fund_with_real_token(env, target, invoice_id);
+    let admin = Address::generate(env);
+    let funder = Address::generate(env);
+    (client, admin, escrow_id, sme, funder)
+}
 
 pub fn init_and_fund_with_real_token<'a>(
     env: &'a Env,

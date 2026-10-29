@@ -77,14 +77,14 @@ risk-bearing entrypoint cannot accidentally omit or diverge from them:
 
 | Helper | Signature | Replaces |
 |---|---|---|
-| `guard_not_legal_hold` | `fn(env, error)` | inline `ensure(!legal_hold_active, LegalHoldBlocks*)d in `sweep_terminal_dust`, `rotate_beneficiary`, `fund_impl`, `partial_settle`, `settle`, `withdraw`, `claim_investor_payout`, `cancel_funding` |
+| `guard_not_legal_hold` | `fn(env, error)` | inline `ensure(!legal_hold_active, LegalHoldBlocks*)` in `sweep_terminal_dust`, `rotate_beneficiary`, `fund_impl`, `partial_settle`, `settle`, `withdraw`, `claim_investor_payout`, `cancel_funding` |
 | `guard_status_eq` | `fn(env, status, expected, error)` | inline `ensure(status == expected, ...)` checks |
 | `guard_status_in` | `fn(env, status, &[Allowed], error)` | inline `ensure(matches!(status, ...), ...)` membership checks |
 | `is_terminal_status` | predicate | inline `(status == 2 || status == 3 || status == 4)`, used by `sweep_terminal_dust` |
 | `is_pre_settlement_status` | predicate | inline `(status == 0 || status == 1)`, used by `rotate_beneficiary` |
 | `require_funding_open` | `fn(env, status)` | inline `ensure(status == 0, EscrowNotOpenForFunding)`, used by `fund_impl` |
 
-All helpers are `#inline(always)` `pub(crate) fn` (or `const`) at the top of `escrow/src/lib.rs`
+All helpers are `#[inline(always)]` `pub(crate) fn` (or `const`) at the top of `escrow/src/lib.rs`
 so they are inlined at call sites with no measurable cost; they preserve ADR-002's
 canonical sequence (read-only preconditions → `Address::require_auth()` → storage writes
 and token transfers) and the exact `EscrowError` variant at every call site. The
