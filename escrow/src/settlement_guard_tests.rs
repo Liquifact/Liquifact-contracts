@@ -187,8 +187,8 @@ fn unrelated_escrow_unaffected_by_another_settlement() {
     assert_eq!(client_b.get_escrow().status, 2u32);
 }
 
-/// Edge case for the technical guidance “**make the guard total across all settlement
-/// entrypoints**”: [`LiquifactEscrow::settle_batch`] settles a batch of **distinct** escrows,
+/// Edge case for the technical guidance "**make the guard total across all settlement
+/// entrypoints**": [`LiquifactEscrow::settle_batch`] settles a batch of **distinct** escrows,
 /// each exactly once. A well-formed batch returns `[0, 0]` and both targets are settled.
 /// Changed from issue #1571: `settle_batch` now returns `Vec<u32>` per-entry codes.
 #[test]
@@ -205,9 +205,9 @@ fn settle_batch_settles_distinct_targets_once() {
     let results = client_a.settle_batch(&soroban_sdk::vec![&env, addr_b, addr_c]);
 
     // Both entries should report success (0).
-    assert_eq!(results.len(), 2, "two results for two inputs");
-    assert_eq!(results.get(0).unwrap(), 0u32, "B: settled");
-    assert_eq!(results.get(1).unwrap(), 0u32, "C: settled");
+    assert_eq!(results.len(), 2u32, "two results for two inputs");
+    assert_eq!(results.get(0u32).unwrap(), 0u32, "B: settled");
+    assert_eq!(results.get(1u32).unwrap(), 0u32, "C: settled");
 
     assert_eq!(client_b.get_escrow().status, 2u32, "B settled via batch");
     assert_eq!(client_c.get_escrow().status, 2u32, "C settled via batch");

@@ -1,6 +1,6 @@
 //! Attestor authorization, append uniqueness, historical attribution, and event compatibility.
 use super::*;
-use crate::{AttestationAuthored, AttestorChanged};
+use crate::{AttestationAuthored, AttestorChanged, AttestationDigestAppended};
 use soroban_sdk::{
     testutils::{MockAuth, MockAuthInvoke},
     BytesN, IntoVal,

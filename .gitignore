@@ -11,3 +11,4 @@ escrow/proptest-regressions/
 *.log
 .gitignore
 branch_structure.json
+config.bat
