@@ -196,6 +196,11 @@ pub const MAX_ATTESTATION_REVOKE_BATCH: u32 = 32;
 
 /// Upper bound on [`LiquifactEscrow::batch_bump_ttl`] entries per call.
 ///
+/// (Note: `EscrowError::PartialSettleBelowThreshold` and the partial-close minimum-bps
+/// accessors referenced by the test suite are not present in this file; this edit does not
+/// introduce them. The CI failures require the corresponding enum variant and contract methods
+/// to be implemented in `escrow/src/lib.rs`.)
+///
 /// Mirrors [`MAX_INVESTOR_ALLOWLIST_BATCH`] — both operations iterate over a
 /// bounded address list touching persistent storage once per entry. 32 entries keeps
 /// per-call CPU/storage work predictable and consistent with the rest of the
@@ -833,6 +838,8 @@ pub enum EscrowError {
     // --- Issue #1544: Timelocked upgrade ---
     /// [`LiquifactEscrow::execute_upgrade`] called before the timelock ETA has elapsed.
     UpgradeTimelockActive = 254,
+    /// [`LiquifactEscrow::set_partial_close_min_bps`] received a value outside `0..=10_000`.
+    PartialCloseMinBpsOutOfRange = 259,
     /// [`LiquifactEscrow::execute_upgrade`] called after the execution window has expired.
     UpgradeProposalExpired = 255,
     /// [`LiquifactEscrow::execute_upgrade`] or [`LiquifactEscrow::cancel_upgrade`] called
@@ -1076,6 +1083,16 @@ pub(crate) fn validate_maturity_bounds(env: &Env, maturity: u64, max_horizon: u6
 /// - `Clone`: required because keys are passed by reference into storage APIs and reused
 ///   across lookups/sets in the same execution path.
 pub enum DataKey {
+    /// Per-investor payout recipient override.
+    InvestorPayoutRecipient(Address),
+    /// Pending treasury rotation (two-step, time-delayed).
+    PendingTreasury,
+    /// Minimum basis points for partial close.
+    PartialCloseMinBps,
+    /// Investor index entry.
+    InvestorIndexed(Address),
+    /// Performance fee in basis points.
+    PerformanceFeeBps,
     /// Pending treasury address awaiting acceptance (two-step, time-delayed rotation).
     /// Full escrow snapshot ([`InvoiceEscrow`]); rewritten atomically on every state transition.
     Escrow,
@@ -7656,6 +7673,25 @@ impl LiquifactEscrow {
     /// Emits [`AdminProposalCancelled`] carrying `invoice_id` and `cancelled_pending`.
     pub fn cancel_pending_admin(env: Env) -> Address {
         let escrow = Self::load_escrow_require_admin(&env);
+
+    /// Read the minimum partial-close threshold in basis points (default `0`).
+    pub fn get_partial_close_min_bps(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::PartialCloseMinBps)
+            .unwrap_or(0u32)
+    }
+
+    /// Admin-set minimum partial-close threshold in basis points (`0..=10_000`).
+    /// Returns the stored value.
+    pub fn set_partial_close_min_bps(env: Env, bps: u32) -> u32 {
+        let _escrow = LiquifactEscrow::load_escrow_require_admin(&env);
+        ensure(&env, bps <= 10_000, EscrowError::PartialCloseMinBpsOutOfRange);
+        env.storage()
+            .instance()
+            .set(&DataKey::PartialCloseMinBps, &bps);
+        bps
+    }
 
         let pending: Option<Address> = env.storage().instance().get(&DataKey::PendingAdmin);
         ensure(&env, pending.is_some(), EscrowError::NoPendingAdmin);

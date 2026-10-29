@@ -105,19 +105,9 @@ pub(crate) fn callback_nonce() -> DataKey {
     DataKey::CallbackNonce
 }
 
-/// Per-investor persistent payout recipient override (absent = pay the investor directly).
-pub(crate) fn investor_payout_recipient(investor: Address) -> DataKey {
-    DataKey::InvestorPayoutRecipient(investor)
-}
-
-/// Instance-storage pending callback context keyed by invocation nonce.
+/// Pending callback context keyed by invocation nonce.
 pub(crate) fn callback_context(nonce: u64) -> DataKey {
     DataKey::CallbackContext(nonce)
-}
-
-/// Instance-storage pending treasury rotation (two-step, time-delayed).
-pub(crate) fn pending_treasury() -> DataKey {
-    DataKey::PendingTreasury
 }
 
 /// Instance-storage minimum funded share of target in basis points required for partial settle (0 = no threshold beyond > 0).
