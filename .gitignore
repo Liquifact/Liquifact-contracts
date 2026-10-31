@@ -3,11 +3,9 @@
 **/*.rs.bk
 .cargo/
 **/test_snapshots/
-temp_auto_push.bat
 node_modules/
 .idea/
+.vscode/
 .DS_Store
 escrow/proptest-regressions/
 *.log
-.gitignore
-branch_structure.json
