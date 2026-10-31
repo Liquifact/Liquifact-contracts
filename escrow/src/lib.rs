@@ -1111,6 +1111,9 @@ pub enum EscrowError {
     ClaimPushBatchTooLarge = 310,
     /// [`LiquifactEscrow::push_investor_payouts`] received the same investor more than once.
     ClaimPushBatchDuplicate = 311,
+    /// Base yield cannot change while investor principal remains.
+    YieldBpsLockedAfterFunding = 312,
+
 }
 
 #[inline(always)]
@@ -9408,6 +9411,25 @@ impl LiquifactEscrow {
             new_yield_bps != escrow.yield_bps,
             EscrowError::YieldBpsUnchanged,
         );
+
+        // The base yield may only move while no principal is recorded. An investor's
+        // effective yield is locked in at their first deposit
+        // (`DataKey::InvestorEffectiveYield`), so a base change after funding would leave
+        // the escrow with two yield classes and no on-chain signal of the split.
+        ensure(
+            &env,
+            escrow.funded_amount == 0,
+            EscrowError::YieldBpsLockedAfterFunding,
+        );
+
+        // The tier ladder must stay valid against the new base: a tier below the base
+        // would make locking capital earn less than not locking it, and
+        // `effective_yield_for_commitment` would silently fall back to the base.
+        let tiers = env
+            .storage()
+            .instance()
+            .get::<DataKey, Vec<YieldTier>>(&DataKey::YieldTierTable);
+        Self::validate_yield_tiers_table(&env, &tiers, new_yield_bps);
 
         let old_yield_bps = escrow.yield_bps;
         escrow.yield_bps = new_yield_bps;

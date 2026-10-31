@@ -378,8 +378,8 @@ fn audit_investor_page_120_investors_sum_equals_funded_amount() {
         total_nonzero = total_nonzero.saturating_add(nonzero);
         total_duplicates = total_duplicates.saturating_add(dups);
 
-        // A page shorter than the cap means we've reached the end.
-        let page_len = nonzero + (sum == 0 && nonzero == 0) as u32 * 0; // rough check
+        // Every funded investor is nonzero; validate the actual page size.
+        assert_eq!(nonzero, (n - start).min(page_size));
         start = start.saturating_add(page_size);
         // Stop when we've consumed all 120 entries.
         if start >= n {

@@ -15,6 +15,8 @@ This document details the state machine governing yield-tier table initializatio
 3. **Immutable Effective Rate:** Once written under `DataKey::InvestorEffectiveYield(investor)`, the investor's effective yield rate is immutable.
 4. **Anchored Claim Lock:** The commitment lock timestamp (`DataKey::InvestorClaimNotBefore(investor)`) is calculated as `ledger.timestamp() + committed_lock_secs` on the first deposit. It is never reset or extended by follow-on deposits.
 5. **Fair Payout Gate:** An investor whose lock has not elapsed (`ledger.timestamp() < InvestorClaimNotBefore`) is blocked from claiming their payout, even if the escrow has settled (`escrow.status == 2`).
+6. **Locked Base Yield:** The base yield (`InvoiceEscrow::yield_bps`) can only be changed by `update_yield_bps` while no principal is recorded (`funded_amount == 0`). Once an investor has funded, the base is frozen (`YieldBpsLockedAfterFunding`) because every investor's effective yield is recorded at their first deposit, and a later base change would split the escrow into two yield classes.
+7. **Tier Ladder Survives a Base Change:** `update_yield_bps` re-validates the tier ladder against the new base. A tier that would fall below the new base is rejected with `TierYieldBelowBase`, and the tier table itself stays immutable.
 
 ---
 
@@ -128,6 +130,7 @@ stateDiagram-v2
 | `get_yield_tiers` | *None (Read)* | None | Returns stored `Vec<YieldTier>`. |
 | `get_effective_yield_bps` | *None (Read)* | None | Returns `InvestorEffectiveYield` if set; otherwise escrow base `yield_bps`. |
 | `get_investor_claim_not_before` | *None (Read)* | None | Returns `InvestorClaimNotBefore(investor)` timestamp. |
+| `update_yield_bps` | `admin` | 1. `escrow.status == 0` (Open)<br>2. `funded_amount == 0` (no principal recorded yet)<br>3. The tier ladder is still valid against the new base | Moves the base yield and re-validates the tier ladder against it. Rejected with `YieldBpsLockedAfterFunding` or `TierYieldBelowBase`. |
 
 ---
 
@@ -136,12 +139,57 @@ stateDiagram-v2
 | Error Code | Error Variant | Triggered At | Cause / State Violation |
 |---:|---|---|---|
 | **10** | `TierYieldOutOfRange` | `init` | A tier's `yield_bps` is outside `0..=10_000`. |
-| **11** | `TierYieldBelowBase` | `init` | A tier's `yield_bps` is less than escrow base `yield_bps`. |
+| **11** | `TierYieldBelowBase` | `init`, `update_yield_bps` | A tier's `yield_bps` is less than escrow base `yield_bps`. On `update_yield_bps` the ladder is re-validated against the new base. |
 | **12** | `TierLockNotIncreasing` | `init` | Tier `min_lock_secs` values are not strictly increasing. |
 | **13** | `TierYieldNotNonDecreasing` | `init` | A tier's `yield_bps` decreases relative to a shorter tier. |
 | **108** | `TieredSecondDeposit` | `fund_with_commitment` | Called by an investor who already has principal (`prev > 0`). |
 | **111** | `CommitmentLockExceedsMaturity` | `fund_with_commitment` | `now + committed_lock_secs` extends past escrow maturity. |
 | **128** | `InvestorCommitmentLockNotExpired` | `claim_investor_payout` | Attempted claim while `ledger.timestamp() < InvestorClaimNotBefore`. |
+| **259** | `YieldBpsLockedAfterFunding` | `update_yield_bps` | Principal was already recorded (`funded_amount > 0`); the base yield is locked once investors exist. |
+
+---
+
+## Base-Yield Update Rules
+
+`update_yield_bps` is the only entrypoint that moves the base yield, and it is
+governed by two rules that keep the yield ladder honest.
+
+### 1. The base yield is locked once principal exists
+
+An investor's effective yield is recorded at their **first** deposit
+(`DataKey::InvestorEffectiveYield`) and never changes afterwards. If the base
+could still move after that, one escrow would hold two yield classes — the
+investors who funded before the change and the ones who funded after it — with
+no on-chain signal of the split.
+
+The base may therefore only be changed while `escrow.funded_amount == 0`. Any
+later update is rejected with `YieldBpsLockedAfterFunding` (code **259**).
+
+A **full unfund** (every investor's contribution returned to zero) brings the
+escrow back to `funded_amount == 0` and releases the lock. That is safe: the
+next deposit from a returning investor is a *first* deposit again
+(`prev == 0`), so the new base is recorded for them.
+
+### 2. The tier ladder is re-validated against the new base
+
+The tier table is immutable after `init`, but the base is not — so a base
+change can invalidate it. `update_yield_bps` therefore re-runs the same
+validation used at `init` against the **new** base before applying the change.
+A tier whose `yield_bps` would fall below the new base is rejected with
+`TierYieldBelowBase` (code **11**), exactly as at `init`.
+
+Without this check a base of 1 200 bps with a 1 000 bps tier would make locking
+capital earn **less** than not locking it, and `effective_yield_for_commitment`
+would silently fall back to the base.
+
+### Example matrix
+
+| Escrow state | Base change | Result |
+|---|---|---|
+| `funded_amount == 0`, no tiers | any valid base | Accepted |
+| `funded_amount == 0`, every tier at or above the new base | any valid base | Accepted |
+| `funded_amount == 0`, a tier below the new base | raises the base | Rejected — `TierYieldBelowBase` (11) |
+| `funded_amount > 0` | any | Rejected — `YieldBpsLockedAfterFunding` (259) |
 
 ---
 

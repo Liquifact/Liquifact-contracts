@@ -111,6 +111,7 @@ mod timelocked_upgrade;
 mod unfund_investor_index;
 mod withdraw_attestation_gate;
 mod yield_tier_boundaries;
+mod yield_tier_update;
 /// Registers a new escrow contract instance and returns its contract id.
 pub fn deploy_id(env: &Env) -> Address {
     env.register(LiquifactEscrow, ())
