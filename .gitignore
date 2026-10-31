@@ -5,7 +5,7 @@
 **/test_snapshots/
 node_modules/
 .idea/
-.vscode/
 .DS_Store
 escrow/proptest-regressions/
 *.log
+config.bat
