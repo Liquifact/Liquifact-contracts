@@ -13,6 +13,12 @@ This document describes the authorization rules governing the **SME beneficiary*
 | **Investor** | Per-investor `DataKey::InvestorContribution` | Funds the escrow; claims payouts or refunds. | Self-authorized per call |
 | **Treasury** | `DataKey::Treasury` (immutable) | Receives protocol fees and terminal dust. | Immutable after `init` |
 
+Admin authority remains separate from the SME, treasury, and escrow contract address:
+`propose_admin` rejects any of these as a successor, and `accept_admin` checks again so a
+subsequent `rotate_beneficiary` cannot merge the SME and admin roles. Explicit proposal windows
+must be between 1 hour and 30 days, inclusive; `None` uses the 7-day default. The deprecated
+`transfer_admin` shim delegates to `propose_admin` and has the same restrictions.
+
 ---
 
 ## Authorization Mechanisms

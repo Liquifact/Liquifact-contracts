@@ -2795,3 +2795,77 @@ fn slots_cap_exactly_hit_remaining_is_zero() {
     );
     assert_slots_invariant(&client, "cap exactly hit");
 }
+
+// ===========================================================================
+// Envelope proptest: funded_amount ≤ MAX_INVOICE_AMOUNT → payout never traps
+// ===========================================================================
+
+use crate::MAX_INVOICE_AMOUNT;
+
+/// For any accepted fund sequence where every call succeeds (funded_amount stays
+/// ≤ MAX_INVOICE_AMOUNT), `compute_investor_payout` must never trap with
+/// `ComputePayoutArithmeticOverflow` for any `yield_bps ∈ [0, 10_000]`.
+///
+/// Strategy: fund a single investor with an arbitrary amount in
+/// [1, MAX_INVOICE_AMOUNT], settle, then call compute_investor_payout with
+/// the most aggressive yield (10_000 bps).  The bound guarantees the
+/// worst-case product `2 × funded² ≤ 2 × MAX_INVOICE_AMOUNT² < i128::MAX`.
+proptest! {
+    #[test]
+    fn prop_payout_no_overflow_within_envelope(
+        fund_amount in 1i128..=MAX_INVOICE_AMOUNT,
+        yield_bps in 0i64..=10_000i64,
+    ) {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let investor = Address::generate(&env);
+        let admin    = Address::generate(&env);
+        let sme      = Address::generate(&env);
+
+        let token = install_stellar_asset_token(&env);
+
+        let client = deploy(&env);
+        client.init(
+            &admin,
+            &soroban_sdk::String::from_str(&env, "PROPENV"),
+            &sme,
+            &MAX_INVOICE_AMOUNT,
+            &yield_bps,
+            &0u64,
+            &token.id,
+            &None,
+            &Address::generate(&env),
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None,
+            &None::<i64>,
+        );
+
+        // Mint enough for the fund and the contract's custody.
+        token.stellar.mint(&investor, &fund_amount);
+
+        // Fund — should always succeed because fund_amount ≤ MAX_INVOICE_AMOUNT.
+        client.fund(&investor, &fund_amount);
+
+        // If the escrow is still open, force it to funded via partial_settle.
+        if client.get_escrow().status == 0 {
+            client.partial_settle(&admin);
+        }
+        prop_assert_eq!(client.get_escrow().status, 1);
+
+        // Settle so payouts become claimable.
+        client.settle();
+        prop_assert_eq!(client.get_escrow().status, 2);
+
+        // compute_investor_payout must not panic.
+        let payout = client.compute_investor_payout(&investor);
+        prop_assert!(payout >= fund_amount,
+            "payout ({payout}) must be >= principal ({fund_amount}) with non-negative yield");
+    }
+}

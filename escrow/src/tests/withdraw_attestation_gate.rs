@@ -371,6 +371,8 @@ fn setter_rejected_after_settle() {
     li2.timestamp = 100;
     env.ledger().set(li2);
 
+    // Settle now collects the coupon shortfall from the SME (#1527).
+    sac_admin.mint(&sme, &(TARGET * 800 / 10_000));
     client.settle();
     assert_eq!(client.get_escrow().status, 2u32);
 
