@@ -40,4 +40,9 @@ jobs:
         run: cargo build --target wasm32v1-none --release -p liquifact_escrow
 
       - name: Test (core suites)
-        run: cargo test -p liquifact_escrow --lib
+        run: |
+          cargo test -p liquifact_escrow --lib tests::init::
+          cargo test -p liquifact_escrow --lib tests::funding::
+          cargo test -p liquifact_escrow --lib tests::settlement::
+          cargo test -p liquifact_escrow --lib tests::admin::
+          cargo test -p liquifact_escrow --lib tests::yield_tier_update::
