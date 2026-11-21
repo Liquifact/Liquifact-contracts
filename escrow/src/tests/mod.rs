@@ -66,6 +66,7 @@ mod allowlist_persistent_index;
 mod attestations;
 mod attestor;
 mod auth_matrix;
+mod batch_budget;
 mod cap_validation;
 mod collateral_lock;
 #[rustfmt::skip]
