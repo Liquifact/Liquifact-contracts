@@ -212,3 +212,72 @@ fn push_requires_settled_escrow() {
         EscrowError::InvestorClaimNotSettled,
     );
 }
+
+#[test]
+fn claim_progress_tracks_single_claim_and_idempotent_repeat() {
+    let env = Env::default();
+    let (client, _token, _contract_id, investors) =
+        settled_escrow(&env, &[(1_000, 0), (2_000, 0)]);
+
+    // Before any claims: 0 of 2 investors claimed, distributed principal matches view.
+    assert_eq!(
+        client.get_claim_progress(),
+        (0, 2, client.get_distributed_principal())
+    );
+
+    // Single pull claim increments claimed count to 1.
+    client.claim_investor_payout(&investors[0]);
+    assert_eq!(
+        client.get_claim_progress(),
+        (1, 2, client.get_distributed_principal())
+    );
+
+    // Idempotent second pull claim must not double-increment the counter.
+    client.claim_investor_payout(&investors[0]);
+    assert_eq!(
+        client.get_claim_progress(),
+        (1, 2, client.get_distributed_principal())
+    );
+}
+
+#[test]
+fn claim_progress_tracks_push_batch_and_mixed_pull_push() {
+    let env = Env::default();
+    let (client, _token, _contract_id, investors) =
+        settled_escrow(&env, &[(1_000, 0), (2_000, 0), (3_000, 0)]);
+
+    assert_eq!(
+        client.get_claim_progress(),
+        (0, 3, client.get_distributed_principal())
+    );
+
+    // First investor claims via pull path.
+    client.claim_investor_payout(&investors[0]);
+    assert_eq!(
+        client.get_claim_progress(),
+        (1, 3, client.get_distributed_principal())
+    );
+
+    // Push batch covering all 3 investors skips investors[0] and pays the remaining 2.
+    let batch = SorobanVec::from_array(
+        &env,
+        [
+            investors[0].clone(),
+            investors[1].clone(),
+            investors[2].clone(),
+        ],
+    );
+    let (paid_count, _total_paid) = client.push_investor_payouts(&batch);
+    assert_eq!(paid_count, 2);
+    assert_eq!(
+        client.get_claim_progress(),
+        (3, 3, client.get_distributed_principal())
+    );
+
+    // Repeat push batch is a no-op and must not increment the counter beyond 3.
+    assert_eq!(client.push_investor_payouts(&batch), (0, 0));
+    assert_eq!(
+        client.get_claim_progress(),
+        (3, 3, client.get_distributed_principal())
+    );
+}
