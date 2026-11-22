@@ -65,6 +65,7 @@ mod allowlist_expiry;
 mod allowlist_index_proptest;
 mod allowlist_persistent_index;
 mod attestation_limit;
+mod attestation_event_schema;
 mod attestations;
 mod attestor;
 mod auth_matrix;
