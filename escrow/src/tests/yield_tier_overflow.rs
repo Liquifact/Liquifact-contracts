@@ -282,12 +282,15 @@ fn test_yield_tier_preview_extreme_values_no_wraparound() {
     assert_eq!(resolution_max.effective_yield_bps, 10_000);
     assert_eq!(resolution_max.matched_lock_secs, 10_000);
 
-    // Zero / negative amount and 0 lock must safely fall back to base yield without underflow or error.
-    let resolution_zero = client.preview_yield_tier(&0i128, &0u64);
-    assert_eq!(resolution_zero.effective_yield_bps, 500);
-    assert_eq!(resolution_zero.matched_lock_secs, 0);
+    // Positive amount with 0 lock must safely fall back to base yield without underflow or error.
+    let resolution_base = client.preview_yield_tier(&1i128, &0u64);
+    assert_eq!(resolution_base.effective_yield_bps, 500);
+    assert_eq!(resolution_base.matched_lock_secs, 0);
 
-    let resolution_neg = client.preview_yield_tier(&i128::MIN, &0u64);
-    assert_eq!(resolution_neg.effective_yield_bps, 500);
-    assert_eq!(resolution_neg.matched_lock_secs, 0);
+    // Zero and negative amounts must be rejected with ZeroContributionAmount.
+    let res_zero = client.try_preview_yield_tier(&0i128, &0u64);
+    assert_contract_error(res_zero, EscrowError::ZeroContributionAmount);
+
+    let res_neg = client.try_preview_yield_tier(&i128::MIN, &0u64);
+    assert_contract_error(res_neg, EscrowError::ZeroContributionAmount);
 }
