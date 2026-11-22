@@ -3217,9 +3217,15 @@ impl LiquifactEscrow {
                 return active;
             }
         }
+        // `activate_fee_schedule` stores an `Option<FeeSchedule>` under this
+        // key: `Some(schedule)` once a schedule has been replaced, or `None`
+        // (encoded as `Void`) after the first activation. Read the stored
+        // option and flatten it so the `None` case does not attempt to decode
+        // `Void` as a `FeeSchedule`.
         env.storage()
             .instance()
-            .get(&FeeScheduleStorageKey::Previous)
+            .get::<_, Option<FeeSchedule>>(&FeeScheduleStorageKey::Previous)
+            .flatten()
     }
     fn legal_hold_active(env: &Env) -> bool {
         env.storage()
