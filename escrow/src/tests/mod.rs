@@ -68,6 +68,7 @@ mod attestor;
 mod auth_matrix;
 mod cap_validation;
 mod collateral_lock;
+mod collateral_version_view;
 #[rustfmt::skip]
 mod coverage;
 mod envelope_bounds;
