@@ -73,6 +73,7 @@ mod collateral_state_view;
 #[rustfmt::skip]
 mod coverage;
 mod envelope_bounds;
+mod event_emission;
 mod external_calls;
 mod external_calls_mocked;
 mod fee_schedule;
