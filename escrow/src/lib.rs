@@ -1123,6 +1123,8 @@ pub enum EscrowError {
     /// [`LiquifactEscrow::set_attestation_limit`] received a limit outside
     /// `[MIN_ATTESTATION_LIMIT, MAX_ATTESTATION_LIMIT]`.
     AttestationLimitOutOfRange = 312,
+    /// [`LiquifactEscrow::set_investors_frozen`] received the same investor more than once.
+    InvestorFreezeBatchDuplicate = 312,
 }
 
 #[inline(always)]
@@ -1678,6 +1680,10 @@ pub enum DataKey {
     /// **Instance** storage. **Additive key (ADR-007):** absent ⇒ [`DEFAULT_ATTESTATION_LIMIT`] (32).
     /// Updatable via [`LiquifactEscrow::set_attestation_limit`].
     AttestationLimit,
+    /// Number of distinct investors whose settled payout has been claimed via
+    /// [`LiquifactEscrow::claim_investor_payout`] or [`LiquifactEscrow::push_investor_payouts`].
+    /// **Instance** storage. Absent ⇒ `0` (additive key per ADR-007).
+    ClaimedInvestorCount,
 }
 
 // --- Data types ---
@@ -6844,9 +6850,14 @@ impl LiquifactEscrow {
     ///
     /// # Events
     /// Emits [`InvestorFreezeChanged`] on success.
-    pub fn set_investor_frozen(env: Env, investor: Address, frozen: bool, reason_code: u32) {
-        let escrow = Self::load_escrow_require_admin(&env);
-
+    fn set_investor_frozen_impl(
+        env: &Env,
+        escrow: &InvoiceEscrow,
+        investor: Address,
+        frozen: bool,
+        reason_code: u32,
+        ttl: u32,
+    ) {
         let (current_frozen, _): (bool, u32) = env
             .storage()
             .persistent()
@@ -6854,12 +6865,11 @@ impl LiquifactEscrow {
             .unwrap_or((false, 0u32));
 
         ensure(
-            &env,
+            env,
             current_frozen != frozen,
             EscrowError::InvestorFreezeUnchanged,
         );
 
-        let ttl = Self::get_storage_limit(env.clone());
         env.storage().persistent().set(
             &DataKey::InvestorFrozen(investor.clone()),
             &(frozen, reason_code),
@@ -6875,7 +6885,68 @@ impl LiquifactEscrow {
             frozen: if frozen { 1 } else { 0 },
             reason_code,
         }
-        .publish(&env);
+        .publish(env);
+    }
+
+    pub fn set_investor_frozen(env: Env, investor: Address, frozen: bool, reason_code: u32) {
+        let escrow = Self::load_escrow_require_admin(&env);
+        let ttl = Self::get_storage_limit(env.clone());
+        Self::set_investor_frozen_impl(&env, &escrow, investor, frozen, reason_code, ttl);
+    }
+
+    /// Batch freeze or unfreeze multiple investor positions for compliance purposes.
+    ///
+    /// Accepts a `Vec<Address>`, a single `frozen` flag, and a single `reason_code`.
+    /// Requires admin authorization once (identical to [`LiquifactEscrow::set_investor_frozen`]).
+    /// Bounded by [`MAX_INVESTOR_ALLOWLIST_BATCH`] and rejects empty or duplicate inputs.
+    ///
+    /// Reuses the single-address internal path so authorization, legal-hold behavior,
+    /// storage TTL extension, no-op rejection, and emitted [`InvestorFreezeChanged`] events
+    /// are identical to calling [`LiquifactEscrow::set_investor_frozen`] for each address.
+    /// If any investor fails validation (e.g., [`EscrowError::InvestorFreezeUnchanged`]),
+    /// the entire call reverts atomically.
+    ///
+    /// # Errors
+    /// - [`EscrowError::EscrowNotInitialized`] if the contract has not been initialised.
+    /// - [`EscrowError::InvestorBatchEmpty`] if `investors` is empty.
+    /// - [`EscrowError::InvestorBatchTooLarge`] if `investors.len() > MAX_INVESTOR_ALLOWLIST_BATCH`.
+    /// - [`EscrowError::InvestorFreezeBatchDuplicate`] if `investors` contains duplicate addresses.
+    /// - [`EscrowError::InvestorFreezeUnchanged`] if any investor already has `frozen` state.
+    ///
+    /// # Events
+    /// Emits one [`InvestorFreezeChanged`] per address in `investors`.
+    pub fn set_investors_frozen(
+        env: Env,
+        investors: Vec<Address>,
+        frozen: bool,
+        reason_code: u32,
+    ) {
+        let escrow = Self::load_escrow_require_admin(&env);
+
+        let n = investors.len();
+        ensure(&env, n > 0, EscrowError::InvestorBatchEmpty);
+        ensure(
+            &env,
+            n <= MAX_INVESTOR_ALLOWLIST_BATCH,
+            EscrowError::InvestorBatchTooLarge,
+        );
+
+        for i in 0..n {
+            let inv = investors.get(i).unwrap();
+            for j in (i + 1)..n {
+                ensure(
+                    &env,
+                    investors.get(j).unwrap() != inv,
+                    EscrowError::InvestorFreezeBatchDuplicate,
+                );
+            }
+        }
+
+        let ttl = Self::get_storage_limit(env.clone());
+        for i in 0..n {
+            let inv = investors.get(i).unwrap();
+            Self::set_investor_frozen_impl(&env, &escrow, inv, frozen, reason_code, ttl);
+        }
     }
 
     /// Returns the freeze status `(frozen: bool, reason_code: u32)` for an investor.
@@ -9032,6 +9103,17 @@ impl LiquifactEscrow {
         // Mark before transfer — prevents double-pay on any re-entrant path.
         Self::set_persistent_investor_claimed(env, investor.clone(), true);
 
+        // Increment claimed investor counter (absent ⇒ 0 per ADR-007).
+        let claimed_count: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::ClaimedInvestorCount)
+            .unwrap_or(0);
+        env.storage().instance().set(
+            &DataKey::ClaimedInvestorCount,
+            &claimed_count.saturating_add(1),
+        );
+
         // Extend TTL for all per-investor persistent keys written during claim.
         Self::extend_investor_ttl(env, &investor);
 
@@ -10723,6 +10805,26 @@ impl LiquifactEscrow {
             .instance()
             .get(&DataKey::DistributedPrincipal)
             .unwrap_or(0)
+    }
+
+    /// Read-only claim progress summary: `(claimed, total_investors, distributed_principal)`.
+    ///
+    /// - `claimed`: count of distinct investors whose settled payout has been claimed via
+    ///   [`LiquifactEscrow::claim_investor_payout`] or [`LiquifactEscrow::push_investor_payouts`]
+    ///   ([`DataKey::ClaimedInvestorCount`], absent ⇒ `0` per ADR-007).
+    /// - `total_investors`: total distinct investors with a positive contribution
+    ///   ([`LiquifactEscrow::get_unique_funder_count`]).
+    /// - `distributed_principal`: cumulative principal recorded in [`DataKey::DistributedPrincipal`]
+    ///   ([`LiquifactEscrow::get_distributed_principal`]).
+    pub fn get_claim_progress(env: Env) -> (u32, u32, i128) {
+        let claimed: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::ClaimedInvestorCount)
+            .unwrap_or(0);
+        let total = Self::get_unique_funder_count(env.clone());
+        let distributed = Self::get_distributed_principal(env);
+        (claimed, total, distributed)
     }
 
     /// Read-only reconciliation position: the live funding-token balance held by
