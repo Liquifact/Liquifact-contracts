@@ -1111,6 +1111,8 @@ pub enum EscrowError {
     ClaimPushBatchTooLarge = 310,
     /// [`LiquifactEscrow::push_investor_payouts`] received the same investor more than once.
     ClaimPushBatchDuplicate = 311,
+    /// Checked arithmetic overflow in [`LiquifactEscrow::get_funding_progress_bps`].
+    FundingProgressArithmeticOverflow = 312,
 }
 
 #[inline(always)]
@@ -3763,6 +3765,31 @@ impl LiquifactEscrow {
             .funding_target
             .saturating_sub(escrow.funded_amount)
             .max(0)
+    }
+
+    /// Returns the escrow funding progress in basis points (`0..=10_000`).
+    ///
+    /// Computed as `min(10_000, floor(funded_amount * 10_000 / funding_target))` using
+    /// checked `i128` arithmetic (floor rounding toward zero for non-negative amounts).
+    ///
+    /// - Returns `0` when the escrow has no funding yet (`funded_amount <= 0`) or `funding_target <= 0`.
+    /// - Capped at `10_000` (100.00%) when `funded_amount >= funding_target`.
+    /// - Emits [`EscrowError::EscrowNotInitialized`] (code 20) if called before [`LiquifactEscrow::init`].
+    /// - Emits [`EscrowError::FundingProgressArithmeticOverflow`] (code 312) if `funded_amount * 10_000`
+    ///   overflows `i128`.
+    pub fn get_funding_progress_bps(env: Env) -> u32 {
+        let escrow = Self::get_escrow(env.clone());
+        if escrow.funded_amount <= 0 || escrow.funding_target <= 0 {
+            return 0;
+        }
+        let scaled = escrow
+            .funded_amount
+            .checked_mul(10_000)
+            .unwrap_or_else(|| fail(&env, EscrowError::FundingProgressArithmeticOverflow));
+        let bps = scaled
+            .checked_div(escrow.funding_target)
+            .unwrap_or_else(|| fail(&env, EscrowError::FundingProgressArithmeticOverflow));
+        bps.min(10_000) as u32
     }
 
     /// Returns the SEP-41 funding token bound at [`LiquifactEscrow::init`] ([`DataKey::FundingToken`]).
