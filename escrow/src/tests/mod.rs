@@ -63,6 +63,7 @@ pub(crate) fn assert_contract_error<T, E>(
 mod admin;
 mod allowlist_expiry;
 mod allowlist_persistent_index;
+mod attestation_limit;
 mod attestations;
 mod attestor;
 mod auth_matrix;
