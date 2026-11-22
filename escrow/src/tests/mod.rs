@@ -68,6 +68,7 @@ mod attestation_limit;
 mod attestations;
 mod attestor;
 mod auth_matrix;
+mod batch_budget;
 mod cap_validation;
 mod collateral_lock;
 mod collateral_state_view;
