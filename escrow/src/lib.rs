@@ -1641,6 +1641,10 @@ pub enum DataKey {
     /// Total count of allowlisted investors.
     /// **Instance** storage. Maintained as an O(1) counter. Absent ⇒ `0`.
     AllowlistCount,
+    /// Number of distinct investors whose settled payout has been claimed via
+    /// [`LiquifactEscrow::claim_investor_payout`] or [`LiquifactEscrow::push_investor_payouts`].
+    /// **Instance** storage. Absent ⇒ `0` (additive key per ADR-007).
+    ClaimedInvestorCount,
 }
 
 // --- Data types ---
@@ -8918,6 +8922,17 @@ impl LiquifactEscrow {
         // Mark before transfer — prevents double-pay on any re-entrant path.
         Self::set_persistent_investor_claimed(env, investor.clone(), true);
 
+        // Increment claimed investor counter (absent ⇒ 0 per ADR-007).
+        let claimed_count: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::ClaimedInvestorCount)
+            .unwrap_or(0);
+        env.storage().instance().set(
+            &DataKey::ClaimedInvestorCount,
+            &claimed_count.saturating_add(1),
+        );
+
         // Extend TTL for all per-investor persistent keys written during claim.
         Self::extend_investor_ttl(env, &investor);
 
@@ -10606,6 +10621,26 @@ impl LiquifactEscrow {
             .instance()
             .get(&DataKey::DistributedPrincipal)
             .unwrap_or(0)
+    }
+
+    /// Read-only claim progress summary: `(claimed, total_investors, distributed_principal)`.
+    ///
+    /// - `claimed`: count of distinct investors whose settled payout has been claimed via
+    ///   [`LiquifactEscrow::claim_investor_payout`] or [`LiquifactEscrow::push_investor_payouts`]
+    ///   ([`DataKey::ClaimedInvestorCount`], absent ⇒ `0` per ADR-007).
+    /// - `total_investors`: total distinct investors with a positive contribution
+    ///   ([`LiquifactEscrow::get_unique_funder_count`]).
+    /// - `distributed_principal`: cumulative principal recorded in [`DataKey::DistributedPrincipal`]
+    ///   ([`LiquifactEscrow::get_distributed_principal`]).
+    pub fn get_claim_progress(env: Env) -> (u32, u32, i128) {
+        let claimed: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::ClaimedInvestorCount)
+            .unwrap_or(0);
+        let total = Self::get_unique_funder_count(env.clone());
+        let distributed = Self::get_distributed_principal(env);
+        (claimed, total, distributed)
     }
 
     /// Read-only reconciliation position: the live funding-token balance held by
