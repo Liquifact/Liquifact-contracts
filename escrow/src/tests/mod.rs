@@ -72,6 +72,7 @@ mod batch_budget;
 mod cap_validation;
 mod collateral_lock;
 mod collateral_state_view;
+mod collateral_version_view;
 #[rustfmt::skip]
 mod coverage;
 mod envelope_bounds;

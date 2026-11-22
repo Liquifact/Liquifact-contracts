@@ -4326,6 +4326,14 @@ impl LiquifactEscrow {
         env.storage().instance().get(&DataKey::Version).unwrap_or(0)
     }
 
+    /// Return the schema version associated with collateral metadata.
+    ///
+    /// Collateral metadata follows the contract storage schema version. Returns `0`
+    /// before initialization, matching [`LiquifactEscrow::get_version`].
+    pub fn get_collateral_version(env: Env) -> u32 {
+        Self::get_version(env)
+    }
+
     /// Get the optional funding deadline (ledger timestamp), returns None if not set.
     pub fn get_funding_deadline(env: Env) -> Option<u64> {
         env.storage().instance().get(&keys::funding_deadline())
