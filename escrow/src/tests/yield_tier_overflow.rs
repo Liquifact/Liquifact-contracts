@@ -7,7 +7,10 @@
 
 #[cfg(test)]
 use super::{assert_contract_error, deploy, free_addresses, install_stellar_asset_token};
-use crate::{DataKey, EscrowError, FundingCloseSnapshot, InvoiceEscrow, YieldResolution, YieldTier};
+use crate::{
+    DataKey, EscrowError, FundingCloseSnapshot, InvoiceEscrow, YieldResolution, YieldTier,
+    MAX_INVOICE_AMOUNT,
+};
 use soroban_sdk::{
     testutils::{Address as _, Ledger as _},
     Address, Env, String, Vec as SorobanVec,
@@ -93,6 +96,9 @@ fn test_yield_tier_payout_i128_extreme_multiplication_overflow() {
         escrow.funded_amount = i128::MAX;
         escrow.yield_bps = 10_000;
         env.storage().instance().set(&DataKey::Escrow, &escrow);
+        env.storage()
+            .instance()
+            .set(&DataKey::YieldWeightedPrincipal, &i128::MAX);
     });
 
     // Pro-rata computation must fail cleanly with ComputePayoutArithmeticOverflow (code 129).
@@ -241,7 +247,7 @@ fn test_yield_tier_funded_amount_and_contribution_overflow() {
         env.storage().instance().set(&DataKey::Escrow, &escrow);
     });
     let res_funded = client.try_fund_with_commitment(&investor, &20i128, &0u64);
-    assert_contract_error(res_funded, EscrowError::FundedAmountOverflow);
+    assert_contract_error(res_funded, EscrowError::FundedAmountExceedsSafeEnvelope);
 
     // 2. Reset funded_amount and inject near-max investor contribution to trigger InvestorContributionOverflow.
     env.as_contract(&client.address, || {
@@ -290,4 +296,34 @@ fn test_yield_tier_preview_extreme_values_no_wraparound() {
     let resolution_neg = client.preview_yield_tier(&i128::MIN, &0u64);
     assert_eq!(resolution_neg.effective_yield_bps, 500);
     assert_eq!(resolution_neg.matched_lock_secs, 0);
+}
+
+/// The maximum supported invoice amount remains safe with the highest tier yield.
+#[test]
+fn test_yield_tier_max_invoice_amount_at_highest_yield() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let mut tiers = SorobanVec::new(&env);
+    tiers.push_back(YieldTier {
+        min_lock_secs: 100,
+        yield_bps: 10_000,
+    });
+
+    let (client, _admin, _sme, sac) = setup_tiered_escrow(
+        &env,
+        "YT_MAX_TIER",
+        MAX_INVOICE_AMOUNT,
+        500,
+        Some(tiers),
+    );
+    let investor = Address::generate(&env);
+    sac.mint(&investor, &MAX_INVOICE_AMOUNT);
+    client.fund_with_commitment(&investor, &MAX_INVOICE_AMOUNT, &100u64);
+    client.settle();
+
+    assert_eq!(
+        client.compute_investor_payout(&investor),
+        MAX_INVOICE_AMOUNT * 2
+    );
 }
