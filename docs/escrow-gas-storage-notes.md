@@ -170,3 +170,56 @@ Run the regression suite with:
 ```bash
 cargo test -p liquifact_escrow --lib tests::batch_budget::
 ```
+
+## Persistent investor key TTL extension (issue #1684)
+
+### Problem
+
+Per-investor persistent entries (`InvestorContribution`, `InvestorEffectiveYield`,
+`InvestorClaimNotBefore`, `InvestorClaimed`, `InvestorAllowlisted`, `InvestorFrozen`) are
+stored under independent persistent storage keys. Persistent entries expire after their TTL
+reaches zero, which on Soroban means the entry is archived and effectively absent.  An
+expired `InvestorContribution` returns `0` on the next read, causing `NoContributionToClaim`
+or `NoContributionToRefund` errors for legitimate investors.
+
+Previously only the manual `bump_ttl` / `batch_bump_ttl` entrypoints extended these keys.
+An investor who funded but never triggered an admin bump could have their keys expire before
+settlement.
+
+### Solution
+
+The private helper `extend_investor_ttl` extends every present per-investor persistent key
+using `get_storage_limit` (defaults to `PERSISTENT_TTL_MIN_EXTENSION_LEDGERS = 3600 ledgers,
+≈ 1 h at 1 ledger/s`) as both the `threshold` and `extend_to` arguments of
+`env.storage().persistent().extend_ttl(key, ttl, ttl)`.  Keys that do not yet exist for
+this investor (e.g. `InvestorClaimed` before a claim) are silently skipped.
+
+`extend_investor_ttl` is called on **four** activity paths:
+
+| Entrypoint | Called from | Line (approx.) |
+|---|---|---|
+| `fund` / `fund_with_commitment` / `fund_ref` | `fund_impl` | after contribution write |
+| `fund_batch` | `fund_impl` (once per entry) | after contribution write |
+| `claim_investor_payout` / `push_investor_payouts` | `claim_core` | after claim write |
+| `refund` / `refund_batch` | `refund_core` | after contribution zero |
+
+### Cost per call
+
+Each `extend_ttl` host-function call consumes a small instruction budget even when the TTL
+is already high enough that no on-chain extension is needed; Soroban still charges for
+reading the entry's current TTL.  The number of `extend_ttl` calls per investor is bounded
+by the size of `keys_to_check` in `extend_investor_ttl` (currently 6 keys), so at most
+6 extra host-function calls are added per investor activity.
+
+For `fund_batch` with `n` entries, this adds `n × 6` extend-ttl calls to the batch budget.
+The existing `MAX_FUND_BATCH = 32` limit bounds the worst case to 192 extra calls per
+`fund_batch` invocation.  Benchmarking on the Soroban simulator shows this is well within
+the per-transaction CPU instruction budget.
+
+### Batch budget regression check
+
+`tests::persistent_refund_flags` includes tests that verify TTL rises after each of the four
+activity paths without triggering resource-limit errors (resource limits are relaxed in those
+tests to focus on storage behavior, not metering).  No regression in the batch size limit
+(`MAX_FUND_BATCH`) is expected because `extend_investor_ttl` was already called on the fund
+path before this issue; the claim and refund paths are single-investor and not batch-bounded.
