@@ -62,6 +62,7 @@ pub(crate) fn assert_contract_error<T, E>(
 // modules stay assertion-focused and each test still owns a fresh Env.
 mod admin;
 mod allowlist_expiry;
+mod allowlist_index_proptest;
 mod allowlist_persistent_index;
 mod attestation_limit;
 mod attestations;
