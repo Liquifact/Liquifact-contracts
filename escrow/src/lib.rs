@@ -4712,10 +4712,10 @@ impl LiquifactEscrow {
         // Extend each per-investor persistent key that exists.
         // Check before extend to avoid trapping on missing keys.
         let keys_to_check = [
-            DataKey::InvestorContribution(investor.clone()),
-            DataKey::InvestorEffectiveYield(investor.clone()),
-            DataKey::InvestorClaimNotBefore(investor.clone()),
-            DataKey::InvestorClaimed(investor.clone()),
+            keys::investor_contribution(investor.clone()),
+            keys::investor_effective_yield(investor.clone()),
+            keys::investor_claim_not_before(investor.clone()),
+            keys::investor_claimed(investor.clone()),
             DataKey::InvestorAllowlisted(investor.clone()),
             DataKey::InvestorFrozen(investor.clone()),
         ];
@@ -9768,19 +9768,19 @@ impl LiquifactEscrow {
                 env.storage().persistent().extend_ttl(&k, ttl, ttl);
             }
             // Extend persistent TTL for per-investor persistent keys used by this contract.
-            let ck = DataKey::InvestorContribution(addr.clone());
+            let ck = keys::investor_contribution(addr.clone());
             if env.storage().persistent().has(&ck) {
                 env.storage().persistent().extend_ttl(&ck, ttl, ttl);
             }
-            let yk = DataKey::InvestorEffectiveYield(addr.clone());
+            let yk = keys::investor_effective_yield(addr.clone());
             if env.storage().persistent().has(&yk) {
                 env.storage().persistent().extend_ttl(&yk, ttl, ttl);
             }
-            let nk = DataKey::InvestorClaimNotBefore(addr.clone());
+            let nk = keys::investor_claim_not_before(addr.clone());
             if env.storage().persistent().has(&nk) {
                 env.storage().persistent().extend_ttl(&nk, ttl, ttl);
             }
-            let clk = DataKey::InvestorClaimed(addr.clone());
+            let clk = keys::investor_claimed(addr.clone());
             if env.storage().persistent().has(&clk) {
                 env.storage().persistent().extend_ttl(&clk, ttl, ttl);
             }
