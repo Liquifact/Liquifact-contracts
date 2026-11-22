@@ -1201,6 +1201,27 @@ pub(crate) fn require_funding_open(env: &Env, status: u32) {
     guard_status_eq(env, status, 0, EscrowError::EscrowNotOpenForFunding);
 }
 
+/// Emits [`FundingStateChanged`] when `escrow.status` differs from `old_status`.
+///
+/// Shared by every funding entrypoint that can change the status, so the
+/// "exactly one event per transition" invariant lives in one place instead of
+/// being re-implemented (and possibly forgotten) at each call site. Calls that
+/// leave the status unchanged emit nothing.
+pub(crate) fn emit_funding_state_changed(env: &Env, escrow: &InvoiceEscrow, old_status: u32) {
+    if escrow.status == old_status {
+        return;
+    }
+    FundingStateChanged {
+        // `symbol_short!` is capped at 9 characters; the documented routing
+        // symbol is longer, so build it explicitly.
+        name: Symbol::new(env, "fund_st_ch"),
+        invoice_id: escrow.invoice_id.clone(),
+        old_status,
+        new_status: escrow.status,
+    }
+    .publish(env);
+}
+
 /// Shared guard: assert that no legal/compliance hold is currently active.
 ///
 /// Replaces the repeated inline pattern
@@ -2151,6 +2172,18 @@ pub struct EscrowFunded {
     /// The `min_lock_secs` of the matched [`YieldTier`] (0 when base yield applies — no tier,
     /// no lock commitment, or simple fund). See [`LiquifactEscrow::effective_yield_for_commitment`].
     pub tier_lock_secs: u64,
+}
+
+#[contractevent]
+pub struct FundingStateChanged {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    /// Escrow funding status before the call (`0` open, `1` funded, `4` cancelled).
+    pub old_status: u32,
+    /// Escrow funding status after the call.
+    pub new_status: u32,
 }
 
 /// Emitted by [`LiquifactEscrow::fund_with_reference`] immediately after [`EscrowFunded`],
@@ -7110,6 +7143,7 @@ impl LiquifactEscrow {
         );
 
         let old_target = escrow.funding_target;
+        let old_status = escrow.status;
         escrow.funding_target = new_target;
 
         // If lowering the target causes it to equal (or fall to) the already-funded
@@ -7135,6 +7169,8 @@ impl LiquifactEscrow {
         }
 
         env.storage().instance().set(&DataKey::Escrow, &escrow);
+
+        emit_funding_state_changed(&env, &escrow, old_status);
 
         FundingTargetUpdated {
             name: symbol_short!("fund_tgt"),
@@ -8081,6 +8117,7 @@ impl LiquifactEscrow {
         );
         escrow.funded_amount = new_funded_amount;
 
+        let old_status = escrow.status;
         if escrow.status == 0 && escrow.funded_amount >= escrow.funding_target {
             escrow.status = 1;
             if !env
@@ -8145,6 +8182,8 @@ impl LiquifactEscrow {
             &this,
             amount,
         );
+
+        emit_funding_state_changed(&env, &escrow, old_status);
 
         EscrowFunded {
             name: symbol_short!("funded"),
@@ -8220,6 +8259,7 @@ impl LiquifactEscrow {
         }
 
         // Transition to funded status early.
+        let old_status = escrow.status;
         escrow.status = 1;
 
         // Write FundingCloseSnapshot if not already present.
@@ -8240,6 +8280,8 @@ impl LiquifactEscrow {
         }
 
         env.storage().instance().set(&DataKey::Escrow, &escrow);
+
+        emit_funding_state_changed(&env, &escrow, old_status);
 
         EscrowPartialSettle {
             name: symbol_short!("part_set"),
@@ -10274,8 +10316,11 @@ impl LiquifactEscrow {
 
         guard_status_eq(&env, escrow.status, 0, EscrowError::CancelFundingNotOpen);
 
+        let old_status = escrow.status;
         escrow.status = 4;
         env.storage().instance().set(&DataKey::Escrow, &escrow);
+
+        emit_funding_state_changed(&env, &escrow, old_status);
 
         FundingCancelled {
             name: symbol_short!("fund_can"),

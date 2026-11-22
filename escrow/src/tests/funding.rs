@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::EscrowError;
+use crate::{EscrowError, FundingStateChanged};
 
 use soroban_sdk::{Error, InvokeError};
 
@@ -7624,4 +7624,261 @@ fn test_unfund_investor_index_commitment_reentry_in_funding() {
 #[test]
 fn test_unfund_investor_index_partial_unfund_in_funding() {
     super::unfund_investor_index::test_partial_unfund_retains_index_and_unique_count();
+}
+
+// ── FundingStateChanged event ────────────────────────────────────────────────
+
+/// Initializes a fresh escrow for the state-change tests and returns its admin.
+fn init_state_change_escrow(
+    env: &Env,
+    client: &LiquifactEscrowClient,
+    target: i128,
+    invoice: &str,
+) -> Address {
+    let admin = Address::generate(env);
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(env, invoice),
+        &Address::generate(env),
+        &target,
+        &800i64,
+        &0u64,
+        &Address::generate(env),
+        &None,
+        &Address::generate(env),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+    admin
+}
+
+/// Counts `FundingStateChanged` events matching one exact transition.
+///
+/// Takes a snapshot of the events buffer: `env.events().all()` only exposes the
+/// events of the most recent contract invocation, so it must be read before any
+/// further client call.
+fn count_funding_state_changed(
+    env: &Env,
+    contract_id: &Address,
+    invoice_id: &soroban_sdk::Symbol,
+    old_status: u32,
+    new_status: u32,
+) -> u32 {
+    let expected = FundingStateChanged {
+        name: soroban_sdk::Symbol::new(env, "fund_st_ch"),
+        invoice_id: invoice_id.clone(),
+        old_status,
+        new_status,
+    };
+    let events = env.events().all();
+    let mut count = 0u32;
+    for event in events.events().iter() {
+        if *event == expected.to_xdr(env, contract_id) {
+            count += 1;
+        }
+    }
+    count
+}
+
+/// A deposit that reaches the target closes funding: exactly one `0 -> 1` event.
+#[test]
+fn test_funding_state_changed_on_fund_transition() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let (contract_id, client) = deploy_with_id(&env);
+
+    let target = 10_000i128;
+    init_state_change_escrow(&env, &client, target, "FSCH01");
+    let invoice_id = client.get_escrow().invoice_id;
+    let investor = Address::generate(&env);
+
+    let _ = env.events().all(); // drain init events
+    client.fund(&investor, &target);
+
+    assert_eq!(
+        count_funding_state_changed(&env, &contract_id, &invoice_id, 0, 1),
+        1,
+        "the deposit that closes funding must emit exactly one 0 -> 1 event"
+    );
+    assert_eq!(client.get_escrow().status, 1);
+}
+
+/// A deposit below the target leaves the escrow open and must not emit.
+#[test]
+fn test_no_funding_state_changed_below_target() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let (contract_id, client) = deploy_with_id(&env);
+
+    init_state_change_escrow(&env, &client, 100_000, "FSCH02");
+    let invoice_id = client.get_escrow().invoice_id;
+    let investor = Address::generate(&env);
+
+    let _ = env.events().all(); // drain init events
+    client.fund(&investor, &10_000);
+
+    assert_eq!(
+        count_funding_state_changed(&env, &contract_id, &invoice_id, 0, 1),
+        0,
+        "a non-transition deposit must not emit FundingStateChanged"
+    );
+    assert_eq!(client.get_escrow().status, 0);
+}
+
+/// A batch that crosses the target emits the transition once, not once per entry.
+#[test]
+fn test_funding_state_changed_on_fund_batch_transition() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let (contract_id, client) = deploy_with_id(&env);
+
+    init_state_change_escrow(&env, &client, 100_000, "FSCH03");
+    let invoice_id = client.get_escrow().invoice_id;
+
+    let mut entries = SorobanVec::new(&env);
+    entries.push_back((Address::generate(&env), 40_000i128));
+    entries.push_back((Address::generate(&env), 70_000i128));
+
+    let _ = env.events().all(); // drain init events
+    client.fund_batch(&entries);
+
+    assert_eq!(
+        count_funding_state_changed(&env, &contract_id, &invoice_id, 0, 1),
+        1,
+        "a batch must emit the transition once, not per entry"
+    );
+    assert_eq!(client.get_escrow().status, 1);
+}
+
+/// `partial_settle` closes an under-funded escrow: exactly one `0 -> 1` event.
+#[test]
+fn test_funding_state_changed_on_partial_settle() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let (contract_id, client) = deploy_with_id(&env);
+
+    let admin = init_state_change_escrow(&env, &client, 100_000, "FSCH04");
+    let invoice_id = client.get_escrow().invoice_id;
+
+    client.fund(&Address::generate(&env), &30_000);
+    let _ = env.events().all(); // drain funding events
+    client.partial_settle(&admin);
+
+    assert_eq!(
+        count_funding_state_changed(&env, &contract_id, &invoice_id, 0, 1),
+        1,
+        "partial_settle must emit exactly one 0 -> 1 event"
+    );
+    assert_eq!(client.get_escrow().status, 1);
+}
+
+/// Lowering the target onto the funded amount promotes the escrow: one `0 -> 1` event.
+#[test]
+fn test_funding_state_changed_on_update_target_promotion() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let (contract_id, client) = deploy_with_id(&env);
+
+    init_state_change_escrow(&env, &client, 100_000, "FSCH05");
+    let invoice_id = client.get_escrow().invoice_id;
+
+    client.fund(&Address::generate(&env), &30_000);
+    let _ = env.events().all(); // drain funding events
+    client.update_funding_target(&30_000);
+
+    assert_eq!(
+        count_funding_state_changed(&env, &contract_id, &invoice_id, 0, 1),
+        1,
+        "a target update that closes funding must emit exactly one 0 -> 1 event"
+    );
+    assert_eq!(client.get_escrow().status, 1);
+}
+
+/// Lowering the target above the funded amount keeps the escrow open: no event.
+#[test]
+fn test_no_funding_state_changed_on_target_lower_above_funded() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let (contract_id, client) = deploy_with_id(&env);
+
+    init_state_change_escrow(&env, &client, 100_000, "FSCH06");
+    let invoice_id = client.get_escrow().invoice_id;
+
+    client.fund(&Address::generate(&env), &30_000);
+    let _ = env.events().all(); // drain funding events
+    client.update_funding_target(&50_000);
+
+    assert_eq!(
+        count_funding_state_changed(&env, &contract_id, &invoice_id, 0, 1),
+        0,
+        "a target update that leaves the escrow open must not emit FundingStateChanged"
+    );
+    assert_eq!(client.get_escrow().status, 0);
+}
+
+/// Cancelling an open escrow is a status change too: exactly one `0 -> 4` event.
+#[test]
+fn test_funding_state_changed_on_cancel_funding() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let (contract_id, client) = deploy_with_id(&env);
+
+    init_state_change_escrow(&env, &client, 100_000, "FSCH07");
+    let invoice_id = client.get_escrow().invoice_id;
+
+    let _ = env.events().all(); // drain init events
+    client.cancel_funding();
+
+    assert_eq!(
+        count_funding_state_changed(&env, &contract_id, &invoice_id, 0, 4),
+        1,
+        "cancel_funding must emit exactly one 0 -> 4 event"
+    );
+    assert_eq!(client.get_escrow().status, 4);
+}
+
+/// `unfund` leaves the status untouched and must not emit a transition.
+#[test]
+fn test_no_funding_state_changed_on_unfund() {
+    use soroban_sdk::testutils::Events as _;
+
+    let env = Env::default();
+    env.mock_all_auths();
+    let (contract_id, client) = deploy_with_id(&env);
+
+    init_state_change_escrow(&env, &client, 100_000, "FSCH08");
+    let invoice_id = client.get_escrow().invoice_id;
+    let investor = Address::generate(&env);
+
+    client.fund(&investor, &10_000);
+    let _ = env.events().all(); // drain funding events
+    client.unfund(&investor, &10_000);
+
+    assert_eq!(
+        count_funding_state_changed(&env, &contract_id, &invoice_id, 0, 1),
+        0,
+        "unfund must not emit FundingStateChanged"
+    );
+    assert_eq!(client.get_escrow().status, 0);
 }
