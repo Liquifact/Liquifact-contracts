@@ -191,6 +191,15 @@ pub const EVENT_SCHEMA_VERSION: u32 = 1;
 /// Revocation via [`LiquifactEscrow::revoke_attestation_digest`] does not consume a slot.
 pub const MAX_ATTESTATION_APPEND_ENTRIES: u32 = 32;
 
+/// Default attestation append-log limit when [`DataKey::AttestationLimit`] is absent.
+pub const DEFAULT_ATTESTATION_LIMIT: u32 = MAX_ATTESTATION_APPEND_ENTRIES;
+
+/// Minimum configurable attestation append-log limit.
+pub const MIN_ATTESTATION_LIMIT: u32 = 1;
+
+/// Maximum configurable attestation append-log limit.
+pub const MAX_ATTESTATION_LIMIT: u32 = MAX_ATTESTATION_APPEND_ENTRIES;
+
 /// Maximum number of indices that can be revoked in a single batch call.
 pub const MAX_ATTESTATION_REVOKE_BATCH: u32 = 32;
 
@@ -1111,6 +1120,9 @@ pub enum EscrowError {
     ClaimPushBatchTooLarge = 310,
     /// [`LiquifactEscrow::push_investor_payouts`] received the same investor more than once.
     ClaimPushBatchDuplicate = 311,
+    /// [`LiquifactEscrow::set_attestation_limit`] received a limit outside
+    /// `[MIN_ATTESTATION_LIMIT, MAX_ATTESTATION_LIMIT]`.
+    AttestationLimitOutOfRange = 312,
 }
 
 #[inline(always)]
@@ -1187,6 +1199,27 @@ pub(crate) fn guard_status_in(env: &Env, actual_status: u32, allowed: &[u32], er
 #[inline(always)]
 pub(crate) fn require_funding_open(env: &Env, status: u32) {
     guard_status_eq(env, status, 0, EscrowError::EscrowNotOpenForFunding);
+}
+
+/// Emits [`FundingStateChanged`] when `escrow.status` differs from `old_status`.
+///
+/// Shared by every funding entrypoint that can change the status, so the
+/// "exactly one event per transition" invariant lives in one place instead of
+/// being re-implemented (and possibly forgotten) at each call site. Calls that
+/// leave the status unchanged emit nothing.
+pub(crate) fn emit_funding_state_changed(env: &Env, escrow: &InvoiceEscrow, old_status: u32) {
+    if escrow.status == old_status {
+        return;
+    }
+    FundingStateChanged {
+        // `symbol_short!` is capped at 9 characters; the documented routing
+        // symbol is longer, so build it explicitly.
+        name: Symbol::new(env, "fund_st_ch"),
+        invoice_id: escrow.invoice_id.clone(),
+        old_status,
+        new_status: escrow.status,
+    }
+    .publish(env);
 }
 
 /// Shared guard: assert that no legal/compliance hold is currently active.
@@ -1641,6 +1674,10 @@ pub enum DataKey {
     /// Total count of allowlisted investors.
     /// **Instance** storage. Maintained as an O(1) counter. Absent ⇒ `0`.
     AllowlistCount,
+    /// Admin-configured maximum number of entries in [`DataKey::AttestationAppendLog`].
+    /// **Instance** storage. **Additive key (ADR-007):** absent ⇒ [`DEFAULT_ATTESTATION_LIMIT`] (32).
+    /// Updatable via [`LiquifactEscrow::set_attestation_limit`].
+    AttestationLimit,
 }
 
 // --- Data types ---
@@ -2135,6 +2172,18 @@ pub struct EscrowFunded {
     /// The `min_lock_secs` of the matched [`YieldTier`] (0 when base yield applies — no tier,
     /// no lock commitment, or simple fund). See [`LiquifactEscrow::effective_yield_for_commitment`].
     pub tier_lock_secs: u64,
+}
+
+#[contractevent]
+pub struct FundingStateChanged {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    /// Escrow funding status before the call (`0` open, `1` funded, `4` cancelled).
+    pub old_status: u32,
+    /// Escrow funding status after the call.
+    pub new_status: u32,
 }
 
 /// Emitted by [`LiquifactEscrow::fund_with_reference`] immediately after [`EscrowFunded`],
@@ -2792,6 +2841,15 @@ pub struct AttestationDigestUnrevoked {
 }
 
 #[contractevent]
+pub struct AttestationLimitUpdated {
+    #[topic]
+    pub name: Symbol,
+    pub invoice_id: Symbol,
+    pub old_limit: u32,
+    pub new_limit: u32,
+}
+
+#[contractevent]
 pub struct MaturityMaxHorizonUpdated {
     #[topic]
     pub name: Symbol,
@@ -3217,9 +3275,15 @@ impl LiquifactEscrow {
                 return active;
             }
         }
+        // `activate_fee_schedule` stores an `Option<FeeSchedule>` under this
+        // key: `Some(schedule)` once a schedule has been replaced, or `None`
+        // (encoded as `Void`) after the first activation. Read the stored
+        // option and flatten it so the `None` case does not attempt to decode
+        // `Void` as a `FeeSchedule`.
         env.storage()
             .instance()
-            .get(&FeeScheduleStorageKey::Previous)
+            .get::<_, Option<FeeSchedule>>(&FeeScheduleStorageKey::Previous)
+            .flatten()
     }
     fn legal_hold_active(env: &Env) -> bool {
         env.storage()
@@ -4641,9 +4705,10 @@ impl LiquifactEscrow {
             primary != Some(digest.clone()) && !log.contains(&digest),
             EscrowError::AttestationDigestDuplicate,
         );
+        let limit = Self::get_attestation_limit(env.clone());
         ensure(
             env,
-            log.len() < MAX_ATTESTATION_APPEND_ENTRIES,
+            log.len() < limit,
             EscrowError::AttestationAppendLogCapacityReached,
         );
         let index = log.len();
@@ -4684,6 +4749,38 @@ impl LiquifactEscrow {
             .get(&DataKey::AttestationAuthor(index))
     }
 
+    /// Returns the configured attestation append-log limit, defaulting to
+    /// [`DEFAULT_ATTESTATION_LIMIT`] (32) when [`DataKey::AttestationLimit`] is absent.
+    pub fn get_attestation_limit(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::AttestationLimit)
+            .unwrap_or(DEFAULT_ATTESTATION_LIMIT)
+    }
+
+    /// Admin-only setter for the attestation append-log limit.
+    /// Rejects values outside `[MIN_ATTESTATION_LIMIT, MAX_ATTESTATION_LIMIT]` with
+    /// [`EscrowError::AttestationLimitOutOfRange`] and emits [`AttestationLimitUpdated`].
+    pub fn set_attestation_limit(env: Env, limit: u32) {
+        let escrow = Self::load_escrow_require_admin(&env);
+        ensure(
+            &env,
+            limit >= MIN_ATTESTATION_LIMIT && limit <= MAX_ATTESTATION_LIMIT,
+            EscrowError::AttestationLimitOutOfRange,
+        );
+        let old_limit = Self::get_attestation_limit(env.clone());
+        env.storage()
+            .instance()
+            .set(&DataKey::AttestationLimit, &limit);
+        AttestationLimitUpdated {
+            name: symbol_short!("att_lim"),
+            invoice_id: escrow.invoice_id,
+            old_limit,
+            new_limit: limit,
+        }
+        .publish(&env);
+    }
+
     pub fn get_attestation_append_log(env: Env) -> Vec<BytesN<32>> {
         Self::load_attestation_log(&env)
     }
@@ -4720,10 +4817,10 @@ impl LiquifactEscrow {
         // Extend each per-investor persistent key that exists.
         // Check before extend to avoid trapping on missing keys.
         let keys_to_check = [
-            DataKey::InvestorContribution(investor.clone()),
-            DataKey::InvestorEffectiveYield(investor.clone()),
-            DataKey::InvestorClaimNotBefore(investor.clone()),
-            DataKey::InvestorClaimed(investor.clone()),
+            keys::investor_contribution(investor.clone()),
+            keys::investor_effective_yield(investor.clone()),
+            keys::investor_claim_not_before(investor.clone()),
+            keys::investor_claimed(investor.clone()),
             DataKey::InvestorAllowlisted(investor.clone()),
             DataKey::InvestorFrozen(investor.clone()),
         ];
@@ -7054,6 +7151,7 @@ impl LiquifactEscrow {
         );
 
         let old_target = escrow.funding_target;
+        let old_status = escrow.status;
         escrow.funding_target = new_target;
 
         // If lowering the target causes it to equal (or fall to) the already-funded
@@ -7079,6 +7177,8 @@ impl LiquifactEscrow {
         }
 
         env.storage().instance().set(&DataKey::Escrow, &escrow);
+
+        emit_funding_state_changed(&env, &escrow, old_status);
 
         FundingTargetUpdated {
             name: symbol_short!("fund_tgt"),
@@ -8025,6 +8125,7 @@ impl LiquifactEscrow {
         );
         escrow.funded_amount = new_funded_amount;
 
+        let old_status = escrow.status;
         if escrow.status == 0 && escrow.funded_amount >= escrow.funding_target {
             escrow.status = 1;
             if !env
@@ -8089,6 +8190,8 @@ impl LiquifactEscrow {
             &this,
             amount,
         );
+
+        emit_funding_state_changed(&env, &escrow, old_status);
 
         EscrowFunded {
             name: symbol_short!("funded"),
@@ -8164,6 +8267,7 @@ impl LiquifactEscrow {
         }
 
         // Transition to funded status early.
+        let old_status = escrow.status;
         escrow.status = 1;
 
         // Write FundingCloseSnapshot if not already present.
@@ -8184,6 +8288,8 @@ impl LiquifactEscrow {
         }
 
         env.storage().instance().set(&DataKey::Escrow, &escrow);
+
+        emit_funding_state_changed(&env, &escrow, old_status);
 
         EscrowPartialSettle {
             name: symbol_short!("part_set"),
@@ -9776,19 +9882,19 @@ impl LiquifactEscrow {
                 env.storage().persistent().extend_ttl(&k, ttl, ttl);
             }
             // Extend persistent TTL for per-investor persistent keys used by this contract.
-            let ck = DataKey::InvestorContribution(addr.clone());
+            let ck = keys::investor_contribution(addr.clone());
             if env.storage().persistent().has(&ck) {
                 env.storage().persistent().extend_ttl(&ck, ttl, ttl);
             }
-            let yk = DataKey::InvestorEffectiveYield(addr.clone());
+            let yk = keys::investor_effective_yield(addr.clone());
             if env.storage().persistent().has(&yk) {
                 env.storage().persistent().extend_ttl(&yk, ttl, ttl);
             }
-            let nk = DataKey::InvestorClaimNotBefore(addr.clone());
+            let nk = keys::investor_claim_not_before(addr.clone());
             if env.storage().persistent().has(&nk) {
                 env.storage().persistent().extend_ttl(&nk, ttl, ttl);
             }
-            let clk = DataKey::InvestorClaimed(addr.clone());
+            let clk = keys::investor_claimed(addr.clone());
             if env.storage().persistent().has(&clk) {
                 env.storage().persistent().extend_ttl(&clk, ttl, ttl);
             }
@@ -10218,8 +10324,11 @@ impl LiquifactEscrow {
 
         guard_status_eq(&env, escrow.status, 0, EscrowError::CancelFundingNotOpen);
 
+        let old_status = escrow.status;
         escrow.status = 4;
         env.storage().instance().set(&DataKey::Escrow, &escrow);
+
+        emit_funding_state_changed(&env, &escrow, old_status);
 
         FundingCancelled {
             name: symbol_short!("fund_can"),
