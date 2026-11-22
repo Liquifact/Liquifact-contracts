@@ -114,6 +114,7 @@ mod settle_batch_results;
 mod settlement;
 mod settlement_config_view;
 mod settlement_funding;
+mod settlement_upgrade_auth;
 mod storage_limit;
 mod timelocked_upgrade;
 mod unfund_investor_index;
