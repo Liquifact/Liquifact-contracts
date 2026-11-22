@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 /// Centralized constructors for funding-related storage keys.
 ///
 /// #Purpose
@@ -81,11 +80,13 @@ pub(crate) fn funding_deadline() -> DataKey {
 }
 
 /// Instance-storage original funding deadline baseline (set on first extension, absent = no extension yet).
+#[allow(dead_code)]
 pub(crate) fn original_funding_deadline() -> DataKey {
     DataKey::OriginalFundingDeadline
 }
 
 /// Instance-storage counter of accepted funding-deadline extensions.
+#[allow(dead_code)]
 pub(crate) fn funding_deadline_extension_count() -> DataKey {
     DataKey::FundingDeadlineExtensionCount
 }
@@ -101,16 +102,19 @@ pub(crate) fn funding_token() -> DataKey {
 }
 
 /// Instance-storage invocation nonce for cross-contract callbacks.
+#[allow(dead_code)]
 pub(crate) fn callback_nonce() -> DataKey {
     DataKey::CallbackNonce
 }
 
 /// Per-investor persistent payout recipient override (absent = pay the investor directly).
+#[allow(dead_code)]
 pub(crate) fn investor_payout_recipient(investor: Address) -> DataKey {
     DataKey::InvestorPayoutRecipient(investor)
 }
 
 /// Instance-storage pending callback context keyed by invocation nonce.
+#[allow(dead_code)]
 pub(crate) fn callback_context(nonce: u64) -> DataKey {
     DataKey::CallbackContext(nonce)
 }
@@ -132,6 +136,7 @@ pub(crate) fn investor_refunded(investor: Address) -> DataKey {
 }
 
 /// Instance-storage optional performance fee in basis points taken from investor yield coupon.
+#[allow(dead_code)]
 pub(crate) fn performance_fee_bps() -> DataKey {
     DataKey::PerformanceFeeBps
 }
