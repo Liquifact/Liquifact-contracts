@@ -67,6 +67,30 @@ The CI is configured in `.github/workflows/ci.yml` to run:
 4. `cargo test`
 5. `cargo llvm-cov --features testutils --fail-under-lines 95 --summary-only -p liquifact_escrow`
 
+## Checking the WASM Size Budget
+
+Soroban enforces a **128 KiB (131,072 bytes)** contract size limit. To catch size regressions locally before opening a PR, build the release WASM and run `scripts/check_wasm_size.py`:
+
+```bash
+cargo build --target wasm32v1-none --release -p liquifact_escrow
+python3 scripts/check_wasm_size.py
+```
+
+By default, the script inspects `target/wasm32v1-none/release/liquifact_escrow.wasm` against a budget of `131072` bytes. You can override the budget with `--max` or pass a custom `.wasm` path (for example, after running `scripts/strip_spec_docs.py`):
+
+```bash
+python3 scripts/check_wasm_size.py --max 120000
+python3 scripts/check_wasm_size.py path/to/stripped.wasm --max 131072
+```
+
+### Exit Codes
+
+| Exit Code | Meaning |
+| --- | --- |
+| `0` | WASM file is within the size budget |
+| `1` | WASM file exceeds the size budget |
+| `2` | WASM file is missing (or not a regular file) |
+
 ## Notes
 
 - Current coverage: **98.17%** for `lib.rs` (main contract code)
