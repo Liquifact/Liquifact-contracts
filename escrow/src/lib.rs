@@ -1684,6 +1684,10 @@ pub enum DataKey {
     /// [`LiquifactEscrow::claim_investor_payout`] or [`LiquifactEscrow::push_investor_payouts`].
     /// **Instance** storage. Absent ⇒ `0` (additive key per ADR-007).
     ClaimedInvestorCount,
+    /// Number of distinct investors whose settled payout has been claimed via
+    /// [`LiquifactEscrow::claim_investor_payout`] or [`LiquifactEscrow::push_investor_payouts`].
+    /// **Instance** storage. Absent ⇒ `0` (additive key per ADR-007).
+    ClaimedInvestorCount,
 }
 
 // --- Data types ---
