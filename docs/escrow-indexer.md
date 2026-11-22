@@ -43,12 +43,22 @@ Contract event names (`symbol_short`) emitted by `escrow/src/lib.rs`:
 - `al_set` - investor allowlist membership set
 - `inv_cap` - max unique investors cap lowered (admin, open state only)
 
-See also: `docs/EVENT_SCHEMA.md`.
+See also: `docs/EVENT_SCHEMA.md` for the authoritative topic layout and the full
+event catalog.
+
+The symbols above are the stable `name` topic emitted by `#[contractevent]`.
+`#[contractevent]` puts the Rust event struct name at `topic[0]` and the `name`
+symbol at `topic[1]`, so indexers must match `topic[1] == name` (not `topic[0]`).
+Every business-state-mutating escrow entrypoint publishes at least one such
+event; the executable mapping of entrypoint -> expected topic symbol is
+maintained in `escrow/src/tests/event_emission.rs`. Pure views and a small set
+of explicitly justified operational/TTL helpers are listed in that module's
+exemption table and must not be relied on for business-state reconciliation.
 
 ### RPC event filter baseline
 
 - Filter by `contractId` = escrow contract id.
-- Filter by topics where `topic[0]` is the event symbol above.
+- Filter by topics where `topic[1]` is the stable event symbol (for example `funded`).
 - Persist `(ledger, txHash, eventIndex)` as your idempotency cursor.
 
 ### Horizon/websocket note
