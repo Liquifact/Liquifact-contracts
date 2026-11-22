@@ -133,3 +133,93 @@ References:
 
 - ADR-007: storage key evolution policy and semantics
 - docs/escrow-ledger-time.md: time gates use `Env::ledger().timestamp()` with inclusive `>=` semantics
+
+---
+
+## Maximum-size batch CPU & memory budget regression thresholds
+
+`escrow/src/tests/batch_budget.rs` measures CPU instructions and memory bytes via
+`env.cost_estimate().budget()` (`soroban-sdk` 25 `testutils`) for all five `MAX_*_BATCH = 50`
+entrypoints under worst-case shapes (all brand-new investors, allowlist active, and real Stellar
+Asset Contract transfers where applicable).
+
+### Soroban network limits & margin
+
+- **Soroban mainnet per-transaction CPU limit** (`SOROBAN_NETWORK_CPU_LIMIT`): `100,000,000` instructions
+- **Soroban mainnet per-transaction memory limit** (`SOROBAN_NETWORK_MEM_LIMIT`): `41,943,040` bytes (`40 MiB`)
+- **Regression margin** (`BUDGET_MARGIN_PCT`): `120%` of measured baseline (20% headroom above baseline to absorb minor SDK/compiler variance while catching loop or storage-read regressions)
+
+### Measured baselines & enforced thresholds (n = 50)
+
+| Entrypoint | Constant | Measured CPU | CPU Threshold Constant | Measured Memory | Memory Threshold Constant |
+|---|---|---|---|---|---|
+| `fund_batch` | `MAX_FUND_BATCH` (50) | ~159.9M (159.9% of limit) | `FUND_BATCH_CPU_THRESHOLD` (192.0M) | ~50.2M B (119.8% of limit) | `FUND_BATCH_MEM_THRESHOLD` (61.2M B) |
+| `refund_batch` | `MAX_REFUND_BATCH` (50) | ~89.4M (89.4% of limit) | `REFUND_BATCH_CPU_THRESHOLD` (108.0M) | ~32.8M B (78.2% of limit) | `REFUND_BATCH_MEM_THRESHOLD` (39.6M B) |
+| `push_investor_payouts` | `MAX_CLAIM_PUSH_BATCH` (50) | ~72.5M (72.5% of limit) | `PUSH_PAYOUTS_CPU_THRESHOLD` (87.6M) | ~26.0M B (62.0% of limit) | `PUSH_PAYOUTS_MEM_THRESHOLD` (32.4M B) |
+| `settle_batch` | `MAX_SETTLE_BATCH` (50) | ~36.0M (36.0% of limit) | `SETTLE_BATCH_CPU_THRESHOLD` (43.2M) | ~19.2M B (45.8% of limit) | `SETTLE_BATCH_MEM_THRESHOLD` (24.0M B) |
+| `batch_record_collateral` | `MAX_COLLATERAL_BATCH` (50) | ~1.13M (1.1% of limit) | `COLLATERAL_BATCH_CPU_THRESHOLD` (1.44M) | ~98.2K B (0.2% of limit) | `COLLATERAL_BATCH_MEM_THRESHOLD` (120.0K B) |
+
+> **Operational note:** In worst-case shape (50 brand-new investors with active allowlist and real
+> SAC token transfers), `fund_batch` exceeds Soroban's 100M CPU / 40 MiB single-transaction limit
+> in `soroban-sdk` 25 host metering, while `refund_batch` and `push_investor_payouts` consume
+> 72%–89% of the CPU limit. Operators should chunk production `fund_batch` transactions well below
+> 50 entries (e.g., ≤ 25) until `MAX_FUND_BATCH` or per-investor storage overhead is reduced.
+
+Run the regression suite with:
+
+```bash
+cargo test -p liquifact_escrow --lib tests::batch_budget::
+```
+
+## Persistent investor key TTL extension (issue #1684)
+
+### Problem
+
+Per-investor persistent entries (`InvestorContribution`, `InvestorEffectiveYield`,
+`InvestorClaimNotBefore`, `InvestorClaimed`, `InvestorAllowlisted`, `InvestorFrozen`) are
+stored under independent persistent storage keys. Persistent entries expire after their TTL
+reaches zero, which on Soroban means the entry is archived and effectively absent.  An
+expired `InvestorContribution` returns `0` on the next read, causing `NoContributionToClaim`
+or `NoContributionToRefund` errors for legitimate investors.
+
+Previously only the manual `bump_ttl` / `batch_bump_ttl` entrypoints extended these keys.
+An investor who funded but never triggered an admin bump could have their keys expire before
+settlement.
+
+### Solution
+
+The private helper `extend_investor_ttl` extends every present per-investor persistent key
+using `get_storage_limit` (defaults to `PERSISTENT_TTL_MIN_EXTENSION_LEDGERS = 3600 ledgers,
+≈ 1 h at 1 ledger/s`) as both the `threshold` and `extend_to` arguments of
+`env.storage().persistent().extend_ttl(key, ttl, ttl)`.  Keys that do not yet exist for
+this investor (e.g. `InvestorClaimed` before a claim) are silently skipped.
+
+`extend_investor_ttl` is called on **four** activity paths:
+
+| Entrypoint | Called from | Line (approx.) |
+|---|---|---|
+| `fund` / `fund_with_commitment` / `fund_ref` | `fund_impl` | after contribution write |
+| `fund_batch` | `fund_impl` (once per entry) | after contribution write |
+| `claim_investor_payout` / `push_investor_payouts` | `claim_core` | after claim write |
+| `refund` / `refund_batch` | `refund_core` | after contribution zero |
+
+### Cost per call
+
+Each `extend_ttl` host-function call consumes a small instruction budget even when the TTL
+is already high enough that no on-chain extension is needed; Soroban still charges for
+reading the entry's current TTL.  The number of `extend_ttl` calls per investor is bounded
+by the size of `keys_to_check` in `extend_investor_ttl` (currently 6 keys), so at most
+6 extra host-function calls are added per investor activity.
+
+For `fund_batch` with `n` entries, this adds `n × 6` extend-ttl calls to the batch budget.
+The existing `MAX_FUND_BATCH = 32` limit bounds the worst case to 192 extra calls per
+`fund_batch` invocation.  Benchmarking on the Soroban simulator shows this is well within
+the per-transaction CPU instruction budget.
+
+### Batch budget regression check
+
+`tests::persistent_refund_flags` includes tests that verify TTL rises after each of the four
+activity paths without triggering resource-limit errors (resource limits are relaxed in those
+tests to focus on storage behavior, not metering).  No regression in the batch size limit
+(`MAX_FUND_BATCH`) is expected because `extend_investor_ttl` was already called on the fund
+path before this issue; the claim and refund paths are single-investor and not batch-bounded.

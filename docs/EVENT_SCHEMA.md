@@ -72,6 +72,13 @@ The current contract defines 20 event structs.
 | `AttestationDigestUnrevoked` | `att_unrev` | `unrevoke_attestation_digest` |
 | `AllowlistEnabledChanged` | `al_ena` | `set_allowlist_active` |
 | `InvestorAllowlistChanged` | `al_set` | `set_investor_allowlisted`, `set_investors_allowlisted` |
+| `AdminProposalSuperseded` | `adm_sup` | `propose_admin`, `transfer_admin` |
+| `AdminProposalCancelled` | `adm_can` | `cancel_pending_admin` |
+| `AdminRecoveredEvent` | `adm_rec` | `recover_admin` |
+| `MaxUniqueInvestorsCapRaised` | `raise_cap` | `raise_max_unique_investors` |
+| `MinContributionFloorLowered` | `floor_lo` | `lower_min_contribution_floor` |
+| `MaxPerInvestorCapRaised` | `inv_cap` | `raise_max_per_investor` |
+| `FundingDeadlineExtended` | `fund_ext` | `extend_funding_deadline` |
 
 The `name` symbol for each event is part of the compatibility contract. Symbols
 are stable identifiers: they MUST NOT be reused for a different event and MUST
@@ -548,6 +555,144 @@ if the input exceeds the bound the call fails before any event is emitted, so
 consumers never observe a partial batch. Duplicate investors within a single
 batch are rejected before emission to keep the event stream deterministic.
 
+### `AdminProposalSuperseded`
+
+Emitted during `propose_admin` (including via the deprecated `transfer_admin`
+shim) when an existing pending admin proposal is replaced with a different
+address.
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `admin_proposal_superseded` |
+| 1 | `name` | `Symbol` | `adm_sup` |
+| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
+
+Data:
+
+| Field | Type |
+|---|---|
+| `previous_pending` | `Address` |
+| `new_pending` | `Address` |
+
+### `AdminProposalCancelled`
+
+Emitted after successful `cancel_pending_admin`.
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `admin_proposal_cancelled` |
+| 1 | `name` | `Symbol` | `adm_can` |
+| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
+
+Data:
+
+| Field | Type |
+|---|---|
+| `cancelled_pending` | `Address` |
+
+### `AdminRecoveredEvent`
+
+Emitted after successful `recover_admin` when the current admin clears an
+expired, abandoned admin-transfer proposal after the proposal timelock.
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `admin_recovered_event` |
+| 1 | `name` | `Symbol` | `adm_rec` |
+| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
+
+Data:
+
+| Field | Type |
+|---|---|
+| `current_admin` | `Address` |
+| `abandoned_pending` | `Address` |
+| `reason` | `String` |
+
+### `MaxUniqueInvestorsCapRaised`
+
+Emitted after successful `raise_max_unique_investors`.
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `max_unique_investors_cap_raised` |
+| 1 | `name` | `Symbol` | `raise_cap` |
+| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
+
+Data:
+
+| Field | Type |
+|---|---|
+| `old_cap` | `u32` |
+| `new_cap` | `u32` |
+
+### `MinContributionFloorLowered`
+
+Emitted after successful `lower_min_contribution_floor`.
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `min_contribution_floor_lowered` |
+| 1 | `name` | `Symbol` | `floor_lo` |
+| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
+
+Data:
+
+| Field | Type |
+|---|---|
+| `old_floor` | `i128` |
+| `new_floor` | `i128` |
+
+### `MaxPerInvestorCapRaised`
+
+Emitted after successful `raise_max_per_investor`. Note that its `name` symbol
+(`inv_cap`) is shared with `MaxUniqueInvestorsCapLowered`, so indexers should
+disambiguate using `topic[0]` (`max_per_investor_cap_raised`).
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `max_per_investor_cap_raised` |
+| 1 | `name` | `Symbol` | `inv_cap` |
+| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
+
+Data:
+
+| Field | Type |
+|---|---|
+| `old_cap` | `i128` |
+| `new_cap` | `i128` |
+
+### `FundingDeadlineExtended`
+
+Emitted after successful `extend_funding_deadline`.
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `funding_deadline_extended` |
+| 1 | `name` | `Symbol` | `fund_ext` |
+| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
+
+Data:
+
+| Field | Type |
+|---|---|
+| `old_deadline` | `u64` |
+| `new_deadline` | `u64` |
+
 ## Nested Types
 
 ### `InvoiceEscrow`
@@ -629,4 +774,5 @@ Status values:
 | 2026-06-24 | v0.4 | Added `settled_at_ledger_timestamp` field to `EscrowSettled` event; added `is_settleable` view |
 | 2026-07-27 | v0.5 | Added `AttestationDigestUnrevoked` event for `unrevoke_attestation_digest`; updated `AttestationDigestRevoked` to include `revoke_attestation_digests` |
 | 2026-08-14 | v0.6 | Issue #allowlist_event_payloads: documented compatibility contracts for topic ordering, `name` symbols, version topic, batch emission atomicity, and forward-compatible data reads |
+| 2026-11-22 | v0.7 | Documented `AdminProposalSuperseded`, `AdminProposalCancelled`, `AdminRecoveredEvent`, `MaxUniqueInvestorsCapRaised`, `MinContributionFloorLowered`, `MaxPerInvestorCapRaised`, and `FundingDeadlineExtended` events |
 | 2026-11-22 | v0.7 | Issue #1657: implemented `FundingStateChanged` (`fund_st_ch`) with `old_status` / `new_status` and documented the transitions it covers |

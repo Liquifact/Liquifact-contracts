@@ -191,6 +191,15 @@ pub const EVENT_SCHEMA_VERSION: u32 = 1;
 /// Revocation via [`LiquifactEscrow::revoke_attestation_digest`] does not consume a slot.
 pub const MAX_ATTESTATION_APPEND_ENTRIES: u32 = 32;
 
+/// Default attestation append-log limit when [`DataKey::AttestationLimit`] is absent.
+pub const DEFAULT_ATTESTATION_LIMIT: u32 = MAX_ATTESTATION_APPEND_ENTRIES;
+
+/// Minimum configurable attestation append-log limit.
+pub const MIN_ATTESTATION_LIMIT: u32 = 1;
+
+/// Maximum configurable attestation append-log limit.
+pub const MAX_ATTESTATION_LIMIT: u32 = MAX_ATTESTATION_APPEND_ENTRIES;
+
 /// Maximum number of indices that can be revoked in a single batch call.
 pub const MAX_ATTESTATION_REVOKE_BATCH: u32 = 32;
 
@@ -1111,6 +1120,9 @@ pub enum EscrowError {
     ClaimPushBatchTooLarge = 310,
     /// [`LiquifactEscrow::push_investor_payouts`] received the same investor more than once.
     ClaimPushBatchDuplicate = 311,
+    /// [`LiquifactEscrow::set_attestation_limit`] received a limit outside
+    /// `[MIN_ATTESTATION_LIMIT, MAX_ATTESTATION_LIMIT]`.
+    AttestationLimitOutOfRange = 312,
 }
 
 #[inline(always)]
@@ -1662,6 +1674,10 @@ pub enum DataKey {
     /// Total count of allowlisted investors.
     /// **Instance** storage. Maintained as an O(1) counter. Absent ⇒ `0`.
     AllowlistCount,
+    /// Admin-configured maximum number of entries in [`DataKey::AttestationAppendLog`].
+    /// **Instance** storage. **Additive key (ADR-007):** absent ⇒ [`DEFAULT_ATTESTATION_LIMIT`] (32).
+    /// Updatable via [`LiquifactEscrow::set_attestation_limit`].
+    AttestationLimit,
 }
 
 // --- Data types ---
@@ -2825,6 +2841,15 @@ pub struct AttestationDigestUnrevoked {
 }
 
 #[contractevent]
+pub struct AttestationLimitUpdated {
+    #[topic]
+    pub name: Symbol,
+    pub invoice_id: Symbol,
+    pub old_limit: u32,
+    pub new_limit: u32,
+}
+
+#[contractevent]
 pub struct MaturityMaxHorizonUpdated {
     #[topic]
     pub name: Symbol,
@@ -3250,9 +3275,15 @@ impl LiquifactEscrow {
                 return active;
             }
         }
+        // `activate_fee_schedule` stores an `Option<FeeSchedule>` under this
+        // key: `Some(schedule)` once a schedule has been replaced, or `None`
+        // (encoded as `Void`) after the first activation. Read the stored
+        // option and flatten it so the `None` case does not attempt to decode
+        // `Void` as a `FeeSchedule`.
         env.storage()
             .instance()
-            .get(&FeeScheduleStorageKey::Previous)
+            .get::<_, Option<FeeSchedule>>(&FeeScheduleStorageKey::Previous)
+            .flatten()
     }
     fn legal_hold_active(env: &Env) -> bool {
         env.storage()
@@ -4666,9 +4697,10 @@ impl LiquifactEscrow {
             primary != Some(digest.clone()) && !log.contains(&digest),
             EscrowError::AttestationDigestDuplicate,
         );
+        let limit = Self::get_attestation_limit(env.clone());
         ensure(
             env,
-            log.len() < MAX_ATTESTATION_APPEND_ENTRIES,
+            log.len() < limit,
             EscrowError::AttestationAppendLogCapacityReached,
         );
         let index = log.len();
@@ -4709,6 +4741,38 @@ impl LiquifactEscrow {
             .get(&DataKey::AttestationAuthor(index))
     }
 
+    /// Returns the configured attestation append-log limit, defaulting to
+    /// [`DEFAULT_ATTESTATION_LIMIT`] (32) when [`DataKey::AttestationLimit`] is absent.
+    pub fn get_attestation_limit(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::AttestationLimit)
+            .unwrap_or(DEFAULT_ATTESTATION_LIMIT)
+    }
+
+    /// Admin-only setter for the attestation append-log limit.
+    /// Rejects values outside `[MIN_ATTESTATION_LIMIT, MAX_ATTESTATION_LIMIT]` with
+    /// [`EscrowError::AttestationLimitOutOfRange`] and emits [`AttestationLimitUpdated`].
+    pub fn set_attestation_limit(env: Env, limit: u32) {
+        let escrow = Self::load_escrow_require_admin(&env);
+        ensure(
+            &env,
+            limit >= MIN_ATTESTATION_LIMIT && limit <= MAX_ATTESTATION_LIMIT,
+            EscrowError::AttestationLimitOutOfRange,
+        );
+        let old_limit = Self::get_attestation_limit(env.clone());
+        env.storage()
+            .instance()
+            .set(&DataKey::AttestationLimit, &limit);
+        AttestationLimitUpdated {
+            name: symbol_short!("att_lim"),
+            invoice_id: escrow.invoice_id,
+            old_limit,
+            new_limit: limit,
+        }
+        .publish(&env);
+    }
+
     pub fn get_attestation_append_log(env: Env) -> Vec<BytesN<32>> {
         Self::load_attestation_log(&env)
     }
@@ -4745,10 +4809,10 @@ impl LiquifactEscrow {
         // Extend each per-investor persistent key that exists.
         // Check before extend to avoid trapping on missing keys.
         let keys_to_check = [
-            DataKey::InvestorContribution(investor.clone()),
-            DataKey::InvestorEffectiveYield(investor.clone()),
-            DataKey::InvestorClaimNotBefore(investor.clone()),
-            DataKey::InvestorClaimed(investor.clone()),
+            keys::investor_contribution(investor.clone()),
+            keys::investor_effective_yield(investor.clone()),
+            keys::investor_claim_not_before(investor.clone()),
+            keys::investor_claimed(investor.clone()),
             DataKey::InvestorAllowlisted(investor.clone()),
             DataKey::InvestorFrozen(investor.clone()),
         ];
@@ -9810,19 +9874,19 @@ impl LiquifactEscrow {
                 env.storage().persistent().extend_ttl(&k, ttl, ttl);
             }
             // Extend persistent TTL for per-investor persistent keys used by this contract.
-            let ck = DataKey::InvestorContribution(addr.clone());
+            let ck = keys::investor_contribution(addr.clone());
             if env.storage().persistent().has(&ck) {
                 env.storage().persistent().extend_ttl(&ck, ttl, ttl);
             }
-            let yk = DataKey::InvestorEffectiveYield(addr.clone());
+            let yk = keys::investor_effective_yield(addr.clone());
             if env.storage().persistent().has(&yk) {
                 env.storage().persistent().extend_ttl(&yk, ttl, ttl);
             }
-            let nk = DataKey::InvestorClaimNotBefore(addr.clone());
+            let nk = keys::investor_claim_not_before(addr.clone());
             if env.storage().persistent().has(&nk) {
                 env.storage().persistent().extend_ttl(&nk, ttl, ttl);
             }
-            let clk = DataKey::InvestorClaimed(addr.clone());
+            let clk = keys::investor_claimed(addr.clone());
             if env.storage().persistent().has(&clk) {
                 env.storage().persistent().extend_ttl(&clk, ttl, ttl);
             }

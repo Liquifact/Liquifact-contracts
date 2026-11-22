@@ -29,14 +29,15 @@ fn test_fund_i128_min_rejected() {
 }
 
 #[test]
-fn test_fund_i128_max_accepted() {
+fn test_fund_i128_max_rejected() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
     let investor = Address::generate(&env);
     default_init(&client, &env, &admin, &sme);
-    let funded = client.fund(&investor, &i128::MAX);
-    assert_eq!(funded.funded_amount, i128::MAX);
-    assert_eq!(funded.status, 0);
+    assert_contract_error(
+        client.try_fund(&investor, &i128::MAX),
+        EscrowError::YieldWeightOverflow,
+    );
 }
 
 #[test]
@@ -47,6 +48,19 @@ fn test_fund_exact_max_invoice_amount_accepted() {
     default_init(&client, &env, &admin, &sme);
     let funded = client.fund(&investor, &crate::MAX_INVOICE_AMOUNT);
     assert_eq!(funded.funded_amount, crate::MAX_INVOICE_AMOUNT);
+    assert_eq!(funded.status, 1);
+}
+
+#[test]
+fn test_fund_above_max_invoice_amount_rejected() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    default_init(&client, &env, &admin, &sme);
+    assert_contract_error(
+        client.try_fund(&investor, &(crate::MAX_INVOICE_AMOUNT + 1)),
+        EscrowError::FundedAmountExceedsSafeEnvelope,
+    );
 }
 
 // ── fund_with_commitment amount boundaries ──────────────────────
@@ -64,13 +78,15 @@ fn test_fund_with_commitment_negative_amount_rejected() {
 }
 
 #[test]
-fn test_fund_with_commitment_i128_max_accepted() {
+fn test_fund_with_commitment_i128_max_rejected() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);
     let investor = Address::generate(&env);
     default_init(&client, &env, &admin, &sme);
-    let funded = client.fund_with_commitment(&investor, &i128::MAX, &0u64);
-    assert_eq!(funded.funded_amount, i128::MAX);
+    assert_contract_error(
+        client.try_fund_with_commitment(&investor, &i128::MAX, &0u64),
+        EscrowError::YieldWeightOverflow,
+    );
 }
 
 // ── fund_batch size boundaries ─────────────────────────────────
