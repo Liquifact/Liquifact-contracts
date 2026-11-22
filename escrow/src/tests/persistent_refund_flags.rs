@@ -349,3 +349,279 @@ fn bump_ttl_extends_investor_refunded_ttl_when_refunded() {
     addrs.push_back(investor.clone());
     client.bump_ttl(&addrs);
 }
+
+// ── #1684: TTL extended on fund, fund_batch, claim_investor_payout, refund ──────
+
+/// Helper: set up a settled escrow with one funded investor ready for claim.
+fn setup_settled_with_investor<'a>(
+    env: &'a Env,
+    invoice_id: &str,
+) -> (LiquifactEscrowClient<'a>, Address, Address) {
+    let (client, admin, sme) = setup(env);
+    let token = install_stellar_asset_token(env);
+    let treasury = Address::generate(env);
+    let amount = 1_000_000i128;
+    let yield_bps = 400i64;
+
+    client.init(
+        &admin,
+        &String::from_str(env, invoice_id),
+        &sme,
+        &amount,
+        &yield_bps,
+        &0u64,
+        &token.id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    let investor = Address::generate(env);
+    token.stellar.mint(&investor, &amount);
+    client.fund(&investor, &amount);
+
+    // Mint yield to the contract and settle.
+    let yield_amount = amount * yield_bps as i128 / 10_000;
+    let contract_addr = client.address.clone();
+    token.stellar.mint(&contract_addr, &yield_amount);
+    client.settle();
+
+    (client, contract_addr, investor)
+}
+
+#[test]
+fn fund_extends_investor_contribution_ttl() {
+    let env = Env::default();
+    env.cost_estimate().disable_resource_limits();
+    env.cost_estimate().budget().reset_unlimited();
+
+    let (client, contract_addr, _) = setup_settled_with_investor(&env, "TTLFUND");
+    // fund a fresh investor and observe TTL on their contribution key.
+    let token = install_stellar_asset_token(&env);
+    let new_investor = Address::generate(&env);
+    let amount = 500_000i128;
+    token.stellar.mint(&new_investor, &amount);
+
+    // Set up a fresh escrow for a clean fund observation.
+    let (client2, admin2, sme2) = setup(&env);
+    let token2 = install_stellar_asset_token(&env);
+    let treasury2 = Address::generate(&env);
+    client2.init(
+        &admin2,
+        &String::from_str(&env, "TTLFUND2"),
+        &sme2,
+        &1_000_000i128,
+        &400i64,
+        &0u64,
+        &token2.id,
+        &None,
+        &treasury2,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+    let investor = Address::generate(&env);
+    token2.stellar.mint(&investor, &500_000i128);
+    let contract2 = client2.address.clone();
+
+    // Record the ledger sequence before the fund call.
+    let seq_before = env.ledger().sequence();
+
+    client2.fund(&investor, &500_000i128);
+
+    let key = DataKey::InvestorContribution(investor.clone());
+    let ttl_after_fund = env.as_contract(&contract2, || {
+        env.storage().persistent().get_ttl(&key)
+    });
+
+    // TTL must be positive (key was written and extended).
+    assert!(
+        ttl_after_fund > 0,
+        "InvestorContribution TTL must be > 0 after fund (got {})",
+        ttl_after_fund
+    );
+
+    // Advance ledger so TTL decreases.
+    let mut ledger = env.ledger().get();
+    ledger.sequence_number += 500;
+    env.ledger().set(ledger);
+
+    let ttl_mid = env.as_contract(&contract2, || {
+        env.storage().persistent().get_ttl(&key)
+    });
+    assert!(ttl_mid < ttl_after_fund, "TTL should decrease after ledger advance");
+
+    // A second fund call must re-extend the TTL.
+    token2.stellar.mint(&investor, &500_000i128);
+    client2.fund(&investor, &500_000i128);
+
+    let ttl_after_second_fund = env.as_contract(&contract2, || {
+        env.storage().persistent().get_ttl(&key)
+    });
+    assert!(
+        ttl_after_second_fund > ttl_mid,
+        "TTL must rise after second fund call ({} -> {})",
+        ttl_mid,
+        ttl_after_second_fund
+    );
+}
+
+#[test]
+fn fund_batch_extends_investor_contribution_ttl() {
+    let env = Env::default();
+    env.cost_estimate().disable_resource_limits();
+    env.cost_estimate().budget().reset_unlimited();
+
+    let (client, admin, sme) = setup(&env);
+    let token = install_stellar_asset_token(&env);
+    let treasury = Address::generate(&env);
+    let amount = 500_000i128;
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "TTLFBATCH"),
+        &sme,
+        &10_000_000i128,
+        &400i64,
+        &0u64,
+        &token.id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+    let contract_addr = client.address.clone();
+
+    let investor1 = Address::generate(&env);
+    let investor2 = Address::generate(&env);
+    token.stellar.mint(&investor1, &amount);
+    token.stellar.mint(&investor2, &amount);
+
+    let mut entries = SorobanVec::new(&env);
+    entries.push_back((investor1.clone(), amount));
+    entries.push_back((investor2.clone(), amount));
+    client.fund_batch(&entries);
+
+    for investor in [&investor1, &investor2] {
+        let key = DataKey::InvestorContribution(investor.clone());
+        let ttl = env.as_contract(&contract_addr, || {
+            env.storage().persistent().get_ttl(&key)
+        });
+        assert!(
+            ttl > 0,
+            "InvestorContribution TTL must be > 0 after fund_batch"
+        );
+    }
+
+    // Advance ledger and re-fund via batch — TTL must rise.
+    let mut ledger = env.ledger().get();
+    ledger.sequence_number += 500;
+    env.ledger().set(ledger);
+
+    let ttl_mid1 = env.as_contract(&contract_addr, || {
+        env.storage()
+            .persistent()
+            .get_ttl(&DataKey::InvestorContribution(investor1.clone()))
+    });
+
+    token.stellar.mint(&investor1, &amount);
+    token.stellar.mint(&investor2, &amount);
+    let mut entries2 = SorobanVec::new(&env);
+    entries2.push_back((investor1.clone(), amount));
+    entries2.push_back((investor2.clone(), amount));
+    client.fund_batch(&entries2);
+
+    let ttl_after1 = env.as_contract(&contract_addr, || {
+        env.storage()
+            .persistent()
+            .get_ttl(&DataKey::InvestorContribution(investor1.clone()))
+    });
+    assert!(
+        ttl_after1 > ttl_mid1,
+        "TTL must rise after second fund_batch ({} -> {})",
+        ttl_mid1,
+        ttl_after1
+    );
+}
+
+#[test]
+fn claim_investor_payout_extends_investor_claimed_ttl() {
+    let env = Env::default();
+    env.cost_estimate().disable_resource_limits();
+    env.cost_estimate().budget().reset_unlimited();
+
+    let (client, contract_addr, investor) =
+        setup_settled_with_investor(&env, "TTLCLAIM");
+
+    // Before claim: InvestorClaimed key does not exist yet.
+    let key = DataKey::InvestorClaimed(investor.clone());
+    let exists_before = env.as_contract(&contract_addr, || {
+        env.storage().persistent().has(&key)
+    });
+    assert!(!exists_before, "InvestorClaimed must not exist before claim");
+
+    client.claim_investor_payout(&investor);
+
+    let ttl_after_claim = env.as_contract(&contract_addr, || {
+        env.storage().persistent().get_ttl(&key)
+    });
+    assert!(
+        ttl_after_claim > 0,
+        "InvestorClaimed TTL must be > 0 after claim (got {})",
+        ttl_after_claim
+    );
+}
+
+#[test]
+fn refund_extends_investor_contribution_ttl() {
+    let env = Env::default();
+    env.cost_estimate().disable_resource_limits();
+    env.cost_estimate().budget().reset_unlimited();
+
+    let (client, contract_addr, investors) =
+        setup_cancelled_with_investors(&env, 1, 1_000_000i128, "TTLREFUND");
+    let investor = investors.get(0).unwrap();
+
+    // Advance ledger so the initial TTL from fund has decreased.
+    let mut ledger = env.ledger().get();
+    ledger.sequence_number += 500;
+    env.ledger().set(ledger);
+
+    let key = DataKey::InvestorContribution(investor.clone());
+    let ttl_before_refund = env.as_contract(&contract_addr, || {
+        env.storage().persistent().get_ttl(&key)
+    });
+
+    client.refund(&investor);
+
+    // After refund, InvestorRefunded is written and TTL extended.
+    let refund_key = DataKey::InvestorRefunded(investor.clone());
+    let ttl_refund_flag = env.as_contract(&contract_addr, || {
+        env.storage().persistent().get_ttl(&refund_key)
+    });
+    assert!(
+        ttl_refund_flag > 0,
+        "InvestorRefunded TTL must be > 0 after refund"
+    );
+}

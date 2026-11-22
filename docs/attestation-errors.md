@@ -16,12 +16,16 @@ All codes are **stable and append-only** — SDKs must branch on the numeric
 | `revoke_attestation_digest(index)` | Admin | Mark a single append-log entry as revoked. |
 | `revoke_attestation_digests(indices)` | Admin | Atomically revoke multiple entries by index. All-or-nothing: any per-index failure rolls back the entire batch. |
 | `unrevoke_attestation_digest(index)` | Admin | Clear the revocation flag on an append-log entry. |
+| `set_attestation_limit(limit)` | Admin | Configure the maximum number of entries in the attestation append log (`MIN_ATTESTATION_LIMIT..=MAX_ATTESTATION_LIMIT`). Emits `AttestationLimitUpdated`. |
 
 ### Constants referenced by error codes
 
 | Constant | Value | Description |
 | --- | ---: | --- |
 | `MAX_ATTESTATION_APPEND_ENTRIES` | 32 | Maximum total entries in the append log. Revocation does not free a slot. |
+| `DEFAULT_ATTESTATION_LIMIT` | 32 | Default append-log limit when `DataKey::AttestationLimit` is absent. |
+| `MIN_ATTESTATION_LIMIT` | 1 | Minimum configurable append-log limit for `set_attestation_limit`. |
+| `MAX_ATTESTATION_LIMIT` | 32 | Maximum configurable append-log limit for `set_attestation_limit`. |
 | `MAX_ATTESTATION_APPEND_BATCH` | 32 | Maximum digests per `append_attestation_digests` call. |
 | `MAX_ATTESTATION_REVOKE_BATCH` | 32 | Maximum indices per `revoke_attestation_digests` call. |
 | `MAX_ATTESTATION_READ_PAGE` | 20 | Maximum entries per `get_revoked_attestation_digests` page. |
@@ -46,7 +50,8 @@ All codes are **stable and append-only** — SDKs must branch on the numeric
 
 | Code | Variant | Entrypoint(s) | When it fires | How to avoid it |
 | ---: | --- | --- | --- | --- |
-| 51 | `AttestationAppendLogCapacityReached` | `append_attestation_digest`, `append_attestation_digests` | The append log already contains `MAX_ATTESTATION_APPEND_ENTRIES` (32) entries, **or** (for the batch entrypoint) adding the requested digests would push the total over 32. The pre-flight capacity check runs before any state mutation, so no partial append ever occurs. | Query `get_attestation_append_log()` to check current log length. For `append_attestation_digests`, verify that `current_len + batch_size ≤ 32` before calling. If the log is full, no further appends are possible on this escrow instance. |
+| 51 | `AttestationAppendLogCapacityReached` | `append_attestation_digest`, `append_attestation_digests` | The append log already contains the configured attestation limit (`get_attestation_limit()`, default `DEFAULT_ATTESTATION_LIMIT` = 32) entries, **or** (for the batch entrypoint) adding the requested digests would push the total over the limit. The pre-flight capacity check runs before any state mutation, so no partial append ever occurs. | Query `get_attestation_append_log()` and `get_attestation_limit()` to check current log length against the active limit. |
+| 312 | `AttestationLimitOutOfRange` | `set_attestation_limit` | `limit < MIN_ATTESTATION_LIMIT` (1) or `limit > MAX_ATTESTATION_LIMIT` (32). | Pass a value within `1..=32`. |
 
 ### Batch-append errors (`append_attestation_digests` only)
 
@@ -133,6 +138,7 @@ Read-only attestation entrypoints require no authentication:
 | `get_attestation_digest_at(index)` | `Option<AttestationDigestInfo>` — `None` when `index >= log.len()`. |
 | `is_attestation_revoked(index)` | `bool` — `false` when no revocation key exists. |
 | `get_revoked_attestation_digests(start, limit)` | Paginated list of revoked entries. Page size capped at `MAX_ATTESTATION_READ_PAGE` (20). |
+| `get_attestation_limit()` | `u32` — configured append-log limit, defaulting to `DEFAULT_ATTESTATION_LIMIT` (32) when unset. |
 
 ---
 
