@@ -342,3 +342,15 @@ proptest::proptest! {
         );
     }
 }
+
+#[test]
+fn test_preview_yield_tier_rejects_non_positive_amounts() {
+    let env = Env::default();
+    let tiers = SorobanVec::from_array(&env, [tier(1, 100), tier(10, 200)]);
+    let client = init_with_tiers(&env, 0, Some(tiers));
+
+    for amount in [0i128, -1i128, i128::MIN] {
+        let result = client.try_preview_yield_tier(&amount, &10u64);
+        assert_contract_error(result, EscrowError::ZeroContributionAmount);
+    }
+}

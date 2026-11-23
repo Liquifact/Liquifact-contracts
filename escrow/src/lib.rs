@@ -5150,15 +5150,20 @@ impl LiquifactEscrow {
     ///
     /// # Parameters
     ///
-    /// - `amount: i128` — Hypothetical funding amount (currently unused; accepted for signature
-    ///   parity with `fund_with_commitment()` for future extensibility).
-    ///   - Valid range: any `i128` value (no validation applied; parameter unused)
+    /// - `amount: i128` — Hypothetical funding amount (accepted for signature parity with
+    ///   `fund_with_commitment()` for future extensibility).
+    ///   - Valid range: `amount > 0` (non-positive values are rejected with
+    ///     [`EscrowError::ZeroContributionAmount`])
     ///
     /// - `lock: u64` — Hypothetical lock commitment in seconds.
     ///   - Valid range: `0..=u64::MAX` (all u64 values safe; used in comparison only)
     ///   - `0` = no lock → returns base yield
     ///   - `> 0` = seconds; matched against tier `min_lock_secs` for highest-yield tier selection
     ///   - **Derivation**: Pure comparison logic `lock >= tier.min_lock_secs` is overflow-free
+    ///
+    /// # Errors
+    ///
+    /// - [`EscrowError::ZeroContributionAmount`] if `amount <= 0`.
     ///
     /// # Returns
     ///
@@ -5176,7 +5181,7 @@ impl LiquifactEscrow {
     /// > **Note:** this preview reflects the rule applied at **first deposit only**. A
     /// > follow-on [`LiquifactEscrow::fund`] call does not re-select a tier.
     pub fn preview_yield_tier(env: Env, amount: i128, lock: u64) -> YieldResolution {
-        let _ = amount; // accepted for signature parity with fund_with_commitment; unused in lock-only selection
+        ensure(&env, amount > 0, EscrowError::ZeroContributionAmount);
         let escrow = Self::get_escrow(env.clone());
         Self::effective_yield_for_commitment(&env, escrow.yield_bps, lock)
     }
