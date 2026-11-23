@@ -54,6 +54,11 @@ The current contract defines the event structs listed below.
 | `EscrowFunded` | `funded` | `fund`, `fund_with_commitment` |
 | `FundingStateChanged` | `fund_st_ch` | `fund`, `fund_with_commitment`, `fund_with_reference`, `fund_batch`, `update_funding_target`, `partial_settle`, `cancel_funding` |
 | `EscrowSettled` | `escrow_sd` | `settle` |
+| `EscrowPartialSettle` | `part_set` | `partial_settle` |
+| `EscrowRepaid` | `repaid` | `repay` |
+| `SettlementFunded` | `set_fund` | `settle` |
+| `SettleBatchProcessed` | `stl_batch` | `settle_batch` |
+| `PartialCloseMinBpsUpdated` | `part_bps` | `set_partial_close_min_bps` |
 | `MaturityUpdatedEvent` | `maturity` | `update_maturity` |
 | `AdminTransferredEvent` | `admin` | `accept_admin` |
 | `AdminProposedEvent` | `adm_prop` | `propose_admin`, `transfer_admin` |
@@ -228,6 +233,115 @@ Data:
 | `yield_bps` | `i64` |
 | `maturity` | `u64` |
 | `settled_at_ledger_timestamp` | `u64` |
+
+### `EscrowPartialSettle`
+
+Emitted after successful `partial_settle`, which closes funding early for an
+under-funded invoice. `funded_amount` is the escrow's funded amount at the time
+funding is closed.
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `escrow_partial_settle` |
+| 1 | `name` | `Symbol` | `part_set` |
+| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
+
+Data:
+
+| Field | Type |
+|---|---|
+| `funded_amount` | `i128` |
+
+### `EscrowRepaid`
+
+Emitted on every successful `repay` call while the escrow is in withdrawn
+(status `3`) state. `repaid_total` and `outstanding` are the cumulative values
+after this instalment. When the pool becomes fully repaid, `repay` also emits
+`EscrowSettled` (before this event).
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `escrow_repaid` |
+| 1 | `name` | `Symbol` | `repaid` |
+| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
+
+Data:
+
+| Field | Type | Notes |
+|---|---|---|
+| `payer` | `Address` | Address that funded this instalment |
+| `amount` | `i128` | Amount transferred in this call |
+| `repaid_total` | `i128` | Cumulative amount repaid after this call |
+| `outstanding` | `i128` | Amount still required before the escrow settles |
+
+### `SettlementFunded`
+
+Emitted by `settle` only when the SME must transfer a coupon shortfall into the
+escrow before claims open. It is published before `EscrowSettled`; calls with no
+shortfall emit only `EscrowSettled`.
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `settlement_funded` |
+| 1 | `name` | `Symbol` | `set_fund` |
+| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
+
+Data:
+
+| Field | Type | Notes |
+|---|---|---|
+| `payer` | `Address` | SME address that funded the shortfall |
+| `amount` | `i128` | Shortfall transferred in this settlement |
+| `settle_pool` | `i128` | Full settlement pool required before claims open |
+
+### `SettleBatchProcessed`
+
+Emitted once at the end of every successful `settle_batch` call, after all
+entries have been processed. `ok_count` and `fail_count` summarize the batch;
+each successful entry also emits its own settlement events from its target
+escrow. This event has no `invoice_id`, so indexers should correlate it with the
+batch call rather than a single escrow.
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `settle_batch_processed` |
+| 1 | `name` | `Symbol` | `stl_batch` |
+
+Data:
+
+| Field | Type |
+|---|---|
+| `ok_count` | `u32` |
+| `fail_count` | `u32` |
+
+### `PartialCloseMinBpsUpdated`
+
+Emitted after successful `set_partial_close_min_bps`, the admin setter for the
+minimum funded basis-points threshold required before `partial_settle` may close
+funding early. Accepted `bps` values are `0..=10_000`.
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `partial_close_min_bps_updated` |
+| 1 | `name` | `Symbol` | `part_bps` |
+| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
+
+Data:
+
+| Field | Type |
+|---|---|
+| `old_bps` | `u32` |
+| `new_bps` | `u32` |
 
 ### `MaturityUpdatedEvent`
 
@@ -1089,3 +1203,4 @@ Status values:
 | 2026-11-22 | v0.7 | Issue #1657: implemented `FundingStateChanged` (`fund_st_ch`) with `old_status` / `new_status` and documented the transitions it covers |
 | 2026-11-22 | v0.7 | Documented `PayoutBatchProcessed`, `RefundBatchProcessed`, `EscrowUnfunded`, `InvestorFreezeChanged`, and `ContributionReferenced` events |
 | 2026-11-23 | v0.8 | Issue #1636: documented `UpgradeProposed`, `UpgradeCancelled`, `ContractUpgraded`, `DeprecatedUpgradeUsed`, and `DeprecatedTransferAdminUsed` events |
+| 2026-11-23 | v0.9 | Issue #1637: documented `EscrowPartialSettle`, `EscrowRepaid`, `SettlementFunded`, `SettleBatchProcessed`, and `PartialCloseMinBpsUpdated` events |
