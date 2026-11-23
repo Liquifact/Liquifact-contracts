@@ -3,6 +3,27 @@ use super::*;
 use soroban_sdk::testutils::Events as _;
 
 #[test]
+fn investor_allowlist_valid_tracks_allowlist_and_expiry_state() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+    default_init(&client, &env, &admin, &sme);
+
+    env.ledger().with_mut(|li| li.timestamp = 1_000);
+    assert!(!client.is_investor_allowlist_valid(&investor));
+
+    client.set_investor_allowlisted(&investor, &true);
+    assert!(client.is_investor_allowlist_valid(&investor));
+
+    client.set_investor_allowlist_expiry(&investor, &1_010);
+    env.ledger().with_mut(|li| li.timestamp = 1_009);
+    assert!(client.is_investor_allowlist_valid(&investor));
+
+    env.ledger().with_mut(|li| li.timestamp = 1_011);
+    assert!(!client.is_investor_allowlist_valid(&investor));
+}
+
+#[test]
 fn investor_allowlist_expiry_blocks_funding_at_exact_expiry() {
     let env = Env::default();
     let (client, admin, sme) = setup(&env);

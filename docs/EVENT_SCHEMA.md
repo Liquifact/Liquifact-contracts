@@ -52,7 +52,7 @@ The current contract defines 20 event structs.
 | `EscrowInitialized` | `escrow_ii` | `init` |
 | `MaxUniqueInvestorsCapLowered` | `inv_cap` | `lower_max_unique_investors` |
 | `EscrowFunded` | `funded` | `fund`, `fund_with_commitment` |
-| `FundingStateChanged` | `fund_st_ch` | `fund`, `fund_with_commitment`, `fund_batch`, `update_funding_target`, `partial_settle` |
+| `FundingStateChanged` | `fund_st_ch` | `fund`, `fund_with_commitment`, `fund_with_reference`, `fund_batch`, `update_funding_target`, `partial_settle`, `cancel_funding` |
 | `EscrowSettled` | `escrow_sd` | `settle` |
 | `MaturityUpdatedEvent` | `maturity` | `update_maturity` |
 | `AdminTransferredEvent` | `admin` | `accept_admin` |
@@ -72,6 +72,13 @@ The current contract defines 20 event structs.
 | `AttestationDigestUnrevoked` | `att_unrev` | `unrevoke_attestation_digest` |
 | `AllowlistEnabledChanged` | `al_ena` | `set_allowlist_active` |
 | `InvestorAllowlistChanged` | `al_set` | `set_investor_allowlisted`, `set_investors_allowlisted` |
+| `AdminProposalSuperseded` | `adm_sup` | `propose_admin`, `transfer_admin` |
+| `AdminProposalCancelled` | `adm_can` | `cancel_pending_admin` |
+| `AdminRecoveredEvent` | `adm_rec` | `recover_admin` |
+| `MaxUniqueInvestorsCapRaised` | `raise_cap` | `raise_max_unique_investors` |
+| `MinContributionFloorLowered` | `floor_lo` | `lower_min_contribution_floor` |
+| `MaxPerInvestorCapRaised` | `inv_cap` | `raise_max_per_investor` |
+| `FundingDeadlineExtended` | `fund_ext` | `extend_funding_deadline` |
 | `PayoutBatchProcessed` | `pay_batch` | `push_investor_payouts` |
 | `RefundBatchProcessed` | `refund_bt` | `refund_batch` |
 | `EscrowUnfunded` | `unfunded` | `unfund` |
@@ -156,34 +163,40 @@ Data:
 
 ### `FundingStateChanged`
 
-Emitted exactly once when the escrow transitions from **open** (status 0) to **funded** (status 1).
+Emitted whenever a call actually changes the escrow funding `status`.
 
-This event is emitted by `fund`, `fund_with_commitment`, `fund_batch`, `update_funding_target`, 
-or `partial_settle` — whichever call causes the `0 → 1` transition. Indexers should subscribe 
-to this event rather than buffering every `EscrowFunded` event to detect the funding-close edge.
+It is emitted from one shared helper (`emit_funding_state_changed`) so every entrypoint that
+can move the status reports the transition the same way. Indexers should subscribe to this
+event instead of reconstructing the transition from `EscrowFunded` / `FundingCancelled`
+payloads.
 
 Topics:
 
 | Index | Field | Type | Value |
 |---:|---|---|---|
-| 0 | fixed event topic | `Symbol` | `funding_state_changed` |
-| 1 | `name` | `Symbol` | `fund_st_ch` |
-| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
+| 0 | `name` | `Symbol` | `fund_st_ch` |
+| 1 | `invoice_id` | `Symbol` | Escrow invoice id |
 
 Data:
 
 | Field | Type | Notes |
 |---|---|---|
-| `from_status` | `u32` | Always `0` (open) |
-| `to_status` | `u32` | Always `1` (funded) |
-| `funded_amount` | `i128` | Total principal at transition |
-| `funding_target` | `i128` | Configured target at transition |
-| `ledger_timestamp` | `u64` | Ledger timestamp of transition |
-| `trigger` | `Symbol` | `fund`, `tgt_lower`, or `part_set` |
+| `old_status` | `u32` | Status before the call. Currently `0` (open) on every transition. |
+| `new_status` | `u32` | Status after the call: `1` (funded) or `4` (cancelled). |
 
-**Emission guarantee:** This event is emitted exactly once per escrow instance. The `0 → 1` 
-transition is guarded by the `FundingCloseSnapshot` write and by the `escrow.status == 0` 
-precondition. Once status reaches 1 it never decreases.
+Transitions and emitters:
+
+| Transition | Entrypoint(s) |
+|---|---|
+| `0 → 1` (open → funded) | `fund`, `fund_with_commitment`, `fund_with_reference`, `fund_batch` (once per batch, not per entry), `update_funding_target` (when lowering the target promotes the escrow), `partial_settle` |
+| `0 → 4` (open → cancelled) | `cancel_funding` |
+
+**Emission guarantee:** at most one `FundingStateChanged` event per call, and exactly one per
+status change. Calls that leave the status unchanged emit nothing — deposits below the target,
+`unfund`, a target raise that keeps the escrow open, and repeated funding of an already-funded
+escrow. `fund_with_reference` inherits the event through `fund_impl`. Status never returns to
+`0` once it leaves it (funding cannot be reopened), so the `0 → 1` / `0 → 4` edges occur once
+per escrow instance.
 
 ### `EscrowSettled`
 
@@ -547,6 +560,144 @@ if the input exceeds the bound the call fails before any event is emitted, so
 consumers never observe a partial batch. Duplicate investors within a single
 batch are rejected before emission to keep the event stream deterministic.
 
+### `AdminProposalSuperseded`
+
+Emitted during `propose_admin` (including via the deprecated `transfer_admin`
+shim) when an existing pending admin proposal is replaced with a different
+address.
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `admin_proposal_superseded` |
+| 1 | `name` | `Symbol` | `adm_sup` |
+| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
+
+Data:
+
+| Field | Type |
+|---|---|
+| `previous_pending` | `Address` |
+| `new_pending` | `Address` |
+
+### `AdminProposalCancelled`
+
+Emitted after successful `cancel_pending_admin`.
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `admin_proposal_cancelled` |
+| 1 | `name` | `Symbol` | `adm_can` |
+| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
+
+Data:
+
+| Field | Type |
+|---|---|
+| `cancelled_pending` | `Address` |
+
+### `AdminRecoveredEvent`
+
+Emitted after successful `recover_admin` when the current admin clears an
+expired, abandoned admin-transfer proposal after the proposal timelock.
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `admin_recovered_event` |
+| 1 | `name` | `Symbol` | `adm_rec` |
+| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
+
+Data:
+
+| Field | Type |
+|---|---|
+| `current_admin` | `Address` |
+| `abandoned_pending` | `Address` |
+| `reason` | `String` |
+
+### `MaxUniqueInvestorsCapRaised`
+
+Emitted after successful `raise_max_unique_investors`.
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `max_unique_investors_cap_raised` |
+| 1 | `name` | `Symbol` | `raise_cap` |
+| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
+
+Data:
+
+| Field | Type |
+|---|---|
+| `old_cap` | `u32` |
+| `new_cap` | `u32` |
+
+### `MinContributionFloorLowered`
+
+Emitted after successful `lower_min_contribution_floor`.
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `min_contribution_floor_lowered` |
+| 1 | `name` | `Symbol` | `floor_lo` |
+| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
+
+Data:
+
+| Field | Type |
+|---|---|
+| `old_floor` | `i128` |
+| `new_floor` | `i128` |
+
+### `MaxPerInvestorCapRaised`
+
+Emitted after successful `raise_max_per_investor`. Note that its `name` symbol
+(`inv_cap`) is shared with `MaxUniqueInvestorsCapLowered`, so indexers should
+disambiguate using `topic[0]` (`max_per_investor_cap_raised`).
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `max_per_investor_cap_raised` |
+| 1 | `name` | `Symbol` | `inv_cap` |
+| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
+
+Data:
+
+| Field | Type |
+|---|---|
+| `old_cap` | `i128` |
+| `new_cap` | `i128` |
+
+### `FundingDeadlineExtended`
+
+Emitted after successful `extend_funding_deadline`.
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `funding_deadline_extended` |
+| 1 | `name` | `Symbol` | `fund_ext` |
+| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
+
+Data:
+
+| Field | Type |
+|---|---|
+| `old_deadline` | `u64` |
+| `new_deadline` | `u64` |
+
 ### `PayoutBatchProcessed`
 
 Emitted once at the end of a successful `push_investor_payouts` batch call,
@@ -721,9 +872,9 @@ Status values:
 - Event emission is atomic with respect to the entrypoint's storage writes: a
   failed or reverted call emits no events, so indexers never observe a state
   transition that did not commit.
-- The `FundingStateChanged` `0 → 1` edge is emitted exactly once per escrow
-  instance; concurrent or retried calls cannot produce duplicate emissions
-  because the transition is guarded by the `FundingCloseSnapshot` write.
+- `FundingStateChanged` is emitted only when a call actually changes the
+  funding status, exactly once per transition (`0 → 1` for the funded edges,
+  `0 → 4` for `cancel_funding`); non-transition funding calls emit nothing.
 
 ## Changelog
 
@@ -735,4 +886,6 @@ Status values:
 | 2026-06-24 | v0.4 | Added `settled_at_ledger_timestamp` field to `EscrowSettled` event; added `is_settleable` view |
 | 2026-07-27 | v0.5 | Added `AttestationDigestUnrevoked` event for `unrevoke_attestation_digest`; updated `AttestationDigestRevoked` to include `revoke_attestation_digests` |
 | 2026-08-14 | v0.6 | Issue #allowlist_event_payloads: documented compatibility contracts for topic ordering, `name` symbols, version topic, batch emission atomicity, and forward-compatible data reads |
+| 2026-11-22 | v0.7 | Documented `AdminProposalSuperseded`, `AdminProposalCancelled`, `AdminRecoveredEvent`, `MaxUniqueInvestorsCapRaised`, `MinContributionFloorLowered`, `MaxPerInvestorCapRaised`, and `FundingDeadlineExtended` events |
+| 2026-11-22 | v0.7 | Issue #1657: implemented `FundingStateChanged` (`fund_st_ch`) with `old_status` / `new_status` and documented the transitions it covers |
 | 2026-11-22 | v0.7 | Documented `PayoutBatchProcessed`, `RefundBatchProcessed`, `EscrowUnfunded`, `InvestorFreezeChanged`, and `ContributionReferenced` events |

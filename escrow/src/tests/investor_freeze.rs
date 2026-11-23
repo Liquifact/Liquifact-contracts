@@ -399,3 +399,175 @@ fn refund_batch_skips_frozen_refunds_unfrozen() {
         "investor_a should NOT be refunded while frozen"
     );
 }
+
+// ── set_investors_frozen (batch) ─────────────────────────────────────────────
+
+#[test]
+fn batch_freeze_and_unfreeze_updates_all_and_emits_event_per_address() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin, investor_a, investor_b, _token_id, _escrow_id) =
+        setup_two_investors(&env, 1_000_000);
+    let investor_c = Address::generate(&env);
+
+    let mut batch = soroban_sdk::Vec::new(&env);
+    batch.push_back(investor_a.clone());
+    batch.push_back(investor_b.clone());
+    batch.push_back(investor_c.clone());
+
+    client.set_investors_frozen(&batch, &true, &77u32);
+
+    assert_eq!(client.get_investor_freeze(&investor_a), (true, 77));
+    assert_eq!(client.get_investor_freeze(&investor_b), (true, 77));
+    assert_eq!(client.get_investor_freeze(&investor_c), (true, 77));
+
+    let invoice_id = client.get_escrow().invoice_id;
+    let all_events = env.events().all();
+    let events = all_events.events();
+    let len = events.len();
+    assert!(len >= 3);
+    for (offset, inv) in [investor_a.clone(), investor_b.clone(), investor_c.clone()]
+        .iter()
+        .enumerate()
+    {
+        assert_eq!(
+            events[len - 3 + offset].clone(),
+            InvestorFreezeChanged {
+                name: symbol_short!("inv_frz"),
+                investor: inv.clone(),
+                invoice_id: invoice_id.clone(),
+                frozen: 1u32,
+                reason_code: 77u32,
+            }
+            .to_xdr(&env, &client.address)
+        );
+    }
+
+    // Batch unfreeze
+    client.set_investors_frozen(&batch, &false, &0u32);
+
+    assert_eq!(client.get_investor_freeze(&investor_a), (false, 0));
+    assert_eq!(client.get_investor_freeze(&investor_b), (false, 0));
+    assert_eq!(client.get_investor_freeze(&investor_c), (false, 0));
+}
+
+#[test]
+fn batch_freeze_rejects_empty_batch() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin, _investor_a, _investor_b, _token_id, _escrow_id) =
+        setup_two_investors(&env, 1_000_000);
+
+    let empty = soroban_sdk::Vec::<Address>::new(&env);
+    let res = client.try_set_investors_frozen(&empty, &true, &1u32);
+    assert_contract_error(res, EscrowError::InvestorBatchEmpty);
+}
+
+#[test]
+fn batch_freeze_enforces_max_batch_bound() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin, _investor_a, _investor_b, _token_id, _escrow_id) =
+        setup_two_investors(&env, 1_000_000);
+
+    let mut oversized = soroban_sdk::Vec::new(&env);
+    for _ in 0..=MAX_INVESTOR_ALLOWLIST_BATCH {
+        oversized.push_back(Address::generate(&env));
+    }
+    let res = client.try_set_investors_frozen(&oversized, &true, &5u32);
+    assert_contract_error(res, EscrowError::InvestorBatchTooLarge);
+
+    // Exactly MAX_INVESTOR_ALLOWLIST_BATCH succeeds
+    let mut max_batch = soroban_sdk::Vec::new(&env);
+    for _ in 0..MAX_INVESTOR_ALLOWLIST_BATCH {
+        max_batch.push_back(Address::generate(&env));
+    }
+    client.set_investors_frozen(&max_batch, &true, &5u32);
+    for i in 0..max_batch.len() {
+        let inv = max_batch.get(i).unwrap();
+        assert_eq!(client.get_investor_freeze(&inv), (true, 5));
+    }
+}
+
+#[test]
+fn batch_freeze_rejects_duplicates_atomically() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin, investor_a, investor_b, _token_id, _escrow_id) =
+        setup_two_investors(&env, 1_000_000);
+
+    let mut batch = soroban_sdk::Vec::new(&env);
+    batch.push_back(investor_a.clone());
+    batch.push_back(investor_b.clone());
+    batch.push_back(investor_a.clone());
+
+    let res = client.try_set_investors_frozen(&batch, &true, &12u32);
+    assert_contract_error(res, EscrowError::InvestorFreezeBatchDuplicate);
+
+    // Neither address should have been modified
+    assert_eq!(client.get_investor_freeze(&investor_a), (false, 0));
+    assert_eq!(client.get_investor_freeze(&investor_b), (false, 0));
+}
+
+#[test]
+fn batch_freeze_is_atomic_on_unchanged_entry() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin, investor_a, investor_b, _token_id, _escrow_id) =
+        setup_two_investors(&env, 1_000_000);
+
+    // Pre-freeze investor_b
+    client.set_investor_frozen(&investor_b, &true, &1u32);
+
+    let mut batch = soroban_sdk::Vec::new(&env);
+    batch.push_back(investor_a.clone());
+    batch.push_back(investor_b.clone());
+
+    let res = client.try_set_investors_frozen(&batch, &true, &2u32);
+    assert_contract_error(res, EscrowError::InvestorFreezeUnchanged);
+
+    // investor_a must remain unfrozen due to atomic rollback
+    assert_eq!(client.get_investor_freeze(&investor_a), (false, 0));
+    assert_eq!(client.get_investor_freeze(&investor_b), (true, 1));
+}
+
+#[test]
+fn non_admin_cannot_batch_freeze() {
+    let env = Env::default();
+    let (client, _admin, investor_a, investor_b, _token_id, _escrow_id) =
+        setup_two_investors(&env, 1_000_000);
+
+    let mut batch = soroban_sdk::Vec::new(&env);
+    batch.push_back(investor_a.clone());
+
+    env.mock_auths(&[soroban_sdk::testutils::MockAuth {
+        address: &investor_b,
+        invoke: &soroban_sdk::testutils::MockAuthInvoke {
+            contract: &client.address,
+            fn_name: "set_investors_frozen",
+            args: (batch.clone(), true, 0u32).into_val(&env),
+            sub_invokes: &[],
+        },
+    }]);
+
+    let result = client.try_set_investors_frozen(&batch, &true, &0u32);
+    assert!(result.is_err());
+}
+
+#[test]
+fn batch_freeze_matches_single_under_legal_hold() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _admin, investor_a, investor_b, _token_id, _escrow_id) =
+        setup_two_investors(&env, 1_000_000);
+
+    client.set_legal_hold(&true);
+
+    let mut batch = soroban_sdk::Vec::new(&env);
+    batch.push_back(investor_a.clone());
+    batch.push_back(investor_b.clone());
+
+    client.set_investors_frozen(&batch, &true, &99u32);
+    assert_eq!(client.get_investor_freeze(&investor_a), (true, 99));
+    assert_eq!(client.get_investor_freeze(&investor_b), (true, 99));
+}

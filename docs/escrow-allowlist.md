@@ -264,6 +264,21 @@ Run tests with:
 cargo test -p liquifact_escrow test_allowlist
 ```
 
+### Dense Index Consistency Property Tests
+
+The allowlist maintains a dense persistent index (`DataKey::AllowlistSlot(u32)`, `DataKey::AllowlistSlotOf(Address)`, and `DataKey::AllowlistCount`) using swap-remove, with lazy migration from the legacy `DataKey::AllowlistIndex` instance vector via `migrate_allowlist_index_if_needed`.
+
+Property-based tests in `escrow/src/tests/allowlist_index_proptest.rs` verify:
+
+- Random sequences of `set_investor_allowlisted` and `set_investors_allowlisted` add/remove operations over a shared address pool keep `get_allowlisted_investors_count`, paginated `get_allowlisted_investors(start, limit)` results (across multiple page sizes, with no duplicates), `is_investor_allowlisted`, and dense slot mappings identical to a reference model set after every step.
+- Seeding a legacy `DataKey::AllowlistIndex` layout (including duplicates, stale `false` entries, absent entries, and empty legacy indices) migrates cleanly into the persistent slot layout and preserves all invariants under subsequent random operations.
+
+Run the index property tests with:
+
+```bash
+cargo test -p liquifact_escrow --lib tests::allowlist_index_proptest::
+```
+
 ## Related Documentation
 
 - [Escrow Data Model](escrow-data-model.md) — Full storage schema and key reference
