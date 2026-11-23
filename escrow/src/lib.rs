@@ -6293,6 +6293,37 @@ impl LiquifactEscrow {
             .unwrap_or(DEFAULT_PAUSE_MAX_DURATION_SECS)
     }
 
+    /// Return the seconds remaining before the effective operational pause auto-expires.
+    ///
+    /// Returns `None` when no pause is active, the pause has expired, or auto-expiry is
+    /// disabled (`max_duration == 0`). The countdown uses the original
+    /// [`DataKey::PausedAt`] and the current [`DataKey::PauseMaxDurationSecs`].
+    ///
+    /// # Security note
+    /// **Pure read** — requires no authorization and performs no state mutation.
+    pub fn get_pause_remaining_secs(env: Env) -> Option<u64> {
+        if !Self::paused_active(&env) {
+            return None;
+        }
+
+        let max_duration: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::PauseMaxDurationSecs)
+            .unwrap_or(DEFAULT_PAUSE_MAX_DURATION_SECS);
+        if max_duration == 0 {
+            return None;
+        }
+
+        let paused_at: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::PausedAt)
+            .unwrap_or(0);
+        let now = env.ledger().timestamp();
+        Some(paused_at.saturating_add(max_duration).saturating_sub(now))
+    }
+
     /// Set the pause cooldown (seconds) that must elapse after a pause auto-expires before a
     /// new pause may be activated. Only the **current** [`InvoiceEscrow::admin`] may call.
     ///
