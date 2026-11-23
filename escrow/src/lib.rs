@@ -1125,6 +1125,8 @@ pub enum EscrowError {
     AttestationLimitOutOfRange = 312,
     /// [`LiquifactEscrow::set_investors_frozen`] received the same investor more than once.
     InvestorFreezeBatchDuplicate = 312,
+    /// Checked arithmetic overflow in [`LiquifactEscrow::get_funding_progress_bps`].
+    FundingProgressArithmeticOverflow = 312,
 }
 
 #[inline(always)]
@@ -3839,6 +3841,31 @@ impl LiquifactEscrow {
             .max(0)
     }
 
+    /// Returns the escrow funding progress in basis points (`0..=10_000`).
+    ///
+    /// Computed as `min(10_000, floor(funded_amount * 10_000 / funding_target))` using
+    /// checked `i128` arithmetic (floor rounding toward zero for non-negative amounts).
+    ///
+    /// - Returns `0` when the escrow has no funding yet (`funded_amount <= 0`) or `funding_target <= 0`.
+    /// - Capped at `10_000` (100.00%) when `funded_amount >= funding_target`.
+    /// - Emits [`EscrowError::EscrowNotInitialized`] (code 20) if called before [`LiquifactEscrow::init`].
+    /// - Emits [`EscrowError::FundingProgressArithmeticOverflow`] (code 312) if `funded_amount * 10_000`
+    ///   overflows `i128`.
+    pub fn get_funding_progress_bps(env: Env) -> u32 {
+        let escrow = Self::get_escrow(env.clone());
+        if escrow.funded_amount <= 0 || escrow.funding_target <= 0 {
+            return 0;
+        }
+        let scaled = escrow
+            .funded_amount
+            .checked_mul(10_000)
+            .unwrap_or_else(|| fail(&env, EscrowError::FundingProgressArithmeticOverflow));
+        let bps = scaled
+            .checked_div(escrow.funding_target)
+            .unwrap_or_else(|| fail(&env, EscrowError::FundingProgressArithmeticOverflow));
+        bps.min(10_000) as u32
+    }
+
     /// Returns the SEP-41 funding token bound at [`LiquifactEscrow::init`] ([`DataKey::FundingToken`]).
     ///
     /// **Immutable:** set once at init; cannot change after deploy. Emits
@@ -5123,15 +5150,20 @@ impl LiquifactEscrow {
     ///
     /// # Parameters
     ///
-    /// - `amount: i128` — Hypothetical funding amount (currently unused; accepted for signature
-    ///   parity with `fund_with_commitment()` for future extensibility).
-    ///   - Valid range: any `i128` value (no validation applied; parameter unused)
+    /// - `amount: i128` — Hypothetical funding amount (accepted for signature parity with
+    ///   `fund_with_commitment()` for future extensibility).
+    ///   - Valid range: `amount > 0` (non-positive values are rejected with
+    ///     [`EscrowError::ZeroContributionAmount`])
     ///
     /// - `lock: u64` — Hypothetical lock commitment in seconds.
     ///   - Valid range: `0..=u64::MAX` (all u64 values safe; used in comparison only)
     ///   - `0` = no lock → returns base yield
     ///   - `> 0` = seconds; matched against tier `min_lock_secs` for highest-yield tier selection
     ///   - **Derivation**: Pure comparison logic `lock >= tier.min_lock_secs` is overflow-free
+    ///
+    /// # Errors
+    ///
+    /// - [`EscrowError::ZeroContributionAmount`] if `amount <= 0`.
     ///
     /// # Returns
     ///
@@ -5149,7 +5181,7 @@ impl LiquifactEscrow {
     /// > **Note:** this preview reflects the rule applied at **first deposit only**. A
     /// > follow-on [`LiquifactEscrow::fund`] call does not re-select a tier.
     pub fn preview_yield_tier(env: Env, amount: i128, lock: u64) -> YieldResolution {
-        let _ = amount; // accepted for signature parity with fund_with_commitment; unused in lock-only selection
+        ensure(&env, amount > 0, EscrowError::ZeroContributionAmount);
         let escrow = Self::get_escrow(env.clone());
         Self::effective_yield_for_commitment(&env, escrow.yield_bps, lock)
     }

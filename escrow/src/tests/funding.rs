@@ -7882,3 +7882,133 @@ fn test_no_funding_state_changed_on_unfund() {
     );
     assert_eq!(client.get_escrow().status, 0);
 }
+
+#[test]
+fn test_get_funding_progress_bps_zero_partial_exact_and_floor_rounding() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+
+    // Target of 300 gives clean floor-rounding test cases:
+    // 0 / 300 -> 0 bps
+    // 100 / 300 -> floor(1_000_000 / 300) = 3333 bps (not 3334)
+    // 200 / 300 -> floor(2_000_000 / 300) = 6666 bps (not 6667)
+    // 300 / 300 -> 10_000 bps
+    let (tok, tre) = free_addresses(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "BPS001"),
+        &sme,
+        &300i128,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    assert_eq!(client.get_funding_progress_bps(), 0);
+
+    client.fund(&investor, &100i128);
+    assert_eq!(client.get_funding_progress_bps(), 3_333);
+
+    client.fund(&investor, &100i128);
+    assert_eq!(client.get_funding_progress_bps(), 6_666);
+
+    client.fund(&investor, &100i128);
+    assert_eq!(client.get_funding_progress_bps(), 10_000);
+}
+
+#[test]
+fn test_get_funding_progress_bps_over_target_and_after_update_funding_target() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    let investor = Address::generate(&env);
+
+    let (tok, tre) = free_addresses(&env);
+    client.init(
+        &admin,
+        &String::from_str(&env, "BPS002"),
+        &sme,
+        &1_000i128,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    // Fund 400 / 1_000 -> 4_000 bps.
+    client.fund(&investor, &400i128);
+    assert_eq!(client.get_funding_progress_bps(), 4_000);
+
+    // Lower funding target to 500 -> 400 / 500 = 8_000 bps.
+    client.update_funding_target(&500i128);
+    assert_eq!(client.get_funding_progress_bps(), 8_000);
+
+    // Over-fund past the updated target (400 + 200 = 600 > 500) -> capped at 10_000 bps.
+    client.fund(&investor, &200i128);
+    assert_eq!(client.get_funding_progress_bps(), 10_000);
+}
+
+#[test]
+fn test_get_funding_progress_bps_overflow_returns_typed_error() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = deploy(&env);
+    let contract_id = client.address.clone();
+    let admin = Address::generate(&env);
+    let sme = Address::generate(&env);
+    let (tok, tre) = free_addresses(&env);
+
+    client.init(
+        &admin,
+        &String::from_str(&env, "BPS003"),
+        &sme,
+        &1_000i128,
+        &800i64,
+        &0u64,
+        &tok,
+        &None,
+        &tre,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    // Force funded_amount to a value where funded_amount * 10_000 overflows i128.
+    env.as_contract(&contract_id, || {
+        let mut escrow = LiquifactEscrow::get_escrow(env.clone());
+        escrow.funded_amount = i128::MAX;
+        env.storage().instance().set(&DataKey::Escrow, &escrow);
+    });
+
+    assert_contract_error(
+        client.try_get_funding_progress_bps(),
+        EscrowError::FundingProgressArithmeticOverflow,
+    );
+}

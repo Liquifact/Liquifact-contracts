@@ -1,4 +1,4 @@
-#![allow(
+﻿#![allow(
     unused_imports,
     unused_variables,
     dead_code,
@@ -66,6 +66,7 @@ mod allowlist_index_proptest;
 mod allowlist_persistent_index;
 mod attestation_limit;
 mod attestation_event_schema;
+mod attestation_parameters;
 mod attestations;
 mod attestor;
 mod auth_matrix;
@@ -89,6 +90,7 @@ mod init;
 // mod integration;
 mod fees;
 mod funding_deadline_cap_tests;
+mod funding_deadline_tests;
 mod integration_status_guards;
 mod investor_freeze;
 mod legal_hold;
@@ -114,6 +116,7 @@ mod settle_batch_results;
 mod settlement;
 mod settlement_config_view;
 mod settlement_funding;
+mod settlement_upgrade_auth;
 mod storage_limit;
 mod timelocked_upgrade;
 mod unfund_investor_index;
