@@ -7,6 +7,8 @@
 //  [AC2]  Pagination edge-cases: empty index, start >= len, limit = 0, limit > cap, partial last page.
 //  [AC3]  get_funding_records(u32::MAX - 1, 50) returns empty without trapping.
 //  [AC4]  Budget: the tests exercise a 20-entry page (see `investor_positions_budget_20_entries`).
+//  [AC5]  Investor share bps: single investor, two investors with floor rounding,
+//         unknown investor, and empty escrow.
 
 use crate::{InvestorPosition, LiquifactEscrow, MAX_POSITION_READ_PAGE};
 use soroban_sdk::{
@@ -205,6 +207,65 @@ fn position_refunded_investor() {
     assert_eq!(pos.contribution, 0);
     assert!(!pos.claimed);
     assert_eq!(pos.claimable_payout, 0);
+}
+
+// ── AC5: investor principal share ─────────────────────────────────────────────
+
+#[test]
+fn investor_share_single_investor_is_10000_bps() {
+    let env = Env::default();
+    let target = 100_000i128;
+    let (client, _escrow_id, _token_id, sac_admin, ..) =
+        deploy_real(&env, target, 500i64, "POS_SHARE_SINGLE");
+
+    let investor = Address::generate(&env);
+    sac_admin.mint(&investor, &target);
+    client.fund(&investor, &target);
+
+    assert_eq!(client.get_investor_share_bps(&investor), 10_000);
+}
+
+#[test]
+fn investor_share_two_investors_floor_rounds() {
+    let env = Env::default();
+    let target = 10_000i128;
+    let (client, _escrow_id, _token_id, sac_admin, ..) =
+        deploy_real(&env, target, 500i64, "POS_SHARE_TWO");
+
+    let first = Address::generate(&env);
+    let second = Address::generate(&env);
+    sac_admin.mint(&first, &1_000);
+    sac_admin.mint(&second, &2_000);
+    client.fund(&first, &1_000);
+    client.fund(&second, &2_000);
+
+    // 1,000 / 3,000 and 2,000 / 3,000 both truncate at the bps precision.
+    assert_eq!(client.get_investor_share_bps(&first), 3_333);
+    assert_eq!(client.get_investor_share_bps(&second), 6_666);
+}
+
+#[test]
+fn investor_share_unknown_investor_is_zero() {
+    let env = Env::default();
+    let target = 10_000i128;
+    let (client, _escrow_id, _token_id, sac_admin, ..) =
+        deploy_real(&env, target, 500i64, "POS_SHARE_UNKNOWN");
+
+    let known = Address::generate(&env);
+    sac_admin.mint(&known, &target);
+    client.fund(&known, &target);
+
+    let unknown = Address::generate(&env);
+    assert_eq!(client.get_investor_share_bps(&unknown), 0);
+}
+
+#[test]
+fn investor_share_empty_escrow_is_zero() {
+    let env = Env::default();
+    let (client, ..) = deploy_real(&env, 10_000i128, 500i64, "POS_SHARE_EMPTY");
+    let investor = Address::generate(&env);
+
+    assert_eq!(client.get_investor_share_bps(&investor), 0);
 }
 
 // ── AC2: pagination edge-cases for get_investor_positions ─────────────────────
