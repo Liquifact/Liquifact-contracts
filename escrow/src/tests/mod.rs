@@ -1,4 +1,4 @@
-#![allow(
+﻿#![allow(
     unused_imports,
     unused_variables,
     dead_code,
@@ -89,6 +89,7 @@ mod init;
 // mod integration;
 mod fees;
 mod funding_deadline_cap_tests;
+mod funding_deadline_tests;
 mod integration_status_guards;
 mod investor_freeze;
 mod legal_hold;
