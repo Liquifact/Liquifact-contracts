@@ -79,6 +79,11 @@ The current contract defines 20 event structs.
 | `MinContributionFloorLowered` | `floor_lo` | `lower_min_contribution_floor` |
 | `MaxPerInvestorCapRaised` | `inv_cap` | `raise_max_per_investor` |
 | `FundingDeadlineExtended` | `fund_ext` | `extend_funding_deadline` |
+| `PayoutBatchProcessed` | `pay_batch` | `push_investor_payouts` |
+| `RefundBatchProcessed` | `refund_bt` | `refund_batch` |
+| `EscrowUnfunded` | `unfunded` | `unfund` |
+| `InvestorFreezeChanged` | `inv_frz` | `set_investor_frozen` |
+| `ContributionReferenced` | `fund_ref` | `fund_with_reference` |
 | `UpgradeProposed` | `upg_prop` | `propose_upgrade`, `upgrade` (deprecated) |
 | `UpgradeCancelled` | `upg_cncl` | `cancel_upgrade` |
 | `ContractUpgraded` | `upgrade` | `execute_upgrade` |
@@ -698,6 +703,113 @@ Data:
 | `old_deadline` | `u64` |
 | `new_deadline` | `u64` |
 
+### `PayoutBatchProcessed`
+
+Emitted once at the end of a successful `push_investor_payouts` batch call,
+summarizing the number of payouts disbursed and the total gross amount paid.
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `payout_batch_processed` |
+| 1 | `name` | `Symbol` | `pay_batch` |
+| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
+
+Data:
+
+| Field | Type |
+|---|---|
+| `count` | `u32` |
+| `total` | `i128` |
+
+### `RefundBatchProcessed`
+
+Emitted once at the end of every successful `refund_batch` call (including an
+all-skipped retry returning `(0, 0)`). Each individual refund in the batch also
+emits `InvestorRefundedEvt`.
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `refund_batch_processed` |
+| 1 | `name` | `Symbol` | `refund_bt` |
+| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
+
+Data:
+
+| Field | Type |
+|---|---|
+| `count` | `u32` |
+| `total` | `i128` |
+
+### `EscrowUnfunded`
+
+Emitted after a successful `unfund` call when an investor partially or fully
+withdraws their principal while the escrow remains open (status 0).
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `escrow_unfunded` |
+| 1 | `name` | `Symbol` | `unfunded` |
+| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
+| 3 | `investor` | `Address` | Withdrawing investor |
+
+Data:
+
+| Field | Type |
+|---|---|
+| `amount` | `i128` |
+| `remaining_contribution` | `i128` |
+| `new_funded_amount` | `i128` |
+| `timestamp` | `u64` |
+
+### `InvestorFreezeChanged`
+
+Emitted after successful `set_investor_frozen` whenever an investor's freeze
+status changes.
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `investor_freeze_changed` |
+| 1 | `name` | `Symbol` | `inv_frz` |
+| 2 | `investor` | `Address` | Affected investor |
+| 3 | `invoice_id` | `Symbol` | Escrow invoice id |
+
+Data:
+
+| Field | Type | Values |
+|---|---|---|
+| `frozen` | `u32` | `1` = frozen, `0` = unfrozen |
+| `reason_code` | `u32` | Caller-supplied compliance reason code |
+
+### `ContributionReferenced`
+
+Emitted after successful `fund_with_reference`, immediately after
+`EscrowFunded`, tying the on-chain contribution to an off-chain payment
+reference.
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `contribution_referenced` |
+| 1 | `name` | `Symbol` | `fund_ref` |
+| 2 | `investor` | `Address` | Funding investor |
+
+Data:
+
+| Field | Type |
+|---|---|
+| `invoice_id` | `Symbol` |
+| `amount` | `i128` |
+| `reference` | `BytesN<32>` |
+
 ### `UpgradeProposed`
 
 Emitted after successful `propose_upgrade`. The deprecated `upgrade` entrypoint calls `propose_upgrade`, so it also emits this event (followed by `DeprecatedUpgradeUsed`). A new proposal replaces any earlier pending one; `eta` is the earliest ledger timestamp at which `execute_upgrade` may run.
@@ -872,4 +984,5 @@ Status values:
 | 2026-08-14 | v0.6 | Issue #allowlist_event_payloads: documented compatibility contracts for topic ordering, `name` symbols, version topic, batch emission atomicity, and forward-compatible data reads |
 | 2026-11-22 | v0.7 | Documented `AdminProposalSuperseded`, `AdminProposalCancelled`, `AdminRecoveredEvent`, `MaxUniqueInvestorsCapRaised`, `MinContributionFloorLowered`, `MaxPerInvestorCapRaised`, and `FundingDeadlineExtended` events |
 | 2026-11-22 | v0.7 | Issue #1657: implemented `FundingStateChanged` (`fund_st_ch`) with `old_status` / `new_status` and documented the transitions it covers |
+| 2026-11-22 | v0.7 | Documented `PayoutBatchProcessed`, `RefundBatchProcessed`, `EscrowUnfunded`, `InvestorFreezeChanged`, and `ContributionReferenced` events |
 | 2026-11-23 | v0.8 | Issue #1636: documented `UpgradeProposed`, `UpgradeCancelled`, `ContractUpgraded`, `DeprecatedUpgradeUsed`, and `DeprecatedTransferAdminUsed` events |
