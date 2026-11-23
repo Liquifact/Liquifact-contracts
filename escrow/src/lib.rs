@@ -200,6 +200,9 @@ pub const MIN_ATTESTATION_LIMIT: u32 = 1;
 /// Maximum configurable attestation append-log limit.
 pub const MAX_ATTESTATION_LIMIT: u32 = MAX_ATTESTATION_APPEND_ENTRIES;
 
+/// Maximum number of digests that can be appended in a single batch call.
+pub const MAX_ATTESTATION_APPEND_BATCH: u32 = MAX_ATTESTATION_APPEND_ENTRIES;
+
 /// Maximum number of indices that can be revoked in a single batch call.
 pub const MAX_ATTESTATION_REVOKE_BATCH: u32 = 32;
 
@@ -2071,6 +2074,28 @@ pub struct SettlementConfig {
     pub max_unique_investors_cap: Option<u32>,
     /// Optional cap on total principal per single investor; `None` means unlimited.
     pub max_per_investor_cap: Option<i128>,
+}
+
+/// Read-only snapshot of attestation configuration limits and live state.
+///
+/// Returned by [`LiquifactEscrow::get_attestation_config`]. Every field is read from
+/// compile-time constants or instance storage with safe defaults, so the view is safe
+/// to call before [`LiquifactEscrow::init`] without panicking.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct AttestationConfig {
+    /// Maximum number of digests allowed in the attestation append log.
+    pub max_append_entries: u32,
+    /// Maximum number of indices allowed in a single batch revocation call.
+    pub max_revoke_batch: u32,
+    /// Maximum number of digests allowed in a single batch append call.
+    pub max_append_batch: u32,
+    /// Maximum number of entries returned per paginated attestation read.
+    pub max_read_page: u32,
+    /// Whether the primary attestation hash has been bound.
+    pub primary_bound: bool,
+    /// Current number of entries in the attestation append log.
+    pub append_log_length: u32,
 }
 
 /// Cross-contract callback context binding origin, nonce, and lifecycle phase.
@@ -5595,6 +5620,34 @@ impl LiquifactEscrow {
             min_contribution_floor,
             max_unique_investors_cap,
             max_per_investor_cap,
+        }
+    }
+
+    /// Read-only snapshot of attestation configuration limits and live state.
+    ///
+    /// Returns the compile-time attestation bounds alongside live primary-hash and
+    /// append-log state in a single [`AttestationConfig`] struct.
+    ///
+    /// # Pre-init safety
+    /// Safe to call before [`LiquifactEscrow::init`]: missing storage keys fall back
+    /// to `primary_bound = false` and `append_log_length = 0` without panicking.
+    ///
+    /// # Read-only
+    /// Pure view: no `require_auth`, no storage writes, and no TTL bump.
+    pub fn get_attestation_config(env: Env) -> AttestationConfig {
+        let primary_bound = env
+            .storage()
+            .instance()
+            .has(&DataKey::PrimaryAttestationHash);
+        let append_log_length = Self::load_attestation_log(&env).len();
+
+        AttestationConfig {
+            max_append_entries: MAX_ATTESTATION_APPEND_ENTRIES,
+            max_revoke_batch: MAX_ATTESTATION_REVOKE_BATCH,
+            max_append_batch: MAX_ATTESTATION_APPEND_BATCH,
+            max_read_page: MAX_ATTESTATION_READ_PAGE,
+            primary_bound,
+            append_log_length,
         }
     }
 
