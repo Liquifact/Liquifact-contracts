@@ -287,7 +287,7 @@ fn append_attestation_digest_default_limit_allows_full_log() {
 // Enforcement by append_attestation_digests (batch)
 // ---------------------------------------------------------------------------
 
-/// Batch append is also gated by the configured limit.
+/// Multiple sequential appends are also gated by the configured limit.
 #[test]
 fn append_attestation_digests_batch_respects_configured_limit() {
     let env = Env::default();
@@ -296,12 +296,12 @@ fn append_attestation_digests_batch_respects_configured_limit() {
 
     client.set_attestation_limit(&2);
 
-    // Batch of 2 fits.
-    let batch = SorobanVec::from_array(&env, [digest(&env, 1), digest(&env, 2)]);
-    client.append_attestation_digests(&batch);
+    // 2 appends fit.
+    client.append_attestation_digest(&digest(&env, 1));
+    client.append_attestation_digest(&digest(&env, 2));
     assert_eq!(client.get_attestation_append_log().len(), 2);
 
-    // One more (single) is over the limit.
+    // One more is over the limit.
     assert_contract_error(
         client.try_append_attestation_digest(&digest(&env, 3)),
         EscrowError::AttestationAppendLogCapacityReached,

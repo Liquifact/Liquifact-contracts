@@ -134,6 +134,100 @@ fn non_admin_cannot_cancel_pending_fee_schedule() {
 }
 
 #[test]
+fn fee_schedule_getters_before_any_schedule() {
+    let env = Env::default();
+    let (client, _) = initialized(&env);
+    assert_eq!(client.get_active_fee_schedule(), None);
+    assert_eq!(client.get_previous_fee_schedule(), None);
+    assert_eq!(client.get_pending_fee_schedule(), None);
+}
+
+#[test]
+fn fee_schedule_getters_track_first_activation() {
+    let env = Env::default();
+    let (client, _) = initialized(&env);
+    let first = schedule(101, 100);
+    client.submit_fee_schedule(&first);
+
+    // Pending but not yet due: still no active or previous schedule.
+    assert_eq!(client.get_active_fee_schedule(), None);
+    assert_eq!(client.get_previous_fee_schedule(), None);
+    assert_eq!(client.get_pending_fee_schedule(), Some(first.clone()));
+
+    // A due pending schedule is promoted on read, before anyone activates it.
+    env.ledger().set_sequence_number(101);
+    assert_eq!(client.get_active_fee_schedule(), Some(first.clone()));
+    assert_eq!(client.get_previous_fee_schedule(), None);
+    assert_eq!(client.get_pending_fee_schedule(), None);
+
+    // Explicit activation stores it as active, with nothing previous yet.
+    assert!(client.activate_fee_schedule());
+    assert_eq!(client.get_active_fee_schedule(), Some(first.clone()));
+    assert_eq!(client.get_previous_fee_schedule(), None);
+    assert_eq!(client.get_pending_fee_schedule(), None);
+}
+
+#[test]
+fn fee_schedule_getters_rotate_previous_on_second_activation() {
+    let env = Env::default();
+    let (client, _) = initialized(&env);
+    let first = schedule(101, 100);
+    let second = schedule(102, 200);
+    client.submit_fee_schedule(&first);
+    env.ledger().set_sequence_number(101);
+    assert!(client.activate_fee_schedule());
+
+    // Submitting the next schedule leaves active/previous untouched.
+    client.submit_fee_schedule(&second);
+    assert_eq!(client.get_active_fee_schedule(), Some(first.clone()));
+    assert_eq!(client.get_previous_fee_schedule(), None);
+    assert_eq!(client.get_pending_fee_schedule(), Some(second.clone()));
+
+    // The second activation rotates the old active schedule into previous.
+    env.ledger().set_sequence_number(102);
+    assert!(client.activate_fee_schedule());
+    assert_eq!(client.get_active_fee_schedule(), Some(second.clone()));
+    assert_eq!(client.get_previous_fee_schedule(), Some(first.clone()));
+    assert_eq!(client.get_pending_fee_schedule(), None);
+
+    // A third schedule only moves `previous` forward once it activates.
+    let third = schedule(103, 300);
+    client.submit_fee_schedule(&third);
+    assert_eq!(client.get_active_fee_schedule(), Some(second.clone()));
+    assert_eq!(client.get_previous_fee_schedule(), Some(first.clone()));
+    assert_eq!(client.get_pending_fee_schedule(), Some(third.clone()));
+
+    env.ledger().set_sequence_number(103);
+    assert!(client.activate_fee_schedule());
+    assert_eq!(client.get_active_fee_schedule(), Some(third.clone()));
+    assert_eq!(client.get_previous_fee_schedule(), Some(second.clone()));
+    assert_eq!(client.get_pending_fee_schedule(), None);
+}
+
+#[test]
+fn fee_schedule_cancel_leaves_active_and_previous_unchanged() {
+    let env = Env::default();
+    let (client, _) = initialized(&env);
+    let first = schedule(101, 100);
+    let second = schedule(102, 200);
+    client.submit_fee_schedule(&first);
+    env.ledger().set_sequence_number(101);
+    assert!(client.activate_fee_schedule());
+    client.submit_fee_schedule(&second);
+    env.ledger().set_sequence_number(102);
+    assert!(client.activate_fee_schedule());
+
+    let cancelled = schedule(103, 300);
+    client.submit_fee_schedule(&cancelled);
+    assert_eq!(client.get_pending_fee_schedule(), Some(cancelled.clone()));
+
+    assert_eq!(client.cancel_pending_fee_schedule(), cancelled);
+    assert_eq!(client.get_pending_fee_schedule(), None);
+    assert_eq!(client.get_active_fee_schedule(), Some(second));
+    assert_eq!(client.get_previous_fee_schedule(), Some(first));
+}
+
+#[test]
 fn fee_schedule_events_and_idempotency() {
     let env = Env::default();
     let (client, _) = initialized(&env);
@@ -216,3 +310,4 @@ fn later_submission_lazily_activates_and_emits_once() {
         .to_xdr(&env, &contract_id),
     );
 }
+
