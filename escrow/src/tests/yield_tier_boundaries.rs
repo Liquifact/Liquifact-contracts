@@ -286,6 +286,63 @@ fn test_preview_selection_uses_bounded_boundary_matrix() {
     }
 }
 
+
+// Issue #1670: for every valid, non-decreasing tier table, a longer lock
+// must never resolve to a lower effective yield. Keep this property bounded
+// because each case deploys and initializes a fresh Soroban contract.
+proptest::proptest! {
+    #![proptest_config(proptest::test_runner::ProptestConfig::with_cases(64))]
+
+    #[test]
+    fn prop_preview_yield_tier_monotonic_for_valid_tables(
+        base_yield_bps in 0i64..=10_000,
+        // Positive increments guarantee strictly increasing lock thresholds.
+        // Yield proposals are folded with max() to guarantee non-decreasing rates.
+        tier_steps in proptest::collection::vec((2u64..=5_000, 0i64..=10_000), 1..=8),
+        amount in 1i128..=1_000_000_000,
+        lock_a in 0u64..=50_000,
+        lock_b in 0u64..=50_000,
+    ) {
+        let env = Env::default();
+        let mut tiers = SorobanVec::new(&env);
+        let mut threshold = 0u64;
+        let mut yield_bps = base_yield_bps;
+
+        for (lock_increment, yield_proposal) in tier_steps {
+            threshold += lock_increment;
+            yield_bps = yield_bps.max(yield_proposal);
+            tiers.push_back(tier(threshold, yield_bps));
+        }
+
+        // The first threshold is >= 2: test a positive lock immediately below
+        // that threshold, not just the special-case zero-lock fallback.
+        let first_threshold = tiers.get_unchecked(0).min_lock_secs;
+        let client = init_with_tiers(&env, base_yield_bps, Some(tiers));
+
+        let below_first = client.preview_yield_tier(&amount, &(first_threshold - 1));
+        proptest::prop_assert_eq!(below_first.effective_yield_bps, base_yield_bps);
+        proptest::prop_assert_eq!(below_first.matched_lock_secs, 0);
+
+        let short_lock = lock_a.min(lock_b);
+        let long_lock = lock_a.max(lock_b);
+        let short = client.preview_yield_tier(&amount, &short_lock);
+        let long = client.preview_yield_tier(&amount, &long_lock);
+
+        proptest::prop_assert!(
+            short.effective_yield_bps <= long.effective_yield_bps,
+            "yield decreased: lock {short_lock} => {} bps, lock {long_lock} => {} bps",
+            short.effective_yield_bps,
+            long.effective_yield_bps
+        );
+        proptest::prop_assert!(short.effective_yield_bps >= base_yield_bps);
+        proptest::prop_assert!(long.effective_yield_bps >= base_yield_bps);
+        proptest::prop_assert_eq!(
+            client.preview_yield_tier(&amount, &u64::MAX).effective_yield_bps,
+            yield_bps
+        );
+    }
+}
+
 #[test]
 fn test_preview_yield_tier_rejects_non_positive_amounts() {
     let env = Env::default();

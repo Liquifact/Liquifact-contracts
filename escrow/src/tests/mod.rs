@@ -62,15 +62,22 @@ pub(crate) fn assert_contract_error<T, E>(
 // modules stay assertion-focused and each test still owns a fresh Env.
 mod admin;
 mod allowlist_expiry;
+mod allowlist_index_proptest;
 mod allowlist_persistent_index;
+mod attestation_limit;
+mod attestation_event_schema;
 mod attestations;
 mod attestor;
 mod auth_matrix;
+mod batch_budget;
 mod cap_validation;
 mod collateral_lock;
+mod collateral_state_view;
+mod collateral_version_view;
 #[rustfmt::skip]
 mod coverage;
 mod envelope_bounds;
+mod event_emission;
 mod external_calls;
 mod external_calls_mocked;
 mod fee_schedule;
@@ -107,10 +114,13 @@ mod settle_batch_results;
 mod settlement;
 mod settlement_config_view;
 mod settlement_funding;
+mod storage_limit;
 mod timelocked_upgrade;
 mod unfund_investor_index;
 mod withdraw_attestation_gate;
 mod yield_tier_boundaries;
+mod yield_tier_setter;
+mod yield_tier_overflow;
 /// Registers a new escrow contract instance and returns its contract id.
 pub fn deploy_id(env: &Env) -> Address {
     env.register(LiquifactEscrow, ())

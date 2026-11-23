@@ -372,6 +372,22 @@ fn set_paused_by_admin_succeeds() {
 }
 
 #[test]
+fn get_paused_at_tracks_pause_lifecycle() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    init_open(&client, &env, &admin, &sme, "PAU015-1");
+
+    assert_eq!(client.get_paused_at(), None);
+
+    env.ledger().with_mut(|li| li.timestamp = 1_234);
+    client.set_paused(&true, &PauseScope::All, &PauseReason::Incident);
+    assert_eq!(client.get_paused_at(), Some(1_234));
+
+    client.set_paused(&false, &PauseScope::All, &PauseReason::Incident);
+    assert_eq!(client.get_paused_at(), None);
+}
+
+#[test]
 #[should_panic]
 fn set_paused_by_non_admin_panics() {
     let env = Env::default();

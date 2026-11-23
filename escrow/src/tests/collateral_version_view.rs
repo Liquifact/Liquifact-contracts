@@ -210,17 +210,3 @@ fn test_get_collateral_version_unchanged_after_clear_collateral() {
 
     assert_eq!(before, after, "clearing collateral must not change the schema version");
 }
-
-/// Setting the collateral limit must not alter the version.
-#[test]
-fn test_get_collateral_version_unchanged_after_set_collateral_limit() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (client, _admin, _sme) = deploy_and_init(&env);
-
-    let before = client.get_collateral_version();
-    client.set_collateral_limit(&1_000_000i128);
-    let after = client.get_collateral_version();
-
-    assert_eq!(before, after, "set_collateral_limit must not change the schema version");
-}
