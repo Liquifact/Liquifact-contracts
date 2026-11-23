@@ -45,7 +45,7 @@ mutating the `v1` layout in place.
 
 ## Event Catalog
 
-The current contract defines 20 event structs.
+The current contract defines the event structs listed below.
 
 | Rust event | `name` symbol | Entrypoint(s) |
 |---|---:|---|
@@ -89,6 +89,11 @@ The current contract defines 20 event structs.
 | `ContractUpgraded` | `upgrade` | `execute_upgrade` |
 | `DeprecatedUpgradeUsed` | `depr_upg` | `upgrade` (deprecated) |
 | `DeprecatedTransferAdminUsed` | `depr_xfer` | `transfer_admin` (deprecated) |
+| `PausedChanged` | `paused` | `set_paused`, `pause_as_pauser` |
+| `PauseMaxDurationUpdated` | `pausemax` | `set_pause_max_duration` |
+| `PauseRateLimitUpdated` | `pause_rl` | `set_pause_rate_limit` |
+| `PauseCooldownUpdated` | `pausecd` | `set_pause_cooldown` |
+| `PauserChanged` | `pauser` | `set_pauser` |
 
 The `name` symbol for each event is part of the compatibility contract. Symbols
 are stable identifiers: they MUST NOT be reused for a different event and MUST
@@ -900,6 +905,104 @@ Data:
 | Field | Type |
 |---|---|
 | `proposed_address` | `Address` |
+
+### `PausedChanged`
+
+Emitted after a successful `set_paused` or `pause_as_pauser` call. A no-op
+clear also emits the event so indexers can observe the requested toggle.
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `paused_changed` |
+| 1 | `name` | `Symbol` | `paused` |
+| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
+
+Data:
+
+| Field | Type |
+|---|---|
+| `active` | `u32` (`1` enabled, `0` cleared) |
+| `scope` | `PauseScope` |
+| `reason` | `PauseReason` |
+
+### `PauseMaxDurationUpdated`
+
+Emitted after successful `set_pause_max_duration`.
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `pause_max_duration_updated` |
+| 1 | `name` | `Symbol` | `pausemax` |
+| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
+
+Data:
+
+| Field | Type |
+|---|---|
+| `old_value` | `u64` |
+| `new_value` | `u64` |
+
+### `PauseRateLimitUpdated`
+
+Emitted after successful `set_pause_rate_limit`.
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `pause_rate_limit_updated` |
+| 1 | `name` | `Symbol` | `pause_rl` |
+| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
+
+Data:
+
+| Field | Type |
+|---|---|
+| `old_limit` | `u32` |
+| `new_limit` | `u32` |
+| `old_window_secs` | `u64` |
+| `new_window_secs` | `u64` |
+
+### `PauseCooldownUpdated`
+
+Emitted after successful `set_pause_cooldown`.
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `pause_cooldown_updated` |
+| 1 | `name` | `Symbol` | `pausecd` |
+| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
+
+Data:
+
+| Field | Type |
+|---|---|
+| `old_value` | `u64` |
+| `new_value` | `u64` |
+
+### `PauserChanged`
+
+Emitted after successful `set_pauser`.
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `pauser_changed` |
+| 1 | `name` | `Symbol` | `pauser` |
+| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
+
+Data:
+
+| Field | Type |
+|---|---|
+| `pauser` | `Option<Address>` (new address, or `None` when revoked) |
 
 ## Nested Types
 
