@@ -79,6 +79,11 @@ The current contract defines 20 event structs.
 | `MinContributionFloorLowered` | `floor_lo` | `lower_min_contribution_floor` |
 | `MaxPerInvestorCapRaised` | `inv_cap` | `raise_max_per_investor` |
 | `FundingDeadlineExtended` | `fund_ext` | `extend_funding_deadline` |
+| `UpgradeProposed` | `upg_prop` | `propose_upgrade`, `upgrade` (deprecated) |
+| `UpgradeCancelled` | `upg_cncl` | `cancel_upgrade` |
+| `ContractUpgraded` | `upgrade` | `execute_upgrade` |
+| `DeprecatedUpgradeUsed` | `depr_upg` | `upgrade` (deprecated) |
+| `DeprecatedTransferAdminUsed` | `depr_xfer` | `transfer_admin` (deprecated) |
 
 The `name` symbol for each event is part of the compatibility contract. Symbols
 are stable identifiers: they MUST NOT be reused for a different event and MUST
@@ -693,6 +698,97 @@ Data:
 | `old_deadline` | `u64` |
 | `new_deadline` | `u64` |
 
+### `UpgradeProposed`
+
+Emitted after successful `propose_upgrade`. The deprecated `upgrade` entrypoint calls `propose_upgrade`, so it also emits this event (followed by `DeprecatedUpgradeUsed`). A new proposal replaces any earlier pending one; `eta` is the earliest ledger timestamp at which `execute_upgrade` may run.
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `upgrade_proposed` |
+| 1 | `name` | `Symbol` | `upg_prop` |
+| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
+
+Data:
+
+| Field | Type |
+|---|---|
+| `new_wasm_hash` | `BytesN<32>` |
+| `eta` | `u64` |
+
+### `UpgradeCancelled`
+
+Emitted after successful `cancel_upgrade`, once the pending proposal has been removed. `cancelled_wasm_hash` is the hash of the proposal that was discarded.
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `upgrade_cancelled` |
+| 1 | `name` | `Symbol` | `upg_cncl` |
+| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
+
+Data:
+
+| Field | Type |
+|---|---|
+| `cancelled_wasm_hash` | `BytesN<32>` |
+
+### `ContractUpgraded`
+
+Emitted by `execute_upgrade` after the pending proposal is cleared and immediately before the contract WASM is replaced. Note that the `name` symbol is `upgrade`, not a `upg_*` symbol.
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `contract_upgraded` |
+| 1 | `name` | `Symbol` | `upgrade` |
+| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
+
+Data:
+
+| Field | Type |
+|---|---|
+| `new_wasm_hash` | `BytesN<32>` |
+
+### `DeprecatedUpgradeUsed`
+
+Emitted by the deprecated `upgrade` entrypoint after it has delegated to `propose_upgrade` (so an `UpgradeProposed` event is emitted first, in the same call). Indexers can use it to detect integrators that still need to migrate to `propose_upgrade` + `execute_upgrade`.
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `deprecated_upgrade_used` |
+| 1 | `name` | `Symbol` | `depr_upg` |
+| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
+
+Data:
+
+| Field | Type |
+|---|---|
+| `new_wasm_hash` | `BytesN<32>` |
+
+### `DeprecatedTransferAdminUsed`
+
+Emitted by the deprecated `transfer_admin` entrypoint after it has delegated to `propose_admin` (so the events emitted by `propose_admin` come first, in the same call). `proposed_address` is the address passed to the deprecated shim. Migrate to `propose_admin` + `accept_admin`.
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `deprecated_transfer_admin_used` |
+| 1 | `name` | `Symbol` | `depr_xfer` |
+| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
+
+Data:
+
+| Field | Type |
+|---|---|
+| `proposed_address` | `Address` |
+
 ## Nested Types
 
 ### `InvoiceEscrow`
@@ -776,3 +872,4 @@ Status values:
 | 2026-08-14 | v0.6 | Issue #allowlist_event_payloads: documented compatibility contracts for topic ordering, `name` symbols, version topic, batch emission atomicity, and forward-compatible data reads |
 | 2026-11-22 | v0.7 | Documented `AdminProposalSuperseded`, `AdminProposalCancelled`, `AdminRecoveredEvent`, `MaxUniqueInvestorsCapRaised`, `MinContributionFloorLowered`, `MaxPerInvestorCapRaised`, and `FundingDeadlineExtended` events |
 | 2026-11-22 | v0.7 | Issue #1657: implemented `FundingStateChanged` (`fund_st_ch`) with `old_status` / `new_status` and documented the transitions it covers |
+| 2026-11-23 | v0.8 | Issue #1636: documented `UpgradeProposed`, `UpgradeCancelled`, `ContractUpgraded`, `DeprecatedUpgradeUsed`, and `DeprecatedTransferAdminUsed` events |
