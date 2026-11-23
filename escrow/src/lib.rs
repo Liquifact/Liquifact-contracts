@@ -200,6 +200,9 @@ pub const MIN_ATTESTATION_LIMIT: u32 = 1;
 /// Maximum configurable attestation append-log limit.
 pub const MAX_ATTESTATION_LIMIT: u32 = MAX_ATTESTATION_APPEND_ENTRIES;
 
+/// Maximum number of digests that can be appended in a single batch call.
+pub const MAX_ATTESTATION_APPEND_BATCH: u32 = MAX_ATTESTATION_APPEND_ENTRIES;
+
 /// Maximum number of indices that can be revoked in a single batch call.
 pub const MAX_ATTESTATION_REVOKE_BATCH: u32 = 32;
 
@@ -1127,6 +1130,10 @@ pub enum EscrowError {
     InvestorFreezeBatchDuplicate = 312,
     /// Checked arithmetic overflow in [`LiquifactEscrow::get_funding_progress_bps`].
     FundingProgressArithmeticOverflow = 312,
+    /// [`LiquifactEscrow::append_attestation_digests`] received an empty digests vector.
+    AttestationAppendBatchEmpty = 313,
+    /// [`LiquifactEscrow::append_attestation_digests`] exceeded [`MAX_ATTESTATION_APPEND_BATCH`].
+    AttestationAppendBatchTooLarge = 314,
 }
 
 #[inline(always)]
@@ -4716,6 +4723,39 @@ impl LiquifactEscrow {
         let escrow = Self::load_escrow_require_admin(&env);
         let author = escrow.admin.clone();
         Self::append_attestation(&env, &escrow, author, digest);
+    }
+
+    /// Atomically append multiple attestation digests as admin in a single call.
+    ///
+    /// Rejects empty batches with [`EscrowError::AttestationAppendBatchEmpty`], batches
+    /// exceeding [`MAX_ATTESTATION_APPEND_BATCH`] with [`EscrowError::AttestationAppendBatchTooLarge`],
+    /// and batches that would exceed the configured attestation limit with
+    /// [`EscrowError::AttestationAppendLogCapacityReached`]. Reuses [`Self::append_attestation`]
+    /// for each digest, emitting one [`AttestationDigestAppended`] event per entry and rolling back
+    /// the entire batch atomically on any failure.
+    pub fn append_attestation_digests(env: Env, digests: Vec<BytesN<32>>) {
+        let n = digests.len();
+        ensure(&env, n > 0, EscrowError::AttestationAppendBatchEmpty);
+        ensure(
+            &env,
+            n <= MAX_ATTESTATION_APPEND_BATCH,
+            EscrowError::AttestationAppendBatchTooLarge,
+        );
+
+        let escrow = Self::load_escrow_require_admin(&env);
+        let log = Self::load_attestation_log(&env);
+        let limit = Self::get_attestation_limit(env.clone());
+        ensure(
+            &env,
+            log.len().saturating_add(n) <= limit,
+            EscrowError::AttestationAppendLogCapacityReached,
+        );
+
+        let author = escrow.admin.clone();
+        for i in 0..n {
+            let digest = digests.get(i).unwrap();
+            Self::append_attestation(&env, &escrow, author.clone(), digest);
+        }
     }
 
     /// Append as the designated attestor. This role grants no revocation or admin permissions.
