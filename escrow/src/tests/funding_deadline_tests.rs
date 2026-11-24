@@ -10,7 +10,10 @@
 
 use crate::tests::{assert_contract_error, deploy};
 use crate::EscrowError;
-use soroban_sdk::{testutils::Address as _, Address, Env, String};
+use soroban_sdk::{
+    testutils::{Address as _, Ledger as _},
+    Address, Env, String,
+};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -58,7 +61,7 @@ fn setup_with_deadline(env: &Env) -> (crate::LiquifactEscrowClient<'_>, Address,
         &None,
         &None,
         &None,
-        &Some(deadline as i64),
+        &Some(deadline),
         &None,
         &None::<i64>,
     );
@@ -84,7 +87,7 @@ fn init_with_past_deadline_rejected() {
     let maturity = NOW + MATURITY_OFFSET;
 
     // A deadline in the past (NOW - 1).
-    let past_deadline: i64 = (NOW - 1) as i64;
+    let past_deadline: u64 = NOW - 1;
 
     let result = client.try_init(
         &admin,
