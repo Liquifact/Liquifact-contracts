@@ -13,7 +13,7 @@
 //! off-chain verifiers can confirm the on-chain anchor matches their document set.
 
 use super::*;
-use crate::MAX_ATTESTATION_REVOKE_BATCH;
+use crate::{MAX_ATTESTATION_APPEND_BATCH, MAX_ATTESTATION_REVOKE_BATCH};
 use soroban_sdk::{symbol_short, testutils::Events, BytesN, Error, InvokeError};
 use std::fmt::Debug;
 
@@ -1176,4 +1176,174 @@ fn test_require_index_in_range_last_valid_index_at_max_capacity() {
         client.try_revoke_attestation_digest(&MAX_ATTESTATION_APPEND_ENTRIES),
         EscrowError::AttestationIndexOutOfRange,
     );
+}
+
+// ---------------------------------------------------------------------------
+// append_attestation_digests — bounded atomic batch append
+// ---------------------------------------------------------------------------
+
+/// Happy path: batch appends multiple digests in order and emits one
+/// `AttestationDigestAppended` event per digest with sequential indices.
+#[test]
+fn test_batch_append_happy_path_and_events() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    let contract_id = client.address.clone();
+    let invoice_id = client.get_escrow().invoice_id;
+
+    let d0 = digest(&env, 0xA1);
+    let d1 = digest(&env, 0xA2);
+    let d2 = digest(&env, 0xA3);
+    let batch = soroban_sdk::vec![&env, d0.clone(), d1.clone(), d2.clone()];
+
+    client.append_attestation_digests(&batch);
+
+    let all_events = env.events().all();
+    let events_list = all_events.events();
+    let expected_events = [
+        AttestationDigestAppended {
+            name: symbol_short!("att_app"),
+            invoice_id: invoice_id.clone(),
+            index: 0,
+            digest: d0.clone(),
+        }
+        .to_xdr(&env, &contract_id),
+        AttestationDigestAppended {
+            name: symbol_short!("att_app"),
+            invoice_id: invoice_id.clone(),
+            index: 1,
+            digest: d1.clone(),
+        }
+        .to_xdr(&env, &contract_id),
+        AttestationDigestAppended {
+            name: symbol_short!("att_app"),
+            invoice_id,
+            index: 2,
+            digest: d2.clone(),
+        }
+        .to_xdr(&env, &contract_id),
+    ];
+
+    for expected in expected_events {
+        assert!(
+            events_list.iter().any(|ev| *ev == expected),
+            "expected AttestationDigestAppended event not found"
+        );
+    }
+
+    let log = client.get_attestation_append_log();
+    assert_eq!(log.len(), 3);
+    assert_eq!(log.get(0).unwrap(), d0);
+    assert_eq!(log.get(1).unwrap(), d1);
+    assert_eq!(log.get(2).unwrap(), d2);
+}
+
+/// Empty batch is rejected with `AttestationAppendBatchEmpty` and leaves the log unchanged.
+#[test]
+fn test_batch_append_empty_returns_typed_error() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    client.append_attestation_digest(&digest(&env, 0x01));
+    let before = client.get_attestation_append_log();
+
+    let empty: soroban_sdk::Vec<BytesN<32>> = soroban_sdk::Vec::new(&env);
+    assert_contract_error(
+        client.try_append_attestation_digests(&empty),
+        EscrowError::AttestationAppendBatchEmpty,
+    );
+    assert_eq!(client.get_attestation_append_log(), before);
+}
+
+/// Batch exceeding `MAX_ATTESTATION_APPEND_BATCH` is rejected with
+/// `AttestationAppendBatchTooLarge` and leaves the log unchanged.
+#[test]
+fn test_batch_append_over_limit_returns_typed_error() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    let mut batch = soroban_sdk::Vec::new(&env);
+    for i in 0u8..=(MAX_ATTESTATION_APPEND_BATCH as u8) {
+        batch.push_back(digest(&env, i));
+    }
+
+    assert_contract_error(
+        client.try_append_attestation_digests(&batch),
+        EscrowError::AttestationAppendBatchTooLarge,
+    );
+    assert_eq!(client.get_attestation_append_log().len(), 0);
+}
+
+/// Batch that would overflow remaining log capacity is rejected atomically with
+/// `AttestationAppendLogCapacityReached` and leaves the log unchanged.
+#[test]
+fn test_batch_append_exceeding_capacity_leaves_log_unchanged() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    // Fill log to MAX - 2 entries.
+    for i in 0u8..((MAX_ATTESTATION_APPEND_ENTRIES - 2) as u8) {
+        client.append_attestation_digest(&digest(&env, i));
+    }
+    let before = client.get_attestation_append_log();
+
+    // Attempt to append 3 more digests (only 2 slots remain).
+    let batch = soroban_sdk::vec![
+        &env,
+        digest(&env, 0xF0),
+        digest(&env, 0xF1),
+        digest(&env, 0xF2),
+    ];
+    assert_contract_error(
+        client.try_append_attestation_digests(&batch),
+        EscrowError::AttestationAppendLogCapacityReached,
+    );
+    assert_eq!(client.get_attestation_append_log(), before);
+}
+
+/// Batch that fills the log exactly to `MAX_ATTESTATION_APPEND_ENTRIES` succeeds.
+#[test]
+fn test_batch_append_fills_log_exactly_to_capacity() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    let mut batch = soroban_sdk::Vec::new(&env);
+    for i in 0u8..(MAX_ATTESTATION_APPEND_ENTRIES as u8) {
+        batch.push_back(digest(&env, i));
+    }
+
+    client.append_attestation_digests(&batch);
+    assert_eq!(
+        client.get_attestation_append_log().len(),
+        MAX_ATTESTATION_APPEND_ENTRIES
+    );
+
+    assert_contract_error(
+        client.try_append_attestation_digest(&digest(&env, 0xFF)),
+        EscrowError::AttestationAppendLogCapacityReached,
+    );
+}
+
+/// Duplicate digest within a batch rolls back the entire batch atomically.
+#[test]
+fn test_batch_append_duplicate_rolls_back_atomically() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    let d0 = digest(&env, 0x11);
+    let d1 = digest(&env, 0x22);
+    let batch = soroban_sdk::vec![&env, d0.clone(), d1, d0];
+
+    assert_contract_error(
+        client.try_append_attestation_digests(&batch),
+        EscrowError::AttestationDigestDuplicate,
+    );
+    assert_eq!(client.get_attestation_append_log().len(), 0);
+}
+
+/// Non-admin caller is rejected and leaves the log unchanged.
+#[test]
+fn test_batch_append_non_admin_returns_error() {
+    let env = Env::default();
+    let (client, _) = setup_with_init(&env);
+    env.mock_auths(&[]);
+    let batch = soroban_sdk::vec![&env, digest(&env, 0x01)];
+
+    assert!(client.try_append_attestation_digests(&batch).is_err());
+    assert_eq!(client.get_attestation_append_log().len(), 0);
 }

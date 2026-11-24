@@ -63,11 +63,11 @@ digest is a valid anchor and must not be special-cased by callers or indexers.
 | Input class | Behavior |
 |---|---|
 | Valid: `1 <= len <= MAX_ATTESTATION_APPEND_BATCH` and `log.len() + len <= MAX_ATTESTATION_APPEND_ENTRIES` | Appends all entries atomically, one event per entry |
-| Invalid: `len == 0` | Rejected with `AttestationAppendBatchEmpty` (57) |
-| Invalid: `len > MAX_ATTESTATION_APPEND_BATCH` | Rejected with `AttestationAppendBatchTooLarge` (58) |
+| Invalid: `len == 0` | Rejected with `AttestationAppendBatchEmpty` (313) |
+| Invalid: `len > MAX_ATTESTATION_APPEND_BATCH` | Rejected with `AttestationAppendBatchTooLarge` (314) |
 | Invalid: `log.len() + len > MAX_ATTESTATION_APPEND_ENTRIES` | Rejected with `AttestationAppendLogCapacityReached` (51); no partial write |
 | Invalid: caller is not admin | Auth failure; no state change |
-| Duplicate: repeated digests within the batch | Accepted — same policy as single append |
+| Duplicate: repeated digests within the batch or already in log/primary | Rejected with `AttestationDigestDuplicate` (270); full rollback |
 | Boundary: `len == 1` | Accepted (minimum valid batch) |
 | Boundary: `len == MAX_ATTESTATION_APPEND_BATCH` | Accepted (maximum valid batch) |
 | Boundary: batch fills log exactly to `MAX_ATTESTATION_APPEND_ENTRIES` | Accepted; next append fails with (51) |
@@ -295,9 +295,10 @@ sequentially starting from `log.len()` at call time, identical to repeated singl
 
 | Condition | Error code | `EscrowError` variant |
 |---|---|---|
-| `digests.len() == 0` | 57 | `AttestationAppendBatchEmpty` |
-| `digests.len() > MAX_ATTESTATION_APPEND_BATCH` | 58 | `AttestationAppendBatchTooLarge` |
+| `digests.len() == 0` | 313 | `AttestationAppendBatchEmpty` |
+| `digests.len() > MAX_ATTESTATION_APPEND_BATCH` | 314 | `AttestationAppendBatchTooLarge` |
 | `current_log_len + digests.len() > MAX_ATTESTATION_APPEND_ENTRIES` | 51 | `AttestationAppendLogCapacityReached` |
+| duplicate digest (primary, existing log, or within batch) | 270 | `AttestationDigestDuplicate` |
 
 ```typescript
 // Example: anchor three document hashes in one call
