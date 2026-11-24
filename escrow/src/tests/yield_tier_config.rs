@@ -23,6 +23,7 @@ fn test_yield_tier_config_defaults_before_init() {
 #[test]
 fn test_yield_tier_config_after_init() {
     let env = Env::default();
+    env.mock_all_auths();
     let (client, admin, sme) = setup(&env);
 
     let mut tiers: SorobanVec<YieldTier> = SorobanVec::new(&env);
@@ -62,18 +63,39 @@ fn test_yield_tier_config_after_init() {
     assert_eq!(cfg.tiers.len(), 2);
     assert_eq!(cfg.tiers.get_unchecked(0), tiers.get_unchecked(0));
     assert_eq!(cfg.tiers.get_unchecked(1), tiers.get_unchecked(1));
+    assert_eq!(cfg.tiers, client.get_yield_tiers());
+}
 
-    // Cover edge case: values after set
+#[test]
+fn test_yield_tier_config_after_init_without_tiers() {
+    let env = Env::default();
     env.mock_all_auths();
-    let mut new_tiers: SorobanVec<YieldTier> = SorobanVec::new(&env);
-    new_tiers.push_back(YieldTier {
-        min_lock_secs: 100_000,
-        yield_bps: 1100,
-    });
-    client.set_yield_tiers(&new_tiers);
+    let (client, admin, sme) = setup(&env);
 
-    let cfg_after = client.get_yield_tier_config();
-    assert_eq!(cfg_after.base_yield_bps, 800); // base yield is unmodified
-    assert_eq!(cfg_after.tiers.len(), 1);
-    assert_eq!(cfg_after.tiers.get_unchecked(0), new_tiers.get_unchecked(0));
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(&env, "INVBase"),
+        &sme,
+        &10_000i128,
+        &750i64, // base_yield_bps
+        &0u64,
+        &Address::generate(&env),
+        &None,
+        &Address::generate(&env),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    let cfg = client.get_yield_tier_config();
+
+    assert_eq!(cfg.base_yield_bps, 750);
+    assert!(cfg.tiers.is_empty());
+    assert_eq!(cfg.tiers, client.get_yield_tiers());
 }

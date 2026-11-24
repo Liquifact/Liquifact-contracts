@@ -100,6 +100,12 @@ The current contract defines the event structs listed below.
 | `PauseRateLimitUpdated` | `pause_rl` | `set_pause_rate_limit` |
 | `PauseCooldownUpdated` | `pausecd` | `set_pause_cooldown` |
 | `PauserChanged` | `pauser` | `set_pauser` |
+| `FeeScheduleSubmitted` | `fee_sub` | `submit_fee_schedule` |
+| `FeeScheduleActivated` | `fee_act` | `activate_fee_schedule`, `submit_fee_schedule` (lazy activation) |
+| `FeeScheduleCancelled` | `fee_can` | `cancel_pending_fee_schedule` |
+| `ProtocolFeeUpdated` | `fee_upd` | `set_protocol_fee_bps` |
+| `PerformanceFeeUpdated` | `perf_upd` | `set_performance_fee_bps` |
+| `PerformanceFeeCollected` | `perf_fee` | `claim_investor_payout`, `push_investor_payouts` |
 
 The `name` symbol for each event is part of the compatibility contract. Symbols
 are stable identifiers: they MUST NOT be reused for a different event and MUST
@@ -1141,6 +1147,128 @@ Data:
 |---|---|
 | `pauser` | `Option<Address>` (new address, or `None` when revoked) |
 
+### `FeeScheduleSubmitted`
+
+Emitted after `submit_fee_schedule` stores a new pending fee schedule.
+Resubmitting an identical still-pending schedule is a successful no-op and does
+not re-emit this event.
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `fee_schedule_submitted` |
+| 1 | `name` | `Symbol` | `fee_sub` |
+| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
+
+Data:
+
+| Field | Type |
+|---|---|
+| `fee_bps` | `u32` |
+| `activation_ledger` | `u32` |
+
+### `FeeScheduleActivated`
+
+Emitted by `activate_fee_schedule` when a pending schedule reaches its activation
+ledger. `submit_fee_schedule` calls `activate_fee_schedule` first, so a submission
+can lazily activate an earlier schedule and emit this event before
+`FeeScheduleSubmitted`.
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `fee_schedule_activated` |
+| 1 | `name` | `Symbol` | `fee_act` |
+| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
+
+Data:
+
+| Field | Type |
+|---|---|
+| `fee_bps` | `u32` |
+
+### `FeeScheduleCancelled`
+
+Emitted after `cancel_pending_fee_schedule` removes a pending fee schedule.
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `fee_schedule_cancelled` |
+| 1 | `name` | `Symbol` | `fee_can` |
+| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
+
+Data:
+
+| Field | Type |
+|---|---|
+| `fee_bps` | `u32` |
+
+### `ProtocolFeeUpdated`
+
+Emitted by `set_protocol_fee_bps` when the stored protocol fee changes. A no-op
+update emits no event.
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `protocol_fee_updated` |
+| 1 | `name` | `Symbol` | `fee_upd` |
+| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
+
+Data:
+
+| Field | Type |
+|---|---|
+| `old_fee_bps` | `i64` |
+| `new_fee_bps` | `i64` |
+
+### `PerformanceFeeUpdated`
+
+Emitted by `set_performance_fee_bps` when the stored performance fee changes. A
+no-op update emits no event.
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `performance_fee_updated` |
+| 1 | `name` | `Symbol` | `perf_upd` |
+| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
+
+Data:
+
+| Field | Type |
+|---|---|
+| `old_fee_bps` | `u32` |
+| `new_fee_bps` | `u32` |
+
+### `PerformanceFeeCollected`
+
+Emitted by the shared `claim_core` helper during `claim_investor_payout` or
+`push_investor_payouts` when a positive performance fee is transferred to the
+treasury, before `InvestorPayoutClaimed`. Unlike the other fee events, `name`
+and `invoice_id` are data fields; only `investor` is a dynamic topic.
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `performance_fee_collected` |
+| 1 | `investor` | `Address` | Investor whose payout generated the fee |
+
+Data:
+
+| Field | Type | Value |
+|---|---|---|
+| `name` | `Symbol` | `perf_fee` |
+| `invoice_id` | `Symbol` | Escrow invoice id |
+| `fee` | `i128` | Performance fee transferred to the treasury |
+
 ## Nested Types
 
 ### `InvoiceEscrow`
@@ -1227,3 +1355,4 @@ Status values:
 | 2026-11-22 | v0.7 | Documented `PayoutBatchProcessed`, `RefundBatchProcessed`, `EscrowUnfunded`, `InvestorFreezeChanged`, and `ContributionReferenced` events |
 | 2026-11-23 | v0.8 | Issue #1636: documented `UpgradeProposed`, `UpgradeCancelled`, `ContractUpgraded`, `DeprecatedUpgradeUsed`, and `DeprecatedTransferAdminUsed` events |
 | 2026-11-23 | v0.9 | Issue #1637: documented `EscrowPartialSettle`, `EscrowRepaid`, `SettlementFunded`, `SettleBatchProcessed`, and `PartialCloseMinBpsUpdated` events |
+| 2026-11-23 | v0.10 | Issue #1634: documented `FeeScheduleSubmitted`, `FeeScheduleActivated`, `FeeScheduleCancelled`, `ProtocolFeeUpdated`, `PerformanceFeeUpdated`, and `PerformanceFeeCollected` events |

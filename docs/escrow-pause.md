@@ -63,6 +63,12 @@ state (`None` when no pause is active, including after auto-expiry). It is a
 continues to report just the effective boolean, and `get_pause_state()` is the
 view that explains *what* is blocked and *why*.
 
+`get_pause_remaining_secs() -> Option<u64>` returns the seconds until the
+current pause auto-expires. It returns `None` when no pause is effective, after
+expiry, or when the max duration is `0` (unlimited). Like the other pause views,
+it is a **pure read** with no auth and no storage mutation; integrators do not
+need to combine `get_paused_at()` and `get_pause_max_duration()` themselves.
+
 ---
 
 ## Gated entrypoints
@@ -244,6 +250,7 @@ ledger timestamp exceeds `PauseToggleWindowStart + window_secs`.
 | `set_paused(active, scope, reason)` | Activate/clear a typed, scoped pause | Rate limit exceeded; re-pause narrow → `PauseAlreadyActive` (276); cooldown active → `PauseCooldownActive` (277); wrong-scope unpause → `PauseScopeMismatch` (246) |
 | `set_pause_max_duration(duration)` | Set auto-expiry window | Duration out of bounds |
 | `get_pause_max_duration()` | Read current auto-expiry | — |
+| `get_pause_remaining_secs()` | Read seconds until auto-expiry (`None` when unpaused, expired, or unlimited) | — |
 | `set_pause_cooldown(secs)` | Set cooldown after expiry before re-activation | Cooldown out of bounds → `PauseCooldownOutOfRange` (278) |
 | `get_pause_cooldown()` | Read current cooldown | — |
 | `set_pause_rate_limit(limit, window)` | Set toggle rate limit | Invalid combination or out of bounds |
@@ -308,6 +315,8 @@ The matrix in `escrow/src/tests/pause.rs` covers:
 14. Typed scope/reason edge cases: pause one scope, pause all scopes, unpause
     wrong scope (`PauseScopeMismatch`), already-paused idempotency, and
     unauthorized scoped pause all fail/succeed as documented.
+15. `get_pause_remaining_secs()` returns `None` without a bounded active pause,
+    counts down with ledger time, and returns `None` at and after expiry.
 
 The matrix in `escrow/src/tests/pause_bypass.rs` covers the max-duration
 bypass fix (issue #1549):

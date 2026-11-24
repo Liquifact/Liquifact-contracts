@@ -126,6 +126,7 @@ stateDiagram-v2
 | `claim_investor_payout` | `investor` | 1. `escrow.status == 2` (Settled)<br>2. `contribution > 0`<br>3. `ledger.timestamp() >= InvestorClaimNotBefore` | Computes payout using `InvestorEffectiveYield` (or fallback base), transfers tokens, clears contribution. |
 | `preview_yield_tier` | *None (Read)* | None (Simulates hypothetical deposit amount & lock duration against tier table). | Returns `(effective_yield_bps, matched_lock_secs)`. |
 | `get_yield_tiers` | *None (Read)* | None | Returns stored `Vec<YieldTier>`. |
+| `get_yield_tier_config` | *None (Read)* | None | Returns `YieldTierConfig { base_yield_bps, tiers }` (defaults to `0` and empty before `init`). |
 | `get_effective_yield_bps` | *None (Read)* | None | Returns `InvestorEffectiveYield` if set; otherwise escrow base `yield_bps`. |
 | `get_investor_claim_not_before` | *None (Read)* | None | Returns `InvestorClaimNotBefore(investor)` timestamp. |
 

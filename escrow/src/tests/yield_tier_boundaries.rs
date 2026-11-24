@@ -9,6 +9,7 @@
 use super::{assert_contract_error, deploy, LiquifactEscrowClient, TARGET};
 use crate::{EscrowError, YieldResolution, YieldTier};
 use soroban_sdk::{testutils::Address as _, Address, Env, String, Vec as SorobanVec};
+use proptest::prelude::ProptestConfig;
 
 const BOUNDED_TIER_COUNT_PROBE: u32 = 64;
 
@@ -292,6 +293,7 @@ fn test_preview_selection_uses_bounded_boundary_matrix() {
 // because each case deploys and initializes a fresh Soroban contract.
 proptest::proptest! {
     #![proptest_config(proptest::prelude::ProptestConfig::with_cases(64))]
+    #![proptest_config(ProptestConfig::with_cases(64))]
 
     #[test]
     fn prop_preview_yield_tier_monotonic_for_valid_tables(

@@ -40,7 +40,7 @@ State-mutating attestation entrypoints--`bind_primary_attestation_hash`, `append
   - `bind_primary_attestation_hash` and `append_attestation_digest` call `Self::load_escrow_require_admin(&env)`.
   - `revoke_attestation_digest`, `revoke_attestation_digests`, and `unrevoke_attestation_digest` verify `escrow.admin.require_auth()`.
 - **Attestor Exception:** `append_attestation_digest_as` requires the stored attestor address and its authorization. Only admin can assign, rotate, or clear it through `set_attestor`. Both append paths reject primary and historical duplicates, including revoked entries, and persist the author at the appended index.
-- **Read-Only Exception:** `get_attestation_author` and read functions (`get_primary_attestation_hash`, `get_attestation_append_log`, `get_attestation_digest_at`, `is_attestation_revoked`, `get_revoked_attestation_digests`, `get_escrow_summary`) require no authorization.
+- **Read-Only Exception:** `get_attestation_author` and read functions (`get_primary_attestation_hash`, `get_attestation_append_log`, `get_attestation_digest_at`, `is_attestation_revoked`, `get_revoked_attestation_digests`, `get_attestation_config`, `get_escrow_summary`) require no authorization.
 
 ---
 
@@ -136,12 +136,12 @@ All attestation state modifications publish structured Soroban contract events f
 
 ### INV-ATT-11: Configuration View Determinism
 
-The attestation configuration view (`AttestationConfigView`) is a read-only projection of attestation constants and current state. It must be deterministic for any given storage state.
+The attestation configuration view (`get_attestation_config` returning `AttestationConfig`) is a read-only projection of attestation constants and current state. It must be deterministic for any given storage state.
 
-- **Rule:** `AttestationConfigView` MUST report the exact bounds (`MAX_ATTESTATION_APPEND_ENTRIES`, `MAX_ATTESTATION_REVOKE_BATCH`, `MAX_ATTESTATION_READ_PAGE`) and the current occupancy of the append log.
+- **Rule:** `get_attestation_config` MUST report the exact bounds (`MAX_ATTESTATION_APPEND_ENTRIES`, `MAX_ATTESTATION_REVOKE_BATCH`, `MAX_ATTESTATION_APPEND_BATCH`, `MAX_ATTESTATION_READ_PAGE`), whether the primary attestation hash is bound (`primary_bound`), and the current occupancy of the append log (`append_log_length`).
 - **Enforcement Location:** [`escrow/src/tests/attestation_config_view.rs`](../escrow/src/tests/attestation_config_view.rs) verifies the view against the constants and storage layout.
-- **Boundary Behavior:** The view must report `attestation_append_log_length` correctly at 0, at the exact capacity boundary (32), and after revocation/revocation reversal.
-- **Invalid Input:** The view is pure and must not panic on any storage state, including an empty log or a fully revoked log.
+- **Boundary Behavior:** The view must report `append_log_length` correctly at 0 (including pre-init), at the exact capacity boundary (32), and after revocation/revocation reversal.
+- **Invalid Input:** The view is pure, pre-init safe, and must not panic on any storage state, including before `init`, an empty log, or a fully revoked log.
 
 ---
 
@@ -159,6 +159,7 @@ The attestation configuration view (`AttestationConfigView`) is a read-only proj
 | `get_attestation_digest_at` | Read-only | None | R: `AttestationAppendLog`<br />R: `AttestationRevoked(i)` | None | None |
 | `is_attestation_revoked` | Read-only | None | R: `AttestationRevoked(i)` | None | None |
 | `get_revoked_attestation_digests` | Read-only | None | R: `AttestationAppendLog`<br />R: `AttestationRevoked(i)` | Bounded by `MAX_ATTESTATION_READ_PAGE` (20) | None |
+| `get_attestation_config` | Read-only | None | R: `PrimaryAttestationHash`<br />R: `AttestationAppendLog` | None (pre-init safe) | None |
 
 ---
 
