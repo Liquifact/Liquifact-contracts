@@ -91,6 +91,7 @@ mod init;
 mod fees;
 mod funding_deadline_cap_tests;
 mod funding_deadline_tests;
+mod funding_state_view;
 mod integration_status_guards;
 mod investor_freeze;
 mod legal_hold;
