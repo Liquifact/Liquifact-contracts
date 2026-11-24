@@ -79,6 +79,7 @@ mod collateral_version_view;
 #[rustfmt::skip]
 mod coverage;
 mod envelope_bounds;
+mod error_docs;
 mod event_emission;
 mod external_calls;
 mod external_calls_mocked;
