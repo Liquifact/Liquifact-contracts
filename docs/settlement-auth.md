@@ -150,6 +150,24 @@ Admin aborts the funding round, transitioning to `status = 4` (Cancelled) and un
 2. `load_escrow_require_admin`
 3. `guard_status_eq(..., 0, CancelFundingNotOpen)`
 
+#### `expire_funding(env: Env) -> InvoiceEscrow`
+
+Permissionless variant of `cancel_funding` for an open escrow whose funding deadline has passed.
+
+| Aspect | Detail |
+|--------|--------|
+| **Authorized caller** | anyone (no `require_auth`) |
+| **Legal-hold gate** | Blocked if `LegalHold == true` → `LegalHoldBlocksCancelFunding (140)` |
+| **Status precondition** | `status == 0` (Open) → `CancelFundingNotOpen (141)` if not |
+| **Deadline precondition** | deadline set and `now > deadline` → `FundingNotExpired (316)` if not |
+| **State transition** | `0 → 4` via the same helper as `cancel_funding` (emits `FundingCancelled`, then `FundingExpired`) |
+| **Operational pause** | **Not checked**, same as `cancel_funding` |
+
+**Guard ordering:**
+1. `guard_not_legal_hold(..., LegalHoldBlocksCancelFunding)`
+2. `guard_status_eq(..., 0, CancelFundingNotOpen)`
+3. deadline check → `FundingNotExpired`
+
 ---
 
 ### 6. `refund(env: Env, investor: Address)`
@@ -234,8 +252,8 @@ Treasury sweeps residual funding-token balance from a terminal escrow (status 2,
 | 127 | `InvestorClaimNotSettled` | `claim_investor_payout()` when `status != 2` |
 | 128 | `InvestorCommitmentLockNotExpired` | `claim_investor_payout()` before `not_before` |
 | 129 | `ComputePayoutArithmeticOverflow` | Payout math overflow |
-| 140 | `LegalHoldBlocksCancelFunding` | `cancel_funding()` with active legal hold |
-| 141 | `CancelFundingNotOpen` | `cancel_funding()` when `status != 0` |
+| 140 | `LegalHoldBlocksCancelFunding` | `cancel_funding()` / `expire_funding()` with active legal hold |
+| 141 | `CancelFundingNotOpen` | `cancel_funding()` / `expire_funding()` when `status != 0` |
 | 142 | `RefundNotCancelled` | `refund()` when `status != 4` |
 | 143 | `NoContributionToRefund` | `refund()` with zero contribution |
 | 165 | `InsufficientContractBalance` | `withdraw()` contract balance < `funded_amount` |
@@ -245,6 +263,7 @@ Treasury sweeps residual funding-token balance from a terminal escrow (status 2,
 | 211 | `PausedBlocksSettlement` | `settle()` when paused |
 | 212 | `PausedBlocksWithdrawal` | `withdraw()` when paused |
 | 213 | `PausedBlocksInvestorClaims` | `claim_investor_payout()` when paused |
+| 316 | `FundingNotExpired` | `expire_funding()` when no deadline is set or `now <= deadline` |
 | 30 | `LegalHoldBlocksTreasuryDustSweep` | `sweep_terminal_dust()` with active legal hold |
 | 33 | `DustSweepNotTerminal` | `sweep_terminal_dust()` on non-terminal status |
 | 42 | `SweepExceedsLiabilityFloor` | Sweep would leave balance < outstanding refunds |

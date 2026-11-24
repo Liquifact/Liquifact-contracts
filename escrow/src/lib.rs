@@ -1133,6 +1133,12 @@ pub enum EscrowError {
     InvestorFreezeBatchDuplicate = 315,
     /// Checked arithmetic overflow in [`LiquifactEscrow::get_funding_progress_bps`].
     FundingProgressArithmeticOverflow = 314,
+    /// [`LiquifactEscrow::preview_yield_tier`] received an `amount` that is zero or negative.
+    ZeroContributionAmount = 315,
+    /// [`LiquifactEscrow::expire_funding`] called while the funding deadline is unset or has
+    /// not yet passed (`now <= deadline`).
+    FundingNotExpired = 316,
+    FundingProgressArithmeticOverflow = 314,
     /// Non-positive contribution amount rejected in [`LiquifactEscrow::preview_yield_tier`].
     ZeroContributionAmount = 315,
     FundingProgressArithmeticOverflow = 314,
@@ -2747,6 +2753,22 @@ pub struct FundingCancelled {
     #[topic]
     pub invoice_id: Symbol,
     pub funded_amount: i128,
+}
+
+/// Emitted by [`LiquifactEscrow::expire_funding`] **after** the shared
+/// [`FundingCancelled`] event, so indexers can tell a permissionless expiry apart from an
+/// admin cancellation. `FundingCancelled` is still emitted exactly as for `cancel_funding`.
+#[contractevent]
+pub struct FundingExpired {
+    #[topic]
+    pub name: Symbol,
+    #[topic]
+    pub invoice_id: Symbol,
+    pub funded_amount: i128,
+    /// The funding deadline (ledger timestamp) that was exceeded.
+    pub deadline: u64,
+    /// Ledger timestamp at which the expiry was recorded.
+    pub expired_at: u64,
 }
 
 #[contractevent]
@@ -10626,22 +10648,80 @@ impl LiquifactEscrow {
     pub fn cancel_funding(env: Env) -> InvoiceEscrow {
         guard_not_legal_hold(&env, EscrowError::LegalHoldBlocksCancelFunding);
 
-        let mut escrow = Self::load_escrow_require_admin(&env);
+        let escrow = Self::load_escrow_require_admin(&env);
 
         guard_status_eq(&env, escrow.status, 0, EscrowError::CancelFundingNotOpen);
 
+        Self::apply_funding_cancellation(&env, escrow)
+    }
+
+    /// Permissionlessly cancel an **open** escrow whose funding deadline has passed.
+    ///
+    /// Anyone may call this once `now > funding_deadline` while the escrow is still open
+    /// (status 0). It performs the same `0 → 4` transition as
+    /// [`LiquifactEscrow::cancel_funding`] (shared via `apply_funding_cancellation`), which
+    /// unlocks [`LiquifactEscrow::refund`] / [`LiquifactEscrow::refund_batch`] without
+    /// depending on an admin action.
+    ///
+    /// No authorization is required. Legal hold blocks this call exactly as it blocks
+    /// `cancel_funding`; the operational pause does **not**, matching `cancel_funding`
+    /// (refunds stay reachable during an incident).
+    ///
+    /// # Errors
+    /// - [`EscrowError::LegalHoldBlocksCancelFunding`] while a legal hold is active.
+    /// - [`EscrowError::EscrowNotInitialized`] before `init`.
+    /// - [`EscrowError::CancelFundingNotOpen`] if the status is not 0 (funded, settled,
+    ///   withdrawn, or already cancelled — so a second call fails).
+    /// - [`EscrowError::FundingNotExpired`] if no deadline is set or `now <= deadline`.
+    ///
+    /// # Events
+    /// Emits [`FundingStateChanged`] and [`FundingCancelled`] (as `cancel_funding` does),
+    /// then [`FundingExpired`].
+    pub fn expire_funding(env: Env) -> InvoiceEscrow {
+        guard_not_legal_hold(&env, EscrowError::LegalHoldBlocksCancelFunding);
+
+        let escrow = Self::get_escrow(env.clone());
+
+        guard_status_eq(&env, escrow.status, 0, EscrowError::CancelFundingNotOpen);
+
+        let deadline: u64 = env
+            .storage()
+            .instance()
+            .get(&keys::funding_deadline())
+            .unwrap_or_else(|| fail(&env, EscrowError::FundingNotExpired));
+        let now = env.ledger().timestamp();
+        ensure(&env, now > deadline, EscrowError::FundingNotExpired);
+
+        let escrow = Self::apply_funding_cancellation(&env, escrow);
+
+        FundingExpired {
+            name: symbol_short!("fund_exp"),
+            invoice_id: escrow.invoice_id.clone(),
+            funded_amount: escrow.funded_amount,
+            deadline,
+            expired_at: now,
+        }
+        .publish(&env);
+
+        escrow
+    }
+
+    /// Shared `0 → 4` transition used by [`LiquifactEscrow::cancel_funding`] and
+    /// [`LiquifactEscrow::expire_funding`]. Callers must already have checked auth, legal
+    /// hold and that `escrow.status == 0`.
+    fn apply_funding_cancellation(env: &Env, mut escrow: InvoiceEscrow) -> InvoiceEscrow {
         let old_status = escrow.status;
         escrow.status = 4;
         env.storage().instance().set(&DataKey::Escrow, &escrow);
 
-        emit_funding_state_changed(&env, &escrow, old_status);
+        emit_funding_state_changed(env, &escrow, old_status);
 
         FundingCancelled {
             name: symbol_short!("fund_can"),
             invoice_id: escrow.invoice_id.clone(),
             funded_amount: escrow.funded_amount,
         }
-        .publish(&env);
+        .publish(env);
 
         escrow
     }

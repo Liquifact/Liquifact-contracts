@@ -1,4 +1,5 @@
 use super::*;
+use crate::MAX_INVESTOR_ALLOWLIST_BATCH;
 use soroban_sdk::IntoVal;
 use crate::MAX_INVESTOR_ALLOWLIST_BATCH;
 

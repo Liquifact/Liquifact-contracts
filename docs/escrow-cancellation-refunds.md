@@ -20,6 +20,17 @@ When an escrow is open and active (status `0`), it accepts funding contributions
   - Transitioning to status `4` unlocks the [`LiquifactEscrow::refund`](file:///c:/Users/enwer/OneDrive/Documents/Code%20Projects/OS%20Contributions/Liquifact-contracts/escrow/src/lib.rs#L3816) entrypoint for all contributing investors.
   - It also allows the treasury to call [`LiquifactEscrow::sweep_terminal_dust`](file:///c:/Users/enwer/OneDrive/Documents/Code%20Projects/OS%20Contributions/Liquifact-contracts/escrow/src/lib.rs#L1447) (subject to the liability floor).
 
+### Triggering expire_funding (permissionless)
+If the admin never cancels a stalled raise, anyone can unlock refunds once the funding deadline has passed by calling `LiquifactEscrow::expire_funding`.
+- **Auth**: none. The call does not use `require_auth`.
+- **Conditions**:
+  - The escrow status must be exactly `0` (Open), otherwise `CancelFundingNotOpen (141)`. A funded escrow can never expire, and a second call fails because the first one moved the status to `4`.
+  - A funding deadline must be configured and `ledger.timestamp > funding_deadline` (strict, so the deadline second itself is still open), otherwise `FundingNotExpired (316)`. This is the same predicate as `is_funding_expired()`.
+  - No legal hold is active, otherwise `LegalHoldBlocksCancelFunding (140)`, exactly as for `cancel_funding`.
+  - The operational pause does **not** block it, matching `cancel_funding`, so refunds stay reachable during an incident.
+- **State Transition**: the same `0 → 4` transition as `cancel_funding` (both call one internal helper), so `FundingStateChanged` and `FundingCancelled` are emitted unchanged, followed by a `FundingExpired` marker event (`deadline`, `expired_at`) that lets indexers tell expiry from an admin cancellation.
+- **Unlocks**: identical to `cancel_funding`: `refund` / `refund_batch` and `sweep_terminal_dust`.
+
 ---
 
 ## 2. Refund Mechanics
