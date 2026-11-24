@@ -64,6 +64,7 @@ mod admin;
 mod allowlist_expiry;
 mod allowlist_index_proptest;
 mod allowlist_persistent_index;
+mod attestation_config_view;
 mod attestation_limit;
 mod attestation_event_schema;
 mod attestation_parameters;
@@ -84,6 +85,7 @@ mod external_calls;
 mod external_calls_mocked;
 mod fee_schedule;
 mod funding;
+mod funding_events;
 mod init;
 // `integration` (integration.rs) is disabled: it was written against a contract
 // API (close-escrow, admin-transfer, collateral events) and an older SDK event
