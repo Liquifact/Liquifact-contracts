@@ -66,6 +66,7 @@ mod allowlist_event_payloads;
 mod allowlist_expiry;
 mod allowlist_index_proptest;
 mod allowlist_persistent_index;
+mod attestation_config_view;
 mod attestation_limit;
 mod attestation_event_schema;
 mod attestation_parameters;
@@ -80,19 +81,24 @@ mod collateral_version_view;
 #[rustfmt::skip]
 mod coverage;
 mod envelope_bounds;
+mod error_docs;
 mod event_emission;
 mod external_calls;
 mod external_calls_mocked;
 mod fee_schedule;
+mod fees;
+mod fees_boundary_tests;
 mod funding;
+mod funding_events;
 mod init;
 // `integration` (integration.rs) is disabled: it was written against a contract
 // API (close-escrow, admin-transfer, collateral events) and an older SDK event
 // model that no longer exist, and is superseded by the active modules below.
 // mod integration;
-mod fees;
+mod fees_setter_tests;
 mod funding_deadline_cap_tests;
 mod funding_deadline_tests;
+mod funding_state_view;
 mod integration_status_guards;
 mod investor_freeze;
 mod legal_hold;

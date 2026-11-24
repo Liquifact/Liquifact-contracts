@@ -200,6 +200,9 @@ pub const MIN_ATTESTATION_LIMIT: u32 = 1;
 /// Maximum configurable attestation append-log limit.
 pub const MAX_ATTESTATION_LIMIT: u32 = MAX_ATTESTATION_APPEND_ENTRIES;
 
+/// Maximum number of digests that can be appended in a single batch call.
+pub const MAX_ATTESTATION_APPEND_BATCH: u32 = MAX_ATTESTATION_APPEND_ENTRIES;
+
 /// Maximum number of indices that can be revoked in a single batch call.
 pub const MAX_ATTESTATION_REVOKE_BATCH: u32 = 32;
 
@@ -1127,8 +1130,16 @@ pub enum EscrowError {
     AttestationLimitOutOfRange = 312,
     /// [`LiquifactEscrow::set_investors_frozen`] received the same investor more than once.
     InvestorFreezeBatchDuplicate = 313,
+    InvestorFreezeBatchDuplicate = 315,
     /// Checked arithmetic overflow in [`LiquifactEscrow::get_funding_progress_bps`].
     FundingProgressArithmeticOverflow = 314,
+    FundingProgressArithmeticOverflow = 316,
+    /// [`LiquifactEscrow::preview_yield_tier`] received a non-positive `amount`.
+    ZeroContributionAmount = 317,
+    /// [`LiquifactEscrow::append_attestation_digests`] received an empty digests vector.
+    AttestationAppendBatchEmpty = 313,
+    /// [`LiquifactEscrow::append_attestation_digests`] exceeded [`MAX_ATTESTATION_APPEND_BATCH`].
+    AttestationAppendBatchTooLarge = 314,
 }
 
 #[inline(always)]
@@ -2069,6 +2080,28 @@ pub struct SettlementConfig {
     pub max_unique_investors_cap: Option<u32>,
     /// Optional cap on total principal per single investor; `None` means unlimited.
     pub max_per_investor_cap: Option<i128>,
+}
+
+/// Read-only snapshot of attestation configuration limits and live state.
+///
+/// Returned by [`LiquifactEscrow::get_attestation_config`]. Every field is read from
+/// compile-time constants or instance storage with safe defaults, so the view is safe
+/// to call before [`LiquifactEscrow::init`] without panicking.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct AttestationConfig {
+    /// Maximum number of digests allowed in the attestation append log.
+    pub max_append_entries: u32,
+    /// Maximum number of indices allowed in a single batch revocation call.
+    pub max_revoke_batch: u32,
+    /// Maximum number of digests allowed in a single batch append call.
+    pub max_append_batch: u32,
+    /// Maximum number of entries returned per paginated attestation read.
+    pub max_read_page: u32,
+    /// Whether the primary attestation hash has been bound.
+    pub primary_bound: bool,
+    /// Current number of entries in the attestation append log.
+    pub append_log_length: u32,
 }
 
 /// Cross-contract callback context binding origin, nonce, and lifecycle phase.
@@ -4716,6 +4749,39 @@ impl LiquifactEscrow {
         Self::append_attestation(&env, &escrow, author, digest);
     }
 
+    /// Atomically append multiple attestation digests as admin in a single call.
+    ///
+    /// Rejects empty batches with [`EscrowError::AttestationAppendBatchEmpty`], batches
+    /// exceeding [`MAX_ATTESTATION_APPEND_BATCH`] with [`EscrowError::AttestationAppendBatchTooLarge`],
+    /// and batches that would exceed the configured attestation limit with
+    /// [`EscrowError::AttestationAppendLogCapacityReached`]. Reuses [`Self::append_attestation`]
+    /// for each digest, emitting one [`AttestationDigestAppended`] event per entry and rolling back
+    /// the entire batch atomically on any failure.
+    pub fn append_attestation_digests(env: Env, digests: Vec<BytesN<32>>) {
+        let n = digests.len();
+        ensure(&env, n > 0, EscrowError::AttestationAppendBatchEmpty);
+        ensure(
+            &env,
+            n <= MAX_ATTESTATION_APPEND_BATCH,
+            EscrowError::AttestationAppendBatchTooLarge,
+        );
+
+        let escrow = Self::load_escrow_require_admin(&env);
+        let log = Self::load_attestation_log(&env);
+        let limit = Self::get_attestation_limit(env.clone());
+        ensure(
+            &env,
+            log.len().saturating_add(n) <= limit,
+            EscrowError::AttestationAppendLogCapacityReached,
+        );
+
+        let author = escrow.admin.clone();
+        for i in 0..n {
+            let digest = digests.get(i).unwrap();
+            Self::append_attestation(&env, &escrow, author.clone(), digest);
+        }
+    }
+
     /// Append as the designated attestor. This role grants no revocation or admin permissions.
     pub fn append_attestation_digest_as(env: Env, attestor: Address, digest: BytesN<32>) {
         let escrow = Self::get_escrow(env.clone());
@@ -5596,6 +5662,34 @@ impl LiquifactEscrow {
         }
     }
 
+    /// Read-only snapshot of attestation configuration limits and live state.
+    ///
+    /// Returns the compile-time attestation bounds alongside live primary-hash and
+    /// append-log state in a single [`AttestationConfig`] struct.
+    ///
+    /// # Pre-init safety
+    /// Safe to call before [`LiquifactEscrow::init`]: missing storage keys fall back
+    /// to `primary_bound = false` and `append_log_length = 0` without panicking.
+    ///
+    /// # Read-only
+    /// Pure view: no `require_auth`, no storage writes, and no TTL bump.
+    pub fn get_attestation_config(env: Env) -> AttestationConfig {
+        let primary_bound = env
+            .storage()
+            .instance()
+            .has(&DataKey::PrimaryAttestationHash);
+        let append_log_length = Self::load_attestation_log(&env).len();
+
+        AttestationConfig {
+            max_append_entries: MAX_ATTESTATION_APPEND_ENTRIES,
+            max_revoke_batch: MAX_ATTESTATION_REVOKE_BATCH,
+            max_append_batch: MAX_ATTESTATION_APPEND_BATCH,
+            max_read_page: MAX_ATTESTATION_READ_PAGE,
+            primary_bound,
+            append_log_length,
+        }
+    }
+
     /// Record or replace the optional SME collateral commitment metadata.
     ///
     /// **Metadata-only:** this writes [`DataKey::SmeCollateralPledge`] and emits
@@ -6289,6 +6383,37 @@ impl LiquifactEscrow {
             .instance()
             .get(&DataKey::PauseMaxDurationSecs)
             .unwrap_or(DEFAULT_PAUSE_MAX_DURATION_SECS)
+    }
+
+    /// Return the seconds remaining before the effective operational pause auto-expires.
+    ///
+    /// Returns `None` when no pause is active, the pause has expired, or auto-expiry is
+    /// disabled (`max_duration == 0`). The countdown uses the original
+    /// [`DataKey::PausedAt`] and the current [`DataKey::PauseMaxDurationSecs`].
+    ///
+    /// # Security note
+    /// **Pure read** — requires no authorization and performs no state mutation.
+    pub fn get_pause_remaining_secs(env: Env) -> Option<u64> {
+        if !Self::paused_active(&env) {
+            return None;
+        }
+
+        let max_duration: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::PauseMaxDurationSecs)
+            .unwrap_or(DEFAULT_PAUSE_MAX_DURATION_SECS);
+        if max_duration == 0 {
+            return None;
+        }
+
+        let paused_at: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::PausedAt)
+            .unwrap_or(0);
+        let now = env.ledger().timestamp();
+        Some(paused_at.saturating_add(max_duration).saturating_sub(now))
     }
 
     /// Set the pause cooldown (seconds) that must elapse after a pause auto-expires before a
@@ -9243,6 +9368,33 @@ impl LiquifactEscrow {
         let contribution = Self::get_persistent_investor_contribution(&env, investor);
         let (net, _fee) = Self::calculate_claim_split(&env, payout, contribution);
         net
+    }
+
+    /// Read-only pro-rata principal share of the current funded total, in basis points.
+    ///
+    /// Uses floor division: `contribution * 10_000 / funded_amount`. Returns `0` when
+    /// `funded_amount <= 0` or the investor has no positive recorded contribution.
+    /// This is a live funding view; payout calculations use the immutable
+    /// [`FundingCloseSnapshot`] denominator instead.
+    ///
+    /// # Authorization
+    /// None — pure read; no auth required and no state mutation.
+    pub fn get_investor_share_bps(env: Env, investor: Address) -> u32 {
+        let escrow = Self::get_escrow(env.clone());
+        if escrow.funded_amount <= 0 {
+            return 0;
+        }
+
+        let contribution = Self::get_persistent_investor_contribution(&env, investor);
+        if contribution <= 0 {
+            return 0;
+        }
+
+        contribution
+            .checked_mul(10_000)
+            .and_then(|scaled| scaled.checked_div(escrow.funded_amount))
+            .unwrap_or(0)
+            .min(10_000) as u32
     }
 
     /// Composite read-only view of a single investor's position.
