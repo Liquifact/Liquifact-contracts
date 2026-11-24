@@ -292,6 +292,7 @@ fn test_preview_selection_uses_bounded_boundary_matrix() {
 // must never resolve to a lower effective yield. Keep this property bounded
 // because each case deploys and initializes a fresh Soroban contract.
 proptest::proptest! {
+    #![proptest_config(proptest::prelude::ProptestConfig::with_cases(64))]
     #![proptest_config(ProptestConfig::with_cases(64))]
 
     #[test]

@@ -88,6 +88,7 @@ mod external_calls_mocked;
 mod fee_schedule;
 mod fees;
 mod fees_boundary_tests;
+mod fee_split_proptest;
 mod funding;
 mod funding_events;
 mod init;

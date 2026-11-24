@@ -1133,6 +1133,9 @@ pub enum EscrowError {
     InvestorFreezeBatchDuplicate = 315,
     /// Checked arithmetic overflow in [`LiquifactEscrow::get_funding_progress_bps`].
     FundingProgressArithmeticOverflow = 314,
+    /// Non-positive contribution amount rejected in [`LiquifactEscrow::preview_yield_tier`].
+    ZeroContributionAmount = 315,
+    FundingProgressArithmeticOverflow = 314,
     FundingProgressArithmeticOverflow = 316,
     /// [`LiquifactEscrow::preview_yield_tier`] received a non-positive `amount`.
     ZeroContributionAmount = 317,
