@@ -10,6 +10,7 @@ use crate::{
 use soroban_sdk::{
     symbol_short, testutils::Address as _, testutils::Events as _, Address, BytesN, Env, Event,
     IntoVal, Vec as SorobanVec,
+    Vec as SorobanVec, Event,
 };
 
 // ---------------------------------------------------------------------------

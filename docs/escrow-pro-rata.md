@@ -19,6 +19,27 @@ To ensure protocol solvency and prevent "penny-bleeding" attacks, integrators sh
 2.  **Protocol Fees**: Calculated on the remainder after all investor payouts are rounded.
 3.  **Intermediate Math**: Use high-precision rational arithmetic (e.g., `BigInt` or 256-bit fixed point) before the final rounding step.
 
+## Current Investor Share View
+
+```
+LiquifactEscrow::get_investor_share_bps(investor: Address) → u32
+```
+
+Returns the investor's principal share of the **current** `InvoiceEscrow.funded_amount`:
+
+```text
+share_bps = contribution × 10_000 / funded_amount  (floor)
+```
+
+The view returns `0` when nothing has been funded or the investor has no positive
+recorded contribution. It uses checked multiplication and division, requires no
+authorization, and performs no state mutation.
+
+This is a live funding-phase view: the result changes as principal is funded or
+withdrawn. It intentionally uses the current funded total rather than the
+immutable `FundingCloseSnapshot.total_principal` denominator used for settled
+payout calculations.
+
 ## 📝 Example Calculation
 
 **Scenario:**
