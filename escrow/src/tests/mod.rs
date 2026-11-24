@@ -90,7 +90,6 @@ mod init;
 // API (close-escrow, admin-transfer, collateral events) and an older SDK event
 // model that no longer exist, and is superseded by the active modules below.
 // mod integration;
-mod fees;
 mod funding_deadline_cap_tests;
 mod funding_deadline_tests;
 mod integration_status_guards;
