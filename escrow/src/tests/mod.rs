@@ -79,6 +79,7 @@ mod collateral_version_view;
 mod coverage;
 mod envelope_bounds;
 mod event_emission;
+mod expire_funding;
 mod external_calls;
 mod external_calls_mocked;
 mod fee_schedule;

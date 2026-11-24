@@ -58,6 +58,7 @@ Triggered when the escrow's recorded principal meets or exceeds the funding targ
 | Entrypoint | Auth | Guard | Notes |
 |------------|------|-------|-------|
 | `cancel_funding()` | admin | status == 0, legal hold inactive | Emits `FundingCancelled`; irreversible |
+| `expire_funding()` | anyone | status == 0, deadline set and `now > deadline`, legal hold inactive | Same transition as `cancel_funding`; emits `FundingCancelled` then `FundingExpired`; pause does not block |
 
 ### 1 → 2 (Funded → Settled)
 

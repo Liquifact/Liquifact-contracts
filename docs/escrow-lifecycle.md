@@ -25,6 +25,7 @@ stateDiagram-v2
     Open --> Open: unfund()
     Open --> Funded: fund() reaches funding target
     Open --> Cancelled: cancel_funding() [admin]
+    Open --> Cancelled: expire_funding() [anyone, after deadline]
     Funded --> Settled: settle() [SME]
     Funded --> Withdrawn: withdraw() [SME]
     Withdrawn --> Settled: repay() reaches settlement pool
@@ -127,6 +128,7 @@ let result = fund_batch(entries); // All three processed; status = 1
 |------|----|---------|--------------|
 | `0` (open) | `1` (funded) | `fund()`, `fund_with_commitment()`, or `fund_batch()` when `funded_amount >= funding_target` | Investor auth (per-investor for batch) |
 | `0` (open) | `4` (cancelled) | `cancel_funding()` | Admin auth; legal hold must be inactive |
+| `0` (open) | `4` (cancelled) | `expire_funding()` | No auth; funding deadline must have passed (`now > deadline`); legal hold must be inactive |
 | `0` (open) | `0` (open) | `unfund(investor, amount)` | Investor auth; legal hold must be inactive | Partial unfund: `funded_amount` decreases, status stays 0. Full unfund (contribution → 0): `UniqueFunderCount` decrements, status stays 0 |
 | `1` (funded) | `2` (settled) | `settle()` | SME auth; legal hold must be inactive; if `maturity > 0`, ledger timestamp must be >= maturity |
 | `1` (funded) | `3` (withdrawn) | `withdraw()` | SME auth; legal hold must be inactive |
@@ -191,6 +193,10 @@ their principal:
    already-cancelled (4) escrows reject with `CancelFundingNotOpen` (code 141). See
    `test_cancel_funding_transition_matrix_and_refund_unlock` in
    [`escrow/src/tests/integration.rs`](../escrow/src/tests/integration.rs) for the full matrix.
+   Alternatively, **anyone** may call `expire_funding()` once the funding deadline has passed
+   (`now > deadline`, status still 0, no legal hold). It performs the identical `0 → 4`
+   transition and emits `FundingCancelled` followed by `FundingExpired`; before the deadline,
+   or with no deadline set, it fails with `FundingNotExpired` (code 316).
 2. Each investor calls `refund(investor)` — transfers exactly `DataKey::InvestorContribution`
    back to the investor via `external_calls::transfer_funding_token_with_balance_checks`.
 3. `InvestorContribution` is zeroed after transfer (checks-effects-interactions pattern).
@@ -209,7 +215,8 @@ their principal:
 
 | Event | When |
 |-------|------|
-| `FundingCancelled` | `cancel_funding()` succeeds |
+| `FundingCancelled` | `cancel_funding()` or `expire_funding()` succeeds |
+| `FundingExpired` | `expire_funding()` succeeds (after `FundingCancelled`) |
 | `InvestorRefundedEvt` | `refund()` succeeds |
 
 ---

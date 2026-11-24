@@ -68,7 +68,8 @@ The current contract defines the event structs listed below.
 | `CollateralRecordedEvt` | `coll_rec` | `record_sme_collateral_commitment` |
 | `SmeWithdrew` | `sme_wd` | `withdraw` |
 | `InvestorPayoutClaimed` | `inv_claim` | `claim_investor_payout` |
-| `FundingCancelled` | `fund_can` | `cancel_funding` |
+| `FundingCancelled` | `fund_can` | `cancel_funding`, `expire_funding` |
+| `FundingExpired` | `fund_exp` | `expire_funding` |
 | `InvestorRefundedEvt` | `refunded` | `refund` |
 | `TreasuryDustSwept` | `dust_sw` | `sweep_terminal_dust` |
 | `PrimaryAttestationBound` | `att_bind` | `bind_primary_attestation_hash` |
@@ -531,6 +532,28 @@ Data:
 | Field | Type |
 |---|---|
 | `funded_amount` | `i128` |
+
+`expire_funding` emits this event too (same schema), immediately before `FundingExpired`.
+
+### `FundingExpired`
+
+Emitted after successful `expire_funding`, right after the `FundingCancelled` event for the same transition.
+
+Topics:
+
+| Index | Field | Type | Value |
+|---:|---|---|---|
+| 0 | fixed event topic | `Symbol` | `funding_expired` |
+| 1 | `name` | `Symbol` | `fund_exp` |
+| 2 | `invoice_id` | `Symbol` | Escrow invoice id |
+
+Data:
+
+| Field | Type |
+|---|---|
+| `funded_amount` | `i128` |
+| `deadline` | `u64` (the funding deadline that was exceeded) |
+| `expired_at` | `u64` (ledger timestamp of the call) |
 
 ### `InvestorRefundedEvt`
 

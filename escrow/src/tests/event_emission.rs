@@ -223,6 +223,14 @@ fn setup_partial_funded(env: &Env) -> Harness<'_> {
     h
 }
 
+fn setup_expired_funding(env: &Env) -> Harness<'_> {
+    // `setup_with_deadline` uses a deadline of 1_000; move past it with some principal in.
+    let h = setup_with_deadline(env);
+    h.client.fund(&h.investor, &1_000);
+    env.ledger().set_timestamp(1_001);
+    h
+}
+
 fn setup_real_funded(env: &Env) -> Harness<'_> {
     let h = new_harness(env, true);
     initialize(&h, env, InitOpts::default());
@@ -602,6 +610,10 @@ fn call_fund_batch(env: &Env, h: &mut Harness<'_>) {
 
 fn call_cancel_funding(_env: &Env, h: &mut Harness<'_>) {
     h.client.cancel_funding();
+}
+
+fn call_expire_funding(_env: &Env, h: &mut Harness<'_>) {
+    h.client.expire_funding();
 }
 
 fn call_refund(_env: &Env, h: &mut Harness<'_>) {
@@ -1100,6 +1112,13 @@ const CASES: &[Case] = &[
     },
     Case {
         group: "funding",
+        entrypoint: "expire_funding",
+        topic: "fund_exp",
+        setup: setup_expired_funding,
+        call: call_expire_funding,
+    },
+    Case {
+        group: "funding",
         entrypoint: "refund",
         topic: "refunded",
         setup: setup_real_cancelled,
@@ -1512,6 +1531,7 @@ const ALL_PUB_FNS: &[&str] = &[
     "cancel_pending_admin",
     "recover_admin",
     "cancel_funding",
+    "expire_funding",
     "refund",
     "refund_batch",
     "unfund",
