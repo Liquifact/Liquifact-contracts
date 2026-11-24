@@ -1124,9 +1124,11 @@ pub enum EscrowError {
     /// `[MIN_ATTESTATION_LIMIT, MAX_ATTESTATION_LIMIT]`.
     AttestationLimitOutOfRange = 312,
     /// [`LiquifactEscrow::set_investors_frozen`] received the same investor more than once.
-    InvestorFreezeBatchDuplicate = 312,
+    InvestorFreezeBatchDuplicate = 313,
     /// Checked arithmetic overflow in [`LiquifactEscrow::get_funding_progress_bps`].
-    FundingProgressArithmeticOverflow = 312,
+    FundingProgressArithmeticOverflow = 314,
+    /// Non-positive contribution amount rejected in [`LiquifactEscrow::preview_yield_tier`].
+    ZeroContributionAmount = 315,
 }
 
 #[inline(always)]
@@ -1682,10 +1684,6 @@ pub enum DataKey {
     /// **Instance** storage. **Additive key (ADR-007):** absent ⇒ [`DEFAULT_ATTESTATION_LIMIT`] (32).
     /// Updatable via [`LiquifactEscrow::set_attestation_limit`].
     AttestationLimit,
-    /// Number of distinct investors whose settled payout has been claimed via
-    /// [`LiquifactEscrow::claim_investor_payout`] or [`LiquifactEscrow::push_investor_payouts`].
-    /// **Instance** storage. Absent ⇒ `0` (additive key per ADR-007).
-    ClaimedInvestorCount,
     /// Number of distinct investors whose settled payout has been claimed via
     /// [`LiquifactEscrow::claim_investor_payout`] or [`LiquifactEscrow::push_investor_payouts`].
     /// **Instance** storage. Absent ⇒ `0` (additive key per ADR-007).
