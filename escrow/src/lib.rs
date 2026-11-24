@@ -541,6 +541,8 @@ pub enum EscrowError {
     TierLockNotIncreasing = 12,
     /// [`LiquifactEscrow::init`] rejected tiers whose `yield_bps` decrease across tiers.
     TierYieldNotNonDecreasing = 13,
+    /// [`LiquifactEscrow::preview_yield_tier`] rejected a non-positive amount.
+    ZeroContributionAmount = 15,
 
     /// Escrow storage is missing; entrypoint requires prior [`LiquifactEscrow::init`].
     EscrowNotInitialized = 20,
@@ -1127,8 +1129,10 @@ pub enum EscrowError {
     /// `[MIN_ATTESTATION_LIMIT, MAX_ATTESTATION_LIMIT]`.
     AttestationLimitOutOfRange = 312,
     /// [`LiquifactEscrow::set_investors_frozen`] received the same investor more than once.
+    InvestorFreezeBatchDuplicate = 313,
     InvestorFreezeBatchDuplicate = 315,
     /// Checked arithmetic overflow in [`LiquifactEscrow::get_funding_progress_bps`].
+    FundingProgressArithmeticOverflow = 314,
     FundingProgressArithmeticOverflow = 316,
     /// [`LiquifactEscrow::preview_yield_tier`] received a non-positive `amount`.
     ZeroContributionAmount = 317,
