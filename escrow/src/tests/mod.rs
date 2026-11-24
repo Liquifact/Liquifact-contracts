@@ -17,10 +17,11 @@
     clippy::unusual_byte_groupings
 )]
 use super::{
-    AttestationDigestAppended, AttestationDigestRevoked, AttestationDigestUnrevoked,
+    AllowlistEnabledChanged, AttestationDigestAppended, AttestationDigestRevoked, AttestationDigestUnrevoked,
     AttestationRequirementChanged, CollateralRecordedEvt, ContractUpgraded, DataKey,
     DeprecatedTransferAdminUsed, EscrowError, EscrowFunded, EscrowInitialized, EscrowUnfunded,
-    FundingCancelled, FundingDeadlineExtensionStats, FundingTargetUpdated, InvestorFreezeChanged,
+    FundingCancelled, FundingDeadlineExtensionStats, FundingTargetUpdated, InvestorAllowlistChanged,
+    InvestorFreezeChanged,
     InvestorRefundedEvt, LiquifactEscrow, LiquifactEscrowClient, MaturityMaxHorizonUpdated,
     MaxUniqueInvestorsCapLowered, PauseReason, PauseScope, PauseState, PerformanceFeeCollected,
     PerformanceFeeUpdated, PrimaryAttestationBound,
@@ -61,6 +62,7 @@ pub(crate) fn assert_contract_error<T, E>(
 // Focused test tree for escrow behavior. Shared helpers live here so feature
 // modules stay assertion-focused and each test still owns a fresh Env.
 mod admin;
+mod allowlist_event_payloads;
 mod allowlist_expiry;
 mod allowlist_index_proptest;
 mod allowlist_persistent_index;
