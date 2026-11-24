@@ -1,5 +1,5 @@
 use super::*;
-use crate::{EscrowError, PausedChanged};
+use crate::{EscrowError, PausedChanged, MIN_PAUSE_MAX_DURATION_SECS};
 use soroban_sdk::{testutils::Events, token::StellarAssetClient, Event};
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -385,6 +385,67 @@ fn get_paused_at_tracks_pause_lifecycle() {
 
     client.set_paused(&false, &PauseScope::All, &PauseReason::Incident);
     assert_eq!(client.get_paused_at(), None);
+}
+
+#[test]
+fn get_pause_remaining_secs_none_without_bounded_active_pause() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    init_open(&client, &env, &admin, &sme, "PAU015-2");
+
+    assert_eq!(client.get_pause_remaining_secs(), None);
+
+    client.set_pause_max_duration(&MIN_PAUSE_MAX_DURATION_SECS);
+    assert_eq!(client.get_pause_remaining_secs(), None);
+
+    env.ledger().with_mut(|li| li.timestamp = 1_000);
+    client.set_paused(&true, &PauseScope::All, &PauseReason::Incident);
+    assert_eq!(
+        client.get_pause_remaining_secs(),
+        Some(MIN_PAUSE_MAX_DURATION_SECS)
+    );
+
+    client.set_pause_max_duration(&0);
+    assert!(client.is_paused());
+    assert_eq!(client.get_pause_remaining_secs(), None);
+
+    client.set_pause_max_duration(&MIN_PAUSE_MAX_DURATION_SECS);
+    assert_eq!(
+        client.get_pause_remaining_secs(),
+        Some(MIN_PAUSE_MAX_DURATION_SECS)
+    );
+
+    client.set_paused(&false, &PauseScope::All, &PauseReason::Incident);
+    assert_eq!(client.get_pause_remaining_secs(), None);
+}
+
+#[test]
+fn get_pause_remaining_secs_counts_down_and_expires_at_boundary() {
+    let env = Env::default();
+    let (client, admin, sme) = setup(&env);
+    init_open(&client, &env, &admin, &sme, "PAU015-3");
+
+    client.set_pause_max_duration(&MIN_PAUSE_MAX_DURATION_SECS);
+    env.ledger().with_mut(|li| li.timestamp = 1_000);
+    client.set_paused(&true, &PauseScope::All, &PauseReason::Incident);
+    let expires_at = 1_000 + MIN_PAUSE_MAX_DURATION_SECS;
+
+    assert_eq!(
+        client.get_pause_remaining_secs(),
+        Some(MIN_PAUSE_MAX_DURATION_SECS)
+    );
+
+    env.ledger().with_mut(|li| li.timestamp = expires_at - 1);
+    assert_eq!(client.get_pause_remaining_secs(), Some(1));
+    assert!(client.is_paused());
+
+    env.ledger().with_mut(|li| li.timestamp = expires_at);
+    assert_eq!(client.get_pause_remaining_secs(), None);
+    assert!(!client.is_paused());
+    assert_eq!(client.get_paused_at(), Some(1_000));
+
+    env.ledger().with_mut(|li| li.timestamp = expires_at + 1);
+    assert_eq!(client.get_pause_remaining_secs(), None);
 }
 
 #[test]
