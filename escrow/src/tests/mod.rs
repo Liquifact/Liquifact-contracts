@@ -84,6 +84,8 @@ mod event_emission;
 mod external_calls;
 mod external_calls_mocked;
 mod fee_schedule;
+mod fees;
+mod fees_boundary_tests;
 mod funding;
 mod funding_events;
 mod init;
@@ -91,7 +93,6 @@ mod init;
 // API (close-escrow, admin-transfer, collateral events) and an older SDK event
 // model that no longer exist, and is superseded by the active modules below.
 // mod integration;
-mod fees;
 mod funding_deadline_cap_tests;
 mod funding_deadline_tests;
 mod funding_state_view;
