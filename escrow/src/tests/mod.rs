@@ -82,6 +82,8 @@ mod event_emission;
 mod external_calls;
 mod external_calls_mocked;
 mod fee_schedule;
+mod fees;
+mod fees_boundary_tests;
 mod funding;
 mod init;
 // `integration` (integration.rs) is disabled: it was written against a contract
