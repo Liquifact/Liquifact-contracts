@@ -558,3 +558,228 @@ fn get_revoked_attestation_digests_continuation_start() {
         soroban_sdk::BytesN::from_array(&env, &[3u8; 32])
     );
 }
+
+// ── get_contributions ─────────────────────────────────────────────────────────
+//
+// get_contributions(investors: Vec<Address>) -> Vec<i128>
+//
+// Semantics verified here:
+//   • empty input returns an empty Vec
+//   • unknown addresses return 0
+//   • known addresses return the correct contribution
+//   • output order matches input order
+//   • duplicate addresses are allowed
+//   • exactly MAX_INVESTOR_READ_BATCH (50) addresses accepted
+//   • 51 addresses rejected with EscrowError::ContributionReadBatchTooLarge
+
+/// Shared helper: spin up a contract with a real SAC token, initialise it, and
+/// fund `n` distinct investors each contributing `amount` stroops.
+/// Returns (client, token_id, ordered Vec of investor addresses).
+fn setup_contributions_escrow(
+    env: &Env,
+    n: usize,
+    amount: i128,
+) -> (
+    crate::LiquifactEscrowClient<'_>,
+    soroban_sdk::Vec<Address>,
+) {
+    let sac = env.register_stellar_asset_contract_v2(Address::generate(env));
+    let token_id = sac.address();
+    let sac_admin = soroban_sdk::token::StellarAssetClient::new(env, &token_id);
+
+    let escrow_id = env.register(crate::LiquifactEscrow, ());
+    let client = crate::LiquifactEscrowClient::new(env, &escrow_id);
+    let admin = Address::generate(env);
+    let sme = Address::generate(env);
+    let treasury = Address::generate(env);
+
+    // Target must be large enough for all n investors
+    let target = amount * (n as i128).max(1) + 1_000_000;
+
+    client.init(
+        &admin,
+        &soroban_sdk::String::from_str(env, "CONTRIB_BATCH"),
+        &sme,
+        &target,
+        &800i64,
+        &0u64,
+        &token_id,
+        &None,
+        &treasury,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None::<i64>,
+    );
+
+    let mut investors = soroban_sdk::Vec::new(env);
+    for _ in 0..n {
+        let inv = Address::generate(env);
+        sac_admin.mint(&inv, &amount);
+        client.fund(&inv, &amount);
+        investors.push_back(inv);
+    }
+
+    (client, investors)
+}
+
+#[test]
+fn get_contributions_empty_input_returns_empty_vec() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _investors) = setup_contributions_escrow(&env, 0, 0);
+
+    let batch: soroban_sdk::Vec<Address> = soroban_sdk::Vec::new(&env);
+    let result = client.get_contributions(&batch);
+    assert_eq!(result.len(), 0);
+}
+
+#[test]
+fn get_contributions_unknown_address_returns_zero() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, _investors) = setup_contributions_escrow(&env, 0, 0);
+
+    let stranger = Address::generate(&env);
+    let mut batch = soroban_sdk::Vec::new(&env);
+    batch.push_back(stranger);
+
+    let result = client.get_contributions(&batch);
+    assert_eq!(result.len(), 1);
+    assert_eq!(result.get(0).unwrap(), 0i128);
+}
+
+#[test]
+fn get_contributions_known_address_returns_correct_amount() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let amount = 50_000_000i128;
+    let (client, investors) = setup_contributions_escrow(&env, 1, amount);
+
+    let investor = investors.get(0).unwrap();
+    let mut batch = soroban_sdk::Vec::new(&env);
+    batch.push_back(investor);
+
+    let result = client.get_contributions(&batch);
+    assert_eq!(result.len(), 1);
+    assert_eq!(result.get(0).unwrap(), amount);
+}
+
+#[test]
+fn get_contributions_order_preserved() {
+    // Input order must be reflected in output order regardless of insertion order.
+    let env = Env::default();
+    env.mock_all_auths();
+    let amount = 10_000_000i128;
+    let (client, investors) = setup_contributions_escrow(&env, 3, amount);
+
+    let inv_a = investors.get(0).unwrap();
+    let inv_b = investors.get(1).unwrap();
+    let inv_c = investors.get(2).unwrap();
+
+    // Request in reverse order: C, A, B
+    let mut batch = soroban_sdk::Vec::new(&env);
+    batch.push_back(inv_c.clone());
+    batch.push_back(inv_a.clone());
+    batch.push_back(inv_b.clone());
+
+    let result = client.get_contributions(&batch);
+    assert_eq!(result.len(), 3);
+    assert_eq!(result.get(0).unwrap(), amount); // C
+    assert_eq!(result.get(1).unwrap(), amount); // A
+    assert_eq!(result.get(2).unwrap(), amount); // B
+}
+
+#[test]
+fn get_contributions_mixed_known_and_unknown_preserves_order() {
+    // Known slots return their contributions; unknown slots return 0; order matches input.
+    let env = Env::default();
+    env.mock_all_auths();
+    let amount = 20_000_000i128;
+    let (client, investors) = setup_contributions_escrow(&env, 2, amount);
+
+    let known_a = investors.get(0).unwrap();
+    let known_b = investors.get(1).unwrap();
+    let stranger = Address::generate(&env);
+
+    // Request: known_a, stranger, known_b
+    let mut batch = soroban_sdk::Vec::new(&env);
+    batch.push_back(known_a.clone());
+    batch.push_back(stranger.clone());
+    batch.push_back(known_b.clone());
+
+    let result = client.get_contributions(&batch);
+    assert_eq!(result.len(), 3);
+    assert_eq!(result.get(0).unwrap(), amount); // known_a
+    assert_eq!(result.get(1).unwrap(), 0i128);  // stranger → 0
+    assert_eq!(result.get(2).unwrap(), amount); // known_b
+}
+
+#[test]
+fn get_contributions_duplicate_addresses_allowed() {
+    // The same address may appear multiple times; each slot reports its contribution.
+    let env = Env::default();
+    env.mock_all_auths();
+    let amount = 15_000_000i128;
+    let (client, investors) = setup_contributions_escrow(&env, 1, amount);
+
+    let investor = investors.get(0).unwrap();
+
+    let mut batch = soroban_sdk::Vec::new(&env);
+    batch.push_back(investor.clone());
+    batch.push_back(investor.clone());
+    batch.push_back(investor.clone());
+
+    let result = client.get_contributions(&batch);
+    assert_eq!(result.len(), 3);
+    assert_eq!(result.get(0).unwrap(), amount);
+    assert_eq!(result.get(1).unwrap(), amount);
+    assert_eq!(result.get(2).unwrap(), amount);
+}
+
+#[test]
+fn get_contributions_exactly_50_addresses_accepted() {
+    // Batch of exactly MAX_INVESTOR_READ_BATCH (50) must succeed.
+    let env = Env::default();
+    env.mock_all_auths();
+    let amount = 1_000_000i128;
+    let (client, investors) = setup_contributions_escrow(&env, 50, amount);
+
+    // Build a batch from all 50 investors
+    let mut batch = soroban_sdk::Vec::new(&env);
+    for i in 0..50 {
+        batch.push_back(investors.get(i).unwrap());
+    }
+
+    let result = client.get_contributions(&batch);
+    assert_eq!(result.len(), 50);
+    for i in 0..50u32 {
+        assert_eq!(result.get(i).unwrap(), amount);
+    }
+}
+
+#[test]
+fn get_contributions_51_addresses_rejected_with_typed_error() {
+    // Batch of 51 must be rejected with EscrowError::ContributionReadBatchTooLarge (203).
+    let env = Env::default();
+    env.mock_all_auths();
+    let amount = 1_000_000i128;
+    let (client, investors) = setup_contributions_escrow(&env, 50, amount);
+
+    // Build a 51-element batch (50 real investors + 1 stranger)
+    let mut batch = soroban_sdk::Vec::new(&env);
+    for i in 0..50 {
+        batch.push_back(investors.get(i).unwrap());
+    }
+    batch.push_back(Address::generate(&env)); // the 51st entry
+
+    assert_contract_error(
+        client.try_get_contributions(&batch),
+        crate::EscrowError::ContributionReadBatchTooLarge,
+    );
+}
