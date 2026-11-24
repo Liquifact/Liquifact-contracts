@@ -1869,6 +1869,21 @@ pub struct YieldTier {
     pub yield_bps: i64,
 }
 
+/// Combined yield-tier configuration snapshot returned by
+/// [`LiquifactEscrow::get_yield_tier_config`].
+///
+/// Bundles the escrow's base yield (`base_yield_bps`) and the immutable tier
+/// ladder (`tiers`) in a single read call so clients do not need to call
+/// `get_escrow` and `get_yield_tiers` separately.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct YieldTierConfig {
+    /// Base annual yield in basis points (`0` before `init`).
+    pub base_yield_bps: i64,
+    /// Configured yield-tier ladder (empty before `init` or when no tiers were set).
+    pub tiers: Vec<YieldTier>,
+}
+
 /// Result of yield-tier resolution for a given commitment.
 ///
 /// Returned by [`LiquifactEscrow::preview_yield_tier`] and produced internally by
@@ -5176,6 +5191,26 @@ impl LiquifactEscrow {
             .instance()
             .get::<DataKey, Vec<YieldTier>>(&DataKey::YieldTierTable)
             .unwrap_or_else(|| Vec::new(&env))
+    }
+
+    /// Returns the combined base yield and yield-tier table in a single read.
+    ///
+    /// Before `init`, returns defaults (`base_yield_bps: 0`, empty `tiers`) without
+    /// panicking. After `init`, `base_yield_bps` matches `InvoiceEscrow::yield_bps`
+    /// and `tiers` matches [`LiquifactEscrow::get_yield_tiers`].
+    /// Pure read — no auth required, no state mutation.
+    pub fn get_yield_tier_config(env: Env) -> YieldTierConfig {
+        let base_yield_bps = env
+            .storage()
+            .instance()
+            .get::<DataKey, InvoiceEscrow>(&DataKey::Escrow)
+            .map(|escrow| escrow.yield_bps)
+            .unwrap_or(0);
+        let tiers = Self::get_yield_tiers(env);
+        YieldTierConfig {
+            base_yield_bps,
+            tiers,
+        }
     }
 
     /// Returns a paginated view of the configured yield-tier ladder.

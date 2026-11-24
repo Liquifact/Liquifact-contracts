@@ -130,6 +130,7 @@ mod timelocked_upgrade;
 mod unfund_investor_index;
 mod withdraw_attestation_gate;
 mod yield_tier_boundaries;
+mod yield_tier_config;
 mod yield_tier_setter;
 mod yield_tier_overflow;
 /// Registers a new escrow contract instance and returns its contract id.
