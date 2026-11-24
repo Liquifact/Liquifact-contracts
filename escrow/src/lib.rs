@@ -9368,6 +9368,33 @@ impl LiquifactEscrow {
         net
     }
 
+    /// Read-only pro-rata principal share of the current funded total, in basis points.
+    ///
+    /// Uses floor division: `contribution * 10_000 / funded_amount`. Returns `0` when
+    /// `funded_amount <= 0` or the investor has no positive recorded contribution.
+    /// This is a live funding view; payout calculations use the immutable
+    /// [`FundingCloseSnapshot`] denominator instead.
+    ///
+    /// # Authorization
+    /// None — pure read; no auth required and no state mutation.
+    pub fn get_investor_share_bps(env: Env, investor: Address) -> u32 {
+        let escrow = Self::get_escrow(env.clone());
+        if escrow.funded_amount <= 0 {
+            return 0;
+        }
+
+        let contribution = Self::get_persistent_investor_contribution(&env, investor);
+        if contribution <= 0 {
+            return 0;
+        }
+
+        contribution
+            .checked_mul(10_000)
+            .and_then(|scaled| scaled.checked_div(escrow.funded_amount))
+            .unwrap_or(0)
+            .min(10_000) as u32
+    }
+
     /// Composite read-only view of a single investor's position.
     ///
     /// Aggregates contribution, effective yield, claim gate, claimed flag, refunded flag,
