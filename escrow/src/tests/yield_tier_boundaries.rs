@@ -293,7 +293,6 @@ fn test_preview_selection_uses_bounded_boundary_matrix() {
 // because each case deploys and initializes a fresh Soroban contract.
 proptest::proptest! {
     #![proptest_config(proptest::prelude::ProptestConfig::with_cases(64))]
-    #![proptest_config(ProptestConfig::with_cases(64))]
 
     #[test]
     fn prop_preview_yield_tier_monotonic_for_valid_tables(

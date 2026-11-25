@@ -197,6 +197,9 @@ Codes raised by `fund`, `fund_with_commitment`, `fund_with_reference`, `fund_bat
 | `InvestorRoleConflict` | 296 | The investor is the escrow's `sme_address`, `admin`, `treasury`, or the contract itself. |
 | `FundingProgressArithmeticOverflow` | 316 | Checked arithmetic overflowed in `get_funding_progress_bps`. |
 | `ZeroContributionAmount` | 317 | `preview_yield_tier` received a non-positive `amount`. |
+| `FundingNotExpired` | 318 | `expire_funding` called when no deadline is set or `now <= deadline`. |
+| `AttestationAppendBatchEmpty` | 313 | `append_attestation_digests` received an empty digests vector. |
+| `AttestationAppendBatchTooLarge` | 314 | `append_attestation_digests` exceeded `MAX_ATTESTATION_APPEND_BATCH`. |
 
 ## Admin Parameter Update Errors
 

@@ -159,7 +159,7 @@ Permissionless variant of `cancel_funding` for an open escrow whose funding dead
 | **Authorized caller** | anyone (no `require_auth`) |
 | **Legal-hold gate** | Blocked if `LegalHold == true` → `LegalHoldBlocksCancelFunding (140)` |
 | **Status precondition** | `status == 0` (Open) → `CancelFundingNotOpen (141)` if not |
-| **Deadline precondition** | deadline set and `now > deadline` → `FundingNotExpired (316)` if not |
+| **Deadline precondition** | deadline set and `now > deadline` → `FundingNotExpired (318)` if not |
 | **State transition** | `0 → 4` via the same helper as `cancel_funding` (emits `FundingCancelled`, then `FundingExpired`) |
 | **Operational pause** | **Not checked**, same as `cancel_funding` |
 
@@ -263,7 +263,7 @@ Treasury sweeps residual funding-token balance from a terminal escrow (status 2,
 | 211 | `PausedBlocksSettlement` | `settle()` when paused |
 | 212 | `PausedBlocksWithdrawal` | `withdraw()` when paused |
 | 213 | `PausedBlocksInvestorClaims` | `claim_investor_payout()` when paused |
-| 316 | `FundingNotExpired` | `expire_funding()` when no deadline is set or `now <= deadline` |
+| 318 | `FundingNotExpired` | `expire_funding()` when no deadline is set or `now <= deadline` |
 | 30 | `LegalHoldBlocksTreasuryDustSweep` | `sweep_terminal_dust()` with active legal hold |
 | 33 | `DustSweepNotTerminal` | `sweep_terminal_dust()` on non-terminal status |
 | 42 | `SweepExceedsLiabilityFloor` | Sweep would leave balance < outstanding refunds |
