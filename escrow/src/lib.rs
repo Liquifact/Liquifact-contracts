@@ -541,9 +541,6 @@ pub enum EscrowError {
     TierLockNotIncreasing = 12,
     /// [`LiquifactEscrow::init`] rejected tiers whose `yield_bps` decrease across tiers.
     TierYieldNotNonDecreasing = 13,
-    /// [`LiquifactEscrow::preview_yield_tier`] rejected a non-positive amount.
-    ZeroContributionAmount = 15,
-
     /// Escrow storage is missing; entrypoint requires prior [`LiquifactEscrow::init`].
     EscrowNotInitialized = 20,
     /// [`DataKey::FundingToken`] is unset (escrow not fully initialized).
@@ -1129,19 +1126,8 @@ pub enum EscrowError {
     /// `[MIN_ATTESTATION_LIMIT, MAX_ATTESTATION_LIMIT]`.
     AttestationLimitOutOfRange = 312,
     /// [`LiquifactEscrow::set_investors_frozen`] received the same investor more than once.
-    InvestorFreezeBatchDuplicate = 313,
     InvestorFreezeBatchDuplicate = 315,
     /// Checked arithmetic overflow in [`LiquifactEscrow::get_funding_progress_bps`].
-    FundingProgressArithmeticOverflow = 314,
-    /// [`LiquifactEscrow::preview_yield_tier`] received an `amount` that is zero or negative.
-    ZeroContributionAmount = 315,
-    /// [`LiquifactEscrow::expire_funding`] called while the funding deadline is unset or has
-    /// not yet passed (`now <= deadline`).
-    FundingNotExpired = 316,
-    FundingProgressArithmeticOverflow = 314,
-    /// Non-positive contribution amount rejected in [`LiquifactEscrow::preview_yield_tier`].
-    ZeroContributionAmount = 315,
-    FundingProgressArithmeticOverflow = 314,
     FundingProgressArithmeticOverflow = 316,
     /// [`LiquifactEscrow::preview_yield_tier`] received a non-positive `amount`.
     ZeroContributionAmount = 317,
@@ -1149,6 +1135,9 @@ pub enum EscrowError {
     AttestationAppendBatchEmpty = 313,
     /// [`LiquifactEscrow::append_attestation_digests`] exceeded [`MAX_ATTESTATION_APPEND_BATCH`].
     AttestationAppendBatchTooLarge = 314,
+    /// [`LiquifactEscrow::expire_funding`] called while the funding deadline is unset or has
+    /// not yet passed (`now <= deadline`).
+    FundingNotExpired = 318,
 }
 
 #[inline(always)]

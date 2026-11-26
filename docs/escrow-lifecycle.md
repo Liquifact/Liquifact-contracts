@@ -196,7 +196,7 @@ their principal:
    Alternatively, **anyone** may call `expire_funding()` once the funding deadline has passed
    (`now > deadline`, status still 0, no legal hold). It performs the identical `0 → 4`
    transition and emits `FundingCancelled` followed by `FundingExpired`; before the deadline,
-   or with no deadline set, it fails with `FundingNotExpired` (code 316).
+   or with no deadline set, it fails with `FundingNotExpired` (code 318).
 2. Each investor calls `refund(investor)` — transfers exactly `DataKey::InvestorContribution`
    back to the investor via `external_calls::transfer_funding_token_with_balance_checks`.
 3. `InvestorContribution` is zeroed after transfer (checks-effects-interactions pattern).

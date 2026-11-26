@@ -63,10 +63,8 @@ fn emitted_events(env: &Env, contract_id: &Address) -> std::vec::Vec<ContractEve
 
 /// Extract the topic array from a SDK 25 `ContractEvent` XDR body.
 fn event_topics(event: &ContractEvent) -> &[ScVal] {
-    match &event.body {
-        ContractEventBody::V0(v0) => v0.topics.as_slice(),
-        other => panic!("expected a V0 contract event, got {other:?}"),
-    }
+    let ContractEventBody::V0(v0) = &event.body;
+    v0.topics.as_slice()
 }
 
 /// Topic 0 is the fixed snake-case event name; topic 1 is its short routing symbol.
@@ -85,7 +83,7 @@ fn record_unique_routing_topics(
         let symbol = routing_symbol(env, &event);
         assert!(
             !topics_seen.iter().any(|seen| *seen == symbol),
-            "duplicate routing symbol across different event types: {symbol}"
+            "duplicate routing symbol across different event types: {symbol:?}"
         );
         topics_seen.push(symbol);
     }
@@ -380,7 +378,7 @@ fn test_funding_event_topics_no_collision() {
     ] {
         assert!(
             topics_seen.iter().any(|seen| *seen == expected),
-            "missing funding lifecycle routing topic: {expected}"
+            "missing funding lifecycle routing topic: {expected:?}"
         );
     }
 }

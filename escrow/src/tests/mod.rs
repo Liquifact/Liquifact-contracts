@@ -116,6 +116,7 @@ mod pause_bypass;
 mod payout_batch;
 mod pauser_boundary_tests;
 mod pauser_role;
+mod pauser_version_view;
 mod persistent_refund_flags;
 mod properties;
 mod reconciliation_lifecycle;

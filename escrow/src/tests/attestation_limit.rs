@@ -8,10 +8,9 @@ use crate::{
     MIN_ATTESTATION_LIMIT,
 };
 use soroban_sdk::{
-    events::Event as _, symbol_short, testutils::Address as _, testutils::Events as _, Address, BytesN, Env, IntoVal,
-    symbol_short, testutils::Address as _, testutils::Events as _, Address, BytesN, Env, Event,
-    IntoVal, Vec as SorobanVec,
-    Vec as SorobanVec, Event,
+    symbol_short,
+    testutils::{Address as _, Events as _},
+    Address, BytesN, Env, Event, IntoVal, Vec as SorobanVec,
 };
 
 // ---------------------------------------------------------------------------

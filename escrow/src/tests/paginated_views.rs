@@ -4,6 +4,7 @@
 //
 // Each test uses a fresh Env so state cannot leak across cases.
 
+use crate::tests::assert_contract_error;
 use crate::{PauseReason, PauseScope};
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::{Address, Env};

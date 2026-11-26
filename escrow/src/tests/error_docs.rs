@@ -260,6 +260,9 @@ escrow_error_table! {
     InvestorFreezeBatchDuplicate = 315,
     FundingProgressArithmeticOverflow = 316,
     ZeroContributionAmount = 317,
+    FundingNotExpired = 318,
+    AttestationAppendBatchEmpty = 313,
+    AttestationAppendBatchTooLarge = 314,
 }
 
 /// Parses `| `Name` | code | ... |` table rows into `(name, code)` pairs, in file order.
